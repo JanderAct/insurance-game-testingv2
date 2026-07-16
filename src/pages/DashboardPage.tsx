@@ -19,7 +19,9 @@ export default function DashboardPage({ lockedResults, historicalYears, starting
 
   const displaySurplus = last?.endingSurplus ?? startingFinancials.surplus;
   const displayPremium = last?.totalMemberCharge ?? startingFinancials.annualPremium;
-  const displayCombined = last?.combinedRatio;
+  const displayLossRatio = last ? last.poolLosses / Math.max(last.poolPremium, 1) : undefined;
+  const displayUnderwritingIncome = last?.underwritingIncome;
+  const displayInvestmentIncome = last?.investmentIncome;
   const displayMembers = last?.activeMembers ?? startingFinancials.activeMembers;
   const displayExposure = last?.activeExposure ?? startingFinancials.activeExposure;
   const displayMarketShare = last?.marketShare ?? startingFinancials.marketShare;
@@ -53,11 +55,24 @@ export default function DashboardPage({ lockedResults, historicalYears, starting
           sub={`$${formatNumber(displayExposure, 2)}M payroll`}
         />
         <StatCard
-          label="Actual Combined Ratio"
-          value={displayCombined !== undefined ? formatPct(displayCombined) : '—'}
-          valueColor={displayCombined !== undefined ? colorForRatio(displayCombined) : 'text-gray-400'}
+          label="Pool Loss Ratio"
+          value={displayLossRatio !== undefined ? formatPct(displayLossRatio) : '—'}
+          valueColor={displayLossRatio !== undefined ? colorForRatio(displayLossRatio) : 'text-gray-400'}
+          icon={<Activity size={16} />}
+          sub="Pool losses ÷ pool premium"
+        />
+        <StatCard
+          label="Underwriting Income"
+          value={displayUnderwritingIncome !== undefined ? formatCurrency(displayUnderwritingIncome, true) : '—'}
+          valueColor={displayUnderwritingIncome !== undefined ? (displayUnderwritingIncome >= 0 ? 'text-emerald-600' : 'text-red-600') : 'text-gray-400'}
           icon={<Activity size={16} />}
           sub="Excl. investment income"
+        />
+        <StatCard
+          label="Investment Income"
+          value={displayInvestmentIncome !== undefined ? formatCurrency(displayInvestmentIncome, true) : '—'}
+          valueColor={displayInvestmentIncome !== undefined ? (displayInvestmentIncome >= 0 ? 'text-emerald-600' : 'text-red-600') : 'text-gray-400'}
+          icon={<DollarSign size={16} />}
         />
         <StatCard
           label="Market Share"
@@ -110,7 +125,7 @@ export default function DashboardPage({ lockedResults, historicalYears, starting
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  {['Yr', 'Calendar', 'Gross Premium & Admin Expense', 'Gross Loss', 'Net Loss', 'Actual CR', 'Underwriting Income', 'Investment Income', 'Total Income', 'Ending Surplus', 'Members', 'Mkt Share'].map(h => (
+                  {['Yr', 'Calendar', 'Gross Premium & Admin Expense', 'Gross Loss', 'Net Loss', 'Pool Loss Ratio', 'Underwriting Income', 'Investment Income', 'Total Income', 'Ending Surplus', 'Members', 'Mkt Share'].map(h => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -123,7 +138,7 @@ export default function DashboardPage({ lockedResults, historicalYears, starting
                     <td className="px-4 py-3 font-medium">{formatCurrency(year.totalMemberCharge, true)}</td>
                     <td className="px-4 py-3">{formatCurrency(year.grossUltimateLoss, true)}</td>
                     <td className="px-4 py-3">{formatCurrency(year.netUltimateLoss, true)}</td>
-                    <td className={`px-4 py-3 font-semibold ${colorForRatio(year.actualCombinedRatio)}`}>{formatPct(year.actualCombinedRatio)}</td>
+                    <td className={`px-4 py-3 font-semibold ${colorForRatio(year.poolLosses / Math.max(year.poolPremium, 1))}`}>{formatPct(year.poolLosses / Math.max(year.poolPremium, 1))}</td>
                     <td className={year.underwritingIncome >= 0 ? 'px-4 py-3 text-emerald-600/70' : 'px-4 py-3 text-red-600/70'}>{formatCurrency(year.underwritingIncome, true)}</td>
                     <td className="px-4 py-3">{formatCurrency(year.investmentIncome, true)}</td>
                     <td className={year.netIncome >= 0 ? 'px-4 py-3 font-semibold text-emerald-600/70' : 'px-4 py-3 font-semibold text-red-600/70'}>{formatCurrency(year.netIncome, true)}</td>
@@ -153,7 +168,7 @@ export default function DashboardPage({ lockedResults, historicalYears, starting
                     <td className="px-4 py-3 font-medium text-gray-900">{formatCurrency(r.totalMemberCharge, true)}</td>
                     <td className="px-4 py-3 text-gray-700">{formatCurrency(r.grossUltimateLoss, true)}</td>
                     <td className="px-4 py-3 text-gray-700">{formatCurrency(r.netUltimateLoss, true)}</td>
-                    <td className={`px-4 py-3 font-semibold ${colorForRatio(r.combinedRatio)}`}>{formatPct(r.combinedRatio)}</td>
+                    <td className={`px-4 py-3 font-semibold ${colorForRatio(r.poolLosses / Math.max(r.poolPremium, 1))}`}>{formatPct(r.poolLosses / Math.max(r.poolPremium, 1))}</td>
                     <td className={`px-4 py-3 font-medium ${r.underwritingIncome >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                       {formatCurrency(r.underwritingIncome, true)}
                     </td>
