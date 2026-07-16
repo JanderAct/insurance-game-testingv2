@@ -100,15 +100,14 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
               <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
                 <DataRow label="Attachment Point" value={formatCurrency(reinsStructure.attachment)} />
                 <DataRow label="Attachment (% of Exp. Loss)" value={`${(REINSURANCE_PROGRAMS[decisions.reinsuranceLevel].attachmentMultiplierOfExpectedLoss * 100).toFixed(0)}%`} />
-                <DataRow label="Limit" value={formatCurrency(reinsStructure.limit)} />
-                <DataRow label="Limit (% of Premium)" value={`${(REINSURANCE_PROGRAMS[decisions.reinsuranceLevel].limitPctOfPremium * 100).toFixed(0)}%`} />
-                <DataRow label="Recovery %" value={`${(reinsStructure.recoveryPct * 100).toFixed(0)}%`} />
+                <DataRow label="Quota Share %" value={`${(reinsStructure.recoveryPct * 100).toFixed(0)}%`} />
+                <DataRow label="Coverage" value="Uncapped above attachment" />
                 <DataRow label="Est. Annual Cost" value={`${formatCurrency(reinsCost)}/yr (${(reinsCostPct * 100).toFixed(0)}% of prem.)`} />
               </div>
             ) : (
               <p className="text-gray-500 italic">No reinsurance — pool retains all gross losses.</p>
             )}
-            <p className="text-blue-700 mt-2 text-xs leading-relaxed border-t border-blue-100 pt-2">Reinsurance does not reduce gross losses. It shifts part of the loss to the reinsurer after the attachment point.</p>
+            <p className="text-blue-700 mt-2 text-xs leading-relaxed border-t border-blue-100 pt-2">Reinsurance does not reduce gross losses. Above the attachment point, the reinsurer pays its quota share of the excess; the pool retains the rest.</p>
           </div>
         </SectionCard>
       </div>

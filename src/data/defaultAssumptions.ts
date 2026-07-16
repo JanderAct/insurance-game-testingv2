@@ -97,9 +97,12 @@ export const INVESTMENT_RISK_PARAMS = {
 };
 
 // Reinsurance program table indexed by level (0-4)
-// Attachment is expressed as a multiplier of expected gross loss + LAE
-// Limit is expressed as a percentage of annual premium
-// These ensure reinsurance is meaningful but appropriately expensive
+// Aggregate quota-share reinsurance, above the pool's own expected loss.
+// Attachment is fixed at 100% of expected gross loss + LAE for every paid level —
+// the pool retains all losses up to its own expected loss, no matter the level chosen.
+// Above that attachment, the reinsurer pays a flat quota share (recoveryPct) of the
+// excess, uncapped (no limit) — this is aggregate-basis for now; occurrence-basis
+// layering is deferred until a claim-level frequency/severity model exists.
 export const REINSURANCE_PROGRAMS = [
   {
     level: 0,
@@ -114,9 +117,9 @@ export const REINSURANCE_PROGRAMS = [
   {
     level: 1,
     label: 'Low',
-    description: '125% attachment, 35% limit, 50% recovery',
-    attachmentMultiplierOfExpectedLoss: 1.25,
-    limitPctOfPremium: 0.35,
+    description: '100% attachment, 50% quota share, uncapped',
+    attachmentMultiplierOfExpectedLoss: 1.00,
+    limitPctOfPremium: Infinity,
     recoveryPct: 0.50,
     costPctOfPremiumMin: 0.06,
     costPctOfPremiumMax: 0.09,
@@ -124,30 +127,30 @@ export const REINSURANCE_PROGRAMS = [
   {
     level: 2,
     label: 'Moderate',
-    description: '100% attachment, 60% limit, 70% recovery',
+    description: '100% attachment, 75% quota share, uncapped',
     attachmentMultiplierOfExpectedLoss: 1.00,
-    limitPctOfPremium: 0.60,
-    recoveryPct: 0.70,
+    limitPctOfPremium: Infinity,
+    recoveryPct: 0.75,
     costPctOfPremiumMin: 0.12,
     costPctOfPremiumMax: 0.18,
   },
   {
     level: 3,
     label: 'High',
-    description: '80% attachment, 90% limit, 85% recovery',
-    attachmentMultiplierOfExpectedLoss: 0.80,
-    limitPctOfPremium: 0.90,
-    recoveryPct: 0.85,
+    description: '100% attachment, 90% quota share, uncapped',
+    attachmentMultiplierOfExpectedLoss: 1.00,
+    limitPctOfPremium: Infinity,
+    recoveryPct: 0.90,
     costPctOfPremiumMin: 0.22,
     costPctOfPremiumMax: 0.32,
   },
   {
     level: 4,
     label: 'Full Transfer',
-    description: '50% attachment, 120% limit, 95% recovery — very high cost',
-    attachmentMultiplierOfExpectedLoss: 0.50,
-    limitPctOfPremium: 1.20,
-    recoveryPct: 0.95,
+    description: '100% attachment, 100% quota share (full transfer of excess), uncapped',
+    attachmentMultiplierOfExpectedLoss: 1.00,
+    limitPctOfPremium: Infinity,
+    recoveryPct: 1.00,
     costPctOfPremiumMin: 0.45,
     costPctOfPremiumMax: 0.65,
   },

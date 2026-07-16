@@ -934,8 +934,7 @@ function buildAssumptionRows(): AuditRow[] {
       value: REINSURANCE_PROGRAMS.map(program =>
         `Level ${program.level} - ${program.label}: ` +
         `Attach ${program.attachmentMultiplierOfExpectedLoss.toFixed(2)}x expected loss, ` +
-        `Limit ${formatPct(program.limitPctOfPremium)} premium, ` +
-        `Recovery ${formatPct(program.recoveryPct)}, ` +
+        `Quota Share ${formatPct(program.recoveryPct)} (uncapped), ` +
         `Cost ${formatPct(program.costPctOfPremiumMin)} to ${formatPct(program.costPctOfPremiumMax)}`
       ).join('\n'),
       formula: 'Default reinsurance program structure by selected level.',
