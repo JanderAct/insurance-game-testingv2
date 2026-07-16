@@ -27,7 +27,12 @@ export const AGGREGATE_LOSS_DISTRIBUTION = {
   distribution: 'Lognormal',
   logMean: -0.163964,
   logSigma: 0.25,
-  actualLossLevelMultiplier: 2.05,
+  // Chosen so the mean of (lognormal × multiplier) ≈ 1.0, i.e. actual losses
+  // average about the expected loss (pure premium). The CLF loading in the
+  // premium then supplies the funding margin instead of losses systematically
+  // running above expected. (Lognormal mean = exp(logMean + logSigma²/2) ≈ 0.876,
+  // so 1 / 0.876 ≈ 1.14.)
+  actualLossLevelMultiplier: 1.14,
   catastropheThresholdConfidence: 0.95,
 };
 
