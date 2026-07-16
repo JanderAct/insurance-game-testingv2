@@ -196,6 +196,7 @@ export interface ResultSet {
   reinsuranceCost: number;
   reinsuranceRecovery: number;
   netUltimateLoss: number;
+  netIncurredLoss: number;      // netUltimateLoss adjusted for prior-year reserve development
 
   // Expenses
   operatingExpense: number;
@@ -270,7 +271,8 @@ export interface ResultSet {
   fundingAdequacyIndicator: string;         // Alias for premiumFundingAdequacyStatus
 
   // Income statement
-  netIncome: number;
+  underwritingIncome: number;   // totalMemberCharge + assessments − netIncurredLoss − operatingExpense − riskControlInvestment − reinsuranceCost − dividends
+  netIncome: number;            // underwritingIncome + investmentIncome
 
   // Balance sheet
   beginningCash: number;

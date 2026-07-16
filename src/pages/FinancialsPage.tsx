@@ -81,15 +81,16 @@ export default function FinancialsPage({ lockedResults, startingFinancials, star
               <ISLine label="Reinsurance Cost" value={formatCurrency(statement.incomeStatement.reinsuranceCost)} />
               <ISLine label="Gross Premium & Admin Expense" value={formatCurrency(statement.incomeStatement.totalMemberCharge)} bold />
               <ISLine label="Assessments" value={formatCurrency(statement.incomeStatement.assessments)} />
-              <ISLine label="Investment Income" value={formatCurrency(statement.incomeStatement.investmentIncome)} valueColor={statement.incomeStatement.investmentIncome >= 0 ? 'text-emerald-600' : 'text-red-600'} />
-              <ISLine label="Total Revenue" value={formatCurrency(statement.incomeStatement.totalRevenue)} bold />
               <div className="border-t border-gray-200 my-2" />
-              <ISLine label="Net Ultimate Loss + LAE" value={`(${formatCurrency(statement.incomeStatement.netUltimateLoss)})`} valueColor="text-red-600" />
+              <ISLine label="Net Incurred Loss" value={`(${formatCurrency(statement.incomeStatement.netIncurredLoss)})`} valueColor="text-red-600" />
               <ISLine label="Admin Expense" value={`(${formatCurrency(statement.incomeStatement.operatingExpense)})`} valueColor="text-red-600" />
               <ISLine label="Risk Control Investment" value={`(${formatCurrency(statement.incomeStatement.riskControlInvestment)})`} valueColor="text-red-600" />
               <ISLine label="Reinsurance Cost" value={`(${formatCurrency(statement.incomeStatement.reinsuranceCost)})`} valueColor="text-red-600" />
-              <ISLine label="Dividends / Returned Pool Premium" value={`(${formatCurrency(selectedResult.dividends)})`} valueColor="text-red-600" />
-              <ISLine label="Prior-Year Development (Favorable)" value={formatCurrency(statement.incomeStatement.priorYearDevelopment)} valueColor={statement.incomeStatement.priorYearDevelopment >= 0 ? 'text-emerald-600' : 'text-red-600'} />
+              <ISLine label="Dividends / Returned Pool Premium" value={`(${formatCurrency(statement.incomeStatement.dividends)})`} valueColor="text-red-600" />
+              <p className="text-xs text-gray-400 -mt-1">Includes prior-year reserve development: {formatCurrency(statement.incomeStatement.priorYearDevelopment)} ({statement.incomeStatement.priorYearDevelopment >= 0 ? 'favorable' : 'adverse'})</p>
+              <div className="border-t border-gray-200 my-2" />
+              <ISLine label="Underwriting Income" value={formatCurrency(statement.incomeStatement.underwritingIncome)} bold valueColor={colorForNetIncome(statement.incomeStatement.underwritingIncome)} />
+              <ISLine label="Investment Income" value={formatCurrency(statement.incomeStatement.investmentIncome)} valueColor={statement.incomeStatement.investmentIncome >= 0 ? 'text-emerald-600' : 'text-red-600'} />
               <div className="border-t border-gray-200 my-2" />
               <ISLine label="Net Income" value={formatCurrency(statement.incomeStatement.netIncome)} bold valueColor={colorForNetIncome(statement.incomeStatement.netIncome)} />
             </StatementCard>

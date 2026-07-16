@@ -36,7 +36,7 @@ export default function DashboardPage({ lockedResults, startingFinancials, curre
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard
-          label="Net Equity / Surplus"
+          label="Surplus"
           value={formatCurrency(displaySurplus, true)}
           valueColor={colorForSurplus(displaySurplus)}
           icon={<DollarSign size={16} />}
@@ -103,7 +103,7 @@ export default function DashboardPage({ lockedResults, startingFinancials, curre
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  {['Yr', 'Calendar', 'Gross Premium & Admin Expense', 'Gross Loss', 'Net Loss', 'Actual CR', 'Inv. Income', 'Net Income', 'Ending Surplus', 'Members', 'Mkt Share'].map(h => (
+                  {['Yr', 'Calendar', 'Gross Premium & Admin Expense', 'Gross Loss', 'Net Loss', 'Actual CR', 'Underwriting Income', 'Investment Income', 'Total Income', 'Ending Surplus', 'Members', 'Mkt Share'].map(h => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -118,6 +118,7 @@ export default function DashboardPage({ lockedResults, startingFinancials, curre
                   <td className={`px-4 py-3 font-semibold ${colorForRatio(startingFinancials.expectedLossRatio)}`}>{formatPct(startingFinancials.expectedLossRatio)}</td>
                   <td className="px-4 py-3 text-gray-400">&mdash;</td>
                   <td className="px-4 py-3 text-gray-400">&mdash;</td>
+                  <td className="px-4 py-3 text-gray-400">&mdash;</td>
                   <td className={`px-4 py-3 font-bold ${colorForSurplus(startingFinancials.surplus)}`}>{formatCurrency(startingFinancials.surplus, true)}</td>
                   <td className="px-4 py-3 text-gray-600">{startingFinancials.activeMembers}</td>
                   <td className="px-4 py-3 text-sky-600 font-medium">{formatPct(startingFinancials.marketShare)}</td>
@@ -130,6 +131,9 @@ export default function DashboardPage({ lockedResults, startingFinancials, curre
                     <td className="px-4 py-3 text-gray-700">{formatCurrency(r.grossUltimateLoss, true)}</td>
                     <td className="px-4 py-3 text-gray-700">{formatCurrency(r.netUltimateLoss, true)}</td>
                     <td className={`px-4 py-3 font-semibold ${colorForRatio(r.combinedRatio)}`}>{formatPct(r.combinedRatio)}</td>
+                    <td className={`px-4 py-3 font-medium ${r.underwritingIncome >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                      {formatCurrency(r.underwritingIncome, true)}
+                    </td>
                     <td className="px-4 py-3 text-gray-700">{formatCurrency(r.investmentIncome, true)}</td>
                     <td className={`px-4 py-3 font-semibold ${r.netIncome >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                       {formatCurrency(r.netIncome, true)}

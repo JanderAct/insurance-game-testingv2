@@ -9,14 +9,14 @@ export interface IncomeStatement {
   totalMemberCharge: number;
   grossPremium: number;
   assessments: number;
-  totalRevenue: number;
   netUltimateLoss: number;
+  netIncurredLoss: number;
   operatingExpense: number;
   riskControlInvestment: number;
   reinsuranceCost: number;
+  dividends: number;
   priorYearDevelopment: number;
-  totalUnderwritingExpense: number;
-  underwritingResult: number;
+  underwritingIncome: number;
   investmentIncome: number;
   netIncome: number;
 }
@@ -132,14 +132,14 @@ export function deriveAnnualStatement(result: ResultSet): AnnualFinancialStateme
     totalMemberCharge: result.totalMemberCharge,
     grossPremium: result.grossPremium,
     assessments: result.assessments,
-    totalRevenue: result.grossPremium + result.assessments + result.investmentIncome,
     netUltimateLoss: result.netUltimateLoss,
+    netIncurredLoss: result.netIncurredLoss,
     operatingExpense: result.operatingExpense,
     riskControlInvestment: result.riskControlInvestment,
     reinsuranceCost: result.reinsuranceCost,
+    dividends: result.dividends,
     priorYearDevelopment: result.priorYearDevelopment,
-    totalUnderwritingExpense: result.netUltimateLoss + result.operatingExpense + result.riskControlInvestment + result.reinsuranceCost,
-    underwritingResult: result.grossPremium - result.netUltimateLoss - result.operatingExpense - result.riskControlInvestment - result.reinsuranceCost,
+    underwritingIncome: result.underwritingIncome,
     investmentIncome: result.investmentIncome,
     netIncome: result.netIncome,
   };

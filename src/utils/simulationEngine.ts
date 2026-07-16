@@ -328,15 +328,20 @@ export function processYear(
     grossIncurredLoss -
     cededIncurredRecovery;
 
-  const netIncome =
+  // Underwriting Income excludes investment income: it is the pool's premium/assessment
+  // revenue net of losses (incl. reserve development), expenses, risk control, reinsurance,
+  // and dividends returned to members. Assessments and dividends are treated as offsets to
+  // premium since they are collected/returned through the same member-charge mechanism.
+  const underwritingIncome =
     totalMemberCharge +
-    assessments +
-    investmentIncome -
+    assessments -
     netIncurredLoss -
     operatingExpense -
     riskControlInvestment -
     reinsuranceCost -
     dividends;
+
+  const netIncome = underwritingIncome + investmentIncome;
 
   // --- Balance Sheet ---
   // Balance sheet liabilities use expected unpaid losses, not CLF-loaded targets.
@@ -501,6 +506,7 @@ export function processYear(
     reinsuranceCost,
     reinsuranceRecovery,
     netUltimateLoss,
+    netIncurredLoss,
 
     operatingExpense,
     riskControlInvestment,
@@ -560,6 +566,7 @@ export function processYear(
     fundingAdequacyIndicator,
 
     // Income and balance sheet
+    underwritingIncome,
     netIncome,
     beginningCash,
     endingCash,
