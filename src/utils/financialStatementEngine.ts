@@ -7,6 +7,7 @@ export interface IncomeStatement {
   poolPremium: number;
   adminExpense: number;
   poolPremiumAndAdminExpense: number;
+  selfFundedDiscount: number;
   totalMemberCharge: number;
   grossPremium: number;
   assessments: number;
@@ -115,6 +116,7 @@ export function deriveAnnualStatement(result: ResultSet): AnnualFinancialStateme
     poolPremium: result.poolPremium,
     adminExpense: result.adminExpense,
     poolPremiumAndAdminExpense: result.poolPremiumAndAdminExpense,
+    selfFundedDiscount: result.selfFundedDiscount,
     totalMemberCharge: result.totalMemberCharge,
     grossPremium: result.grossPremium,
     assessments: result.assessments,
@@ -226,6 +228,7 @@ export function deriveHistoricalStatement(year: HistoricalYear): AnnualFinancial
     poolPremium: year.poolPremium,
     adminExpense: year.adminExpense,
     poolPremiumAndAdminExpense: year.poolPremiumAndAdminExpense,
+    selfFundedDiscount: year.selfFundedDiscount,
     totalMemberCharge: year.totalMemberCharge,
     grossPremium: year.totalMemberCharge,
     assessments: 0,

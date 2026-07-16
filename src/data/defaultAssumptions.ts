@@ -104,24 +104,33 @@ export const INVESTMENT_RISK_PARAMS = {
 
 // Reinsurance program table indexed by level (0-4)
 // Aggregate quota-share reinsurance, above the pool's own expected loss.
-// Attachment is fixed at 100% of expected gross loss + LAE for every paid level —
-// the pool retains all losses up to its own expected loss, no matter the level chosen.
-// Above that attachment, the reinsurer pays a flat quota share (recoveryPct) of the
-// excess, uncapped (no limit) — this is aggregate-basis for now; occurrence-basis
-// layering is deferred until a claim-level frequency/severity model exists.
-// Full Transfer costs a flat 35% of premium; other paid levels scale that cost
+// Attachment is 125% of expected gross loss + LAE for Self Fund/Low/Moderate/High —
+// the pool retains real loss risk into its own CLF-funded cushion before any
+// reinsurance help arrives, no matter the level chosen. Full Transfer keeps a
+// 100% attachment, since it is meant to be genuine full risk transfer above
+// expected loss. Above attachment, the reinsurer pays a flat quota share
+// (recoveryPct) of the excess, uncapped (no limit) — this is aggregate-basis for
+// now; occurrence-basis layering is deferred until a claim-level frequency/
+// severity model exists.
+// Full Transfer costs a flat 50% of premium; other paid levels scale that cost
 // linearly by their quota share (cost and quota share move together). Self Fund
-// (level 0) pays nothing externally — instead it retains that same 35%-of-premium
+// (level 0) pays nothing externally — instead it retains that same 50%-of-premium
 // budget in cash, which the general cash-sweep mechanism carries into investments
 // where it earns a return, rather than paying it away with nothing in exchange.
-const FULL_TRANSFER_COST_PCT_OF_PREMIUM = 0.35;
+export const FULL_TRANSFER_COST_PCT_OF_PREMIUM = 0.50;
+
+// The pool's retained (non-ceded) share of the excess layer is billed to members
+// at a discount off its full-transfer-equivalent notional cost, taken immediately
+// in the current year's charge — self-funding avoids a commercial reinsurer's
+// margin, so pools can pass that savings straight through to members.
+export const SELF_FUNDED_DISCOUNT_PCT = 0.08;
 
 export const REINSURANCE_PROGRAMS = [
   {
     level: 0,
     label: 'Self Fund',
-    description: 'No external reinsurance — the pool retains and invests the amount it would otherwise pay for full coverage',
-    attachmentMultiplierOfExpectedLoss: 0,
+    description: '125% attachment — no external reinsurance; the pool retains and invests the amount it would otherwise pay for full coverage',
+    attachmentMultiplierOfExpectedLoss: 1.25,
     limitPctOfPremium: 0,
     recoveryPct: 0,
     costPctOfPremiumMin: 0,
@@ -130,8 +139,8 @@ export const REINSURANCE_PROGRAMS = [
   {
     level: 1,
     label: 'Low',
-    description: '100% attachment, pool retains 50% of excess, uncapped',
-    attachmentMultiplierOfExpectedLoss: 1.00,
+    description: '125% attachment, pool retains 50% of excess, uncapped',
+    attachmentMultiplierOfExpectedLoss: 1.25,
     limitPctOfPremium: Infinity,
     recoveryPct: 0.50,
     costPctOfPremiumMin: 0.50 * FULL_TRANSFER_COST_PCT_OF_PREMIUM,
@@ -140,8 +149,8 @@ export const REINSURANCE_PROGRAMS = [
   {
     level: 2,
     label: 'Moderate',
-    description: '100% attachment, pool retains 25% of excess, uncapped',
-    attachmentMultiplierOfExpectedLoss: 1.00,
+    description: '125% attachment, pool retains 25% of excess, uncapped',
+    attachmentMultiplierOfExpectedLoss: 1.25,
     limitPctOfPremium: Infinity,
     recoveryPct: 0.75,
     costPctOfPremiumMin: 0.75 * FULL_TRANSFER_COST_PCT_OF_PREMIUM,
@@ -150,8 +159,8 @@ export const REINSURANCE_PROGRAMS = [
   {
     level: 3,
     label: 'High',
-    description: '100% attachment, pool retains 10% of excess, uncapped',
-    attachmentMultiplierOfExpectedLoss: 1.00,
+    description: '125% attachment, pool retains 10% of excess, uncapped',
+    attachmentMultiplierOfExpectedLoss: 1.25,
     limitPctOfPremium: Infinity,
     recoveryPct: 0.90,
     costPctOfPremiumMin: 0.90 * FULL_TRANSFER_COST_PCT_OF_PREMIUM,

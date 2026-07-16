@@ -3,7 +3,7 @@
 
 import type { GameState, PoolState, DecisionSet, ResultSet, ReserveCohort, Member, MemberLossResult } from '../types/simulation';
 import { SeededRandom, deriveSubRng } from './random';
-import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, MEMBER_LOSS_VOLATILITY, RISK_CONTROL_PARAMS, RESERVE_PAYDOWN_PCT, OPERATING_CASH_PCT_OF_PREMIUM } from '../data/defaultAssumptions';
+import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, MEMBER_LOSS_VOLATILITY, RISK_CONTROL_PARAMS, RESERVE_PAYDOWN_PCT, OPERATING_CASH_PCT_OF_PREMIUM, FULL_TRANSFER_COST_PCT_OF_PREMIUM, SELF_FUNDED_DISCOUNT_PCT } from '../data/defaultAssumptions';
 import { getReinsuranceStructure, calculateReinsuranceCost, calculateReinsuranceRecovery } from './reinsuranceEngine';
 import { simulateInvestmentReturn } from './investmentEngine';
 import { simulateMemberMovement } from './membershipEngine';
@@ -134,25 +134,31 @@ export function processYear(
   const adminRatePer100 = newPurePremiumPer100 * ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM;
   const poolPremiumAndAdminExpense = poolPremium + adminExpense;
 
+  const reinsStructure = getReinsuranceStructure(
+    decisions.reinsuranceLevel,
+    poolPremium,
+    expectedLoss
+  );
+
   const reinsuranceCost = calculateReinsuranceCost(
     decisions.reinsuranceLevel,
     poolPremium,
     instance.marketEnvironment.competitivePressure
   );
 
-  const totalMemberCharge = poolPremiumAndAdminExpense + reinsuranceCost;
+  // The pool's retained (non-ceded) share of the excess layer is billed to members
+  // at a discount off its full-transfer-equivalent notional cost, taken immediately.
+  const retainedSharePct = 1 - reinsStructure.recoveryPct;
+  const selfFundedNotional = retainedSharePct * FULL_TRANSFER_COST_PCT_OF_PREMIUM * poolPremium;
+  const selfFundedDiscount = selfFundedNotional * SELF_FUNDED_DISCOUNT_PCT;
+
+  const totalMemberCharge = poolPremiumAndAdminExpense + reinsuranceCost - selfFundedDiscount;
   const totalMemberRatePer100 = totalMemberCharge / Math.max(activeExposure * 10_000, 1);
 
   // Legacy names remain populated for compatibility with older screens and exports.
   const grossPremium = totalMemberCharge;
   const operatingExpense = adminExpense;
   const riskControlInvestment = poolPremium * decisions.riskControlPct;
-
-  const reinsStructure = getReinsuranceStructure(
-    decisions.reinsuranceLevel,
-    poolPremium,
-    expectedLoss
-  );
 
   // --- Member-Level Loss Simulation ---
   // Each member's Gamma distribution has a mean equal to expected loss. Risk
@@ -214,10 +220,9 @@ export function processYear(
 
   const netUltimateLoss = grossUltimateLoss - reinsuranceRecovery;
 
-  // Pool Losses / Excess Losses split uses 100% of expected loss as the boundary
-  // for every reinsurance level (including Self Fund), since it represents the
-  // pool's own funded layer regardless of whether external reinsurance sits above it.
-  const attachment = expectedLoss;
+  // Pool Losses / Excess Losses split uses each level's real attachment point
+  // (125% of expected loss for Self Fund/Low/Moderate/High, 100% for Full Transfer).
+  const attachment = reinsStructure.attachment;
   const poolLosses = Math.min(grossUltimateLoss, attachment);
   const excessLosses = Math.max(0, grossUltimateLoss - attachment);
   const quotaShareLosses = excessLosses - reinsuranceRecovery;
@@ -516,6 +521,7 @@ export function processYear(
     poolPremium,
     adminExpense,
     poolPremiumAndAdminExpense,
+    selfFundedDiscount,
     totalMemberCharge,
     grossPremium,
     assessments,

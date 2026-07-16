@@ -4,6 +4,8 @@ import {
   AGGREGATE_LOSS_DISTRIBUTION,
   FUNDING_CLF_TABLE,
   SLIDER_RANGES,
+  FULL_TRANSFER_COST_PCT_OF_PREMIUM,
+  SELF_FUNDED_DISCOUNT_PCT,
 } from '../data/defaultAssumptions';
 import { SeededRandom, deriveSubRng } from './random';
 import {
@@ -69,12 +71,20 @@ function buildCandidate(
     const adminExpense = expectedLoss * ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM;
     const poolPremium = Math.max(0, poolPremiumAndAdminExpense - adminExpense);
     const reinsuranceLevel = SLIDER_RANGES.reinsuranceLevel.default;
+    const reinsuranceStructure = getReinsuranceStructure(
+      reinsuranceLevel,
+      poolPremium,
+      expectedLoss
+    );
     const reinsuranceCost = calculateReinsuranceCost(
       reinsuranceLevel,
       poolPremium,
       instance.marketEnvironment.competitivePressure
     );
-    const totalMemberCharge = poolPremiumAndAdminExpense + reinsuranceCost;
+    const retainedSharePct = 1 - reinsuranceStructure.recoveryPct;
+    const selfFundedNotional = retainedSharePct * FULL_TRANSFER_COST_PCT_OF_PREMIUM * poolPremium;
+    const selfFundedDiscount = selfFundedNotional * SELF_FUNDED_DISCOUNT_PCT;
+    const totalMemberCharge = poolPremiumAndAdminExpense + reinsuranceCost - selfFundedDiscount;
 
     const memberAggregateSigma = 0.08;
     const memberAggregateFactor = rng.lognormal(
@@ -89,11 +99,6 @@ function buildCandidate(
       0,
       expectedLoss * memberAggregateFactor * annualLossFactor
     );
-    const reinsuranceStructure = getReinsuranceStructure(
-      reinsuranceLevel,
-      poolPremium,
-      expectedLoss
-    );
     const reinsuranceRecovery = calculateReinsuranceRecovery(
       grossUltimateLoss,
       reinsuranceStructure
@@ -101,10 +106,9 @@ function buildCandidate(
     const netUltimateLoss = grossUltimateLoss - reinsuranceRecovery;
     const grossPaidLosses = grossUltimateLoss * 0.40;
 
-    // Pool Losses / Excess Losses split uses 100% of expected loss as the boundary
-    // for every level (including Self Fund), since it represents the pool's own
-    // funded layer regardless of whether external reinsurance is purchased above it.
-    const attachment = expectedLoss;
+    // Pool Losses / Excess Losses split uses the level's real attachment point
+    // (125% of expected loss for Self Fund/Low/Moderate/High, 100% for Full Transfer).
+    const attachment = reinsuranceStructure.attachment;
     const poolLosses = Math.min(grossUltimateLoss, attachment);
     const excessLosses = Math.max(0, grossUltimateLoss - attachment);
     const quotaShareLosses = excessLosses - reinsuranceRecovery;
@@ -138,6 +142,7 @@ function buildCandidate(
       poolPremium,
       adminExpense,
       poolPremiumAndAdminExpense,
+      selfFundedDiscount,
       reinsuranceCost,
       totalMemberCharge,
       grossUltimateLoss,

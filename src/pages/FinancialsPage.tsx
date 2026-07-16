@@ -68,6 +68,7 @@ export default function FinancialsPage({ lockedResults, historicalYears, startin
               <ISLine label="Admin Expense" value={formatCurrency(statement.incomeStatement.adminExpense)} />
               <ISLine label="Pool Premium & Admin Expense" value={formatCurrency(statement.incomeStatement.poolPremiumAndAdminExpense)} />
               <ISLine label="Reinsurance Cost" value={formatCurrency(statement.incomeStatement.reinsuranceCost)} />
+              <ISLine label="Self-Funded Discount" value={`(${formatCurrency(statement.incomeStatement.selfFundedDiscount)})`} valueColor="text-emerald-600" />
               <ISLine label="Gross Premium & Admin Expense" value={formatCurrency(statement.incomeStatement.totalMemberCharge)} bold />
               <ISLine label="Assessments" value={formatCurrency(statement.incomeStatement.assessments)} />
               <div className="border-t border-gray-200 my-2" />
