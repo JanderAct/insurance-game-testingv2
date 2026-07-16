@@ -6,6 +6,17 @@ interface SetupPageProps {
   onStart: (settings: GameSetupSettings) => void;
 }
 
+const MANAGED_ITEMS: { label: string; definition: string }[] = [
+  { label: 'Rate changes and premium adequacy', definition: 'How much you raise or lower pool rates each year, balancing competitiveness against how well premium covers expected losses.' },
+  { label: 'Underwriting strictness', definition: 'How selective the pool is when accepting new members. Stricter underwriting favors better risks but slows growth.' },
+  { label: 'Reinsurance protection levels', definition: 'How much of your losses are transferred to a reinsurer in exchange for a cost, reducing volatility and protecting surplus.' },
+  { label: 'Investment risk strategy', definition: 'How aggressively the pool invests its assets. Higher risk offers higher expected returns but more volatility and downside risk.' },
+  { label: 'Funding confidence level', definition: 'The percentile of the loss distribution your funding is designed to cover. Higher confidence means more conservative, and costlier, funding.' },
+  { label: 'Risk control investment', definition: 'Spending on loss-prevention programs (safety, training, inspections) that gradually reduce expected losses over time.' },
+  { label: 'Dividends and assessments', definition: 'Returning surplus to members as dividends, or collecting additional funding from members through assessments when needed.' },
+  { label: 'Member retention and growth', definition: 'How many members stay in or join the pool, driven by pricing, satisfaction, and the pool’s financial performance.' },
+];
+
 function randomInstanceId(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let id = '';
@@ -17,7 +28,7 @@ function randomInstanceId(): string {
 
 export default function SetupPage({ onStart }: SetupPageProps) {
   const [poolName, setPoolName] = useState('Clearwater Public Entity Pool');
-  const [gameLength, setGameLength] = useState(10);
+  const [gameLength, setGameLength] = useState(5);
   const [startingYear, setStartingYear] = useState(2026);
   const [instanceId, setInstanceId] = useState(() => randomInstanceId());
 
@@ -68,7 +79,7 @@ export default function SetupPage({ onStart }: SetupPageProps) {
                 <input
                   type="range"
                   min={3}
-                  max={20}
+                  max={10}
                   step={1}
                   value={gameLength}
                   onChange={e => setGameLength(parseInt(e.target.value))}
@@ -76,7 +87,7 @@ export default function SetupPage({ onStart }: SetupPageProps) {
                 />
                 <div className="flex justify-between text-xs text-gray-400 mt-1">
                   <span>3 years</span>
-                  <span>20 years</span>
+                  <span>10 years</span>
                 </div>
               </div>
 
@@ -123,14 +134,16 @@ export default function SetupPage({ onStart }: SetupPageProps) {
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
               <p className="text-blue-800 text-sm font-medium mb-2">What you will manage:</p>
               <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-blue-700">
-                <span>• Rate changes and premium adequacy</span>
-                <span>• Underwriting strictness</span>
-                <span>• Reinsurance protection levels</span>
-                <span>• Investment risk strategy</span>
-                <span>• Funding confidence level</span>
-                <span>• Risk control investment</span>
-                <span>• Dividends and assessments</span>
-                <span>• Member retention and growth</span>
+                {MANAGED_ITEMS.map(item => (
+                  <span key={item.label} className="relative group inline-flex items-center gap-1 cursor-help w-fit">
+                    • <span className="underline decoration-dotted decoration-blue-400">{item.label}</span>
+                    <span className="pointer-events-none absolute bottom-full left-0 mb-2 w-56 z-20 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity">
+                      <span className="block bg-gray-900 text-white text-xs font-normal leading-relaxed rounded-lg px-3 py-2 shadow-lg">
+                        {item.definition}
+                      </span>
+                    </span>
+                  </span>
+                ))}
               </div>
             </div>
 
