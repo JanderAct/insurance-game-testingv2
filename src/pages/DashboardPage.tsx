@@ -1,16 +1,20 @@
 import { TrendingUp, Users, Shield, DollarSign, Activity, BarChart2, Globe, Star } from 'lucide-react';
-import type { ResultSet, StartingFinancials } from '../types/simulation';
+import type { ResultSet, StartingFinancials, HistoricalYear } from '../types/simulation';
 import StatCard from '../components/StatCard';
 import { formatCurrency, formatPct, colorForRatio, colorForSurplus } from '../utils/formatters';
 
 interface DashboardPageProps {
   lockedResults: ResultSet[];
+  historicalYears: HistoricalYear[];
   startingFinancials: StartingFinancials;
   currentYearNumber: number;
   startingYear: number;
 }
 
-export default function DashboardPage({ lockedResults, startingFinancials, currentYearNumber, startingYear }: DashboardPageProps) {
+export default function DashboardPage({ lockedResults, historicalYears, startingFinancials, currentYearNumber, startingYear }: DashboardPageProps) {
+  // The last historical year is anchored to exactly match Year 0 (startingFinancials),
+  // so it's excluded here to avoid showing the same opening position twice.
+  const priorHistoricalYears = historicalYears.slice(0, -1);
   const last = lockedResults[lockedResults.length - 1];
 
   const displaySurplus = last?.endingSurplus ?? startingFinancials.surplus;
@@ -97,6 +101,9 @@ export default function DashboardPage({ lockedResults, startingFinancials, curre
         <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
           <BarChart2 size={18} className="text-blue-600" />
           <h3 className="font-bold text-gray-900">Annual Summary</h3>
+          {priorHistoricalYears.length > 0 && (
+            <span className="text-xs text-gray-400 font-normal">— years before 0 are pre-game history (see Pool History tab)</span>
+          )}
         </div>
 
         <div className="overflow-x-auto">
@@ -109,6 +116,22 @@ export default function DashboardPage({ lockedResults, startingFinancials, curre
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
+                {priorHistoricalYears.map(year => (
+                  <tr key={year.historyYearNumber} className="hover:bg-gray-50 transition-colors text-gray-500">
+                    <td className="px-4 py-3 font-bold">{year.historyYearNumber}</td>
+                    <td className="px-4 py-3">{year.calendarYear}</td>
+                    <td className="px-4 py-3 font-medium">{formatCurrency(year.totalMemberCharge, true)}</td>
+                    <td className="px-4 py-3">{formatCurrency(year.grossUltimateLoss, true)}</td>
+                    <td className="px-4 py-3">{formatCurrency(year.netUltimateLoss, true)}</td>
+                    <td className={`px-4 py-3 font-semibold ${colorForRatio(year.actualCombinedRatio)}`}>{formatPct(year.actualCombinedRatio)}</td>
+                    <td className={year.underwritingIncome >= 0 ? 'px-4 py-3 text-emerald-600/70' : 'px-4 py-3 text-red-600/70'}>{formatCurrency(year.underwritingIncome, true)}</td>
+                    <td className="px-4 py-3">{formatCurrency(year.investmentIncome, true)}</td>
+                    <td className={year.netIncome >= 0 ? 'px-4 py-3 font-semibold text-emerald-600/70' : 'px-4 py-3 font-semibold text-red-600/70'}>{formatCurrency(year.netIncome, true)}</td>
+                    <td className="px-4 py-3 font-bold">{formatCurrency(year.endingSurplus, true)}</td>
+                    <td className="px-4 py-3">{year.activeMembers}</td>
+                    <td className="px-4 py-3 text-sky-600/70 font-medium">{formatPct(year.marketShare)}</td>
+                  </tr>
+                ))}
                 <tr className="bg-blue-50/40 hover:bg-blue-50 transition-colors">
                   <td className="px-4 py-3 font-bold text-gray-900">0</td>
                   <td className="px-4 py-3 text-gray-600">{startingYear - 1}</td>

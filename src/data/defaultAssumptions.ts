@@ -5,6 +5,12 @@
 // after the selected CLF is applied and is not itself multiplied by the CLF.
 export const ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM = 0.15;
 
+// Liquid operating cash the pool keeps on hand each year, sized to that year's
+// premium. Cash above this target is swept into investments at year-end, where
+// it earns a return; cash below this target is covered by drawing down
+// investments instead of letting the shortfall vanish.
+export const OPERATING_CASH_PCT_OF_PREMIUM = 0.15;
+
 export const LOSS_TREND = 0.04; // 4% annual claim inflation (default; instance may override)
 
 // Every member uses a Gamma distribution whose mean is its Pure Premium
@@ -103,11 +109,18 @@ export const INVESTMENT_RISK_PARAMS = {
 // Above that attachment, the reinsurer pays a flat quota share (recoveryPct) of the
 // excess, uncapped (no limit) — this is aggregate-basis for now; occurrence-basis
 // layering is deferred until a claim-level frequency/severity model exists.
+// Full Transfer costs a flat 35% of premium; other paid levels scale that cost
+// linearly by their quota share (cost and quota share move together). Self Fund
+// (level 0) pays nothing externally — instead it retains that same 35%-of-premium
+// budget in cash, which the general cash-sweep mechanism carries into investments
+// where it earns a return, rather than paying it away with nothing in exchange.
+const FULL_TRANSFER_COST_PCT_OF_PREMIUM = 0.35;
+
 export const REINSURANCE_PROGRAMS = [
   {
     level: 0,
-    label: 'None',
-    description: 'No reinsurance protection',
+    label: 'Self Fund',
+    description: 'No external reinsurance — the pool retains and invests the amount it would otherwise pay for full coverage',
     attachmentMultiplierOfExpectedLoss: 0,
     limitPctOfPremium: 0,
     recoveryPct: 0,
@@ -121,8 +134,8 @@ export const REINSURANCE_PROGRAMS = [
     attachmentMultiplierOfExpectedLoss: 1.00,
     limitPctOfPremium: Infinity,
     recoveryPct: 0.50,
-    costPctOfPremiumMin: 0.06,
-    costPctOfPremiumMax: 0.09,
+    costPctOfPremiumMin: 0.50 * FULL_TRANSFER_COST_PCT_OF_PREMIUM,
+    costPctOfPremiumMax: 0.50 * FULL_TRANSFER_COST_PCT_OF_PREMIUM,
   },
   {
     level: 2,
@@ -131,8 +144,8 @@ export const REINSURANCE_PROGRAMS = [
     attachmentMultiplierOfExpectedLoss: 1.00,
     limitPctOfPremium: Infinity,
     recoveryPct: 0.75,
-    costPctOfPremiumMin: 0.12,
-    costPctOfPremiumMax: 0.18,
+    costPctOfPremiumMin: 0.75 * FULL_TRANSFER_COST_PCT_OF_PREMIUM,
+    costPctOfPremiumMax: 0.75 * FULL_TRANSFER_COST_PCT_OF_PREMIUM,
   },
   {
     level: 3,
@@ -141,8 +154,8 @@ export const REINSURANCE_PROGRAMS = [
     attachmentMultiplierOfExpectedLoss: 1.00,
     limitPctOfPremium: Infinity,
     recoveryPct: 0.90,
-    costPctOfPremiumMin: 0.22,
-    costPctOfPremiumMax: 0.32,
+    costPctOfPremiumMin: 0.90 * FULL_TRANSFER_COST_PCT_OF_PREMIUM,
+    costPctOfPremiumMax: 0.90 * FULL_TRANSFER_COST_PCT_OF_PREMIUM,
   },
   {
     level: 4,
@@ -151,8 +164,8 @@ export const REINSURANCE_PROGRAMS = [
     attachmentMultiplierOfExpectedLoss: 1.00,
     limitPctOfPremium: Infinity,
     recoveryPct: 1.00,
-    costPctOfPremiumMin: 0.45,
-    costPctOfPremiumMax: 0.65,
+    costPctOfPremiumMin: FULL_TRANSFER_COST_PCT_OF_PREMIUM,
+    costPctOfPremiumMax: FULL_TRANSFER_COST_PCT_OF_PREMIUM,
   },
 ];
 

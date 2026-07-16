@@ -26,35 +26,44 @@ export default function HistoryPage({ historicalYears, scenarioId, startingYear 
   const operatingRows: HistoryRow[] = [
     { label: 'Active Members', value: year => String(year.activeMembers) },
     { label: 'Payroll Exposure', value: year => `$${year.activeExposure.toFixed(2)}M` },
-    { label: 'Market Share', value: year => formatPct(year.marketShare) },
-    { label: 'Pure Premium Rate per $100 Payroll', value: year => `$${year.purePremiumPer100.toFixed(2)}` },
+    { label: 'Market Share (% of Exposure)', value: year => formatPct(year.marketShare) },
     { label: 'Pool Premium Rate per $100 Payroll', value: year => `$${year.poolPremiumRatePer100.toFixed(2)}` },
   ];
 
   const performanceRows: HistoryRow[] = [
+    { label: 'Pool Premium', value: year => formatCurrency(year.poolPremium) },
+    { label: 'Admin Expense', value: year => formatCurrency(year.adminExpense) },
     { label: 'Pool Premium & Admin Expense', value: year => formatCurrency(year.poolPremiumAndAdminExpense) },
     { label: 'Reinsurance Cost', value: year => formatCurrency(year.reinsuranceCost) },
     { label: 'Gross Premium & Admin Expense', value: year => formatCurrency(year.totalMemberCharge) },
-    { label: 'Actual Ultimate Losses', value: year => formatCurrency(year.grossUltimateLoss) },
-    { label: 'Reinsurance Recovery', value: year => formatCurrency(year.reinsuranceRecovery) },
+    { label: 'Ultimate Losses', value: year => formatCurrency(year.grossUltimateLoss) },
+    { label: 'Pool Losses', value: year => formatCurrency(year.poolLosses) },
+    { label: 'Excess Losses', value: year => formatCurrency(year.excessLosses) },
+    { label: 'Quota Share Losses', value: year => formatCurrency(year.quotaShareLosses) },
+    { label: 'Reinsurance Losses', value: year => formatCurrency(year.reinsuranceRecovery) },
     { label: 'Net Ultimate Loss', value: year => formatCurrency(year.netUltimateLoss) },
     {
       label: 'Actual Combined Ratio',
       value: year => formatPct(year.actualCombinedRatio),
       className: year => colorForRatio(year.actualCombinedRatio),
     },
+    {
+      label: 'Underwriting Income',
+      value: year => formatCurrency(year.underwritingIncome),
+      className: year => year.underwritingIncome >= 0 ? 'text-emerald-600' : 'text-red-600',
+    },
     { label: 'Investment Income', value: year => formatCurrency(year.investmentIncome) },
     {
-      label: 'Net Income',
+      label: 'Total Income',
       value: year => formatCurrency(year.netIncome),
       className: year => year.netIncome >= 0 ? 'text-emerald-600' : 'text-red-600',
     },
   ];
 
   const capitalRows: HistoryRow[] = [
-    { label: 'Ending Gross Unpaid Loss', value: year => formatCurrency(year.endingGrossReserve) },
-    { label: 'Expected Reinsurance Recoverable', value: year => formatCurrency(year.endingReinsuranceRecoverable) },
-    { label: 'Ending Net Unpaid Loss', value: year => formatCurrency(year.endingNetReserve) },
+    { label: 'Pool Outstanding', value: year => formatCurrency(year.endingGrossReserve) },
+    { label: 'Reinsurance Recoverable Outstanding', value: year => formatCurrency(year.endingReinsuranceRecoverable) },
+    { label: 'Total Outstanding', value: year => formatCurrency(year.endingNetReserve) },
     { label: 'Required Reserve Margin', value: year => formatCurrency(year.requiredReserveMargin) },
     {
       label: 'Ending Surplus',
@@ -146,7 +155,7 @@ function HistoryTable({
         <table className="w-full text-sm">
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
-              <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide min-w-[260px]">Metric</th>
+              <th className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide min-w-[260px]"></th>
               {years.map((year, index) => (
                 <th key={year.calendarYear} className="px-5 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide min-w-[150px]">
                   {year.calendarYear}

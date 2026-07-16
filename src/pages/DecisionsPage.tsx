@@ -105,7 +105,11 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
                 <DataRow label="Est. Annual Cost" value={`${formatCurrency(reinsCost)}/yr (${(reinsCostPct * 100).toFixed(0)}% of prem.)`} />
               </div>
             ) : (
-              <p className="text-gray-500 italic">No reinsurance — pool retains all gross losses.</p>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                <DataRow label="Self-Funded Amount" value={`${formatCurrency(estimatedPremium * REINSURANCE_PROGRAMS[4].costPctOfPremiumMax)}/yr`} />
+                <DataRow label="Where it goes" value="Retained & invested by the pool" />
+                <p className="col-span-2 text-gray-500 italic mt-1">No external reinsurance — the pool retains all gross losses. Instead of paying this amount to a reinsurer, it stays in the pool's cash and earns investment income for the pool's own account.</p>
+              </div>
             )}
             <p className="text-blue-700 mt-2 text-xs leading-relaxed border-t border-blue-100 pt-2">Reinsurance does not reduce gross losses. Above the attachment point, the reinsurer pays its quota share of the excess; the pool retains the rest.</p>
           </div>

@@ -50,7 +50,7 @@ export function generateNarrative(result: ResultSet, _priorResult?: ResultSet): 
 
   // --- Reinsurance ---
   if (decisions.reinsuranceLevel === 0) {
-    parts.push(`No reinsurance protection was in place.`);
+    parts.push(`The pool self-funded rather than buying external reinsurance, retaining that budget in cash and investments.`);
   } else if (reinsuranceRecovery > 0) {
     parts.push(`Reinsurance generated $${fmt(reinsuranceRecovery)} in recoveries, reducing net losses.`);
   } else if (decisions.reinsuranceLevel > 0) {

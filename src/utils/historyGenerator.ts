@@ -101,18 +101,26 @@ function buildCandidate(
     const netUltimateLoss = grossUltimateLoss - reinsuranceRecovery;
     const grossPaidLosses = grossUltimateLoss * 0.40;
 
+    // Pool Losses / Excess Losses split uses 100% of expected loss as the boundary
+    // for every level (including Self Fund), since it represents the pool's own
+    // funded layer regardless of whether external reinsurance is purchased above it.
+    const attachment = expectedLoss;
+    const poolLosses = Math.min(grossUltimateLoss, attachment);
+    const excessLosses = Math.max(0, grossUltimateLoss - attachment);
+    const quotaShareLosses = excessLosses - reinsuranceRecovery;
+
     const investedAssets = startingFinancials.investments * scaleToOpening;
     const investmentReturn = Math.max(
       -0.02,
       Math.min(0.05, rng.normal(instance.investmentEnvironment.baseReturn * 0.55, 0.012))
     );
     const investmentIncome = investedAssets * investmentReturn;
-    const netIncome =
+    const underwritingIncome =
       totalMemberCharge
-      + investmentIncome
       - netUltimateLoss
       - adminExpense
       - reinsuranceCost;
+    const netIncome = underwritingIncome + investmentIncome;
     const actualLossRatio = netUltimateLoss / Math.max(totalMemberCharge, 1);
     const actualExpenseRatio =
       (adminExpense + reinsuranceCost) / Math.max(totalMemberCharge, 1);
@@ -133,12 +141,17 @@ function buildCandidate(
       reinsuranceCost,
       totalMemberCharge,
       grossUltimateLoss,
+      attachment,
+      poolLosses,
+      excessLosses,
+      quotaShareLosses,
       reinsuranceRecovery,
       netUltimateLoss,
       grossPaidLosses,
       actualLossRatio,
       actualExpenseRatio,
       actualCombinedRatio: actualLossRatio + actualExpenseRatio,
+      underwritingIncome,
       investmentIncome,
       netIncome,
     };

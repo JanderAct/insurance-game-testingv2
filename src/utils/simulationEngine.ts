@@ -3,7 +3,7 @@
 
 import type { GameState, PoolState, DecisionSet, ResultSet, ReserveCohort, Member, MemberLossResult } from '../types/simulation';
 import { SeededRandom, deriveSubRng } from './random';
-import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, MEMBER_LOSS_VOLATILITY, RISK_CONTROL_PARAMS, RESERVE_PAYDOWN_PCT } from '../data/defaultAssumptions';
+import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, MEMBER_LOSS_VOLATILITY, RISK_CONTROL_PARAMS, RESERVE_PAYDOWN_PCT, OPERATING_CASH_PCT_OF_PREMIUM } from '../data/defaultAssumptions';
 import { getReinsuranceStructure, calculateReinsuranceCost, calculateReinsuranceRecovery } from './reinsuranceEngine';
 import { simulateInvestmentReturn } from './investmentEngine';
 import { simulateMemberMovement } from './membershipEngine';
@@ -214,6 +214,14 @@ export function processYear(
 
   const netUltimateLoss = grossUltimateLoss - reinsuranceRecovery;
 
+  // Pool Losses / Excess Losses split uses 100% of expected loss as the boundary
+  // for every reinsurance level (including Self Fund), since it represents the
+  // pool's own funded layer regardless of whether external reinsurance sits above it.
+  const attachment = expectedLoss;
+  const poolLosses = Math.min(grossUltimateLoss, attachment);
+  const excessLosses = Math.max(0, grossUltimateLoss - attachment);
+  const quotaShareLosses = excessLosses - reinsuranceRecovery;
+
   // --- Investment Income ---
   const investRng = deriveSubRng(instance.seed, yearNumber, 'invest');
   const investedAssets = poolState.investments;
@@ -365,10 +373,27 @@ export function processYear(
     reinsuranceCost -
     dividends;
 
-  const endingCash = Math.max(0, newCash);
-
   const beginningInvestments = poolState.investments;
-  const endingInvestments = Math.max(0, beginningInvestments + investmentIncome);
+  const investmentsBeforeSweep = Math.max(0, beginningInvestments + investmentIncome);
+
+  // Sweep cash above the operating target into investments (where it earns a
+  // return going forward); draw down investments to cover a cash shortfall
+  // instead of letting it silently vanish. Total assets (cash + investments)
+  // are conserved by this reallocation, except at the floor below.
+  const operatingCashTarget = totalMemberCharge * OPERATING_CASH_PCT_OF_PREMIUM;
+  let endingCash: number;
+  let endingInvestments: number;
+  if (newCash >= operatingCashTarget) {
+    endingCash = operatingCashTarget;
+    endingInvestments = investmentsBeforeSweep + (newCash - operatingCashTarget);
+  } else {
+    const shortfall = operatingCashTarget - newCash;
+    const drawFromInvestments = Math.min(shortfall, investmentsBeforeSweep);
+    endingCash = newCash + drawFromInvestments;
+    endingInvestments = investmentsBeforeSweep - drawFromInvestments;
+  }
+  endingCash = Math.max(0, endingCash);
+  endingInvestments = Math.max(0, endingInvestments);
 
   const totalAssets =
     endingCash +
@@ -504,6 +529,10 @@ export function processYear(
     grossUltimateLoss,
     shockLossIncurred: shockOccurred,
     reinsuranceCost,
+    attachment,
+    poolLosses,
+    excessLosses,
+    quotaShareLosses,
     reinsuranceRecovery,
     netUltimateLoss,
     netIncurredLoss,
