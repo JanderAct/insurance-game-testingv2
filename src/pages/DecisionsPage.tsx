@@ -100,7 +100,7 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
               <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
                 <DataRow label="Attachment Point" value={formatCurrency(reinsStructure.attachment)} />
                 <DataRow label="Attachment (% of Exp. Loss)" value={`${(REINSURANCE_PROGRAMS[decisions.reinsuranceLevel].attachmentMultiplierOfExpectedLoss * 100).toFixed(0)}%`} />
-                <DataRow label="Quota Share %" value={`${(reinsStructure.recoveryPct * 100).toFixed(0)}%`} />
+                <DataRow label="Quota Share % (Pool Retains)" value={`${((1 - reinsStructure.recoveryPct) * 100).toFixed(0)}%`} />
                 <DataRow label="Coverage" value="Uncapped above attachment" />
                 <DataRow label="Est. Annual Cost" value={`${formatCurrency(reinsCost)}/yr (${(reinsCostPct * 100).toFixed(0)}% of prem.)`} />
               </div>

@@ -130,7 +130,7 @@ export const REINSURANCE_PROGRAMS = [
   {
     level: 1,
     label: 'Low',
-    description: '100% attachment, 50% quota share, uncapped',
+    description: '100% attachment, pool retains 50% of excess, uncapped',
     attachmentMultiplierOfExpectedLoss: 1.00,
     limitPctOfPremium: Infinity,
     recoveryPct: 0.50,
@@ -140,7 +140,7 @@ export const REINSURANCE_PROGRAMS = [
   {
     level: 2,
     label: 'Moderate',
-    description: '100% attachment, 75% quota share, uncapped',
+    description: '100% attachment, pool retains 25% of excess, uncapped',
     attachmentMultiplierOfExpectedLoss: 1.00,
     limitPctOfPremium: Infinity,
     recoveryPct: 0.75,
@@ -150,7 +150,7 @@ export const REINSURANCE_PROGRAMS = [
   {
     level: 3,
     label: 'High',
-    description: '100% attachment, 90% quota share, uncapped',
+    description: '100% attachment, pool retains 10% of excess, uncapped',
     attachmentMultiplierOfExpectedLoss: 1.00,
     limitPctOfPremium: Infinity,
     recoveryPct: 0.90,
@@ -160,7 +160,7 @@ export const REINSURANCE_PROGRAMS = [
   {
     level: 4,
     label: 'Full Transfer',
-    description: '100% attachment, 100% quota share (full transfer of excess), uncapped',
+    description: '100% attachment, pool retains 0% of excess (full transfer), uncapped',
     attachmentMultiplierOfExpectedLoss: 1.00,
     limitPctOfPremium: Infinity,
     recoveryPct: 1.00,

@@ -1,14 +1,13 @@
 import React, { useState } from 'react';
 import { FileText, Target } from 'lucide-react';
 import type { ResultSet, StartingFinancials, HistoricalYear } from '../types/simulation';
-import { deriveAnnualStatement, deriveHistoricalStatement, deriveStartingStatement } from '../utils/financialStatementEngine';
+import { deriveAnnualStatement, deriveHistoricalStatement, deriveOpeningStatement } from '../utils/financialStatementEngine';
 import { formatCurrency, formatPct, colorForNetIncome } from '../utils/formatters';
 
 interface FinancialsPageProps {
   lockedResults: ResultSet[];
   historicalYears: HistoricalYear[];
   startingFinancials: StartingFinancials;
-  startingYear: number;
 }
 
 function formatYearEndDate(calendarYear: number): string {
@@ -16,32 +15,34 @@ function formatYearEndDate(calendarYear: number): string {
   return `12/31/${yy}`;
 }
 
-export default function FinancialsPage({ lockedResults, historicalYears, startingFinancials, startingYear }: FinancialsPageProps) {
-  const [selectedIdx, setSelectedIdx] = useState<'start' | number>('start');
+export default function FinancialsPage({ lockedResults, historicalYears, startingFinancials }: FinancialsPageProps) {
+  // Chronological order: earliest historical year first, Year 0 (the opening
+  // position) last among the "prior" entries, then Year 1 onward below it.
+  const openingYear = historicalYears[historicalYears.length - 1];
+  const earlierHistoricalYears = historicalYears.slice(0, -1);
 
-  // The last historical year is anchored to exactly match the Starting Statement,
-  // so it's excluded here to avoid offering the same opening position twice.
-  const priorHistoricalYears = historicalYears.slice(0, -1);
+  const [selectedIdx, setSelectedIdx] = useState<number>(openingYear?.historyYearNumber ?? 0);
 
-  const yearOptions: { label: string; value: 'start' | number }[] = [
-    { label: `Starting Statement — ${formatYearEndDate(startingYear - 1)}`, value: 'start' },
-    ...priorHistoricalYears.map(y => ({ label: `${formatYearEndDate(y.calendarYear)} (History)`, value: y.historyYearNumber })),
+  const yearOptions: { label: string; value: number }[] = [
+    ...earlierHistoricalYears.map(y => ({ label: `${formatYearEndDate(y.calendarYear)} (History)`, value: y.historyYearNumber })),
+    ...(openingYear ? [{ label: `Year 0 — ${formatYearEndDate(openingYear.calendarYear)} (Opening)`, value: openingYear.historyYearNumber }] : []),
     ...lockedResults.map(r => ({ label: `Year ${r.yearNumber} — ${formatYearEndDate(r.calendarYear)}`, value: r.yearNumber })),
   ];
 
-  const isStart = selectedIdx === 'start';
-  const selectedHistorical = !isStart && selectedIdx < 0
-    ? priorHistoricalYears.find(y => y.historyYearNumber === selectedIdx)
+  const isOpening = openingYear && selectedIdx === openingYear.historyYearNumber;
+  const selectedHistorical = !isOpening && selectedIdx < 0
+    ? earlierHistoricalYears.find(y => y.historyYearNumber === selectedIdx)
     : undefined;
-  const selectedResult = !isStart && typeof selectedIdx === 'number' && selectedIdx > 0
+  const selectedResult = selectedIdx > 0
     ? lockedResults.find(r => r.yearNumber === selectedIdx)
     : undefined;
   const statement = selectedResult
     ? deriveAnnualStatement(selectedResult)
-    : selectedHistorical
-      ? deriveHistoricalStatement(selectedHistorical)
-      : null;
-  const startStatement = isStart ? deriveStartingStatement(startingFinancials) : null;
+    : isOpening
+      ? deriveOpeningStatement(openingYear, startingFinancials)
+      : selectedHistorical
+        ? deriveHistoricalStatement(selectedHistorical)
+        : null;
 
   return (
     <div className="max-w-screen-2xl mx-auto px-4 py-6 space-y-6">
@@ -50,38 +51,16 @@ export default function FinancialsPage({ lockedResults, historicalYears, startin
           <h2 className="text-xl font-bold text-gray-900">Financial Statements</h2>
           <p className="text-gray-500 text-sm">Select a year to view the full statement</p>
         </div>
-        <select value={String(selectedIdx)} onChange={e => setSelectedIdx(e.target.value === 'start' ? 'start' : parseInt(e.target.value))} className="border border-gray-300 rounded-lg px-4 py-2 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <select value={String(selectedIdx)} onChange={e => setSelectedIdx(parseInt(e.target.value))} className="border border-gray-300 rounded-lg px-4 py-2 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
           {yearOptions.map(opt => (<option key={String(opt.value)} value={String(opt.value)}>{opt.label}</option>))}
         </select>
       </div>
 
-      {isStart && startStatement && (
-        <div className="space-y-5">
-          <SectionHeader title={`Starting Financial Statement — ${formatYearEndDate(startingYear - 1)}`} subtitle="Opening position before any player decisions" />
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <StatementCard title="Opening Balance Sheet">
-              <BSLine label="Cash & Cash Equivalents" value={formatCurrency(startStatement.cash)} />
-              <BSLine label="Investments" value={formatCurrency(startStatement.investments)} />
-              <BSLine label="Reinsurance Recoverable on Unpaid Losses" value={formatCurrency(startStatement.reinsuranceRecoverable)} />
-              <BSLine label="Other Assets" value={formatCurrency(startStatement.otherAssets)} />
-              <BSLine label="Total Assets" value={formatCurrency(startStatement.totalAssets)} bold />
-              <div className="border-t border-gray-200 my-2" />
-              <BSLine label="Gross Unpaid Loss and LAE Reserve" value={formatCurrency(startStatement.grossUnpaidReserve)} />
-              <BSLine label="Unearned Pool Premium" value={formatCurrency(startStatement.unearnedPremium)} />
-              <BSLine label="Other Liabilities" value={formatCurrency(startStatement.otherLiabilities)} />
-              <BSLine label="Total Liabilities" value={formatCurrency(startStatement.totalLiabilities)} bold />
-              <div className="border-t border-gray-200 my-2" />
-              <BSLine label="Net Equity / Surplus" value={formatCurrency(startStatement.surplus)} bold highlight />
-            </StatementCard>
-          </div>
-        </div>
-      )}
-
-      {!isStart && statement && (selectedResult || selectedHistorical) && (
+      {statement && (
         <div className="space-y-5">
           <SectionHeader
-            title={`Financial Statements — ${selectedResult ? `Year ${statement.yearNumber}` : 'History'} — ${formatYearEndDate(statement.calendarYear)}`}
-            subtitle={selectedResult ? `Locked results for Year ${statement.yearNumber}` : 'Pre-game historical statement (read-only)'}
+            title={`Financial Statements — ${selectedResult ? `Year ${statement.yearNumber}` : isOpening ? 'Year 0 (Opening)' : 'History'} — ${formatYearEndDate(statement.calendarYear)}`}
+            subtitle={selectedResult ? `Locked results for Year ${statement.yearNumber}` : isOpening ? 'Opening position before any player decisions' : 'Pre-game historical statement (read-only)'}
           />
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <StatementCard title="Income Statement">
@@ -186,7 +165,7 @@ export default function FinancialsPage({ lockedResults, historicalYears, startin
         </div>
       )}
 
-      {!isStart && !statement && (
+      {!statement && (
         <div className="text-center py-16 text-gray-400">
           <FileText size={40} className="mx-auto mb-3 opacity-30" />
           <p>No statement available. Lock a year to generate statements.</p>

@@ -312,6 +312,38 @@ export function deriveHistoricalStatement(year: HistoricalYear): AnnualFinancial
   };
 }
 
+// The opening year (Year 0) is the last historical year, anchored to end exactly at
+// startingFinancials. It gets the same full income-statement detail as the other
+// historical years, but its balance sheet uses the real starting cash/investments/
+// other-assets/other-liabilities breakdown instead of the zeroed placeholders used
+// for the earlier historical years (which don't track those separately per year).
+export function deriveOpeningStatement(openingYear: HistoricalYear, sf: StartingFinancials): AnnualFinancialStatement {
+  const historical = deriveHistoricalStatement(openingYear);
+  const balanceSheet: BalanceSheet = {
+    cash: sf.cash,
+    investments: sf.investments,
+    reinsuranceRecoverable: sf.reinsuranceRecoverable,
+    otherAssets: sf.otherAssets,
+    totalAssets: sf.totalAssets,
+    grossUnpaidReserve: sf.grossUnpaidReserve,
+    unearnedPremium: sf.unearnedPremium,
+    otherLiabilities: sf.otherLiabilities,
+    totalLiabilities: sf.totalLiabilities,
+    surplus: sf.surplus,
+  };
+  const surplusRollforward: SurplusRollforward = {
+    ...historical.surplusRollforward,
+    endingSurplus: sf.surplus,
+    surplusFromIncome: sf.surplus,
+    beginingSurplus: sf.surplus - openingYear.netIncome,
+  };
+  return {
+    ...historical,
+    balanceSheet,
+    surplusRollforward,
+  };
+}
+
 export function deriveStartingStatement(sf: StartingFinancials): BalanceSheet {
   return {
     cash: sf.cash,

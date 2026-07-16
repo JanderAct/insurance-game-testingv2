@@ -281,7 +281,6 @@ export default function App() {
             lockedResults={gameState.lockedResults}
             historicalYears={historicalYears}
             startingFinancials={startingFinancials}
-            startingYear={gameState.setup.startingYear}
           />
         )}
 
