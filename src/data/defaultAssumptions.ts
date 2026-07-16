@@ -215,7 +215,6 @@ export const STARTING_FINANCIALS = {
   reinsuranceRecoverable: { min: 0, max: 1_000_000 },
   otherAssets: { min: 100_000, max: 400_000 },
   grossUnpaidReserve: { min: 4_000_000, max: 8_000_000 },
-  unearnedPremiumPct: { min: 0.20, max: 0.30 },
   otherLiabilities: { min: 100_000, max: 400_000 },
   startingSurplus: { min: 3_000_000, max: 7_000_000 },
 };

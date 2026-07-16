@@ -972,7 +972,6 @@ function buildAssumptionRows(): AuditRow[] {
         `Reinsurance Recoverable: ${formatRangeCurrency(STARTING_FINANCIALS.reinsuranceRecoverable)}\n` +
         `Other Assets: ${formatRangeCurrency(STARTING_FINANCIALS.otherAssets)}\n` +
         `Gross Unpaid Reserve: ${formatRangeCurrency(STARTING_FINANCIALS.grossUnpaidReserve)}\n` +
-        `Unearned Premium %: ${formatRangePct(STARTING_FINANCIALS.unearnedPremiumPct)}\n` +
         `Other Liabilities: ${formatRangeCurrency(STARTING_FINANCIALS.otherLiabilities)}\n` +
         `Starting Surplus: ${formatRangeCurrency(STARTING_FINANCIALS.startingSurplus)}`,
       formula: 'Starting financial assumption ranges used by instance generation.',

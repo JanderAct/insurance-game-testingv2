@@ -184,7 +184,9 @@ export function generateStartingPoolState(instance: GameInstance, startingYear: 
   const reinsuranceRecoverable = rng.range(STARTING_FINANCIALS.reinsuranceRecoverable.min, STARTING_FINANCIALS.reinsuranceRecoverable.max);
   const otherAssets = rng.range(STARTING_FINANCIALS.otherAssets.min, STARTING_FINANCIALS.otherAssets.max);
   const grossUnpaidReserve = rng.range(STARTING_FINANCIALS.grossUnpaidReserve.min, STARTING_FINANCIALS.grossUnpaidReserve.max);
-  const unearnedPremium = annualPremium * rng.range(STARTING_FINANCIALS.unearnedPremiumPct.min, STARTING_FINANCIALS.unearnedPremiumPct.max);
+  // Held at zero, matching every subsequent year: written premium is treated as collected
+  // and earned in the year it's written, with no separate unearned-premium timing layer.
+  const unearnedPremium = 0;
   const otherLiabilities = rng.range(STARTING_FINANCIALS.otherLiabilities.min, STARTING_FINANCIALS.otherLiabilities.max);
 
   const totalAssets = cash + investments + reinsuranceRecoverable + otherAssets;
