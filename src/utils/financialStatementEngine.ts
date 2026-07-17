@@ -1,22 +1,30 @@
 // Financial Statement engine for Risk Pool Simulation v1
 
-import type { ResultSet, StartingFinancials } from '../types/simulation';
+import type { ResultSet, StartingFinancials, HistoricalYear } from '../types/simulation';
+import { SLIDER_RANGES } from '../data/defaultAssumptions';
 
 export interface IncomeStatement {
   poolPremium: number;
   adminExpense: number;
   poolPremiumAndAdminExpense: number;
+  selfFundedDiscount: number;
   totalMemberCharge: number;
   grossPremium: number;
   assessments: number;
-  totalRevenue: number;
+  grossUltimateLoss: number;
+  attachment: number;
+  poolLosses: number;
+  excessLosses: number;
+  quotaShareLosses: number;
+  reinsuranceRecovery: number;
   netUltimateLoss: number;
+  netIncurredLoss: number;
   operatingExpense: number;
   riskControlInvestment: number;
   reinsuranceCost: number;
+  dividends: number;
   priorYearDevelopment: number;
-  totalUnderwritingExpense: number;
-  underwritingResult: number;
+  underwritingIncome: number;
   investmentIncome: number;
   netIncome: number;
 }
@@ -91,37 +99,16 @@ export interface FundingDetail {
   excessCapitalStatus: string;
 }
 
-export interface KeyRatios {
-  expectedLossRatio: number;
-  expectedExpenseRatio: number;
-  expectedCombinedRatio: number;
-  lossRatio: number;
-  netLossRatio: number;
-  expenseRatio: number;
-  combinedRatio: number;
-  investmentReturnRate: number;
-  operatingRatio: number;
-  surplusToPremiumRatio: number;
-  marketShare: number;
-  memberRetentionRate: number;
-  fundingAdequacyIndicator: string;
-  fundingAdequacyStatus: string;
-  fundingAdequacyRatio: number;
-  ratePer100: number;
-  purePremiumPer100: number;
-  activeExposure: number;
-}
-
 export interface AnnualFinancialStatement {
   yearNumber: number;
   calendarYear: number;
+  isHistorical: boolean;
   incomeStatement: IncomeStatement;
   balanceSheet: BalanceSheet;
   surplusRollforward: SurplusRollforward;
   reinsuranceDetail: ReinsuranceDetail;
   reserveDetail: ReserveDetail;
-  fundingDetail: FundingDetail;
-  keyRatios: KeyRatios;
+  fundingDetail: FundingDetail | null;  // null for historical years — no player-selected funding confidence exists pre-game
 }
 
 export function deriveAnnualStatement(result: ResultSet): AnnualFinancialStatement {
@@ -129,17 +116,24 @@ export function deriveAnnualStatement(result: ResultSet): AnnualFinancialStateme
     poolPremium: result.poolPremium,
     adminExpense: result.adminExpense,
     poolPremiumAndAdminExpense: result.poolPremiumAndAdminExpense,
+    selfFundedDiscount: result.selfFundedDiscount,
     totalMemberCharge: result.totalMemberCharge,
     grossPremium: result.grossPremium,
     assessments: result.assessments,
-    totalRevenue: result.grossPremium + result.assessments + result.investmentIncome,
+    grossUltimateLoss: result.grossUltimateLoss,
+    attachment: result.attachment,
+    poolLosses: result.poolLosses,
+    excessLosses: result.excessLosses,
+    quotaShareLosses: result.quotaShareLosses,
+    reinsuranceRecovery: result.reinsuranceRecovery,
     netUltimateLoss: result.netUltimateLoss,
+    netIncurredLoss: result.netIncurredLoss,
     operatingExpense: result.operatingExpense,
     riskControlInvestment: result.riskControlInvestment,
     reinsuranceCost: result.reinsuranceCost,
+    dividends: result.dividends,
     priorYearDevelopment: result.priorYearDevelopment,
-    totalUnderwritingExpense: result.netUltimateLoss + result.operatingExpense + result.riskControlInvestment + result.reinsuranceCost,
-    underwritingResult: result.grossPremium - result.netUltimateLoss - result.operatingExpense - result.riskControlInvestment - result.reinsuranceCost,
+    underwritingIncome: result.underwritingIncome,
     investmentIncome: result.investmentIncome,
     netIncome: result.netIncome,
   };
@@ -167,15 +161,15 @@ export function deriveAnnualStatement(result: ResultSet): AnnualFinancialStateme
     tieOutDifference: result.surplusTieOutDifference,
   };
 
-  const reinsLabels = ['None', 'Low', 'Moderate', 'High', 'Full Transfer'];
+  const reinsLabels = ['Self Fund', 'Low', 'Moderate', 'High', 'Full Transfer'];
   const reinsLevel = result.decisions.reinsuranceLevel;
 
   const reinsuranceDetail: ReinsuranceDetail = {
     level: reinsLevel,
     levelLabel: reinsLabels[reinsLevel] ?? 'Unknown',
-    attachment: 0,
-    limit: 0,
-    recoveryPct: 0,
+    attachment: result.attachment,
+    limit: Infinity,
+    recoveryPct: result.excessLosses > 0 ? result.reinsuranceRecovery / result.excessLosses : 0,
     reinsuranceCost: result.reinsuranceCost,
     grossLoss: result.grossUltimateLoss,
     reinsuranceRecovery: result.reinsuranceRecovery,
@@ -216,41 +210,144 @@ export function deriveAnnualStatement(result: ResultSet): AnnualFinancialStateme
     excessCapitalStatus: result.capitalAdequacyStatus,
   };
 
-  const keyRatios: KeyRatios = {
-    expectedLossRatio: result.expectedLossRatio,
-    expectedExpenseRatio: result.expectedExpenseRatio,
-    expectedCombinedRatio: result.expectedCombinedRatio,
-    lossRatio: result.grossUltimateLoss / Math.max(result.totalMemberCharge, 1),
-    netLossRatio: result.lossRatio,
-    expenseRatio: result.expenseRatio,
-    combinedRatio: result.combinedRatio,
-    investmentReturnRate: result.investmentReturnRate,
-    operatingRatio: result.combinedRatio - result.investmentReturnRate,
-    surplusToPremiumRatio: result.endingSurplus / Math.max(result.grossPremium, 1),
-    marketShare: result.marketShare,
-    memberRetentionRate: result.memberRetentionRate,
-    fundingAdequacyIndicator: result.fundingAdequacyIndicator,
-    fundingAdequacyStatus: result.fundingAdequacyStatus,
-    fundingAdequacyRatio: result.fundingAdequacyRatio,
-    ratePer100: result.ratePer100,
-    purePremiumPer100: result.purePremiumPer100,
-    activeExposure: result.activeExposure,
-  };
-
   return {
     yearNumber: result.yearNumber,
     calendarYear: result.calendarYear,
+    isHistorical: false,
     incomeStatement,
     balanceSheet,
     surplusRollforward,
     reinsuranceDetail,
     reserveDetail,
     fundingDetail,
-    keyRatios,
   };
 }
 
-export function deriveStartingStatement(sf: StartingFinancials): BalanceSheet & { operatingMetrics: { activeMembers: number; activeExposure: number; totalMarketExposure: number; marketShare: number; rateLevel: number; ratePer100: number; purePremiumPer100: number; purePremium: number; memberSatisfaction: number; riskQuality: number; surplusToPremiumRatio: number; annualPremium: number; expectedLossRatio: number } } {
+export function deriveHistoricalStatement(year: HistoricalYear): AnnualFinancialStatement {
+  const incomeStatement: IncomeStatement = {
+    poolPremium: year.poolPremium,
+    adminExpense: year.adminExpense,
+    poolPremiumAndAdminExpense: year.poolPremiumAndAdminExpense,
+    selfFundedDiscount: year.selfFundedDiscount,
+    totalMemberCharge: year.totalMemberCharge,
+    grossPremium: year.totalMemberCharge,
+    assessments: 0,
+    grossUltimateLoss: year.grossUltimateLoss,
+    attachment: year.attachment,
+    poolLosses: year.poolLosses,
+    excessLosses: year.excessLosses,
+    quotaShareLosses: year.quotaShareLosses,
+    reinsuranceRecovery: year.reinsuranceRecovery,
+    netUltimateLoss: year.netUltimateLoss,
+    netIncurredLoss: year.netUltimateLoss,
+    operatingExpense: year.adminExpense,
+    riskControlInvestment: 0,
+    reinsuranceCost: year.reinsuranceCost,
+    dividends: 0,
+    priorYearDevelopment: 0,
+    underwritingIncome: year.underwritingIncome,
+    investmentIncome: year.investmentIncome,
+    netIncome: year.netIncome,
+  };
+
+  const balanceSheet: BalanceSheet = {
+    cash: 0,
+    investments: 0,
+    reinsuranceRecoverable: year.endingReinsuranceRecoverable,
+    otherAssets: 0,
+    totalAssets: year.endingSurplus + year.endingGrossReserve,
+    grossUnpaidReserve: year.endingGrossReserve,
+    unearnedPremium: 0,
+    otherLiabilities: 0,
+    totalLiabilities: year.endingGrossReserve,
+    surplus: year.endingSurplus,
+  };
+
+  const surplusRollforward: SurplusRollforward = {
+    beginingSurplus: year.endingSurplus - year.netIncome,
+    netIncome: year.netIncome,
+    endingSurplus: year.endingSurplus,
+    change: year.netIncome,
+    changePct: year.netIncome / Math.max(Math.abs(year.endingSurplus - year.netIncome), 1),
+    surplusFromIncome: year.endingSurplus,
+    tieOutDifference: 0,
+  };
+
+  const reinsLabels = ['Self Fund', 'Low', 'Moderate', 'High', 'Full Transfer'];
+  const reinsLevel = SLIDER_RANGES.reinsuranceLevel.default;
+
+  const reinsuranceDetail: ReinsuranceDetail = {
+    level: reinsLevel,
+    levelLabel: reinsLabels[reinsLevel] ?? 'Unknown',
+    attachment: year.attachment,
+    limit: Infinity,
+    recoveryPct: year.excessLosses > 0 ? year.reinsuranceRecovery / year.excessLosses : 0,
+    reinsuranceCost: year.reinsuranceCost,
+    grossLoss: year.grossUltimateLoss,
+    reinsuranceRecovery: year.reinsuranceRecovery,
+    netLoss: year.netUltimateLoss,
+    cessionRatio: year.reinsuranceRecovery / Math.max(year.grossUltimateLoss, 1),
+  };
+
+  const reserveDetail: ReserveDetail = {
+    beginningGrossReserve: 0,
+    currentYearUltimate: year.grossUltimateLoss,
+    grossPaidLosses: year.grossPaidLosses,
+    priorYearDevelopment: 0,
+    endingGrossReserve: year.endingGrossReserve,
+    beginningReinsRecoverable: 0,
+    currentYearReinsRecovery: year.reinsuranceRecovery,
+    reinsReceived: year.reinsuranceRecovery * 0.40,
+    endingReinsRecoverable: year.endingReinsuranceRecoverable,
+    netUnpaidReserve: year.endingNetReserve,
+  };
+
+  return {
+    yearNumber: year.historyYearNumber,
+    calendarYear: year.calendarYear,
+    isHistorical: true,
+    incomeStatement,
+    balanceSheet,
+    surplusRollforward,
+    reinsuranceDetail,
+    reserveDetail,
+    fundingDetail: null,
+  };
+}
+
+// The opening year (Year 0) is the last historical year, anchored to end exactly at
+// startingFinancials. It gets the same full income-statement detail as the other
+// historical years, but its balance sheet uses the real starting cash/investments/
+// other-assets/other-liabilities breakdown instead of the zeroed placeholders used
+// for the earlier historical years (which don't track those separately per year).
+export function deriveOpeningStatement(openingYear: HistoricalYear, sf: StartingFinancials): AnnualFinancialStatement {
+  const historical = deriveHistoricalStatement(openingYear);
+  const balanceSheet: BalanceSheet = {
+    cash: sf.cash,
+    investments: sf.investments,
+    reinsuranceRecoverable: sf.reinsuranceRecoverable,
+    otherAssets: sf.otherAssets,
+    totalAssets: sf.totalAssets,
+    grossUnpaidReserve: sf.grossUnpaidReserve,
+    unearnedPremium: sf.unearnedPremium,
+    otherLiabilities: sf.otherLiabilities,
+    totalLiabilities: sf.totalLiabilities,
+    surplus: sf.surplus,
+  };
+  const surplusRollforward: SurplusRollforward = {
+    ...historical.surplusRollforward,
+    endingSurplus: sf.surplus,
+    surplusFromIncome: sf.surplus,
+    beginingSurplus: sf.surplus - openingYear.netIncome,
+  };
+  return {
+    ...historical,
+    balanceSheet,
+    surplusRollforward,
+  };
+}
+
+export function deriveStartingStatement(sf: StartingFinancials): BalanceSheet {
   return {
     cash: sf.cash,
     investments: sf.investments,
@@ -262,20 +359,5 @@ export function deriveStartingStatement(sf: StartingFinancials): BalanceSheet & 
     otherLiabilities: sf.otherLiabilities,
     totalLiabilities: sf.totalLiabilities,
     surplus: sf.surplus,
-    operatingMetrics: {
-      activeMembers: sf.activeMembers,
-      activeExposure: sf.activeExposure,
-      totalMarketExposure: sf.totalMarketExposure,
-      marketShare: sf.marketShare,
-      rateLevel: sf.rateLevel,
-      ratePer100: sf.ratePer100,
-      purePremiumPer100: sf.purePremiumPer100,
-      purePremium: sf.purePremium,
-      memberSatisfaction: sf.memberSatisfaction,
-      riskQuality: sf.riskQuality,
-      surplusToPremiumRatio: sf.surplusToPremiumRatio,
-      annualPremium: sf.annualPremium,
-      expectedLossRatio: sf.expectedLossRatio,
-    },
   };
 }

@@ -934,8 +934,7 @@ function buildAssumptionRows(): AuditRow[] {
       value: REINSURANCE_PROGRAMS.map(program =>
         `Level ${program.level} - ${program.label}: ` +
         `Attach ${program.attachmentMultiplierOfExpectedLoss.toFixed(2)}x expected loss, ` +
-        `Limit ${formatPct(program.limitPctOfPremium)} premium, ` +
-        `Recovery ${formatPct(program.recoveryPct)}, ` +
+        `Quota Share ${formatPct(program.recoveryPct)} (uncapped), ` +
         `Cost ${formatPct(program.costPctOfPremiumMin)} to ${formatPct(program.costPctOfPremiumMax)}`
       ).join('\n'),
       formula: 'Default reinsurance program structure by selected level.',
@@ -973,7 +972,6 @@ function buildAssumptionRows(): AuditRow[] {
         `Reinsurance Recoverable: ${formatRangeCurrency(STARTING_FINANCIALS.reinsuranceRecoverable)}\n` +
         `Other Assets: ${formatRangeCurrency(STARTING_FINANCIALS.otherAssets)}\n` +
         `Gross Unpaid Reserve: ${formatRangeCurrency(STARTING_FINANCIALS.grossUnpaidReserve)}\n` +
-        `Unearned Premium %: ${formatRangePct(STARTING_FINANCIALS.unearnedPremiumPct)}\n` +
         `Other Liabilities: ${formatRangeCurrency(STARTING_FINANCIALS.otherLiabilities)}\n` +
         `Starting Surplus: ${formatRangeCurrency(STARTING_FINANCIALS.startingSurplus)}`,
       formula: 'Starting financial assumption ranges used by instance generation.',

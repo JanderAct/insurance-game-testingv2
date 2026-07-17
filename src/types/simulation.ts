@@ -61,10 +61,15 @@ export interface HistoricalYear {
   poolPremium: number;
   adminExpense: number;
   poolPremiumAndAdminExpense: number;
+  selfFundedDiscount: number;   // discount on the retained (non-ceded) share, taken immediately
   reinsuranceCost: number;
   totalMemberCharge: number;
   grossUltimateLoss: number;
-  reinsuranceRecovery: number;
+  attachment: number;          // per-level attachment; boundary between Pool Losses and Excess Losses
+  poolLosses: number;          // min(grossUltimateLoss, attachment) — retained below attachment
+  excessLosses: number;        // max(0, grossUltimateLoss - attachment) — the layer above attachment
+  quotaShareLosses: number;    // pool's retained share of Excess Losses = (1 - quota%) x excessLosses
+  reinsuranceRecovery: number; // reinsurer's paid share of Excess Losses = quota% x excessLosses
   netUltimateLoss: number;
   grossPaidLosses: number;
   endingGrossReserve: number;
@@ -73,6 +78,7 @@ export interface HistoricalYear {
   actualLossRatio: number;
   actualExpenseRatio: number;
   actualCombinedRatio: number;
+  underwritingIncome: number;
   investmentIncome: number;
   netIncome: number;
   endingSurplus: number;
@@ -180,7 +186,8 @@ export interface ResultSet {
   poolPremium: number;                     // expected loss at selected CLF
   adminExpense: number;                    // payroll-based administrative charge
   poolPremiumAndAdminExpense: number;      // expected-ratio denominator
-  totalMemberCharge: number;               // includes separately stated reinsurance cost
+  selfFundedDiscount: number;               // discount on the retained (non-ceded) share, taken immediately
+  totalMemberCharge: number;               // includes separately stated reinsurance cost, net of selfFundedDiscount
   grossPremium: number;
   assessments: number;
   dividends: number;
@@ -194,8 +201,13 @@ export interface ResultSet {
   grossUltimateLoss: number;
   shockLossIncurred: boolean;
   reinsuranceCost: number;
-  reinsuranceRecovery: number;
+  attachment: number;          // 100% of expected loss; boundary between Pool Losses and Excess Losses
+  poolLosses: number;          // min(grossUltimateLoss, attachment) — retained below attachment
+  excessLosses: number;        // max(0, grossUltimateLoss - attachment) — the layer above attachment
+  quotaShareLosses: number;    // pool's retained share of Excess Losses = (1 - quota%) x excessLosses
+  reinsuranceRecovery: number; // reinsurer's paid share of Excess Losses = quota% x excessLosses
   netUltimateLoss: number;
+  netIncurredLoss: number;      // netUltimateLoss adjusted for prior-year reserve development
 
   // Expenses
   operatingExpense: number;
@@ -270,7 +282,8 @@ export interface ResultSet {
   fundingAdequacyIndicator: string;         // Alias for premiumFundingAdequacyStatus
 
   // Income statement
-  netIncome: number;
+  underwritingIncome: number;   // totalMemberCharge + assessments − netIncurredLoss − operatingExpense − riskControlInvestment − reinsuranceCost − dividends
+  netIncome: number;            // underwritingIncome + investmentIncome
 
   // Balance sheet
   beginningCash: number;

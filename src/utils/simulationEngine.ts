@@ -3,7 +3,7 @@
 
 import type { GameState, PoolState, DecisionSet, ResultSet, ReserveCohort, Member, MemberLossResult } from '../types/simulation';
 import { SeededRandom, deriveSubRng } from './random';
-import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, MEMBER_LOSS_VOLATILITY, RISK_CONTROL_PARAMS, RESERVE_PAYDOWN_PCT } from '../data/defaultAssumptions';
+import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, MEMBER_LOSS_VOLATILITY, RISK_CONTROL_PARAMS, RESERVE_PAYDOWN_PCT, OPERATING_CASH_PCT_OF_PREMIUM, FULL_TRANSFER_COST_PCT_OF_PREMIUM, SELF_FUNDED_DISCOUNT_PCT } from '../data/defaultAssumptions';
 import { getReinsuranceStructure, calculateReinsuranceCost, calculateReinsuranceRecovery } from './reinsuranceEngine';
 import { simulateInvestmentReturn } from './investmentEngine';
 import { simulateMemberMovement } from './membershipEngine';
@@ -134,25 +134,31 @@ export function processYear(
   const adminRatePer100 = newPurePremiumPer100 * ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM;
   const poolPremiumAndAdminExpense = poolPremium + adminExpense;
 
+  const reinsStructure = getReinsuranceStructure(
+    decisions.reinsuranceLevel,
+    poolPremium,
+    expectedLoss
+  );
+
   const reinsuranceCost = calculateReinsuranceCost(
     decisions.reinsuranceLevel,
     poolPremium,
     instance.marketEnvironment.competitivePressure
   );
 
-  const totalMemberCharge = poolPremiumAndAdminExpense + reinsuranceCost;
+  // The pool's retained (non-ceded) share of the excess layer is billed to members
+  // at a discount off its full-transfer-equivalent notional cost, taken immediately.
+  const retainedSharePct = 1 - reinsStructure.recoveryPct;
+  const selfFundedNotional = retainedSharePct * FULL_TRANSFER_COST_PCT_OF_PREMIUM * poolPremium;
+  const selfFundedDiscount = selfFundedNotional * SELF_FUNDED_DISCOUNT_PCT;
+
+  const totalMemberCharge = poolPremiumAndAdminExpense + reinsuranceCost - selfFundedDiscount;
   const totalMemberRatePer100 = totalMemberCharge / Math.max(activeExposure * 10_000, 1);
 
   // Legacy names remain populated for compatibility with older screens and exports.
   const grossPremium = totalMemberCharge;
   const operatingExpense = adminExpense;
   const riskControlInvestment = poolPremium * decisions.riskControlPct;
-
-  const reinsStructure = getReinsuranceStructure(
-    decisions.reinsuranceLevel,
-    poolPremium,
-    expectedLoss
-  );
 
   // --- Member-Level Loss Simulation ---
   // Each member's Gamma distribution has a mean equal to expected loss. Risk
@@ -213,6 +219,13 @@ export function processYear(
   );
 
   const netUltimateLoss = grossUltimateLoss - reinsuranceRecovery;
+
+  // Pool Losses / Excess Losses split uses each level's real attachment point
+  // (125% of expected loss for Self Fund/Low/Moderate/High, 100% for Full Transfer).
+  const attachment = reinsStructure.attachment;
+  const poolLosses = Math.min(grossUltimateLoss, attachment);
+  const excessLosses = Math.max(0, grossUltimateLoss - attachment);
+  const quotaShareLosses = excessLosses - reinsuranceRecovery;
 
   // --- Investment Income ---
   const investRng = deriveSubRng(instance.seed, yearNumber, 'invest');
@@ -328,15 +341,20 @@ export function processYear(
     grossIncurredLoss -
     cededIncurredRecovery;
 
-  const netIncome =
+  // Underwriting Income excludes investment income: it is the pool's premium/assessment
+  // revenue net of losses (incl. reserve development), expenses, risk control, reinsurance,
+  // and dividends returned to members. Assessments and dividends are treated as offsets to
+  // premium since they are collected/returned through the same member-charge mechanism.
+  const underwritingIncome =
     totalMemberCharge +
-    assessments +
-    investmentIncome -
+    assessments -
     netIncurredLoss -
     operatingExpense -
     riskControlInvestment -
     reinsuranceCost -
     dividends;
+
+  const netIncome = underwritingIncome + investmentIncome;
 
   // --- Balance Sheet ---
   // Balance sheet liabilities use expected unpaid losses, not CLF-loaded targets.
@@ -360,10 +378,27 @@ export function processYear(
     reinsuranceCost -
     dividends;
 
-  const endingCash = Math.max(0, newCash);
-
   const beginningInvestments = poolState.investments;
-  const endingInvestments = Math.max(0, beginningInvestments + investmentIncome);
+  const investmentsBeforeSweep = Math.max(0, beginningInvestments + investmentIncome);
+
+  // Sweep cash above the operating target into investments (where it earns a
+  // return going forward); draw down investments to cover a cash shortfall
+  // instead of letting it silently vanish. Total assets (cash + investments)
+  // are conserved by this reallocation, except at the floor below.
+  const operatingCashTarget = totalMemberCharge * OPERATING_CASH_PCT_OF_PREMIUM;
+  let endingCash: number;
+  let endingInvestments: number;
+  if (newCash >= operatingCashTarget) {
+    endingCash = operatingCashTarget;
+    endingInvestments = investmentsBeforeSweep + (newCash - operatingCashTarget);
+  } else {
+    const shortfall = operatingCashTarget - newCash;
+    const drawFromInvestments = Math.min(shortfall, investmentsBeforeSweep);
+    endingCash = newCash + drawFromInvestments;
+    endingInvestments = investmentsBeforeSweep - drawFromInvestments;
+  }
+  endingCash = Math.max(0, endingCash);
+  endingInvestments = Math.max(0, endingInvestments);
 
   const totalAssets =
     endingCash +
@@ -486,6 +521,7 @@ export function processYear(
     poolPremium,
     adminExpense,
     poolPremiumAndAdminExpense,
+    selfFundedDiscount,
     totalMemberCharge,
     grossPremium,
     assessments,
@@ -499,8 +535,13 @@ export function processYear(
     grossUltimateLoss,
     shockLossIncurred: shockOccurred,
     reinsuranceCost,
+    attachment,
+    poolLosses,
+    excessLosses,
+    quotaShareLosses,
     reinsuranceRecovery,
     netUltimateLoss,
+    netIncurredLoss,
 
     operatingExpense,
     riskControlInvestment,
@@ -560,6 +601,7 @@ export function processYear(
     fundingAdequacyIndicator,
 
     // Income and balance sheet
+    underwritingIncome,
     netIncome,
     beginningCash,
     endingCash,

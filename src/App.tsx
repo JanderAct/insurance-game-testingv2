@@ -250,6 +250,7 @@ export default function App() {
         {activeTab === 'dashboard' && gameState && startingFinancials && (
           <DashboardPage
             lockedResults={gameState.lockedResults}
+            historicalYears={historicalYears}
             startingFinancials={startingFinancials}
             currentYearNumber={gameState.currentYearNumber}
             startingYear={gameState.setup.startingYear}
@@ -278,8 +279,8 @@ export default function App() {
         {activeTab === 'financials' && gameState && startingFinancials && (
           <FinancialsPage
             lockedResults={gameState.lockedResults}
+            historicalYears={historicalYears}
             startingFinancials={startingFinancials}
-            startingYear={gameState.setup.startingYear}
           />
         )}
 

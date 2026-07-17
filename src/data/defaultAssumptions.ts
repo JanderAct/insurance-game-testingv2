@@ -5,6 +5,12 @@
 // after the selected CLF is applied and is not itself multiplied by the CLF.
 export const ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM = 0.15;
 
+// Liquid operating cash the pool keeps on hand each year, sized to that year's
+// premium. Cash above this target is swept into investments at year-end, where
+// it earns a return; cash below this target is covered by drawing down
+// investments instead of letting the shortfall vanish.
+export const OPERATING_CASH_PCT_OF_PREMIUM = 0.15;
+
 export const LOSS_TREND = 0.04; // 4% annual claim inflation (default; instance may override)
 
 // Every member uses a Gamma distribution whose mean is its Pure Premium
@@ -21,7 +27,12 @@ export const AGGREGATE_LOSS_DISTRIBUTION = {
   distribution: 'Lognormal',
   logMean: -0.163964,
   logSigma: 0.25,
-  actualLossLevelMultiplier: 2.05,
+  // Chosen so the mean of (lognormal × multiplier) ≈ 1.0, i.e. actual losses
+  // average about the expected loss (pure premium). The CLF loading in the
+  // premium then supplies the funding margin instead of losses systematically
+  // running above expected. (Lognormal mean = exp(logMean + logSigma²/2) ≈ 0.876,
+  // so 1 / 0.876 ≈ 1.14.)
+  actualLossLevelMultiplier: 1.14,
   catastropheThresholdConfidence: 0.95,
 };
 
@@ -97,15 +108,34 @@ export const INVESTMENT_RISK_PARAMS = {
 };
 
 // Reinsurance program table indexed by level (0-4)
-// Attachment is expressed as a multiplier of expected gross loss + LAE
-// Limit is expressed as a percentage of annual premium
-// These ensure reinsurance is meaningful but appropriately expensive
+// Aggregate quota-share reinsurance, above the pool's own expected loss.
+// Attachment is 125% of expected gross loss + LAE for Self Fund/Low/Moderate/High —
+// the pool retains real loss risk into its own CLF-funded cushion before any
+// reinsurance help arrives, no matter the level chosen. Full Transfer keeps a
+// 100% attachment, since it is meant to be genuine full risk transfer above
+// expected loss. Above attachment, the reinsurer pays a flat quota share
+// (recoveryPct) of the excess, uncapped (no limit) — this is aggregate-basis for
+// now; occurrence-basis layering is deferred until a claim-level frequency/
+// severity model exists.
+// Full Transfer costs a flat 50% of premium; other paid levels scale that cost
+// linearly by their quota share (cost and quota share move together). Self Fund
+// (level 0) pays nothing externally — instead it retains that same 50%-of-premium
+// budget in cash, which the general cash-sweep mechanism carries into investments
+// where it earns a return, rather than paying it away with nothing in exchange.
+export const FULL_TRANSFER_COST_PCT_OF_PREMIUM = 0.50;
+
+// The pool's retained (non-ceded) share of the excess layer is billed to members
+// at a discount off its full-transfer-equivalent notional cost, taken immediately
+// in the current year's charge — self-funding avoids a commercial reinsurer's
+// margin, so pools can pass that savings straight through to members.
+export const SELF_FUNDED_DISCOUNT_PCT = 0.08;
+
 export const REINSURANCE_PROGRAMS = [
   {
     level: 0,
-    label: 'None',
-    description: 'No reinsurance protection',
-    attachmentMultiplierOfExpectedLoss: 0,
+    label: 'Self Fund',
+    description: '125% attachment — no external reinsurance; the pool retains and invests the amount it would otherwise pay for full coverage',
+    attachmentMultiplierOfExpectedLoss: 1.25,
     limitPctOfPremium: 0,
     recoveryPct: 0,
     costPctOfPremiumMin: 0,
@@ -114,42 +144,42 @@ export const REINSURANCE_PROGRAMS = [
   {
     level: 1,
     label: 'Low',
-    description: '125% attachment, 35% limit, 50% recovery',
+    description: '125% attachment, pool retains 50% of excess, uncapped',
     attachmentMultiplierOfExpectedLoss: 1.25,
-    limitPctOfPremium: 0.35,
+    limitPctOfPremium: Infinity,
     recoveryPct: 0.50,
-    costPctOfPremiumMin: 0.06,
-    costPctOfPremiumMax: 0.09,
+    costPctOfPremiumMin: 0.50 * FULL_TRANSFER_COST_PCT_OF_PREMIUM,
+    costPctOfPremiumMax: 0.50 * FULL_TRANSFER_COST_PCT_OF_PREMIUM,
   },
   {
     level: 2,
     label: 'Moderate',
-    description: '100% attachment, 60% limit, 70% recovery',
-    attachmentMultiplierOfExpectedLoss: 1.00,
-    limitPctOfPremium: 0.60,
-    recoveryPct: 0.70,
-    costPctOfPremiumMin: 0.12,
-    costPctOfPremiumMax: 0.18,
+    description: '125% attachment, pool retains 25% of excess, uncapped',
+    attachmentMultiplierOfExpectedLoss: 1.25,
+    limitPctOfPremium: Infinity,
+    recoveryPct: 0.75,
+    costPctOfPremiumMin: 0.75 * FULL_TRANSFER_COST_PCT_OF_PREMIUM,
+    costPctOfPremiumMax: 0.75 * FULL_TRANSFER_COST_PCT_OF_PREMIUM,
   },
   {
     level: 3,
     label: 'High',
-    description: '80% attachment, 90% limit, 85% recovery',
-    attachmentMultiplierOfExpectedLoss: 0.80,
-    limitPctOfPremium: 0.90,
-    recoveryPct: 0.85,
-    costPctOfPremiumMin: 0.22,
-    costPctOfPremiumMax: 0.32,
+    description: '125% attachment, pool retains 10% of excess, uncapped',
+    attachmentMultiplierOfExpectedLoss: 1.25,
+    limitPctOfPremium: Infinity,
+    recoveryPct: 0.90,
+    costPctOfPremiumMin: 0.90 * FULL_TRANSFER_COST_PCT_OF_PREMIUM,
+    costPctOfPremiumMax: 0.90 * FULL_TRANSFER_COST_PCT_OF_PREMIUM,
   },
   {
     level: 4,
     label: 'Full Transfer',
-    description: '50% attachment, 120% limit, 95% recovery — very high cost',
-    attachmentMultiplierOfExpectedLoss: 0.50,
-    limitPctOfPremium: 1.20,
-    recoveryPct: 0.95,
-    costPctOfPremiumMin: 0.45,
-    costPctOfPremiumMax: 0.65,
+    description: '100% attachment, pool retains 0% of excess (full transfer), uncapped',
+    attachmentMultiplierOfExpectedLoss: 1.00,
+    limitPctOfPremium: Infinity,
+    recoveryPct: 1.00,
+    costPctOfPremiumMin: FULL_TRANSFER_COST_PCT_OF_PREMIUM,
+    costPctOfPremiumMax: FULL_TRANSFER_COST_PCT_OF_PREMIUM,
   },
 ];
 
@@ -212,7 +242,6 @@ export const STARTING_FINANCIALS = {
   reinsuranceRecoverable: { min: 0, max: 1_000_000 },
   otherAssets: { min: 100_000, max: 400_000 },
   grossUnpaidReserve: { min: 4_000_000, max: 8_000_000 },
-  unearnedPremiumPct: { min: 0.20, max: 0.30 },
   otherLiabilities: { min: 100_000, max: 400_000 },
   startingSurplus: { min: 3_000_000, max: 7_000_000 },
 };

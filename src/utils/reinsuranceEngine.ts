@@ -1,5 +1,9 @@
 // Reinsurance engine for Risk Pool Simulation v1
-// Attachment is based on expected gross loss (not premium) for realistic positioning
+// Aggregate quota share above expected loss: attachment is fixed at 100% of expected
+// gross loss for every paid level, and the reinsurer pays a flat, uncapped quota share
+// of losses above that. Levels 1-4 carry limitPctOfPremium = Infinity, so the limit
+// cap in calculateReinsuranceRecovery below is a no-op for them (Math.min against
+// Infinity always returns the other operand).
 
 import type { ReinsuranceStructure } from '../types/simulation';
 import { REINSURANCE_PROGRAMS } from '../data/defaultAssumptions';

@@ -4,6 +4,8 @@ import {
   AGGREGATE_LOSS_DISTRIBUTION,
   FUNDING_CLF_TABLE,
   SLIDER_RANGES,
+  FULL_TRANSFER_COST_PCT_OF_PREMIUM,
+  SELF_FUNDED_DISCOUNT_PCT,
 } from '../data/defaultAssumptions';
 import { SeededRandom, deriveSubRng } from './random';
 import {
@@ -69,12 +71,20 @@ function buildCandidate(
     const adminExpense = expectedLoss * ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM;
     const poolPremium = Math.max(0, poolPremiumAndAdminExpense - adminExpense);
     const reinsuranceLevel = SLIDER_RANGES.reinsuranceLevel.default;
+    const reinsuranceStructure = getReinsuranceStructure(
+      reinsuranceLevel,
+      poolPremium,
+      expectedLoss
+    );
     const reinsuranceCost = calculateReinsuranceCost(
       reinsuranceLevel,
       poolPremium,
       instance.marketEnvironment.competitivePressure
     );
-    const totalMemberCharge = poolPremiumAndAdminExpense + reinsuranceCost;
+    const retainedSharePct = 1 - reinsuranceStructure.recoveryPct;
+    const selfFundedNotional = retainedSharePct * FULL_TRANSFER_COST_PCT_OF_PREMIUM * poolPremium;
+    const selfFundedDiscount = selfFundedNotional * SELF_FUNDED_DISCOUNT_PCT;
+    const totalMemberCharge = poolPremiumAndAdminExpense + reinsuranceCost - selfFundedDiscount;
 
     const memberAggregateSigma = 0.08;
     const memberAggregateFactor = rng.lognormal(
@@ -89,11 +99,6 @@ function buildCandidate(
       0,
       expectedLoss * memberAggregateFactor * annualLossFactor
     );
-    const reinsuranceStructure = getReinsuranceStructure(
-      reinsuranceLevel,
-      poolPremium,
-      expectedLoss
-    );
     const reinsuranceRecovery = calculateReinsuranceRecovery(
       grossUltimateLoss,
       reinsuranceStructure
@@ -101,18 +106,25 @@ function buildCandidate(
     const netUltimateLoss = grossUltimateLoss - reinsuranceRecovery;
     const grossPaidLosses = grossUltimateLoss * 0.40;
 
+    // Pool Losses / Excess Losses split uses the level's real attachment point
+    // (125% of expected loss for Self Fund/Low/Moderate/High, 100% for Full Transfer).
+    const attachment = reinsuranceStructure.attachment;
+    const poolLosses = Math.min(grossUltimateLoss, attachment);
+    const excessLosses = Math.max(0, grossUltimateLoss - attachment);
+    const quotaShareLosses = excessLosses - reinsuranceRecovery;
+
     const investedAssets = startingFinancials.investments * scaleToOpening;
     const investmentReturn = Math.max(
       -0.02,
       Math.min(0.05, rng.normal(instance.investmentEnvironment.baseReturn * 0.55, 0.012))
     );
     const investmentIncome = investedAssets * investmentReturn;
-    const netIncome =
+    const underwritingIncome =
       totalMemberCharge
-      + investmentIncome
       - netUltimateLoss
       - adminExpense
       - reinsuranceCost;
+    const netIncome = underwritingIncome + investmentIncome;
     const actualLossRatio = netUltimateLoss / Math.max(totalMemberCharge, 1);
     const actualExpenseRatio =
       (adminExpense + reinsuranceCost) / Math.max(totalMemberCharge, 1);
@@ -130,15 +142,21 @@ function buildCandidate(
       poolPremium,
       adminExpense,
       poolPremiumAndAdminExpense,
+      selfFundedDiscount,
       reinsuranceCost,
       totalMemberCharge,
       grossUltimateLoss,
+      attachment,
+      poolLosses,
+      excessLosses,
+      quotaShareLosses,
       reinsuranceRecovery,
       netUltimateLoss,
       grossPaidLosses,
       actualLossRatio,
       actualExpenseRatio,
       actualCombinedRatio: actualLossRatio + actualExpenseRatio,
+      underwritingIncome,
       investmentIncome,
       netIncome,
     };

@@ -14,7 +14,7 @@ export default function Header({ gameState, startingFinancials, onNewGame, onAdv
   const lastResult = gameState?.lockedResults?.[gameState.lockedResults.length - 1];
 
   const surplus = lastResult?.endingSurplus ?? startingFinancials?.surplus ?? 0;
-  const combinedRatio = lastResult?.combinedRatio;
+  const poolLossRatio = lastResult ? lastResult.poolLosses / Math.max(lastResult.poolPremium, 1) : undefined;
   const marketShare = lastResult?.marketShare ?? startingFinancials?.marketShare ?? 0;
   const poolName = gameState?.setup?.poolName ?? 'Risk Pool';
   const instanceId = gameState?.instance?.instanceId ?? '—';
@@ -53,13 +53,13 @@ export default function Header({ gameState, startingFinancials, onNewGame, onAdv
                 value={formatCurrency(surplus, true)}
                 valueClass={surplus >= 0 ? 'text-emerald-400' : 'text-red-400'}
               />
-              {combinedRatio !== undefined && (
+              {poolLossRatio !== undefined && (
                 <Chip
-                  label="Actual Combined Ratio"
-                  value={formatPct(combinedRatio)}
+                  label="Pool Loss Ratio"
+                  value={formatPct(poolLossRatio)}
                   valueClass={
-                    combinedRatio < 1.0 ? 'text-emerald-400' :
-                    combinedRatio < 1.10 ? 'text-amber-400' : 'text-red-400'
+                    poolLossRatio < 0.90 ? 'text-emerald-400' :
+                    poolLossRatio < 1.10 ? 'text-amber-400' : 'text-red-400'
                   }
                 />
               )}
