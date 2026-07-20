@@ -107,8 +107,8 @@ export const ASSET_CLASS_ASSUMPTIONS: Record<'cash' | 'bonds' | 'equities', Asse
   },
 };
 
-// Default shared-portfolio allocation — a moderate blend.
-export const ASSET_ALLOCATION_DEFAULT = { cashPct: 20, bondsPct: 50, equitiesPct: 30 };
+// Default shared-portfolio allocation — a bonds-heavy, realistic pool posture.
+export const ASSET_ALLOCATION_DEFAULT = { cashPct: 10, bondsPct: 80, equitiesPct: 10 };
 
 // Reinsurance program table indexed by level (0-4)
 // Aggregate quota-share reinsurance, above the pool's own expected loss.
