@@ -1,10 +1,16 @@
 import { useState } from 'react';
 import { Shield, Shuffle } from 'lucide-react';
-import type { GameSetupSettings } from '../types/simulation';
+import type { GameSetupSettings, CoverageLine } from '../types/simulation';
 
 interface SetupPageProps {
   onStart: (settings: GameSetupSettings) => void;
 }
+
+const COVERAGE_LINES: { value: CoverageLine; label: string; hint: string }[] = [
+  { value: 'WC', label: "Workers' Compensation", hint: 'Payroll-based' },
+  { value: 'GL', label: 'General Liability', hint: 'Payroll-based' },
+  { value: 'Property', label: 'Property', hint: 'Total Insured Value' },
+];
 
 const MANAGED_ITEMS: { label: string; definition: string }[] = [
   { label: 'Rate changes and premium adequacy', definition: 'How much you raise or lower pool rates each year, balancing competitiveness against how well premium covers expected losses.' },
@@ -31,10 +37,19 @@ export default function SetupPage({ onStart }: SetupPageProps) {
   const [gameLength, setGameLength] = useState(5);
   const [startingYear, setStartingYear] = useState(2026);
   const [instanceId, setInstanceId] = useState(() => randomInstanceId());
+  const [activeLines, setActiveLines] = useState<CoverageLine[]>(['WC']);
+
+  function toggleLine(line: CoverageLine) {
+    setActiveLines(prev =>
+      prev.includes(line) ? prev.filter(l => l !== line) : [...prev, line]
+    );
+  }
 
   function handleStart() {
-    if (!poolName.trim()) return;
-    onStart({ poolName: poolName.trim(), gameLength, startingYear, instanceId: instanceId.trim() || randomInstanceId() });
+    if (!poolName.trim() || activeLines.length === 0) return;
+    // Preserve canonical WC/GL/Property order regardless of click sequence.
+    const orderedLines = COVERAGE_LINES.map(l => l.value).filter(l => activeLines.includes(l));
+    onStart({ poolName: poolName.trim(), gameLength, startingYear, instanceId: instanceId.trim() || randomInstanceId(), activeLines: orderedLines });
   }
 
   return (
@@ -130,6 +145,45 @@ export default function SetupPage({ onStart }: SetupPageProps) {
               <p className="text-sm text-gray-400 mt-1.5">Same ID + same decisions = same results. Share this ID to compare strategies.</p>
             </div>
 
+            {/* Coverage lines */}
+            <div>
+              <label className="block text-base font-semibold text-gray-700 mb-2">Coverage Lines</label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {COVERAGE_LINES.map(line => {
+                  const checked = activeLines.includes(line.value);
+                  return (
+                    <button
+                      key={line.value}
+                      type="button"
+                      onClick={() => toggleLine(line.value)}
+                      className={`flex items-start gap-3 text-left border rounded-lg px-4 py-3 transition ${
+                        checked
+                          ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500'
+                          : 'border-gray-300 bg-white hover:border-blue-300'
+                      }`}
+                    >
+                      <span
+                        className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded border flex items-center justify-center text-xs font-bold ${
+                          checked ? 'bg-blue-600 border-blue-600 text-white' : 'border-gray-400 text-transparent'
+                        }`}
+                      >
+                        ✓
+                      </span>
+                      <span>
+                        <span className="block text-sm font-semibold text-gray-800">{line.label}</span>
+                        <span className="block text-xs text-gray-500">{line.hint}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <p className={`text-sm mt-1.5 ${activeLines.length === 0 ? 'text-red-500' : 'text-gray-400'}`}>
+                {activeLines.length === 0
+                  ? 'Select at least one coverage line.'
+                  : 'Lines are chosen once at setup and locked for the game.'}
+              </p>
+            </div>
+
             {/* Info panel */}
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
               <p className="text-blue-800 text-base font-medium mb-3">What you will manage:</p>
@@ -149,7 +203,7 @@ export default function SetupPage({ onStart }: SetupPageProps) {
 
             <button
               onClick={handleStart}
-              disabled={!poolName.trim()}
+              disabled={!poolName.trim() || activeLines.length === 0}
               className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-4 rounded-xl text-lg transition-colors shadow-md"
             >
               Start Simulation

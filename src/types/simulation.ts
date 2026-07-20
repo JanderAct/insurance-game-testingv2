@@ -111,11 +111,17 @@ export interface GameInstance {
   };
 }
 
+// Coverage lines a pool can write. Selected once at game setup and locked for
+// the whole game. (Stage 1.1: type + setup selection only — not yet consumed by
+// the simulation engine.)
+export type CoverageLine = 'WC' | 'GL' | 'Property';
+
 export interface GameSetupSettings {
   poolName: string;
   gameLength: number;     // number of years
   startingYear: number;   // calendar year label only
   instanceId: string;
+  activeLines: CoverageLine[];  // coverage lines the pool writes (at least one)
 }
 
 // Player decisions for a given year
