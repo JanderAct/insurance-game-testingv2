@@ -15,6 +15,10 @@ import {
   GL_STARTING_RATE_PER_100,
   GL_EXPECTED_LOSS_RATIO,
   GL_STARTING_FINANCIALS,
+  PROPERTY_STARTING_RATE_PER_100,
+  PROPERTY_EXPECTED_LOSS_RATIO,
+  PROPERTY_STARTING_FINANCIALS,
+  LINE_RESERVE_PAYDOWN_PCT,
 } from '../data/defaultAssumptions';
 import type { CoverageLine } from '../types/simulation';
 
@@ -57,7 +61,8 @@ function generateStartingReserveCohorts(
   grossUnpaidReserve: number,
   reinsuranceRecoverable: number,
   startingYear: number,
-  rng: SeededRandom
+  rng: SeededRandom,
+  paydownPct: number = RESERVE_PAYDOWN_PCT
 ): ReserveCohort[] {
   if (grossUnpaidReserve <= 0) return [];
 
@@ -94,7 +99,7 @@ function generateStartingReserveCohorts(
     // Calculate how much has been paid on this cohort (older = more paid)
     // Age determines paydown: cohorts aged 1-5 years
     const age = i + 1; // 1 = most recent (1 year ago), 5 = oldest (5 years ago)
-    const paidRatio = Math.min(0.80, age * RESERVE_PAYDOWN_PCT);
+    const paidRatio = Math.min(0.80, age * paydownPct);
     const grossUltimate = cohortGrossUnpaid / (1 - paidRatio);
     const grossPaid = grossUltimate * paidRatio;
 
@@ -115,7 +120,7 @@ function generateStartingReserveCohorts(
       grossUnpaid: cohortGrossUnpaid,
       reinsuranceRecoverable: cohortReins,
       reinsuranceReceived: cohortReins * paidRatio, // Proportional to paid
-      paydownPct: RESERVE_PAYDOWN_PCT,
+      paydownPct,
       developmentFactor: devFactor,
       closed: false,
     });
@@ -259,6 +264,45 @@ export function generateStartingPoolState(
       })()
     : emptyLinePoolState();
 
+  // Property bootstrap draws happen strictly after WC's and GL's above, so
+  // neither of their seed streams (or regression baselines) are affected by
+  // Property's presence or absence.
+  const propertyLineState: LinePoolState = activeLines.includes('Property')
+    ? (() => {
+        const propertyRatePer100 = rng.range(PROPERTY_STARTING_RATE_PER_100.min, PROPERTY_STARTING_RATE_PER_100.max);
+        const propertyExpectedLossRatio = rng.range(PROPERTY_EXPECTED_LOSS_RATIO.min, PROPERTY_EXPECTED_LOSS_RATIO.max);
+        const propertyPurePremiumPer100 = propertyRatePer100 * propertyExpectedLossRatio;
+        const propertyGrossUnpaidReserve = rng.range(PROPERTY_STARTING_FINANCIALS.grossUnpaidReserve.min, PROPERTY_STARTING_FINANCIALS.grossUnpaidReserve.max);
+        const propertyReinsuranceRecoverable = rng.range(PROPERTY_STARTING_FINANCIALS.reinsuranceRecoverable.min, PROPERTY_STARTING_FINANCIALS.reinsuranceRecoverable.max);
+        const propertyTotalMarketExposure = allMarketMembers.reduce((sum, m) => sum + getMemberExposure(m, 'Property'), 0);
+        const propertyStartingReserveCohorts = generateStartingReserveCohorts(
+          propertyGrossUnpaidReserve,
+          propertyReinsuranceRecoverable,
+          startingYear,
+          rng,
+          LINE_RESERVE_PAYDOWN_PCT.Property
+        );
+        return {
+          rateLevel: 100,
+          ratePer100: propertyRatePer100,
+          purePremiumPer100: propertyPurePremiumPer100,
+          purePremium: propertyPurePremiumPer100,
+          memberSatisfaction: parseFloat(memberSatisfaction.toFixed(1)),
+          averageRiskQuality: parseFloat(riskQuality.toFixed(1)),
+          riskControlEffectiveness: 0,
+          reserveCohorts: propertyStartingReserveCohorts,
+          members: allMembersWithStatus,
+          grossUnpaidReserve: propertyGrossUnpaidReserve,
+          reinsuranceRecoverable: propertyReinsuranceRecoverable,
+          // Same convention as GL: Property contributes no assets of its own
+          // at bootstrap, so its starting surplus is the negative of its net
+          // starting reserve liability (see GL's comment above).
+          surplus: propertyReinsuranceRecoverable - propertyGrossUnpaidReserve,
+          totalMarketExposure: propertyTotalMarketExposure,
+        };
+      })()
+    : emptyLinePoolState();
+
   const wcLineState: LinePoolState = {
     rateLevel: 100,
     ratePer100,
@@ -285,7 +329,7 @@ export function generateStartingPoolState(
     lines: {
       WC: wcLineState,
       GL: glLineState,
-      Property: emptyLinePoolState(),
+      Property: propertyLineState,
     },
   };
 

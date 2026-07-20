@@ -1,4 +1,5 @@
 import type { Member, MemberType, SizeCategory } from '../types/simulation';
+import { TIV_RANGES, TIV_TYPE_MULTIPLIER } from './defaultAssumptions';
 
 const MEMBER_TYPES: MemberType[] = [
   'City',
@@ -38,6 +39,16 @@ function exposureFor(index: number, size: SizeCategory): number {
   return Number((min + (max - min) * (position / 9)).toFixed(2));
 }
 
+// Property's TIV is a different exposure base entirely (insured value, not
+// payroll), sized independently and biased by member type rather than
+// payroll size, so it deliberately doesn't track payroll closely.
+function tivFor(index: number, size: SizeCategory, type: MemberType): number {
+  const position = (index * 7) % 10; // different offset than exposureFor's position
+  const { min, max } = TIV_RANGES[size];
+  const base = min + (max - min) * (position / 9);
+  return Number((base * TIV_TYPE_MULTIPLIER[type]).toFixed(2));
+}
+
 // This catalog is deliberately independent of the game seed. Every game uses
 // the same 100 entities, payrolls, and baseline risk characteristics; the seed
 // only determines which entities begin in the pool.
@@ -55,8 +66,13 @@ export const PREDEFINED_MARKET_MEMBERS: ReadonlyArray<Member> = Array.from(
       sizeCategory,
       // GL rides on the same payroll figure as WC — one payroll number per
       // member drives both lines (public-entity pools don't have a separate
-      // commercial-style revenue base for GL).
-      exposureByLine: { WC: exposureFor(index, sizeCategory), GL: exposureFor(index, sizeCategory) },
+      // commercial-style revenue base for GL). Property uses TIV instead —
+      // a genuinely different, independently-sized exposure base.
+      exposureByLine: {
+        WC: exposureFor(index, sizeCategory),
+        GL: exposureFor(index, sizeCategory),
+        Property: tivFor(index, sizeCategory, type),
+      },
       yearJoined: 0,
       calendarYearJoined: 0,
       riskQuality: Number((2 + ((index * 37) % 66) / 10).toFixed(1)),

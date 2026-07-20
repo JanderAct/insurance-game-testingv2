@@ -241,6 +241,40 @@ export const GL_STARTING_FINANCIALS = {
   reinsuranceRecoverable: { min: 0, max: 300_000 },
 };
 
+// Property starting assumptions. Property's exposure base is Total Insured
+// Value (TIV, $M) — buildings, apparatus, and equipment — not payroll, and a
+// member's TIV need not track its payroll closely (see TIV_TYPE_MULTIPLIER
+// below). Rate per $100 of TIV is much smaller than WC/GL's per-$100-payroll
+// rate since TIV dollar amounts are much larger. Tunable placeholders.
+export const TIV_RANGES: Record<string, { min: number; max: number }> = {
+  Small: { min: 2, max: 8 },
+  Medium: { min: 6, max: 20 },
+  Large: { min: 18, max: 55 },
+  'Very Large': { min: 50, max: 140 },
+};
+
+// Infrastructure-heavy member types carry disproportionately more insured
+// property value per payroll dollar than administrative-heavy types — this
+// decorrelates Property exposure from payroll exposure per member.
+export const TIV_TYPE_MULTIPLIER: Record<string, number> = {
+  City: 1.0,
+  County: 1.0,
+  'Fire District': 2.2,
+  'Water District': 1.8,
+  'Transit Authority': 1.6,
+  'School District': 1.7,
+  'Park District': 1.3,
+  'Recreation District': 1.3,
+  'Special District': 1.0,
+};
+
+export const PROPERTY_STARTING_RATE_PER_100 = { min: 0.10, max: 0.30 };
+export const PROPERTY_EXPECTED_LOSS_RATIO = { min: 0.45, max: 0.60 };
+export const PROPERTY_STARTING_FINANCIALS = {
+  grossUnpaidReserve: { min: 300_000, max: 900_000 },
+  reinsuranceRecoverable: { min: 0, max: 150_000 },
+};
+
 // Starting pool financial ranges
 export const STARTING_FINANCIALS = {
   annualPremium: { min: 4_000_000, max: 8_000_000 },
@@ -275,3 +309,13 @@ export const TOTAL_MARKET_MEMBERS = 100;
 
 // Reserve paydown percentage per year
 export const RESERVE_PAYDOWN_PCT = 0.35;
+
+// Per-line reserve paydown speed — the lightweight placeholder for each
+// line's development-pattern character until Phase 3 builds real per-line
+// accident-year triangles. WC and GL both keep the original flat rate
+// (unchanged); Property pays down much faster (short tail).
+export const LINE_RESERVE_PAYDOWN_PCT: Record<string, number> = {
+  WC: RESERVE_PAYDOWN_PCT,
+  GL: RESERVE_PAYDOWN_PCT,
+  Property: 0.65,
+};
