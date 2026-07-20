@@ -96,10 +96,10 @@ export default function ResultSpreadsheetPage({ lockedResults }: ResultSpreadshe
         csvValue: r => r.decisions.reinsuranceLevel,
       },
       {
-        key: 'investmentRisk',
+        key: 'assetAllocation',
         category: 'Decisions',
-        label: 'Investment Risk',
-        value: r => r.investmentRisk,
+        label: 'Asset Allocation',
+        value: r => `Cash ${r.assetAllocation.cashPct.toFixed(0)}% / Bonds ${r.assetAllocation.bondsPct.toFixed(0)}% / Equities ${r.assetAllocation.equitiesPct.toFixed(0)}%`,
       },
 
       // Membership

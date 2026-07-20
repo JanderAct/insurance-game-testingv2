@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 
 import type { GameState, GameSetupSettings, DecisionSet, StartingFinancials, Member } from './types/simulation';
-import { SLIDER_RANGES } from './data/defaultAssumptions';
+import { SLIDER_RANGES, ASSET_ALLOCATION_DEFAULT } from './data/defaultAssumptions';
 import { generateGameInstance, generateStartingPoolState } from './utils/instanceGenerator';
 import { processYear } from './utils/simulationEngine';
 import { generateHistoricalYears } from './utils/historyGenerator';
@@ -55,7 +55,7 @@ function defaultDecisions(yearNumber: number): DecisionSet {
   };
   return {
     yearNumber,
-    investmentRisk: SLIDER_RANGES.investmentRisk.default,
+    assetAllocation: { ...ASSET_ALLOCATION_DEFAULT },
     byLine: {
       WC: lineDefaults,
       GL: lineDefaults,
@@ -86,7 +86,7 @@ export default function App() {
   // Load persisted game from localStorage if available
   React.useEffect(() => {
     try {
-      const saved = localStorage.getItem('riskpool_gamestate_v2');
+      const saved = localStorage.getItem('riskpool_gamestate_v3');
       if (saved) {
         const { gameState: gs, startingFinancials: sf, initialMembers: im, currentDecisions: cd } = JSON.parse(saved);
 
@@ -99,19 +99,19 @@ export default function App() {
           setActiveTab('dashboard');
         } else {
           // Bad saved state - clear it
-          localStorage.removeItem('riskpool_gamestate_v2');
+          localStorage.removeItem('riskpool_gamestate_v3');
         }
       }
     } catch {
       // ignore parse errors - clear corrupted data
-      localStorage.removeItem('riskpool_gamestate_v2');
+      localStorage.removeItem('riskpool_gamestate_v3');
     }
   }, []);
 
   function persistState(gs: GameState, sf: StartingFinancials, im: Member[], cd: DecisionSet) {
     try {
       localStorage.setItem(
-        'riskpool_gamestate_v2',
+        'riskpool_gamestate_v3',
         JSON.stringify({
           gameState: gs,
           startingFinancials: sf,
@@ -184,7 +184,7 @@ export default function App() {
     setStartingFinancials(null);
     setInitialMembers([]);
     setCurrentDecisions(defaultDecisions(1));
-    localStorage.removeItem('riskpool_gamestate_v2');
+    localStorage.removeItem('riskpool_gamestate_v3');
     setActiveTab('setup');
   }, []);
 

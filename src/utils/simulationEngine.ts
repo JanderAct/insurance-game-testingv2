@@ -1,7 +1,7 @@
 // Core simulation engine for Risk Pool Simulation v1
 // Premium formula: Premium = Exposure($M) × Rate_per_$100_payroll × 10,000
 
-import type { GameState, PoolState, DecisionSet, LinePoolState, LineDecisionSet, ResultSet, LineResultSet, ReserveCohort, Member, MemberLossResult, CoverageLine, GameInstance } from '../types/simulation';
+import type { GameState, PoolState, DecisionSet, LinePoolState, LineDecisionSet, ResultSet, LineResultSet, ReserveCohort, Member, MemberLossResult, CoverageLine, GameInstance, AssetAllocation } from '../types/simulation';
 import { SeededRandom, deriveSubRng } from './random';
 import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, MEMBER_LOSS_VOLATILITY, RISK_CONTROL_PARAMS, LINE_RESERVE_PAYDOWN_PCT, OPERATING_CASH_PCT_OF_PREMIUM, FULL_TRANSFER_COST_PCT_OF_PREMIUM, SELF_FUNDED_DISCOUNT_PCT } from '../data/defaultAssumptions';
 import { getReinsuranceStructure, calculateReinsuranceCost, calculateReinsuranceRecovery } from './reinsuranceEngine';
@@ -51,7 +51,7 @@ interface LineYearContext {
   investments: number;
   otherAssets: number;
   otherLiabilities: number;
-  investmentRisk: number;
+  assetAllocation: AssetAllocation;
   investedAssets: number;
   investmentIncome: number;
   investmentReturnRate: number;
@@ -533,7 +533,7 @@ export function processLineYear(
     yearNumber,
     calendarYear,
     decisions: lineDecisions,
-    investmentRisk: ctx.investmentRisk,
+    assetAllocation: ctx.assetAllocation,
 
     activeMembers: memberResult.activeMembers.length,
     newMembers: memberResult.newMembers.length,
@@ -700,6 +700,27 @@ export function processLineYear(
   return { updatedLineState, updatedShared, result };
 }
 
+// Each active line's share of the shared cash/investments/other-assets pool,
+// proportional to what that line itself has contributed to the pool's net
+// worth (its own surplus plus its own net unpaid reserve, floored above
+// zero so a deeply negative line still gets a minimal, not negative, share).
+// For a single active line this is always 1 regardless of the formula, so
+// a WC-only game's non-investment numbers are unaffected by this change.
+function computeContributionShares(
+  poolState: PoolState,
+  activeLines: CoverageLine[]
+): Record<CoverageLine, number> {
+  const raw = activeLines.map(line => {
+    const ls = poolState.lines[line];
+    const netReserve = Math.max(0, ls.grossUnpaidReserve - ls.reinsuranceRecoverable);
+    return Math.max(1, ls.surplus + netReserve);
+  });
+  const total = raw.reduce((s, v) => s + v, 0);
+  const shares = {} as Record<CoverageLine, number>;
+  activeLines.forEach((line, i) => { shares[line] = raw[i] / total; });
+  return shares;
+}
+
 // Stage 1.3: loops over all active lines (WC and, once wired, GL). Property
 // stays inert (Stage 1.4). For a single active line this reduces to exactly
 // Stage 1.2's behavior — the WC-only regression baseline is unaffected.
@@ -714,20 +735,17 @@ export function processYear(
   const priorPoolResult = gameState.lockedResults[gameState.lockedResults.length - 1];
 
   const activeLines = setup.activeLines;
-  const share = 1 / activeLines.length;
+  const shares = computeContributionShares(poolState, activeLines);
 
   // Investment income is drawn ONCE for the whole shared, commingled
-  // portfolio (same seeded call as Stage 1.2, unkeyed by line — a WC-only
+  // portfolio (same seeded call site as before, unkeyed by line — a WC-only
   // game draws exactly what it always did), then split across active lines
-  // by their equal share below.
+  // by their contribution share below.
   const investRng = deriveSubRng(instance.seed, yearNumber, 'invest');
   const poolInvestedAssets = poolState.investments;
   const invResult = simulateInvestmentReturn(
     poolInvestedAssets,
-    decisions.investmentRisk,
-    instance.investmentEnvironment.baseReturn,
-    instance.investmentEnvironment.volatility,
-    instance.investmentEnvironment.downsideRisk,
+    decisions.assetAllocation,
     investRng
   );
 
@@ -745,6 +763,7 @@ export function processYear(
   // ineligible for new recruitment into the next, but isn't retroactively
   // removed from lines it's already active on).
   for (const line of activeLines) {
+    const share = shares[line];
     const ctx: LineYearContext = {
       instance,
       yearNumber,
@@ -754,7 +773,7 @@ export function processYear(
       investments: poolState.investments * share,
       otherAssets: poolState.otherAssets * share,
       otherLiabilities: poolState.otherLiabilities * share,
-      investmentRisk: decisions.investmentRisk,
+      assetAllocation: decisions.assetAllocation,
       investedAssets: poolInvestedAssets * share,
       investmentIncome: invResult.income * share,
       investmentReturnRate: invResult.returnRate,
@@ -887,7 +906,7 @@ function aggregateLineResults(
     yearNumber: first.yearNumber,
     calendarYear: first.calendarYear,
     decisions: first.decisions,
-    investmentRisk: first.investmentRisk,
+    assetAllocation: first.assetAllocation,
 
     activeMembers: activeMembersSum,
     newMembers: sum('newMembers'),

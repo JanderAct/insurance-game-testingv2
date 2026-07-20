@@ -62,50 +62,53 @@ export const FUNDING_CLF_TABLE: Record<number, number> = {
   0.50: 0.827,
 };
 
-// Investment return assumptions by risk level (0-10)
-// Conservative public-entity / risk-pool style portfolio assumptions.
-// These are intentionally modest so investment income does not dominate underwriting results.
-export const INVESTMENT_RISK_PARAMS = {
-  baseReturnByLevel: [
-    0.0075, // 0 - Very Conservative
-    0.0100,
-    0.0125,
-    0.0150, // 3 - Default-ish
-    0.0175,
-    0.0200,
-    0.0225,
-    0.0250,
-    0.0275,
-    0.0300,
-    0.0325, // 10 - Aggressive for this pool
-  ],
-  volatilityByLevel: [
-    0.0025,
-    0.0035,
-    0.0050,
-    0.0075,
-    0.0100,
-    0.0135,
-    0.0175,
-    0.0225,
-    0.0275,
-    0.0325,
-    0.0400,
-  ],
-  downsideShockProbByLevel: [
-    0.010,
-    0.015,
-    0.020,
-    0.025,
-    0.030,
-    0.035,
-    0.040,
-    0.045,
-    0.050,
-    0.055,
-    0.060,
-  ],
+// Investment return assumptions by asset class. Conservative public-entity /
+// risk-pool style portfolio assumptions, intentionally modest so investment
+// income does not dominate underwriting results. Cash and bonds essentially
+// never have a real down year; equities does, by design, to make the
+// allocation decision carry real risk/return tradeoff.
+export interface AssetClassAssumption {
+  expectedReturn: number;
+  standardDeviation: number;
+  minReturn: number;
+  maxReturn: number;
+  downsideProbability: number;
+  downsideMeanReturn: number;
+  downsideStandardDeviation: number;
+}
+
+export const ASSET_CLASS_ASSUMPTIONS: Record<'cash' | 'bonds' | 'equities', AssetClassAssumption> = {
+  cash: {
+    expectedReturn: 0.020,
+    standardDeviation: 0.003,
+    minReturn: 0.005,
+    maxReturn: 0.035,
+    downsideProbability: 0,
+    downsideMeanReturn: 0.005,
+    downsideStandardDeviation: 0.002,
+  },
+  bonds: {
+    expectedReturn: 0.035,
+    standardDeviation: 0.020,
+    minReturn: -0.04,
+    maxReturn: 0.09,
+    downsideProbability: 0.10,
+    downsideMeanReturn: -0.02,
+    downsideStandardDeviation: 0.015,
+  },
+  equities: {
+    expectedReturn: 0.075,
+    standardDeviation: 0.110,
+    minReturn: -0.30,
+    maxReturn: 0.35,
+    downsideProbability: 0.18,
+    downsideMeanReturn: -0.15,
+    downsideStandardDeviation: 0.08,
+  },
 };
+
+// Default shared-portfolio allocation — a moderate blend.
+export const ASSET_ALLOCATION_DEFAULT = { cashPct: 20, bondsPct: 50, equitiesPct: 30 };
 
 // Reinsurance program table indexed by level (0-4)
 // Aggregate quota-share reinsurance, above the pool's own expected loss.
@@ -300,7 +303,6 @@ export const SLIDER_RANGES = {
   underwritingStrictness: { min: 0, max: 10, step: 1, default: 5 },
   riskControlPct: { min: 0, max: 0.08, step: 0.01, default: 0 },
   reinsuranceLevel: { min: 0, max: 4, step: 1, default: 2 },
-  investmentRisk: { min: 0, max: 10, step: 1, default: 3 },
 };
 
 // Starting pool member count range

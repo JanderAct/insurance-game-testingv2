@@ -96,7 +96,7 @@ export default function ResultsPage({ lockedResults }: ResultsPageProps) {
                 label="Reinsurance Level"
                 value={`${result.decisions.reinsuranceLevel} — ${REINSURANCE_PROGRAMS[result.decisions.reinsuranceLevel]?.label ?? ''}`}
               />
-              <Row label="Investment Risk" value={`${result.investmentRisk} / 10`} />
+              <Row label="Asset Allocation" value={`Cash ${result.assetAllocation.cashPct.toFixed(0)}% / Bonds ${result.assetAllocation.bondsPct.toFixed(0)}% / Equities ${result.assetAllocation.equitiesPct.toFixed(0)}%`} />
             </ResultCard>
 
             <ResultCard title="Membership" icon={<TrendingUp size={16} />}>

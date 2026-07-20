@@ -5,7 +5,7 @@ import type { ResultSet } from '../types/simulation';
 export function generateNarrative(result: ResultSet, _priorResult?: ResultSet): string {
   const parts: string[] = [];
 
-  const { decisions, investmentRisk, actualCombinedRatio, netIncome, grossUltimateLoss, totalMemberCharge,
+  const { decisions, assetAllocation, actualCombinedRatio, netIncome, grossUltimateLoss, totalMemberCharge,
     reinsuranceRecovery, investmentIncome,
     newMembers, withdrawnMembers, shockLossIncurred,
     priorYearDevelopment, endingSurplus } = result;
@@ -58,14 +58,14 @@ export function generateNarrative(result: ResultSet, _priorResult?: ResultSet): 
   }
 
   // --- Investment ---
-  if (investmentRisk >= 7) {
+  if (assetAllocation.equitiesPct >= 50) {
     if (investmentIncome > 0) {
-      parts.push(`Aggressive investment positioning generated strong investment income of $${fmt(investmentIncome)}.`);
+      parts.push(`An equities-heavy allocation generated strong investment income of $${fmt(investmentIncome)}.`);
     } else {
-      parts.push(`Aggressive investment positioning resulted in an investment loss.`);
+      parts.push(`An equities-heavy allocation resulted in an investment loss this year.`);
     }
-  } else if (investmentRisk <= 2) {
-    parts.push(`Conservative investment strategy produced modest but stable investment income of $${fmt(investmentIncome)}.`);
+  } else if (assetAllocation.equitiesPct <= 15) {
+    parts.push(`A cash/bonds-heavy allocation produced modest but stable investment income of $${fmt(investmentIncome)}.`);
   }
 
   // --- Membership ---

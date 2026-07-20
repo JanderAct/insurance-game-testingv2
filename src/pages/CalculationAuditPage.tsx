@@ -20,7 +20,8 @@ import {
   MAX_NEW_MEMBERS_PER_YEAR,
   MAX_WITHDRAWN_PER_YEAR,
   FUNDING_CLF_TABLE,
-  INVESTMENT_RISK_PARAMS,
+  ASSET_CLASS_ASSUMPTIONS,
+  ASSET_ALLOCATION_DEFAULT,
   REINSURANCE_PROGRAMS,
   MEMBER_MOVEMENT_WEIGHTS,
   RISK_CONTROL_PARAMS,
@@ -917,15 +918,13 @@ function buildAssumptionRows(): AuditRow[] {
         'Higher confidence levels produce materially higher contribution rates. This is a pricing/funding target, not the booked accounting reserve.',
     },
     {
-      metric: 'Investment Risk Assumptions',
-      value: INVESTMENT_RISK_PARAMS.baseReturnByLevel
-        .map((base, i) => {
-          const vol = INVESTMENT_RISK_PARAMS.volatilityByLevel[i];
-          const shock = INVESTMENT_RISK_PARAMS.downsideShockProbByLevel[i];
-          return `Risk ${i}: Return ${formatPct(base)}, Vol ${formatPct(vol)}, Shock ${formatPct(shock)}`;
-        })
+      metric: 'Asset Class Assumptions',
+      value: Object.entries(ASSET_CLASS_ASSUMPTIONS)
+        .map(([cls, a]) =>
+          `${labelize(cls)}: Return ${formatPct(a.expectedReturn)}, Vol ${formatPct(a.standardDeviation)}, Down-year Chance ${formatPct(a.downsideProbability)}`
+        )
         .join('\n'),
-      formula: 'Default investment assumptions by risk level.',
+      formula: 'Cash/bonds/equities return and volatility assumptions, blended by the player\'s asset allocation.',
       note:
         'Investment income should be secondary to underwriting results. If surplus grows too easily in bad underwriting years, review these assumptions first.',
     },
@@ -988,7 +987,7 @@ function buildAssumptionRows(): AuditRow[] {
         `Underwriting Strictness: ${formatSliderNumber(SLIDER_RANGES.underwritingStrictness)}\n` +
         `Risk Control %: ${formatSliderPct(SLIDER_RANGES.riskControlPct)}\n` +
         `Reinsurance Level: ${formatSliderNumber(SLIDER_RANGES.reinsuranceLevel)}\n` +
-        `Investment Risk: ${formatSliderNumber(SLIDER_RANGES.investmentRisk)}`,
+        `Asset Allocation Default: Cash ${ASSET_ALLOCATION_DEFAULT.cashPct}% / Bonds ${ASSET_ALLOCATION_DEFAULT.bondsPct}% / Equities ${ASSET_ALLOCATION_DEFAULT.equitiesPct}%`,
       formula: 'Player decision slider configuration.',
       note:
         'Defines the choices available to the player. Wide ranges increase strategic flexibility but can make results harder to balance.',

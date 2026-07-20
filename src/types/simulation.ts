@@ -135,10 +135,18 @@ export interface LineDecisionSet {
   reinsuranceLevel: number;       // 0-4
 }
 
+// Shared investment portfolio allocation across cash/bonds/equities. Pool-level
+// (one shared, commingled portfolio) — must sum to 100.
+export interface AssetAllocation {
+  cashPct: number;
+  bondsPct: number;
+  equitiesPct: number;
+}
+
 // Player decisions for a given year: pool-level fields plus one LineDecisionSet per line
 export interface DecisionSet {
   yearNumber: number;
-  investmentRisk: number;         // 0-10, pool-level (shared asset pool)
+  assetAllocation: AssetAllocation; // pool-level (shared asset pool)
   byLine: Record<CoverageLine, LineDecisionSet>;
 }
 
@@ -173,7 +181,7 @@ export interface ResultSet {
 
   // Decisions echoed
   decisions: LineDecisionSet;
-  investmentRisk: number;       // pool-level decision, echoed for this line's result
+  assetAllocation: AssetAllocation; // pool-level decision, echoed for this line's result
 
   // Membership
   activeMembers: number;

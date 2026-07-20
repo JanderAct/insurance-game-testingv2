@@ -2,7 +2,7 @@ import React from 'react';
 import { DollarSign, TrendingUp, BarChart2, Shield, RotateCcw } from 'lucide-react';
 import type { DecisionSet, LineDecisionSet } from '../types/simulation';
 import SliderInput from '../components/SliderInput';
-import { SLIDER_RANGES, REINSURANCE_PROGRAMS, FULL_TRANSFER_COST_PCT_OF_PREMIUM, SELF_FUNDED_DISCOUNT_PCT } from '../data/defaultAssumptions';
+import { SLIDER_RANGES, REINSURANCE_PROGRAMS, FULL_TRANSFER_COST_PCT_OF_PREMIUM, SELF_FUNDED_DISCOUNT_PCT, ASSET_ALLOCATION_DEFAULT } from '../data/defaultAssumptions';
 import { formatCurrency } from '../utils/formatters';
 import { getReinsuranceStructure } from '../utils/reinsuranceEngine';
 
@@ -25,7 +25,6 @@ function getFundingLabel(v: number): string {
 }
 
 const UW_LABELS = ['Very Flexible', 'Flexible', 'Somewhat Flexible', 'Moderate-Flexible', 'Moderate', 'Moderate-Strict', 'Somewhat Strict', 'Strict', 'Very Strict', 'Extremely Strict', 'Maximum Strict'];
-const INV_LABELS = ['Very Conservative', 'Conservative', 'Moderately Conservative', 'Moderate-Low', 'Balanced', 'Moderate-High', 'Moderately Aggressive', 'Aggressive', 'Very Aggressive', 'Highly Aggressive', 'Maximum Aggressive'];
 
 function defaultDecisions(yearNumber: number): DecisionSet {
   const lineDefaults = {
@@ -39,7 +38,7 @@ function defaultDecisions(yearNumber: number): DecisionSet {
   };
   return {
     yearNumber,
-    investmentRisk: SLIDER_RANGES.investmentRisk.default,
+    assetAllocation: { ...ASSET_ALLOCATION_DEFAULT },
     byLine: {
       WC: lineDefaults,
       GL: lineDefaults,
@@ -52,7 +51,13 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
   const wc = decisions.byLine.WC;
   const set = (key: keyof LineDecisionSet, val: number) =>
     onChange({ ...decisions, byLine: { ...decisions.byLine, WC: { ...wc, [key]: val } } });
-  const setInvestmentRisk = (val: number) => onChange({ ...decisions, investmentRisk: val });
+
+  const { cashPct, bondsPct } = decisions.assetAllocation;
+  const equitiesPct = Math.max(0, 100 - cashPct - bondsPct);
+  const setCashPct = (val: number) =>
+    onChange({ ...decisions, assetAllocation: { cashPct: val, bondsPct: Math.min(bondsPct, 100 - val), equitiesPct: Math.max(0, 100 - val - Math.min(bondsPct, 100 - val)) } });
+  const setBondsPct = (val: number) =>
+    onChange({ ...decisions, assetAllocation: { cashPct: Math.min(cashPct, 100 - val), bondsPct: val, equitiesPct: Math.max(0, 100 - val - Math.min(cashPct, 100 - val)) } });
 
   const reinsStructure = getReinsuranceStructure(wc.reinsuranceLevel, estimatedPremium, estimatedExpectedLoss);
   const prog = REINSURANCE_PROGRAMS[wc.reinsuranceLevel];
@@ -92,7 +97,16 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
         </SectionCard>
 
         <SectionCard title="Investment & Reserving" icon={<BarChart2 size={16} />}>
-          <SliderInput label="Investment Risk" value={decisions.investmentRisk} min={SLIDER_RANGES.investmentRisk.min} max={SLIDER_RANGES.investmentRisk.max} step={SLIDER_RANGES.investmentRisk.step} onChange={setInvestmentRisk} formatValue={v => `${v}/10 — ${INV_LABELS[Math.round(v)]}`} leftLabel="Conservative" rightLabel="Aggressive" disabled={disabled} helpText="Higher investment risk increases expected returns but also surplus volatility." />
+          <p className="text-xs text-gray-500 -mt-2">
+            Unlike the sliders above, this allocation is shared across every active line's investment portfolio, not just this one.
+          </p>
+          <SliderInput label="Cash %" value={cashPct} min={0} max={100} step={1} onChange={setCashPct} formatValue={v => `${v.toFixed(0)}%`} leftLabel="None" rightLabel="All Cash" disabled={disabled} helpText="Low return, very low volatility." />
+          <SliderInput label="Bonds %" value={bondsPct} min={0} max={100} step={1} onChange={setBondsPct} formatValue={v => `${v.toFixed(0)}%`} leftLabel="None" rightLabel="All Bonds" disabled={disabled} helpText="Moderate return, moderate volatility." />
+          <div className="flex justify-between items-center bg-gray-50 rounded-lg px-3 py-2 border border-gray-200">
+            <span className="text-sm text-gray-600">Equities % (remainder)</span>
+            <span className="font-semibold text-gray-800">{equitiesPct.toFixed(0)}%</span>
+          </div>
+          <p className="text-xs text-gray-500">Higher expected return, higher volatility, with an occasional down year.</p>
         </SectionCard>
 
         <SectionCard title="Reinsurance Program" icon={<Shield size={16} />}>
