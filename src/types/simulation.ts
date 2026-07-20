@@ -19,7 +19,7 @@ export interface Member {
   name: string;
   type: MemberType;
   sizeCategory: SizeCategory;
-  exposure: number; // exposure units
+  exposureByLine: Partial<Record<CoverageLine, number>>; // exposure units, per coverage line
   yearJoined: number; // yearNumber when joined
   calendarYearJoined: number;
   riskQuality: number; // 1-10
@@ -39,7 +39,7 @@ export interface MemberSegment {
 export interface MemberLossResult {
   memberId: string;
   memberName: string;
-  exposure: number;
+  exposure: number; // exposure units for the line this loss was simulated on
   riskQuality: number;
   expectedLoss: number;
   coefficientOfVariation: number;
@@ -124,9 +124,8 @@ export interface GameSetupSettings {
   activeLines: CoverageLine[];  // coverage lines the pool writes (at least one)
 }
 
-// Player decisions for a given year
-export interface DecisionSet {
-  yearNumber: number;
+// Per-line player decisions for a given year
+export interface LineDecisionSet {
   rateChange: number;             // -0.20 to +0.30 as decimal
   fundingConfidenceLevel: number; // 0.50 to 0.95
   dividendPct: number;            // 0.00 to 0.15 of premium
@@ -134,7 +133,13 @@ export interface DecisionSet {
   underwritingStrictness: number; // 0-10
   riskControlPct: number;         // 0.00 to 0.08 of premium
   reinsuranceLevel: number;       // 0-4
-  investmentRisk: number;         // 0-10
+}
+
+// Player decisions for a given year: pool-level fields plus one LineDecisionSet per line
+export interface DecisionSet {
+  yearNumber: number;
+  investmentRisk: number;         // 0-10, pool-level (shared asset pool)
+  byLine: Record<CoverageLine, LineDecisionSet>;
 }
 
 // Reinsurance structure derived from level selection
@@ -167,7 +172,8 @@ export interface ResultSet {
   calendarYear: number;
 
   // Decisions echoed
-  decisions: DecisionSet;
+  decisions: LineDecisionSet;
+  investmentRisk: number;       // pool-level decision, echoed for this line's result
 
   // Membership
   activeMembers: number;
@@ -323,8 +329,8 @@ export interface ResultSet {
   narrativeExplanation: string;
 }
 
-// Pool ongoing state (rolled from year to year)
-export interface PoolState {
+// Per-line pool state (rolled from year to year)
+export interface LinePoolState {
   rateLevel: number;           // cumulative rate index (starts at 100)
   ratePer100: number;          // rate per $100 of payroll (e.g. 7.50)
   purePremiumPer100: number;   // expected loss cost per $100 payroll
@@ -335,16 +341,21 @@ export interface PoolState {
   riskControlEffectiveness: number; // rolling score 0-1
   reserveCohorts: ReserveCohort[];
   members: Member[];
+  grossUnpaidReserve: number;
+  reinsuranceRecoverable: number;
+  surplus: number;
+  totalMarketExposure: number;
+}
+
+// Pool ongoing state: fields shared across all lines, plus one LinePoolState per line
+export interface PoolState {
   cash: number;
   investments: number;
   otherAssets: number;
-  grossUnpaidReserve: number;
-  reinsuranceRecoverable: number;
   unearnedPremium: number;
   otherLiabilities: number;
-  surplus: number;
-  totalMarketExposure: number;
   allMarketMembers: Member[];      // all 100 fictional members
+  lines: Record<CoverageLine, LinePoolState>;
 }
 
 // Top-level game state

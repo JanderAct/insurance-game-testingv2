@@ -1,6 +1,6 @@
 import React from 'react';
 import { DollarSign, TrendingUp, BarChart2, Shield, RotateCcw } from 'lucide-react';
-import type { DecisionSet } from '../types/simulation';
+import type { DecisionSet, LineDecisionSet } from '../types/simulation';
 import SliderInput from '../components/SliderInput';
 import { SLIDER_RANGES, REINSURANCE_PROGRAMS, FULL_TRANSFER_COST_PCT_OF_PREMIUM, SELF_FUNDED_DISCOUNT_PCT } from '../data/defaultAssumptions';
 import { formatCurrency } from '../utils/formatters';
@@ -28,8 +28,7 @@ const UW_LABELS = ['Very Flexible', 'Flexible', 'Somewhat Flexible', 'Moderate-F
 const INV_LABELS = ['Very Conservative', 'Conservative', 'Moderately Conservative', 'Moderate-Low', 'Balanced', 'Moderate-High', 'Moderately Aggressive', 'Aggressive', 'Very Aggressive', 'Highly Aggressive', 'Maximum Aggressive'];
 
 function defaultDecisions(yearNumber: number): DecisionSet {
-  return {
-    yearNumber,
+  const lineDefaults = {
     rateChange: SLIDER_RANGES.rateChange.default,
     fundingConfidenceLevel: SLIDER_RANGES.fundingConfidenceLevel.default,
     dividendPct: SLIDER_RANGES.dividendPct.default,
@@ -37,15 +36,26 @@ function defaultDecisions(yearNumber: number): DecisionSet {
     underwritingStrictness: SLIDER_RANGES.underwritingStrictness.default,
     riskControlPct: SLIDER_RANGES.riskControlPct.default,
     reinsuranceLevel: SLIDER_RANGES.reinsuranceLevel.default,
+  };
+  return {
+    yearNumber,
     investmentRisk: SLIDER_RANGES.investmentRisk.default,
+    byLine: {
+      WC: lineDefaults,
+      GL: lineDefaults,
+      Property: lineDefaults,
+    },
   };
 }
 
 export default function DecisionsPage({ decisions, onChange, yearNumber, estimatedPremium, estimatedExpectedLoss, disabled = false }: DecisionsPageProps) {
-  const set = (key: keyof DecisionSet, val: number) => onChange({ ...decisions, [key]: val });
+  const wc = decisions.byLine.WC;
+  const set = (key: keyof LineDecisionSet, val: number) =>
+    onChange({ ...decisions, byLine: { ...decisions.byLine, WC: { ...wc, [key]: val } } });
+  const setInvestmentRisk = (val: number) => onChange({ ...decisions, investmentRisk: val });
 
-  const reinsStructure = getReinsuranceStructure(decisions.reinsuranceLevel, estimatedPremium, estimatedExpectedLoss);
-  const prog = REINSURANCE_PROGRAMS[decisions.reinsuranceLevel];
+  const reinsStructure = getReinsuranceStructure(wc.reinsuranceLevel, estimatedPremium, estimatedExpectedLoss);
+  const prog = REINSURANCE_PROGRAMS[wc.reinsuranceLevel];
   const reinsCostPct = prog ? (prog.costPctOfPremiumMin + prog.costPctOfPremiumMax) / 2 : 0;
   const reinsCost = estimatedPremium * reinsCostPct;
   const retainedSharePct = 1 - reinsStructure.recoveryPct;
@@ -70,19 +80,19 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <SectionCard title="Pricing & Funding" icon={<DollarSign size={16} />}>
-          <SliderInput label="Rate Change" value={decisions.rateChange} min={SLIDER_RANGES.rateChange.min} max={SLIDER_RANGES.rateChange.max} step={SLIDER_RANGES.rateChange.step} onChange={v => set('rateChange', v)} formatValue={rateDisplay} leftLabel="Decrease" rightLabel="Increase" valueColor={decisions.rateChange > 0.05 ? 'text-amber-600' : decisions.rateChange < -0.05 ? 'text-blue-600' : 'text-gray-700'} disabled={disabled} helpText="Higher rates improve premium adequacy but reduce member retention." />
-          <SliderInput label="Funding Confidence Level" value={decisions.fundingConfidenceLevel} min={SLIDER_RANGES.fundingConfidenceLevel.min} max={SLIDER_RANGES.fundingConfidenceLevel.max} step={SLIDER_RANGES.fundingConfidenceLevel.step} onChange={v => set('fundingConfidenceLevel', v)} formatValue={v => `${getFundingLabel(v)} (${(v * 100).toFixed(0)}%)`} leftLabel="Lower Confidence" rightLabel="Higher Confidence" disabled={disabled} helpText="Sets the reserve confidence level. Higher levels strengthen the balance sheet." />
-          <SliderInput label="Dividend / Return of Pool Premium" value={decisions.dividendPct} min={SLIDER_RANGES.dividendPct.min} max={SLIDER_RANGES.dividendPct.max} step={SLIDER_RANGES.dividendPct.step} onChange={v => set('dividendPct', v)} formatValue={pctDisplay} leftLabel="None" rightLabel="High" valueColor={decisions.dividendPct > 0 ? 'text-emerald-600' : 'text-gray-500'} disabled={disabled} helpText="Returns value to members." />
-          <SliderInput label="Assessment" value={decisions.assessmentPct} min={SLIDER_RANGES.assessmentPct.min} max={SLIDER_RANGES.assessmentPct.max} step={SLIDER_RANGES.assessmentPct.step} onChange={v => set('assessmentPct', v)} formatValue={pctDisplay} leftLabel="None" rightLabel="High" valueColor={decisions.assessmentPct > 0 ? 'text-red-600' : 'text-gray-500'} disabled={disabled} helpText="Additional calls on members beyond premium." />
+          <SliderInput label="Rate Change" value={wc.rateChange} min={SLIDER_RANGES.rateChange.min} max={SLIDER_RANGES.rateChange.max} step={SLIDER_RANGES.rateChange.step} onChange={v => set('rateChange', v)} formatValue={rateDisplay} leftLabel="Decrease" rightLabel="Increase" valueColor={wc.rateChange > 0.05 ? 'text-amber-600' : wc.rateChange < -0.05 ? 'text-blue-600' : 'text-gray-700'} disabled={disabled} helpText="Higher rates improve premium adequacy but reduce member retention." />
+          <SliderInput label="Funding Confidence Level" value={wc.fundingConfidenceLevel} min={SLIDER_RANGES.fundingConfidenceLevel.min} max={SLIDER_RANGES.fundingConfidenceLevel.max} step={SLIDER_RANGES.fundingConfidenceLevel.step} onChange={v => set('fundingConfidenceLevel', v)} formatValue={v => `${getFundingLabel(v)} (${(v * 100).toFixed(0)}%)`} leftLabel="Lower Confidence" rightLabel="Higher Confidence" disabled={disabled} helpText="Sets the reserve confidence level. Higher levels strengthen the balance sheet." />
+          <SliderInput label="Dividend / Return of Pool Premium" value={wc.dividendPct} min={SLIDER_RANGES.dividendPct.min} max={SLIDER_RANGES.dividendPct.max} step={SLIDER_RANGES.dividendPct.step} onChange={v => set('dividendPct', v)} formatValue={pctDisplay} leftLabel="None" rightLabel="High" valueColor={wc.dividendPct > 0 ? 'text-emerald-600' : 'text-gray-500'} disabled={disabled} helpText="Returns value to members." />
+          <SliderInput label="Assessment" value={wc.assessmentPct} min={SLIDER_RANGES.assessmentPct.min} max={SLIDER_RANGES.assessmentPct.max} step={SLIDER_RANGES.assessmentPct.step} onChange={v => set('assessmentPct', v)} formatValue={pctDisplay} leftLabel="None" rightLabel="High" valueColor={wc.assessmentPct > 0 ? 'text-red-600' : 'text-gray-500'} disabled={disabled} helpText="Additional calls on members beyond premium." />
         </SectionCard>
 
         <SectionCard title="Growth & Underwriting" icon={<TrendingUp size={16} />}>
-          <SliderInput label="Underwriting Strictness" value={decisions.underwritingStrictness} min={SLIDER_RANGES.underwritingStrictness.min} max={SLIDER_RANGES.underwritingStrictness.max} step={SLIDER_RANGES.underwritingStrictness.step} onChange={v => set('underwritingStrictness', v)} formatValue={v => `${v}/10 — ${UW_LABELS[Math.round(v)]}`} leftLabel="Flexible" rightLabel="Strict" disabled={disabled} helpText="Strict underwriting improves risk quality." />
-          <SliderInput label="Risk Control Investment" value={decisions.riskControlPct} min={SLIDER_RANGES.riskControlPct.min} max={SLIDER_RANGES.riskControlPct.max} step={SLIDER_RANGES.riskControlPct.step} onChange={v => set('riskControlPct', v)} formatValue={pctDisplay} leftLabel="Low" rightLabel="High" valueColor={decisions.riskControlPct > 0.03 ? 'text-emerald-600' : 'text-gray-600'} disabled={disabled} helpText="Investment in member safety and training." />
+          <SliderInput label="Underwriting Strictness" value={wc.underwritingStrictness} min={SLIDER_RANGES.underwritingStrictness.min} max={SLIDER_RANGES.underwritingStrictness.max} step={SLIDER_RANGES.underwritingStrictness.step} onChange={v => set('underwritingStrictness', v)} formatValue={v => `${v}/10 — ${UW_LABELS[Math.round(v)]}`} leftLabel="Flexible" rightLabel="Strict" disabled={disabled} helpText="Strict underwriting improves risk quality." />
+          <SliderInput label="Risk Control Investment" value={wc.riskControlPct} min={SLIDER_RANGES.riskControlPct.min} max={SLIDER_RANGES.riskControlPct.max} step={SLIDER_RANGES.riskControlPct.step} onChange={v => set('riskControlPct', v)} formatValue={pctDisplay} leftLabel="Low" rightLabel="High" valueColor={wc.riskControlPct > 0.03 ? 'text-emerald-600' : 'text-gray-600'} disabled={disabled} helpText="Investment in member safety and training." />
         </SectionCard>
 
         <SectionCard title="Investment & Reserving" icon={<BarChart2 size={16} />}>
-          <SliderInput label="Investment Risk" value={decisions.investmentRisk} min={SLIDER_RANGES.investmentRisk.min} max={SLIDER_RANGES.investmentRisk.max} step={SLIDER_RANGES.investmentRisk.step} onChange={v => set('investmentRisk', v)} formatValue={v => `${v}/10 — ${INV_LABELS[Math.round(v)]}`} leftLabel="Conservative" rightLabel="Aggressive" disabled={disabled} helpText="Higher investment risk increases expected returns but also surplus volatility." />
+          <SliderInput label="Investment Risk" value={decisions.investmentRisk} min={SLIDER_RANGES.investmentRisk.min} max={SLIDER_RANGES.investmentRisk.max} step={SLIDER_RANGES.investmentRisk.step} onChange={setInvestmentRisk} formatValue={v => `${v}/10 — ${INV_LABELS[Math.round(v)]}`} leftLabel="Conservative" rightLabel="Aggressive" disabled={disabled} helpText="Higher investment risk increases expected returns but also surplus volatility." />
         </SectionCard>
 
         <SectionCard title="Reinsurance Program" icon={<Shield size={16} />}>
@@ -90,7 +100,7 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Reinsurance Level</p>
             <div className="grid grid-cols-5 gap-1">
               {REINSURANCE_PROGRAMS.map(prog => (
-                <button key={prog.level} disabled={disabled} onClick={() => !disabled && set('reinsuranceLevel', prog.level)} className={`flex flex-col items-center p-2 rounded-lg border text-center transition-all text-xs ${decisions.reinsuranceLevel === prog.level ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:bg-blue-50'} ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}>
+                <button key={prog.level} disabled={disabled} onClick={() => !disabled && set('reinsuranceLevel', prog.level)} className={`flex flex-col items-center p-2 rounded-lg border text-center transition-all text-xs ${wc.reinsuranceLevel === prog.level ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:bg-blue-50'} ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}>
                   <span className="font-bold">{prog.label}</span>
                   <span className="text-xs opacity-75 mt-0.5 leading-tight hidden sm:block">{prog.description}</span>
                 </button>
@@ -98,10 +108,10 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
             </div>
           </div>
           <div className="bg-gray-50 rounded-lg p-3 border border-gray-200 text-xs space-y-1">
-            {decisions.reinsuranceLevel > 0 ? (
+            {wc.reinsuranceLevel > 0 ? (
               <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
                 <DataRow label="Attachment Point" value={formatCurrency(reinsStructure.attachment)} />
-                <DataRow label="Attachment (% of Exp. Loss)" value={`${(REINSURANCE_PROGRAMS[decisions.reinsuranceLevel].attachmentMultiplierOfExpectedLoss * 100).toFixed(0)}%`} />
+                <DataRow label="Attachment (% of Exp. Loss)" value={`${(REINSURANCE_PROGRAMS[wc.reinsuranceLevel].attachmentMultiplierOfExpectedLoss * 100).toFixed(0)}%`} />
                 <DataRow label="Quota Share % (Pool Retains)" value={`${((1 - reinsStructure.recoveryPct) * 100).toFixed(0)}%`} />
                 <DataRow label="Coverage" value="Uncapped above attachment" />
                 <DataRow label="Est. Annual Cost" value={`${formatCurrency(reinsCost)}/yr (${(reinsCostPct * 100).toFixed(0)}% of prem.)`} />

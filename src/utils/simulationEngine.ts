@@ -1,13 +1,14 @@
 // Core simulation engine for Risk Pool Simulation v1
 // Premium formula: Premium = Exposure($M) × Rate_per_$100_payroll × 10,000
 
-import type { GameState, PoolState, DecisionSet, ResultSet, ReserveCohort, Member, MemberLossResult } from '../types/simulation';
+import type { GameState, PoolState, DecisionSet, LinePoolState, LineDecisionSet, ResultSet, ReserveCohort, Member, MemberLossResult, CoverageLine, GameInstance } from '../types/simulation';
 import { SeededRandom, deriveSubRng } from './random';
 import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, MEMBER_LOSS_VOLATILITY, RISK_CONTROL_PARAMS, RESERVE_PAYDOWN_PCT, OPERATING_CASH_PCT_OF_PREMIUM, FULL_TRANSFER_COST_PCT_OF_PREMIUM, SELF_FUNDED_DISCOUNT_PCT } from '../data/defaultAssumptions';
 import { getReinsuranceStructure, calculateReinsuranceCost, calculateReinsuranceRecovery } from './reinsuranceEngine';
 import { simulateInvestmentReturn } from './investmentEngine';
 import { simulateMemberMovement } from './membershipEngine';
 import { generateNarrative } from './narrativeEngine';
+import { getMemberExposure } from './lineHelpers';
 
 export function lookupCLF(level: number): number {
   const rounded = Math.round(level * 20) / 20;
@@ -27,42 +28,65 @@ export function lookupCLF(level: number): number {
   return FUNDING_CLF_TABLE[best];
 }
 
-export function processYear(
-  gameState: GameState,
-  decisions: DecisionSet
-): { updatedPoolState: PoolState; result: ResultSet } {
-  const { instance, poolState, currentYearNumber, setup } = gameState;
-  const yearNumber = currentYearNumber;
-  const calendarYear = setup.startingYear + yearNumber - 1;
+// Shared (pool-level, cross-line) context needed to process a single line's year.
+interface LineYearContext {
+  instance: GameInstance;
+  yearNumber: number;
+  calendarYear: number;
+  allMarketMembers: Member[];
+  cash: number;
+  investments: number;
+  otherAssets: number;
+  otherLiabilities: number;
+  investmentRisk: number;
+  priorResult?: ResultSet;
+}
 
-  const priorResult = gameState.lockedResults[gameState.lockedResults.length - 1];
+// Shared fields this line's year processing updates.
+interface LineYearShared {
+  cash: number;
+  investments: number;
+  otherAssets: number;
+  unearnedPremium: number;
+  otherLiabilities: number;
+  allMarketMembers: Member[];
+}
+
+export function processLineYear(
+  line: CoverageLine,
+  lineState: LinePoolState,
+  lineDecisions: LineDecisionSet,
+  ctx: LineYearContext
+): { updatedLineState: LinePoolState; updatedShared: LineYearShared; result: ResultSet } {
+  const { instance, yearNumber, calendarYear, priorResult } = ctx;
+
   const priorYearLossRatio = priorResult
     ? priorResult.grossUltimateLoss / Math.max(priorResult.grossPremium, 1)
     : undefined;
 
   // --- Selected Funding Confidence ---
   // CLF is selected by the player and applied after the expected actuarial loss-cost rate is calculated.
-  const selectedFundingConfidenceLevel = decisions.fundingConfidenceLevel;
+  const selectedFundingConfidenceLevel = lineDecisions.fundingConfidenceLevel;
   const selectedFundingCLF = lookupCLF(selectedFundingConfidenceLevel);
 
   // --- Expected Actuarial Loss-Cost Rate ---
   // Expected losses evolve independently from pricing decisions. The player's
   // rate change affects the charged Pool Premium rate, not Pure Premium.
-  const newRateLevel = poolState.rateLevel * (1 + decisions.rateChange);
+  const newRateLevel = lineState.rateLevel * (1 + lineDecisions.rateChange);
   const pricingAdjustment = newRateLevel / 100;
 
   const lossTrend = instance.lossEnvironment.lossTrend;
-  const priorRCEffectiveness = poolState.riskControlEffectiveness;
+  const priorRCEffectiveness = lineState.riskControlEffectiveness;
   const maxRC = RISK_CONTROL_PARAMS.maxEffectiveness;
 
   const rcGain =
-    (decisions.riskControlPct / 0.08) *
+    (lineDecisions.riskControlPct / 0.08) *
     (maxRC / RISK_CONTROL_PARAMS.lagYears);
 
   const rcDecay =
     priorRCEffectiveness *
     RISK_CONTROL_PARAMS.decayRate *
-    (decisions.riskControlPct < 0.01 ? 2 : 1);
+    (lineDecisions.riskControlPct < 0.01 ? 2 : 1);
 
   const newRCEffectiveness = Math.max(
     0,
@@ -70,14 +94,14 @@ export function processYear(
   );
 
   const newPurePremiumPer100 =
-    poolState.purePremiumPer100 *
+    lineState.purePremiumPer100 *
     (1 + lossTrend) *
     (1 - newRCEffectiveness);
 
   // Preliminary contribution estimate used only for member movement.
   // Final premium is recalculated after member movement because exposure changes.
-  const currentActiveMembers = poolState.members.filter(m => m.status === 'active');
-  const estimatedExposure = currentActiveMembers.reduce((s, m) => s + m.exposure, 0);
+  const currentActiveMembers = lineState.members.filter(m => m.status === 'active');
+  const estimatedExposure = currentActiveMembers.reduce((s, m) => s + getMemberExposure(m, line), 0);
 
   const estimatedRateAtConfidenceLevelPer100 =
     newPurePremiumPer100 * selectedFundingCLF * pricingAdjustment;
@@ -89,11 +113,12 @@ export function processYear(
 
   const memberResult = simulateMemberMovement({
     currentMembers: currentActiveMembers,
-    allMarketMembers: poolState.allMarketMembers,
-    decisions,
-    currentMemberSatisfaction: poolState.memberSatisfaction,
-    currentRiskQuality: poolState.averageRiskQuality,
-    surplus: poolState.surplus,
+    allMarketMembers: ctx.allMarketMembers,
+    decisions: lineDecisions,
+    line,
+    currentMemberSatisfaction: lineState.memberSatisfaction,
+    currentRiskQuality: lineState.averageRiskQuality,
+    surplus: lineState.surplus,
     annualPremium: estimatedPremium,
     priorYearLossRatio,
     competitivePressure: instance.marketEnvironment.competitivePressure,
@@ -107,7 +132,7 @@ export function processYear(
   const totalMarketExposure = memberResult.totalMarketExposure;
   const marketShare = activeExposure / Math.max(totalMarketExposure, 0.01);
 
-  const updatedAllMembers: Member[] = poolState.allMarketMembers.map(m => {
+  const updatedAllMembers: Member[] = ctx.allMarketMembers.map(m => {
     const active = memberResult.activeMembers.find(a => a.id === m.id);
     if (active) return active;
 
@@ -135,13 +160,13 @@ export function processYear(
   const poolPremiumAndAdminExpense = poolPremium + adminExpense;
 
   const reinsStructure = getReinsuranceStructure(
-    decisions.reinsuranceLevel,
+    lineDecisions.reinsuranceLevel,
     poolPremium,
     expectedLoss
   );
 
   const reinsuranceCost = calculateReinsuranceCost(
-    decisions.reinsuranceLevel,
+    lineDecisions.reinsuranceLevel,
     poolPremium,
     instance.marketEnvironment.competitivePressure
   );
@@ -158,7 +183,7 @@ export function processYear(
   // Legacy names remain populated for compatibility with older screens and exports.
   const grossPremium = totalMemberCharge;
   const operatingExpense = adminExpense;
-  const riskControlInvestment = poolPremium * decisions.riskControlPct;
+  const riskControlInvestment = poolPremium * lineDecisions.riskControlPct;
 
   // --- Member-Level Loss Simulation ---
   // Each member's Gamma distribution has a mean equal to expected loss. Risk
@@ -178,7 +203,8 @@ export function processYear(
   const catastropheFactor = 1;
 
   const memberLossResults: MemberLossResult[] = memberResult.activeMembers.map(member => {
-    const memberExpectedLoss = member.exposure * newPurePremiumPer100 * 10_000;
+    const memberExposureAmount = getMemberExposure(member, line);
+    const memberExpectedLoss = memberExposureAmount * newPurePremiumPer100 * 10_000;
     const riskQuality = Math.max(1, Math.min(10, member.riskQuality));
     const coefficientOfVariation = MEMBER_LOSS_VOLATILITY.worstRiskCV
       + ((riskQuality - 1) / 9)
@@ -191,7 +217,7 @@ export function processYear(
     return {
       memberId: member.id,
       memberName: member.name,
-      exposure: member.exposure,
+      exposure: memberExposureAmount,
       riskQuality: member.riskQuality,
       expectedLoss: memberExpectedLoss,
       coefficientOfVariation,
@@ -229,11 +255,11 @@ export function processYear(
 
   // --- Investment Income ---
   const investRng = deriveSubRng(instance.seed, yearNumber, 'invest');
-  const investedAssets = poolState.investments;
+  const investedAssets = ctx.investments;
 
   const invResult = simulateInvestmentReturn(
     investedAssets,
-    decisions.investmentRisk,
+    ctx.investmentRisk,
     instance.investmentEnvironment.baseReturn,
     instance.investmentEnvironment.volatility,
     instance.investmentEnvironment.downsideRisk,
@@ -258,7 +284,7 @@ export function processYear(
     grossPaidThisYear,
     reinsReceivedThisYear,
   } = processReserveDevelopment(
-    poolState.reserveCohorts,
+    lineState.reserveCohorts,
     devRng,
     priorFundingAdequacyRatio
   );
@@ -301,12 +327,12 @@ export function processYear(
     expectedGrossUnpaidLoss - expectedReinsuranceRecoverable
   );
 
-  const beginningGrossReserve = poolState.reserveCohorts.reduce(
+  const beginningGrossReserve = lineState.reserveCohorts.reduce(
     (s, c) => s + c.grossUnpaid,
     0
   );
 
-  const beginningReinsRecoverable = poolState.reserveCohorts.reduce(
+  const beginningReinsRecoverable = lineState.reserveCohorts.reduce(
     (s, c) => s + c.reinsuranceRecoverable,
     0
   );
@@ -314,8 +340,8 @@ export function processYear(
   // --- Income Statement ---
   // Use reserve-rollforward incurred loss so the income statement and balance sheet tie.
   // This keeps the financial statement logic consistent with the reserve accounting.
-  const assessments = poolPremium * decisions.assessmentPct;
-  const dividends = poolPremium * decisions.dividendPct;
+  const assessments = poolPremium * lineDecisions.assessmentPct;
+  const dividends = poolPremium * lineDecisions.dividendPct;
 
   // Keep this as a displayed reserve development metric.
   // Do not add it separately to net income because reserve development is already captured
@@ -360,12 +386,12 @@ export function processYear(
   // Balance sheet liabilities use expected unpaid losses, not CLF-loaded targets.
   // To keep the game model clean, written premium is treated as collected and earned in the year.
   // Unearned premium is held at zero rather than creating a separate timing layer.
-  const beginingSurplus = poolState.surplus;
+  const beginingSurplus = lineState.surplus;
 
   const unearnedPremium = 0;
-  const otherLiabilities = poolState.otherLiabilities;
+  const otherLiabilities = ctx.otherLiabilities;
 
-  const beginningCash = poolState.cash;
+  const beginningCash = ctx.cash;
 
   const newCash =
     beginningCash +
@@ -378,7 +404,7 @@ export function processYear(
     reinsuranceCost -
     dividends;
 
-  const beginningInvestments = poolState.investments;
+  const beginningInvestments = ctx.investments;
   const investmentsBeforeSweep = Math.max(0, beginningInvestments + investmentIncome);
 
   // Sweep cash above the operating target into investments (where it earns a
@@ -404,7 +430,7 @@ export function processYear(
     endingCash +
     endingInvestments +
     endingReinsRecoverable +
-    poolState.otherAssets;
+    ctx.otherAssets;
 
   const totalLiabilities =
     expectedGrossUnpaidLoss +
@@ -499,7 +525,8 @@ export function processYear(
   const result: ResultSet = {
     yearNumber,
     calendarYear,
-    decisions,
+    decisions: lineDecisions,
+    investmentRisk: ctx.investmentRisk,
 
     activeMembers: memberResult.activeMembers.length,
     newMembers: memberResult.newMembers.length,
@@ -607,7 +634,7 @@ export function processYear(
     endingCash,
     beginningInvestments,
     endingInvestments,
-    otherAssets: poolState.otherAssets,
+    otherAssets: ctx.otherAssets,
     totalAssets,
     unearnedPremium,
     otherLiabilities,
@@ -635,7 +662,7 @@ export function processYear(
 
   result.narrativeExplanation = generateNarrative(result, priorResult);
 
-  const updatedPoolState: PoolState = {
+  const updatedLineState: LinePoolState = {
     rateLevel: newRateLevel,
     ratePer100: totalMemberRatePer100,
     purePremiumPer100: newPurePremiumPer100,
@@ -648,17 +675,68 @@ export function processYear(
     reserveCohorts: allCohorts,
     members: memberResult.activeMembers,
 
-    cash: endingCash,
-    investments: endingInvestments,
-    otherAssets: poolState.otherAssets,
     grossUnpaidReserve: endingGrossReserve,
     reinsuranceRecoverable: endingReinsRecoverable,
-    unearnedPremium,
-    otherLiabilities,
     surplus: endingSurplus,
 
     totalMarketExposure,
+  };
+
+  const updatedShared: LineYearShared = {
+    cash: endingCash,
+    investments: endingInvestments,
+    otherAssets: ctx.otherAssets,
+    unearnedPremium,
+    otherLiabilities,
     allMarketMembers: updatedAllMembers,
+  };
+
+  return { updatedLineState, updatedShared, result };
+}
+
+// Stage 1.2: only WC is wired to the simulation. GL and Property carry inert
+// placeholder state (see instanceGenerator.ts) that this wrapper leaves untouched.
+export function processYear(
+  gameState: GameState,
+  decisions: DecisionSet
+): { updatedPoolState: PoolState; result: ResultSet } {
+  const { instance, poolState, currentYearNumber, setup } = gameState;
+  const yearNumber = currentYearNumber;
+  const calendarYear = setup.startingYear + yearNumber - 1;
+
+  const priorResult = gameState.lockedResults[gameState.lockedResults.length - 1];
+
+  const ctx: LineYearContext = {
+    instance,
+    yearNumber,
+    calendarYear,
+    allMarketMembers: poolState.allMarketMembers,
+    cash: poolState.cash,
+    investments: poolState.investments,
+    otherAssets: poolState.otherAssets,
+    otherLiabilities: poolState.otherLiabilities,
+    investmentRisk: decisions.investmentRisk,
+    priorResult,
+  };
+
+  const { updatedLineState, updatedShared, result } = processLineYear(
+    'WC',
+    poolState.lines.WC,
+    decisions.byLine.WC,
+    ctx
+  );
+
+  const updatedPoolState: PoolState = {
+    cash: updatedShared.cash,
+    investments: updatedShared.investments,
+    otherAssets: updatedShared.otherAssets,
+    unearnedPremium: updatedShared.unearnedPremium,
+    otherLiabilities: updatedShared.otherLiabilities,
+    allMarketMembers: updatedShared.allMarketMembers,
+    lines: {
+      ...poolState.lines,
+      WC: updatedLineState,
+    },
   };
 
   return { updatedPoolState, result };

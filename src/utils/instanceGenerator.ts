@@ -2,9 +2,10 @@
 // Exposure = payroll in millions of dollars
 // Premium = Exposure($M) × Rate_per_$100_payroll × 10,000
 
-import type { GameInstance, Member, PoolState, StartingFinancials, ReserveCohort } from '../types/simulation';
+import type { GameInstance, Member, PoolState, LinePoolState, StartingFinancials, ReserveCohort } from '../types/simulation';
 import { SeededRandom } from './random';
 import { getPredefinedMarketMembers } from '../data/memberCatalog';
+import { getMemberExposure, emptyLinePoolState } from './lineHelpers';
 import {
   STARTING_FINANCIALS,
   STARTING_MEMBER_RANGE,
@@ -23,7 +24,7 @@ function assignStartingMembers(allMembers: Member[], rng: SeededRandom, targetCo
     const shuffled = [...allMembers];
     rng.shuffle(shuffled);
     const candidate = shuffled.slice(0, targetCount);
-    const exposure = candidate.reduce((sum, member) => sum + member.exposure, 0);
+    const exposure = candidate.reduce((sum, member) => sum + getMemberExposure(member, 'WC'), 0);
     const averageRisk = candidate.reduce((sum, member) => sum + member.riskQuality, 0) / candidate.length;
     const exposurePenalty = exposure < STARTING_POOL_EXPOSURE.min
       ? STARTING_POOL_EXPOSURE.min - exposure
@@ -165,8 +166,8 @@ export function generateStartingPoolState(instance: GameInstance, startingYear: 
 
   const activeMembers = allMembersWithStatus.filter(m => m.status === 'active');
 
-  let activeExposure = activeMembers.reduce((sum, m) => sum + m.exposure, 0);
-  let totalMarketExposure = allMarketMembers.reduce((sum, m) => sum + m.exposure, 0);
+  let activeExposure = activeMembers.reduce((sum, m) => sum + getMemberExposure(m, 'WC'), 0);
+  let totalMarketExposure = allMarketMembers.reduce((sum, m) => sum + getMemberExposure(m, 'WC'), 0);
 
   const targetPremium = rng.range(STARTING_FINANCIALS.annualPremium.min, STARTING_FINANCIALS.annualPremium.max);
   const annualPremium = targetPremium;
@@ -210,7 +211,7 @@ export function generateStartingPoolState(instance: GameInstance, startingYear: 
     console.warn(`Starting reserve cohort sum (${cohortSum}) does not match grossUnpaidReserve (${grossUnpaidReserve})`);
   }
 
-  const poolState: PoolState = {
+  const wcLineState: LinePoolState = {
     rateLevel: 100,
     ratePer100,
     purePremiumPer100,
@@ -220,16 +221,24 @@ export function generateStartingPoolState(instance: GameInstance, startingYear: 
     riskControlEffectiveness: 0,
     reserveCohorts: startingReserveCohorts,
     members: allMembersWithStatus,
+    grossUnpaidReserve,
+    reinsuranceRecoverable,
+    surplus,
+    totalMarketExposure,
+  };
+
+  const poolState: PoolState = {
     cash,
     investments,
     otherAssets,
-    grossUnpaidReserve,
-    reinsuranceRecoverable,
     unearnedPremium,
     otherLiabilities,
-    surplus,
-    totalMarketExposure,
     allMarketMembers: allMembersWithStatus,
+    lines: {
+      WC: wcLineState,
+      GL: emptyLinePoolState(),
+      Property: emptyLinePoolState(),
+    },
   };
 
   const startingFinancials: StartingFinancials = {

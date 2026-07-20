@@ -3,6 +3,7 @@ import { Download, ClipboardList, Table, Users } from 'lucide-react';
 import type { ResultSet } from '../types/simulation';
 import { formatCurrency, formatPct } from '../utils/formatters';
 import { REINSURANCE_PROGRAMS } from '../data/defaultAssumptions';
+import { getMemberExposure } from '../utils/lineHelpers';
 
 interface ResultSpreadsheetPageProps {
   lockedResults: ResultSet[];
@@ -98,7 +99,7 @@ export default function ResultSpreadsheetPage({ lockedResults }: ResultSpreadshe
         key: 'investmentRisk',
         category: 'Decisions',
         label: 'Investment Risk',
-        value: r => r.decisions.investmentRisk,
+        value: r => r.investmentRisk,
       },
 
       // Membership
@@ -618,7 +619,7 @@ export default function ResultSpreadsheetPage({ lockedResults }: ResultSpreadshe
         name: safeCell(record.name),
         status: safeCell(record.status),
         size: safeCell(record.sizeCategory),
-        exposure: safeNumber(record.exposure),
+        exposure: safeNumber(getMemberExposure(member, 'WC')),
         riskQuality: safeNumber(record.riskQuality),
         satisfaction: safeNumber(record.satisfaction),
         expectedLoss: loss ? formatCurrency(loss.expectedLoss) : '',
@@ -949,7 +950,7 @@ function buildMemberCsv(result: ResultSet | undefined): string {
       safeCell(record.name),
       safeCell(record.status),
       safeCell(record.sizeCategory),
-      safeNumber(record.exposure),
+      safeNumber(getMemberExposure(member, 'WC')),
       safeNumber(record.riskQuality),
       safeNumber(record.satisfaction),
       loss ? Math.round(loss.expectedLoss) : '',

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Users, UserPlus, UserMinus, Globe } from 'lucide-react';
 import type { ResultSet, Member, StartingFinancials } from '../types/simulation';
 import { formatPct } from '../utils/formatters';
+import { getMemberExposure } from '../utils/lineHelpers';
 
 interface MembershipPageProps {
   lockedResults: ResultSet[];
@@ -30,7 +31,7 @@ export default function MembershipPage({ lockedResults, startingFinancials, init
     let valA: number | string = 0;
     let valB: number | string = 0;
     if (sortKey === 'name') { valA = a.name; valB = b.name; }
-    else if (sortKey === 'exposure') { valA = a.exposure; valB = b.exposure; }
+    else if (sortKey === 'exposure') { valA = getMemberExposure(a, 'WC'); valB = getMemberExposure(b, 'WC'); }
     else if (sortKey === 'satisfaction') { valA = a.satisfaction; valB = b.satisfaction; }
     else if (sortKey === 'riskQuality') { valA = a.riskQuality; valB = b.riskQuality; }
     else if (sortKey === 'yearJoined') { valA = a.yearJoined; valB = b.yearJoined; }
@@ -117,7 +118,7 @@ function MemberRow({ member }: { member: Member }) {
       <td className="px-4 py-3 font-medium text-gray-900">{member.name}</td>
       <td className="px-4 py-3 text-gray-600"><span className="bg-gray-100 text-gray-700 text-xs px-2 py-0.5 rounded-full whitespace-nowrap">{member.type}</span></td>
       <td className="px-4 py-3 text-gray-600"><SizeBadge size={member.sizeCategory} /></td>
-      <td className="px-4 py-3 font-mono text-gray-800">${member.exposure.toFixed(2)}M</td>
+      <td className="px-4 py-3 font-mono text-gray-800">${getMemberExposure(member, 'WC').toFixed(2)}M</td>
       <td className="px-4 py-3 text-gray-600">{member.calendarYearJoined > 0 ? member.calendarYearJoined : '—'}</td>
       <td className={`px-4 py-3 font-semibold ${qualityColor}`}>{member.riskQuality.toFixed(1)}</td>
       <td className={`px-4 py-3 font-semibold ${satColor}`}>{member.satisfaction.toFixed(1)}</td>

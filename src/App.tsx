@@ -16,6 +16,7 @@ import { SLIDER_RANGES } from './data/defaultAssumptions';
 import { generateGameInstance, generateStartingPoolState } from './utils/instanceGenerator';
 import { processYear } from './utils/simulationEngine';
 import { generateHistoricalYears } from './utils/historyGenerator';
+import { getMemberExposure } from './utils/lineHelpers';
 
 import Header from './components/Header';
 import TabNav, { type TabId } from './components/TabNav';
@@ -43,8 +44,7 @@ function seedFromInstanceId(id: string): number {
 }
 
 function defaultDecisions(yearNumber: number): DecisionSet {
-  return {
-    yearNumber,
+  const lineDefaults = {
     rateChange: SLIDER_RANGES.rateChange.default,
     fundingConfidenceLevel: SLIDER_RANGES.fundingConfidenceLevel.default,
     dividendPct: SLIDER_RANGES.dividendPct.default,
@@ -52,7 +52,15 @@ function defaultDecisions(yearNumber: number): DecisionSet {
     underwritingStrictness: SLIDER_RANGES.underwritingStrictness.default,
     riskControlPct: SLIDER_RANGES.riskControlPct.default,
     reinsuranceLevel: SLIDER_RANGES.reinsuranceLevel.default,
+  };
+  return {
+    yearNumber,
     investmentRisk: SLIDER_RANGES.investmentRisk.default,
+    byLine: {
+      WC: lineDefaults,
+      GL: lineDefaults,
+      Property: lineDefaults,
+    },
   };
 }
 
@@ -78,7 +86,7 @@ export default function App() {
   // Load persisted game from localStorage if available
   React.useEffect(() => {
     try {
-      const saved = localStorage.getItem('riskpool_gamestate');
+      const saved = localStorage.getItem('riskpool_gamestate_v2');
       if (saved) {
         const { gameState: gs, startingFinancials: sf, initialMembers: im, currentDecisions: cd } = JSON.parse(saved);
 
@@ -91,19 +99,19 @@ export default function App() {
           setActiveTab('dashboard');
         } else {
           // Bad saved state - clear it
-          localStorage.removeItem('riskpool_gamestate');
+          localStorage.removeItem('riskpool_gamestate_v2');
         }
       }
     } catch {
       // ignore parse errors - clear corrupted data
-      localStorage.removeItem('riskpool_gamestate');
+      localStorage.removeItem('riskpool_gamestate_v2');
     }
   }, []);
 
   function persistState(gs: GameState, sf: StartingFinancials, im: Member[], cd: DecisionSet) {
     try {
       localStorage.setItem(
-        'riskpool_gamestate',
+        'riskpool_gamestate_v2',
         JSON.stringify({
           gameState: gs,
           startingFinancials: sf,
@@ -121,7 +129,7 @@ export default function App() {
     const instance = generateGameInstance(settings.instanceId, seed);
     const { poolState, startingFinancials: sf } = generateStartingPoolState(instance, settings.startingYear);
 
-    const initMembers = poolState.members.filter(m => m.status === 'active');
+    const initMembers = poolState.lines.WC.members.filter(m => m.status === 'active');
 
     const gs: GameState = {
       setup: settings,
@@ -176,7 +184,7 @@ export default function App() {
     setStartingFinancials(null);
     setInitialMembers([]);
     setCurrentDecisions(defaultDecisions(1));
-    localStorage.removeItem('riskpool_gamestate');
+    localStorage.removeItem('riskpool_gamestate_v2');
     setActiveTab('setup');
   }, []);
 
@@ -207,21 +215,21 @@ export default function App() {
   const estimatedPremium = React.useMemo(() => {
     if (!gameState) return 5_000_000;
 
-    const activeMembers = gameState.poolState.members.filter(m => m.status === 'active');
-    const exposure = activeMembers.reduce((s, m) => s + m.exposure, 0);
+    const activeMembers = gameState.poolState.lines.WC.members.filter(m => m.status === 'active');
+    const exposure = activeMembers.reduce((s, m) => s + getMemberExposure(m, 'WC'), 0);
 
     // Current estimate is intentionally simple for the Decisions page preview.
     // Actual premium is calculated in simulationEngine.ts when the year is processed.
-    return exposure * gameState.poolState.ratePer100 * (1 + currentDecisions.rateChange) * 10_000;
-  }, [gameState, currentDecisions.rateChange]);
+    return exposure * gameState.poolState.lines.WC.ratePer100 * (1 + currentDecisions.byLine.WC.rateChange) * 10_000;
+  }, [gameState, currentDecisions.byLine.WC.rateChange]);
 
   const estimatedExpectedLoss = React.useMemo(() => {
     if (!gameState) return 3_500_000;
 
-    const activeMembers = gameState.poolState.members.filter(m => m.status === 'active');
-    const exposure = activeMembers.reduce((s, m) => s + m.exposure, 0);
+    const activeMembers = gameState.poolState.lines.WC.members.filter(m => m.status === 'active');
+    const exposure = activeMembers.reduce((s, m) => s + getMemberExposure(m, 'WC'), 0);
 
-    return exposure * gameState.poolState.purePremiumPer100 * 10_000;
+    return exposure * gameState.poolState.lines.WC.purePremiumPer100 * 10_000;
   }, [gameState]);
 
   return (

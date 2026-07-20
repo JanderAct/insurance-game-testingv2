@@ -1,8 +1,9 @@
 // Membership engine for Risk Pool Simulation v1
 // Uses count-based attraction to keep growth realistic
 
-import type { Member, DecisionSet } from '../types/simulation';
+import type { Member, LineDecisionSet, CoverageLine } from '../types/simulation';
 import { SeededRandom } from './random';
+import { getMemberExposure } from './lineHelpers';
 import {
   MEMBER_MOVEMENT_WEIGHTS,
   BASE_RETENTION,
@@ -14,7 +15,8 @@ import {
 export interface MemberMovementInputs {
   currentMembers: Member[];
   allMarketMembers: Member[];
-  decisions: DecisionSet;
+  decisions: LineDecisionSet;
+  line: CoverageLine;
   currentMemberSatisfaction: number;
   currentRiskQuality: number;
   surplus: number;
@@ -96,7 +98,7 @@ function calcExpectedNewMembers(inputs: MemberMovementInputs): number {
   return Math.max(0, Math.min(MAX_NEW_MEMBERS_PER_YEAR, expected));
 }
 
-function updateSatisfaction(current: number, decisions: DecisionSet): number {
+function updateSatisfaction(current: number, decisions: LineDecisionSet): number {
   let delta = 0;
   delta -= decisions.rateChange * 5.0;
   delta += decisions.dividendPct * 10.0;
@@ -122,9 +124,9 @@ function updateRiskQuality(
 }
 
 export function simulateMemberMovement(inputs: MemberMovementInputs): MemberMovementResult {
-  const { currentMembers, allMarketMembers, yearNumber, calendarYear, rng } = inputs;
+  const { currentMembers, allMarketMembers, line, yearNumber, calendarYear, rng } = inputs;
 
-  const totalMarketExposure = allMarketMembers.reduce((s, m) => s + m.exposure, 0);
+  const totalMarketExposure = allMarketMembers.reduce((s, m) => s + getMemberExposure(m, line), 0);
 
   const retentionProb = calcRetentionProbability(inputs);
   const expectedWithdrawals = currentMembers.length * (1 - retentionProb);
@@ -167,7 +169,7 @@ export function simulateMemberMovement(inputs: MemberMovementInputs): MemberMove
   }));
 
   const activeMembers: Member[] = [...retainedMembers, ...newMembers];
-  const activeExposure = activeMembers.reduce((s, m) => s + m.exposure, 0);
+  const activeExposure = activeMembers.reduce((s, m) => s + getMemberExposure(m, line), 0);
 
   const retentionRate = currentMembers.length > 0
     ? retainedMembers.length / currentMembers.length

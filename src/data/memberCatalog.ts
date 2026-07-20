@@ -53,7 +53,7 @@ export const PREDEFINED_MARKET_MEMBERS: ReadonlyArray<Member> = Array.from(
       name: `${PLACE_NAMES[index % PLACE_NAMES.length]} ${type} ${sequence}`,
       type,
       sizeCategory,
-      exposure: exposureFor(index, sizeCategory),
+      exposureByLine: { WC: exposureFor(index, sizeCategory) },
       yearJoined: 0,
       calendarYearJoined: 0,
       riskQuality: Number((2 + ((index * 37) % 66) / 10).toFixed(1)),
