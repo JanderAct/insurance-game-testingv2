@@ -127,7 +127,7 @@ export default function App() {
   const handleStartGame = useCallback((settings: GameSetupSettings) => {
     const seed = seedFromInstanceId(settings.instanceId);
     const instance = generateGameInstance(settings.instanceId, seed);
-    const { poolState, startingFinancials: sf } = generateStartingPoolState(instance, settings.startingYear);
+    const { poolState, startingFinancials: sf } = generateStartingPoolState(instance, settings.startingYear, settings.activeLines);
 
     const initMembers = poolState.lines.WC.members.filter(m => m.status === 'active');
 

@@ -327,7 +327,15 @@ export interface ResultSet {
 
   // Narrative
   narrativeExplanation: string;
+
+  // Per-line breakdown. Pool-level fields above are aggregates across active
+  // lines (dollar/count fields summed, ratios recomputed from the summed
+  // components); this map retains each line's own unaggregated result.
+  byLine: Record<CoverageLine, LineResultSet>;
 }
+
+// A single line's own result for the year, before pool-level aggregation.
+export type LineResultSet = Omit<ResultSet, 'byLine'>;
 
 // Per-line pool state (rolled from year to year)
 export interface LinePoolState {

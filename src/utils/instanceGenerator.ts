@@ -12,7 +12,11 @@ import {
   STARTING_POOL_EXPOSURE,
   STARTING_RATE_PER_100,
   RESERVE_PAYDOWN_PCT,
+  GL_STARTING_RATE_PER_100,
+  GL_EXPECTED_LOSS_RATIO,
+  GL_STARTING_FINANCIALS,
 } from '../data/defaultAssumptions';
+import type { CoverageLine } from '../types/simulation';
 
 function assignStartingMembers(allMembers: Member[], rng: SeededRandom, targetCount: number, startingYear: number): Member[] {
   let bestSelection: Member[] = [];
@@ -149,7 +153,11 @@ export function generateGameInstance(instanceId: string, seed: number): GameInst
   };
 }
 
-export function generateStartingPoolState(instance: GameInstance, startingYear: number): { poolState: PoolState; startingFinancials: StartingFinancials } {
+export function generateStartingPoolState(
+  instance: GameInstance,
+  startingYear: number,
+  activeLines: CoverageLine[]
+): { poolState: PoolState; startingFinancials: StartingFinancials } {
   const rng = new SeededRandom(instance.seed + 777);
 
   const allMarketMembers = getPredefinedMarketMembers();
@@ -211,6 +219,46 @@ export function generateStartingPoolState(instance: GameInstance, startingYear: 
     console.warn(`Starting reserve cohort sum (${cohortSum}) does not match grossUnpaidReserve (${grossUnpaidReserve})`);
   }
 
+  // GL bootstrap draws happen strictly after every WC draw above, so the WC-only
+  // seed stream (and its regression baseline) is completely unaffected by GL's
+  // presence or absence.
+  const glLineState: LinePoolState = activeLines.includes('GL')
+    ? (() => {
+        const glRatePer100 = rng.range(GL_STARTING_RATE_PER_100.min, GL_STARTING_RATE_PER_100.max);
+        const glExpectedLossRatio = rng.range(GL_EXPECTED_LOSS_RATIO.min, GL_EXPECTED_LOSS_RATIO.max);
+        const glPurePremiumPer100 = glRatePer100 * glExpectedLossRatio;
+        const glGrossUnpaidReserve = rng.range(GL_STARTING_FINANCIALS.grossUnpaidReserve.min, GL_STARTING_FINANCIALS.grossUnpaidReserve.max);
+        const glReinsuranceRecoverable = rng.range(GL_STARTING_FINANCIALS.reinsuranceRecoverable.min, GL_STARTING_FINANCIALS.reinsuranceRecoverable.max);
+        const glTotalMarketExposure = allMarketMembers.reduce((sum, m) => sum + getMemberExposure(m, 'GL'), 0);
+        const glStartingReserveCohorts = generateStartingReserveCohorts(
+          glGrossUnpaidReserve,
+          glReinsuranceRecoverable,
+          startingYear,
+          rng
+        );
+        return {
+          rateLevel: 100,
+          ratePer100: glRatePer100,
+          purePremiumPer100: glPurePremiumPer100,
+          purePremium: glPurePremiumPer100,
+          memberSatisfaction: parseFloat(memberSatisfaction.toFixed(1)),
+          averageRiskQuality: parseFloat(riskQuality.toFixed(1)),
+          riskControlEffectiveness: 0,
+          reserveCohorts: glStartingReserveCohorts,
+          members: allMembersWithStatus,
+          grossUnpaidReserve: glGrossUnpaidReserve,
+          reinsuranceRecoverable: glReinsuranceRecoverable,
+          // GL contributes no assets of its own at bootstrap (cash/investments are
+          // shared and already fully reflected in WC's starting surplus above), so
+          // its starting surplus is simply the negative of its net starting reserve
+          // liability — this keeps pool-level surplus (WC + GL) exactly equal to
+          // shared assets minus total liabilities across both lines.
+          surplus: glReinsuranceRecoverable - glGrossUnpaidReserve,
+          totalMarketExposure: glTotalMarketExposure,
+        };
+      })()
+    : emptyLinePoolState();
+
   const wcLineState: LinePoolState = {
     rateLevel: 100,
     ratePer100,
@@ -236,7 +284,7 @@ export function generateStartingPoolState(instance: GameInstance, startingYear: 
     allMarketMembers: allMembersWithStatus,
     lines: {
       WC: wcLineState,
-      GL: emptyLinePoolState(),
+      GL: glLineState,
       Property: emptyLinePoolState(),
     },
   };

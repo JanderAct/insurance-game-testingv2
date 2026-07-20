@@ -53,7 +53,10 @@ export const PREDEFINED_MARKET_MEMBERS: ReadonlyArray<Member> = Array.from(
       name: `${PLACE_NAMES[index % PLACE_NAMES.length]} ${type} ${sequence}`,
       type,
       sizeCategory,
-      exposureByLine: { WC: exposureFor(index, sizeCategory) },
+      // GL rides on the same payroll figure as WC — one payroll number per
+      // member drives both lines (public-entity pools don't have a separate
+      // commercial-style revenue base for GL).
+      exposureByLine: { WC: exposureFor(index, sizeCategory), GL: exposureFor(index, sizeCategory) },
       yearJoined: 0,
       calendarYearJoined: 0,
       riskQuality: Number((2 + ((index * 37) % 66) / 10).toFixed(1)),

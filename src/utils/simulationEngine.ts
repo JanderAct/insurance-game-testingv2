@@ -1,7 +1,7 @@
 // Core simulation engine for Risk Pool Simulation v1
 // Premium formula: Premium = Exposure($M) × Rate_per_$100_payroll × 10,000
 
-import type { GameState, PoolState, DecisionSet, LinePoolState, LineDecisionSet, ResultSet, ReserveCohort, Member, MemberLossResult, CoverageLine, GameInstance } from '../types/simulation';
+import type { GameState, PoolState, DecisionSet, LinePoolState, LineDecisionSet, ResultSet, LineResultSet, ReserveCohort, Member, MemberLossResult, CoverageLine, GameInstance } from '../types/simulation';
 import { SeededRandom, deriveSubRng } from './random';
 import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, MEMBER_LOSS_VOLATILITY, RISK_CONTROL_PARAMS, RESERVE_PAYDOWN_PCT, OPERATING_CASH_PCT_OF_PREMIUM, FULL_TRANSFER_COST_PCT_OF_PREMIUM, SELF_FUNDED_DISCOUNT_PCT } from '../data/defaultAssumptions';
 import { getReinsuranceStructure, calculateReinsuranceCost, calculateReinsuranceRecovery } from './reinsuranceEngine';
@@ -28,7 +28,20 @@ export function lookupCLF(level: number): number {
   return FUNDING_CLF_TABLE[best];
 }
 
+// Line-specific label for a seeded sub-RNG stream. WC keeps its original,
+// unsuffixed label so a WC-only game's random draws (and therefore the Stage
+// 1.2 regression baseline) are completely unaffected by other lines existing.
+// Every other line gets its own independent stream via a suffixed label.
+function lineRngLabel(base: string, line: CoverageLine): string {
+  return line === 'WC' ? base : `${base}_${line}`;
+}
+
 // Shared (pool-level, cross-line) context needed to process a single line's year.
+// cash/investments/otherAssets/otherLiabilities are this line's allocated SHARE
+// of the pool's shared balance sheet (see processYear); investedAssets/
+// investmentIncome/investmentReturnRate come from one pool-level investment
+// draw, likewise split by share, so a single commingled portfolio isn't
+// independently re-rolled per line.
 interface LineYearContext {
   instance: GameInstance;
   yearNumber: number;
@@ -39,7 +52,10 @@ interface LineYearContext {
   otherAssets: number;
   otherLiabilities: number;
   investmentRisk: number;
-  priorResult?: ResultSet;
+  investedAssets: number;
+  investmentIncome: number;
+  investmentReturnRate: number;
+  priorResult?: LineResultSet;
 }
 
 // Shared fields this line's year processing updates.
@@ -57,7 +73,7 @@ export function processLineYear(
   lineState: LinePoolState,
   lineDecisions: LineDecisionSet,
   ctx: LineYearContext
-): { updatedLineState: LinePoolState; updatedShared: LineYearShared; result: ResultSet } {
+): { updatedLineState: LinePoolState; updatedShared: LineYearShared; result: LineResultSet } {
   const { instance, yearNumber, calendarYear, priorResult } = ctx;
 
   const priorYearLossRatio = priorResult
@@ -109,7 +125,7 @@ export function processLineYear(
   const estimatedPremium =
     estimatedExposure * estimatedRateAtConfidenceLevelPer100 * 10_000;
 
-  const memberRng = deriveSubRng(instance.seed, yearNumber, 'members');
+  const memberRng = deriveSubRng(instance.seed, yearNumber, lineRngLabel('members', line));
 
   const memberResult = simulateMemberMovement({
     currentMembers: currentActiveMembers,
@@ -188,7 +204,7 @@ export function processLineYear(
   // --- Member-Level Loss Simulation ---
   // Each member's Gamma distribution has a mean equal to expected loss. Risk
   // quality affects the coefficient of variation and therefore standard deviation.
-  const lossRng = deriveSubRng(instance.seed, yearNumber, 'losses');
+  const lossRng = deriveSubRng(instance.seed, yearNumber, lineRngLabel('losses', line));
 
   // Continuous aggregate annual factor calibrated against stock-decision game
   // outcomes. It replaces the old two-state normal/shock mixture, which made
@@ -254,25 +270,16 @@ export function processLineYear(
   const quotaShareLosses = excessLosses - reinsuranceRecovery;
 
   // --- Investment Income ---
-  const investRng = deriveSubRng(instance.seed, yearNumber, 'invest');
-  const investedAssets = ctx.investments;
-
-  const invResult = simulateInvestmentReturn(
-    investedAssets,
-    ctx.investmentRisk,
-    instance.investmentEnvironment.baseReturn,
-    instance.investmentEnvironment.volatility,
-    instance.investmentEnvironment.downsideRisk,
-    investRng
-  );
-
-  const investmentIncome = invResult.income;
-  const investmentReturnRate = invResult.returnRate;
+  // Drawn once for the whole pool (see processYear) and passed in already
+  // split by this line's share of the shared, commingled portfolio.
+  const investedAssets = ctx.investedAssets;
+  const investmentIncome = ctx.investmentIncome;
+  const investmentReturnRate = ctx.investmentReturnRate;
 
   // --- Reserve Development ---
   // Process existing reserve cohorts. These are accounting reserve cohorts.
   // CLF does not multiply booked reserves.
-  const devRng = deriveSubRng(instance.seed, yearNumber, 'dev');
+  const devRng = deriveSubRng(instance.seed, yearNumber, lineRngLabel('dev', line));
 
   // Legacy compatibility: this currently uses prior premium funding adequacy.
   // Later, this could be renamed or separated from reserve adequacy.
@@ -522,7 +529,7 @@ export function processLineYear(
   const lossRatio = actualLossRatio;
   const expenseRatio = actualExpenseRatio;
 
-  const result: ResultSet = {
+  const result: LineResultSet = {
     yearNumber,
     calendarYear,
     decisions: lineDecisions,
@@ -657,10 +664,9 @@ export function processLineYear(
     lossRatio,
     expenseRatio,
 
+    // Narrative is generated once at the pool level (see processYear), not per line.
     narrativeExplanation: '',
   };
-
-  result.narrativeExplanation = generateNarrative(result, priorResult);
 
   const updatedLineState: LinePoolState = {
     rateLevel: newRateLevel,
@@ -694,8 +700,9 @@ export function processLineYear(
   return { updatedLineState, updatedShared, result };
 }
 
-// Stage 1.2: only WC is wired to the simulation. GL and Property carry inert
-// placeholder state (see instanceGenerator.ts) that this wrapper leaves untouched.
+// Stage 1.3: loops over all active lines (WC and, once wired, GL). Property
+// stays inert (Stage 1.4). For a single active line this reduces to exactly
+// Stage 1.2's behavior — the WC-only regression baseline is unaffected.
 export function processYear(
   gameState: GameState,
   decisions: DecisionSet
@@ -704,42 +711,315 @@ export function processYear(
   const yearNumber = currentYearNumber;
   const calendarYear = setup.startingYear + yearNumber - 1;
 
-  const priorResult = gameState.lockedResults[gameState.lockedResults.length - 1];
+  const priorPoolResult = gameState.lockedResults[gameState.lockedResults.length - 1];
 
-  const ctx: LineYearContext = {
-    instance,
-    yearNumber,
-    calendarYear,
-    allMarketMembers: poolState.allMarketMembers,
-    cash: poolState.cash,
-    investments: poolState.investments,
-    otherAssets: poolState.otherAssets,
-    otherLiabilities: poolState.otherLiabilities,
-    investmentRisk: decisions.investmentRisk,
-    priorResult,
-  };
+  const activeLines = setup.activeLines;
+  const share = 1 / activeLines.length;
 
-  const { updatedLineState, updatedShared, result } = processLineYear(
-    'WC',
-    poolState.lines.WC,
-    decisions.byLine.WC,
-    ctx
+  // Investment income is drawn ONCE for the whole shared, commingled
+  // portfolio (same seeded call as Stage 1.2, unkeyed by line — a WC-only
+  // game draws exactly what it always did), then split across active lines
+  // by their equal share below.
+  const investRng = deriveSubRng(instance.seed, yearNumber, 'invest');
+  const poolInvestedAssets = poolState.investments;
+  const invResult = simulateInvestmentReturn(
+    poolInvestedAssets,
+    decisions.investmentRisk,
+    instance.investmentEnvironment.baseReturn,
+    instance.investmentEnvironment.volatility,
+    instance.investmentEnvironment.downsideRisk,
+    investRng
   );
 
+  let currentAllMarketMembers = poolState.allMarketMembers;
+  const lineResults: Array<{ line: CoverageLine; result: LineResultSet }> = [];
+  const updatedLineStates: Partial<Record<CoverageLine, LinePoolState>> = {};
+  let sharedCash = 0;
+  let sharedInvestments = 0;
+  let sharedOtherAssets = 0;
+  let sharedOtherLiabilities = 0;
+  let sharedUnearnedPremium = 0;
+
+  // Sequential fold: each line sees the shared roster as updated by lines
+  // already processed this year (a member withdrawing from one line becomes
+  // ineligible for new recruitment into the next, but isn't retroactively
+  // removed from lines it's already active on).
+  for (const line of activeLines) {
+    const ctx: LineYearContext = {
+      instance,
+      yearNumber,
+      calendarYear,
+      allMarketMembers: currentAllMarketMembers,
+      cash: poolState.cash * share,
+      investments: poolState.investments * share,
+      otherAssets: poolState.otherAssets * share,
+      otherLiabilities: poolState.otherLiabilities * share,
+      investmentRisk: decisions.investmentRisk,
+      investedAssets: poolInvestedAssets * share,
+      investmentIncome: invResult.income * share,
+      investmentReturnRate: invResult.returnRate,
+      priorResult: priorPoolResult?.byLine[line],
+    };
+
+    const { updatedLineState, updatedShared, result } = processLineYear(
+      line,
+      poolState.lines[line],
+      decisions.byLine[line],
+      ctx
+    );
+
+    currentAllMarketMembers = updatedShared.allMarketMembers;
+    updatedLineStates[line] = updatedLineState;
+    lineResults.push({ line, result });
+
+    sharedCash += updatedShared.cash;
+    sharedInvestments += updatedShared.investments;
+    sharedOtherAssets += updatedShared.otherAssets;
+    sharedOtherLiabilities += updatedShared.otherLiabilities;
+    sharedUnearnedPremium += updatedShared.unearnedPremium;
+  }
+
   const updatedPoolState: PoolState = {
-    cash: updatedShared.cash,
-    investments: updatedShared.investments,
-    otherAssets: updatedShared.otherAssets,
-    unearnedPremium: updatedShared.unearnedPremium,
-    otherLiabilities: updatedShared.otherLiabilities,
-    allMarketMembers: updatedShared.allMarketMembers,
+    cash: sharedCash,
+    investments: sharedInvestments,
+    otherAssets: sharedOtherAssets,
+    unearnedPremium: sharedUnearnedPremium,
+    otherLiabilities: sharedOtherLiabilities,
+    allMarketMembers: currentAllMarketMembers,
     lines: {
       ...poolState.lines,
-      WC: updatedLineState,
+      ...updatedLineStates,
     },
   };
 
+  const result = aggregateLineResults(lineResults, priorPoolResult);
+
   return { updatedPoolState, result };
+}
+
+// Combines each active line's own LineResultSet into the pool-level ResultSet.
+// Dollar/count fields are summed across lines; ratios are recomputed from the
+// summed components (never summed directly); a handful of line-ambiguous
+// descriptive/rate fields (rate level, CLF, decisions echo, status strings)
+// show the first active line's value as a placeholder until Stage 2.1 adds a
+// real per-line view. byLine always carries the full accurate per-line data.
+function aggregateLineResults(
+  lineResults: Array<{ line: CoverageLine; result: LineResultSet }>,
+  priorPoolResult: ResultSet | undefined
+): ResultSet {
+  const results = lineResults.map(r => r.result);
+  const first = results[0];
+
+  const sum = (key: keyof LineResultSet): number =>
+    results.reduce((total, r) => total + (r[key] as unknown as number), 0);
+
+  const activeMembersSum = sum('activeMembers');
+  const totalMarketExposureSum = sum('totalMarketExposure');
+  const activeExposureSum = sum('activeExposure');
+
+  // Recompute pool-wide retention from each line's implied prior-active count
+  // rather than averaging the per-line ratios.
+  let retainedSum = 0;
+  let priorActiveSum = 0;
+  for (const r of results) {
+    const retained = r.activeMembers - r.newMembers;
+    retainedSum += retained;
+    priorActiveSum += retained + r.withdrawnMembers;
+  }
+  const memberRetentionRate = priorActiveSum > 0
+    ? parseFloat((retainedSum / priorActiveSum).toFixed(3))
+    : 1;
+
+  const memberSatisfaction = activeMembersSum > 0
+    ? results.reduce((s, r) => s + r.memberSatisfaction * r.activeMembers, 0) / activeMembersSum
+    : first.memberSatisfaction;
+  const averageRiskQuality = activeMembersSum > 0
+    ? results.reduce((s, r) => s + r.averageRiskQuality * r.activeMembers, 0) / activeMembersSum
+    : first.averageRiskQuality;
+
+  const seenMemberIds = new Set<string>();
+  const memberList: Member[] = [];
+  for (const r of results) {
+    for (const m of r.memberList) {
+      if (!seenMemberIds.has(m.id)) {
+        seenMemberIds.add(m.id);
+        memberList.push(m);
+      }
+    }
+  }
+  const memberLossResults = results.flatMap(r => r.memberLossResults);
+
+  const poolPremiumAndAdminExpenseSum = sum('poolPremiumAndAdminExpense');
+  const expectedLossSum = sum('expectedLoss');
+  const totalMemberChargeSum = sum('totalMemberCharge');
+  const netIncurredLossSum = sum('netIncurredLoss');
+  const adminExpenseSum = sum('adminExpense');
+  const reinsuranceCostSum = sum('reinsuranceCost');
+  const reserveRiskMarginNeededSum = sum('reserveRiskMarginNeeded');
+  const excessAvailableSurplusSum = sum('excessAvailableSurplus');
+
+  const expectedLossRatio = expectedLossSum / Math.max(poolPremiumAndAdminExpenseSum, 1);
+  const expectedExpenseRatio = 1 - expectedLossRatio;
+  const actualLossRatio = netIncurredLossSum / Math.max(totalMemberChargeSum, 1);
+  const actualExpenseRatio = (adminExpenseSum + reinsuranceCostSum) / Math.max(totalMemberChargeSum, 1);
+  const actualCombinedRatio = actualLossRatio + actualExpenseRatio;
+
+  const excessCapitalRatio = reserveRiskMarginNeededSum > 0
+    ? excessAvailableSurplusSum / reserveRiskMarginNeededSum
+    : null;
+  const capitalAdequacyStatus =
+    excessCapitalRatio === null
+      ? 'N/A'
+      : excessCapitalRatio >= 0.25
+      ? 'Strong'
+      : excessCapitalRatio >= 0
+        ? 'Adequate'
+        : excessCapitalRatio >= -0.10
+          ? 'Thin'
+          : 'Deficient';
+
+  const byLine = {} as Record<CoverageLine, LineResultSet>;
+  for (const { line, result } of lineResults) {
+    byLine[line] = result;
+  }
+
+  const pooled: ResultSet = {
+    yearNumber: first.yearNumber,
+    calendarYear: first.calendarYear,
+    decisions: first.decisions,
+    investmentRisk: first.investmentRisk,
+
+    activeMembers: activeMembersSum,
+    newMembers: sum('newMembers'),
+    withdrawnMembers: sum('withdrawnMembers'),
+    activeExposure: activeExposureSum,
+    totalMarketExposure: totalMarketExposureSum,
+    marketShare: activeExposureSum / Math.max(totalMarketExposureSum, 0.01),
+    memberRetentionRate,
+    memberSatisfaction,
+    averageRiskQuality,
+    memberList,
+
+    rateLevel: first.rateLevel,
+    ratePer100: first.ratePer100,
+    purePremiumPer100: first.purePremiumPer100,
+    purePremium: first.purePremium,
+    writtenExposure: sum('writtenExposure'),
+
+    poolPremium: sum('poolPremium'),
+    adminExpense: adminExpenseSum,
+    poolPremiumAndAdminExpense: poolPremiumAndAdminExpenseSum,
+    selfFundedDiscount: sum('selfFundedDiscount'),
+    totalMemberCharge: totalMemberChargeSum,
+    grossPremium: sum('grossPremium'),
+    assessments: sum('assessments'),
+    dividends: sum('dividends'),
+
+    memberLossResults,
+    aggregateMemberLoss: sum('aggregateMemberLoss'),
+    commonLossFactor: results.reduce((s, r) => s + r.commonLossFactor, 0) / results.length,
+    catastropheFactor: first.catastropheFactor,
+    shockLossAmount: sum('shockLossAmount'),
+    grossUltimateLoss: sum('grossUltimateLoss'),
+    shockLossIncurred: results.some(r => r.shockLossIncurred),
+    reinsuranceCost: reinsuranceCostSum,
+    attachment: sum('attachment'),
+    poolLosses: sum('poolLosses'),
+    excessLosses: sum('excessLosses'),
+    quotaShareLosses: sum('quotaShareLosses'),
+    reinsuranceRecovery: sum('reinsuranceRecovery'),
+    netUltimateLoss: sum('netUltimateLoss'),
+    netIncurredLoss: netIncurredLossSum,
+
+    operatingExpense: sum('operatingExpense'),
+    riskControlInvestment: sum('riskControlInvestment'),
+    priorYearDevelopment: sum('priorYearDevelopment'),
+
+    beginningGrossReserve: sum('beginningGrossReserve'),
+    currentYearGrossReserve: sum('currentYearGrossReserve'),
+    grossPaidLosses: sum('grossPaidLosses'),
+    endingGrossReserve: sum('endingGrossReserve'),
+    beginningReinsRecoverable: sum('beginningReinsRecoverable'),
+    endingReinsRecoverable: sum('endingReinsRecoverable'),
+
+    investmentReturnRate: first.investmentReturnRate,
+    investedAssets: sum('investedAssets'),
+    investmentIncome: sum('investmentIncome'),
+
+    selectedFundingConfidenceLevel: first.selectedFundingConfidenceLevel,
+    selectedFundingCLF: first.selectedFundingCLF,
+
+    expectedLoss: expectedLossSum,
+    clfAdjustedExpectedLoss: sum('clfAdjustedExpectedLoss'),
+    requiredFundingPremium: sum('requiredFundingPremium'),
+    actualPremium: sum('actualPremium'),
+    premiumFundingGap: sum('premiumFundingGap'),
+    premiumFundingRatio: first.premiumFundingRatio,
+    premiumFundingAdequacyStatus: first.premiumFundingAdequacyStatus,
+
+    indicatedFundingRatePer100: first.indicatedFundingRatePer100,
+    actualRatePer100: first.actualRatePer100,
+    rateFundingGapPer100: first.rateFundingGapPer100,
+    rateAdequacyRatio: first.rateAdequacyRatio,
+
+    expectedGrossUnpaidLoss: sum('expectedGrossUnpaidLoss'),
+    expectedReinsuranceRecoverable: sum('expectedReinsuranceRecoverable'),
+    expectedNetUnpaidLoss: sum('expectedNetUnpaidLoss'),
+    grossFundingTarget: sum('grossFundingTarget'),
+    netFundingTarget: sum('netFundingTarget'),
+    indicatedNetReserveAtConfidenceLevel: sum('indicatedNetReserveAtConfidenceLevel'),
+    reserveRiskMarginNeeded: reserveRiskMarginNeededSum,
+    fundingMarginNeeded: sum('fundingMarginNeeded'),
+
+    availableFunding: sum('availableFunding'),
+    availableSurplus: sum('availableSurplus'),
+    fundingGap: sum('fundingGap'),
+    capitalFundingGap: sum('capitalFundingGap'),
+    excessAvailableSurplus: excessAvailableSurplusSum,
+    excessCapitalRatio,
+    capitalAdequacyRatio: excessCapitalRatio,
+    capitalAdequacyStatus,
+
+    fundingAdequacyRatio: first.fundingAdequacyRatio,
+    fundingAdequacyStatus: first.fundingAdequacyStatus,
+
+    fundingCLF: first.fundingCLF,
+    fundingAdequacyIndicator: first.fundingAdequacyIndicator,
+
+    underwritingIncome: sum('underwritingIncome'),
+    netIncome: sum('netIncome'),
+    beginningCash: sum('beginningCash'),
+    endingCash: sum('endingCash'),
+    beginningInvestments: sum('beginningInvestments'),
+    endingInvestments: sum('endingInvestments'),
+    otherAssets: sum('otherAssets'),
+    totalAssets: sum('totalAssets'),
+    unearnedPremium: sum('unearnedPremium'),
+    otherLiabilities: sum('otherLiabilities'),
+    totalLiabilities: sum('totalLiabilities'),
+    beginingSurplus: sum('beginingSurplus'),
+    endingSurplus: sum('endingSurplus'),
+
+    surplusFromIncome: sum('surplusFromIncome'),
+    surplusTieOutDifference: sum('surplusTieOutDifference'),
+
+    expectedLossRatio,
+    expectedExpenseRatio,
+    expectedCombinedRatio: first.expectedCombinedRatio,
+    actualLossRatio,
+    actualExpenseRatio,
+    actualCombinedRatio,
+    combinedRatio: actualCombinedRatio,
+    lossRatio: actualLossRatio,
+    expenseRatio: actualExpenseRatio,
+
+    narrativeExplanation: '',
+    byLine,
+  };
+
+  pooled.narrativeExplanation = generateNarrative(pooled, priorPoolResult);
+
+  return pooled;
 }
 
 function processReserveDevelopment(

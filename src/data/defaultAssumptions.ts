@@ -230,6 +230,17 @@ export const TOTAL_MARKET_EXPOSURE = { min: 180, max: 300 };
 // Starting rate per $100 payroll range
 export const STARTING_RATE_PER_100 = { min: 5.00, max: 10.00 };
 
+// GL (General Liability) starting assumptions. GL shares WC's payroll exposure
+// base, but liability is lower-frequency/higher-severity than WC's injury/
+// medical exposure, so its charged rate and loss cost per payroll dollar are
+// set meaningfully lower than WC's. Tunable placeholders — calibrate by feel.
+export const GL_STARTING_RATE_PER_100 = { min: 1.50, max: 3.00 };
+export const GL_EXPECTED_LOSS_RATIO = { min: 0.55, max: 0.70 };
+export const GL_STARTING_FINANCIALS = {
+  grossUnpaidReserve: { min: 1_000_000, max: 2_500_000 },
+  reinsuranceRecoverable: { min: 0, max: 300_000 },
+};
+
 // Starting pool financial ranges
 export const STARTING_FINANCIALS = {
   annualPremium: { min: 4_000_000, max: 8_000_000 },

@@ -5,7 +5,7 @@ import type { ResultSet } from '../types/simulation';
 export function generateNarrative(result: ResultSet, _priorResult?: ResultSet): string {
   const parts: string[] = [];
 
-  const { decisions, actualCombinedRatio, netIncome, grossUltimateLoss, totalMemberCharge,
+  const { decisions, investmentRisk, actualCombinedRatio, netIncome, grossUltimateLoss, totalMemberCharge,
     reinsuranceRecovery, investmentIncome,
     newMembers, withdrawnMembers, shockLossIncurred,
     priorYearDevelopment, endingSurplus } = result;
@@ -58,13 +58,13 @@ export function generateNarrative(result: ResultSet, _priorResult?: ResultSet): 
   }
 
   // --- Investment ---
-  if (decisions.investmentRisk >= 7) {
+  if (investmentRisk >= 7) {
     if (investmentIncome > 0) {
       parts.push(`Aggressive investment positioning generated strong investment income of $${fmt(investmentIncome)}.`);
     } else {
       parts.push(`Aggressive investment positioning resulted in an investment loss.`);
     }
-  } else if (decisions.investmentRisk <= 2) {
+  } else if (investmentRisk <= 2) {
     parts.push(`Conservative investment strategy produced modest but stable investment income of $${fmt(investmentIncome)}.`);
   }
 
