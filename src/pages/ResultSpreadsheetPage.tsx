@@ -530,6 +530,36 @@ export default function ResultSpreadsheetPage({ lockedResults }: ResultSpreadshe
         csvValue: r => roundDollars(r.surplusTieOutDifference),
       },
 
+      // Inter-line loan
+      {
+        key: 'loanOriginatedThisYear',
+        category: 'Inter-Line Loan',
+        label: 'Loan Originated This Year',
+        value: r => formatCurrency(r.loanOriginatedThisYear),
+        csvValue: r => roundDollars(r.loanOriginatedThisYear),
+      },
+      {
+        key: 'loanInterestAccrued',
+        category: 'Inter-Line Loan',
+        label: 'Loan Interest Accrued',
+        value: r => formatCurrency(r.loanInterestAccrued),
+        csvValue: r => roundDollars(r.loanInterestAccrued),
+      },
+      {
+        key: 'loanRepaymentApplied',
+        category: 'Inter-Line Loan',
+        label: 'Loan Repayment Applied',
+        value: r => formatCurrency(r.loanRepaymentApplied),
+        csvValue: r => roundDollars(r.loanRepaymentApplied),
+      },
+      {
+        key: 'outstandingLoanBalance',
+        category: 'Inter-Line Loan',
+        label: 'Outstanding Loan Balance',
+        value: r => formatCurrency(r.outstandingLoanBalance),
+        csvValue: r => roundDollars(r.outstandingLoanBalance),
+      },
+
       // Ratios and capital
       {
         key: 'expectedLossRatio',

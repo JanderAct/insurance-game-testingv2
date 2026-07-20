@@ -31,5 +31,6 @@ export function emptyLineDecisionSet(): LineDecisionSet {
     underwritingStrictness: 5,
     riskControlPct: 0,
     reinsuranceLevel: 0,
+    loanRepaymentAggressiveness: 0.5,
   };
 }

@@ -133,6 +133,20 @@ export interface LineDecisionSet {
   underwritingStrictness: number; // 0-10
   riskControlPct: number;         // 0.00 to 0.08 of premium
   reinsuranceLevel: number;       // 0-4
+  loanRepaymentAggressiveness: number; // 0.00 to 1.00 — share of positive net income used to
+                                       // repay an outstanding inter-line loan first; only
+                                       // relevant while that line carries a loan balance
+}
+
+// An inter-line loan from the shared pool to a single line whose surplus went
+// negative. Tracked at the pool level (see PoolState.interLineLoans). At most
+// one outstanding loan per borrowing line at a time.
+export interface InterLineLoan {
+  borrowingLine: CoverageLine;
+  principal: number;              // original amount borrowed (the deficit that was covered)
+  remainingBalance: number;       // outstanding principal + accrued interest, reduced by repayments
+  rateAtOrigination: number;      // that year's realized pool investment return, fixed for the loan's life
+  yearOriginated: number;
 }
 
 // Shared investment portfolio allocation across cash/bonds/equities. Pool-level
@@ -246,6 +260,13 @@ export interface ResultSet {
   investmentReturnRate: number;
   investedAssets: number;
   investmentIncome: number;
+
+  // Inter-line loan (Stage 1.6). All zero/false for a line with no loan activity.
+  outstandingLoanBalance: number;   // this line's outstanding inter-line loan balance at year-end
+  loanRepaymentApplied: number;     // net income skimmed this year to repay the loan
+  loanInterestAccrued: number;      // interest added to the balance this year
+  loanOriginatedThisYear: number;   // principal of a loan originated this year (0 if none)
+  dividendBlocked: boolean;         // true if this line's dividend was blocked (negative surplus carried in)
 
   // CLF / Funding Confidence
   //
@@ -372,6 +393,7 @@ export interface PoolState {
   otherLiabilities: number;
   allMarketMembers: Member[];      // all 100 fictional members
   lines: Record<CoverageLine, LinePoolState>;
+  interLineLoans: InterLineLoan[]; // pool-level ledger of outstanding inter-line loans
 }
 
 // Top-level game state

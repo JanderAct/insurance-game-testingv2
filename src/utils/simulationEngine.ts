@@ -55,6 +55,7 @@ interface LineYearContext {
   investedAssets: number;
   investmentIncome: number;
   investmentReturnRate: number;
+  dividendBlocked: boolean; // true when this line carried a negative surplus in from last year
   priorResult?: LineResultSet;
 }
 
@@ -348,7 +349,10 @@ export function processLineYear(
   // Use reserve-rollforward incurred loss so the income statement and balance sheet tie.
   // This keeps the financial statement logic consistent with the reserve accounting.
   const assessments = poolPremium * lineDecisions.assessmentPct;
-  const dividends = poolPremium * lineDecisions.dividendPct;
+  // A line carrying a negative surplus into the year (declined a loan) cannot pay
+  // a dividend — the decision is blocked regardless of what was requested.
+  const effectiveDividendPct = ctx.dividendBlocked ? 0 : lineDecisions.dividendPct;
+  const dividends = poolPremium * effectiveDividendPct;
 
   // Keep this as a displayed reserve development metric.
   // Do not add it separately to net income because reserve development is already captured
@@ -592,6 +596,14 @@ export function processLineYear(
     investedAssets,
     investmentIncome,
 
+    // Inter-line loan fields — zero/false here; the loan overlay is applied in
+    // processYear's post-pass (repayment) and applyLoanAuthorizations (origination).
+    outstandingLoanBalance: 0,
+    loanRepaymentApplied: 0,
+    loanInterestAccrued: 0,
+    loanOriginatedThisYear: 0,
+    dividendBlocked: ctx.dividendBlocked,
+
     // CLF / funding confidence fields
     selectedFundingConfidenceLevel,
     selectedFundingCLF,
@@ -721,13 +733,33 @@ function computeContributionShares(
   return shares;
 }
 
-// Stage 1.3: loops over all active lines (WC and, once wired, GL). Property
-// stays inert (Stage 1.4). For a single active line this reduces to exactly
-// Stage 1.2's behavior — the WC-only regression baseline is unaffected.
+// A deficient line at year-end that the player may cover with an inter-line loan.
+export interface LoanOffer {
+  line: CoverageLine;
+  deficit: number;              // positive amount needed to bring the line to zero surplus
+  rateAtOrigination: number;    // this year's realized pool investment return, offered rate
+}
+
+// Full output of a processed year. loanOffers is non-empty only when one or
+// more lines ended negative without an existing loan — the caller must resolve
+// those (authorize/decline) via applyLoanAuthorizations before committing.
+export interface ProcessYearResult {
+  updatedPoolState: PoolState;
+  result: ResultSet;
+  lineResults: Array<{ line: CoverageLine; result: LineResultSet }>;
+  loanOffers: LoanOffer[];
+  priorPoolResult?: ResultSet;
+}
+
+// Stage 1.3: loops over all active lines. Stage 1.6 adds the inter-line loan
+// system: an existing loan is serviced (repayment pass) during processing, and
+// any line that ends negative without a loan produces a loanOffer for the
+// player to resolve. When no line is deficient and no loan is outstanding, all
+// of the loan logic is inert — a healthy WC-only game is byte-identical to v3.
 export function processYear(
   gameState: GameState,
   decisions: DecisionSet
-): { updatedPoolState: PoolState; result: ResultSet } {
+): ProcessYearResult {
   const { instance, poolState, currentYearNumber, setup } = gameState;
   const yearNumber = currentYearNumber;
   const calendarYear = setup.startingYear + yearNumber - 1;
@@ -749,6 +781,10 @@ export function processYear(
     investRng
   );
 
+  // Working copy of the loan ledger — repayments mutate balances / remove
+  // paid-off loans below.
+  let interLineLoans = poolState.interLineLoans.map(loan => ({ ...loan }));
+
   let currentAllMarketMembers = poolState.allMarketMembers;
   const lineResults: Array<{ line: CoverageLine; result: LineResultSet }> = [];
   const updatedLineStates: Partial<Record<CoverageLine, LinePoolState>> = {};
@@ -757,6 +793,7 @@ export function processYear(
   let sharedOtherAssets = 0;
   let sharedOtherLiabilities = 0;
   let sharedUnearnedPremium = 0;
+  let loanRepaymentsReturnedToPool = 0;
 
   // Sequential fold: each line sees the shared roster as updated by lines
   // already processed this year (a member withdrawing from one line becomes
@@ -764,6 +801,11 @@ export function processYear(
   // removed from lines it's already active on).
   for (const line of activeLines) {
     const share = shares[line];
+    // A line that carried a negative surplus in from last year (declined a
+    // loan) has its dividend blocked this year.
+    const priorLineSurplus = priorPoolResult?.byLine[line]?.endingSurplus;
+    const dividendBlocked = priorLineSurplus !== undefined && priorLineSurplus < 0;
+
     const ctx: LineYearContext = {
       instance,
       yearNumber,
@@ -777,6 +819,7 @@ export function processYear(
       investedAssets: poolInvestedAssets * share,
       investmentIncome: invResult.income * share,
       investmentReturnRate: invResult.returnRate,
+      dividendBlocked,
       priorResult: priorPoolResult?.byLine[line],
     };
 
@@ -786,6 +829,38 @@ export function processYear(
       decisions.byLine[line],
       ctx
     );
+
+    // --- Inter-line loan repayment pass (existing loans only) ---
+    const loan = interLineLoans.find(l => l.borrowingLine === line);
+    if (loan) {
+      const interest = loan.remainingBalance * loan.rateAtOrigination;
+      loan.remainingBalance += interest;
+      const aggressiveness = Math.max(0, Math.min(1, decisions.byLine[line].loanRepaymentAggressiveness));
+      const skim = aggressiveness * Math.max(0, result.netIncome);
+      const applied = Math.min(skim, loan.remainingBalance);
+      loan.remainingBalance -= applied;
+
+      // The skimmed income leaves the line (diverted to debt service) and
+      // returns to the shared pool; interest is this year's carrying cost.
+      result.loanInterestAccrued = interest;
+      result.loanRepaymentApplied = applied;
+      result.endingSurplus -= applied;
+      result.availableSurplus = result.endingSurplus;
+      result.availableFunding = result.endingSurplus;
+      result.endingInvestments -= applied;
+      result.totalAssets -= applied;
+      loanRepaymentsReturnedToPool += applied;
+
+      updatedLineState.surplus = result.endingSurplus;
+
+      // Close the loan once effectively repaid.
+      if (loan.remainingBalance <= 1) {
+        interLineLoans = interLineLoans.filter(l => l.borrowingLine !== line);
+        result.outstandingLoanBalance = 0;
+      } else {
+        result.outstandingLoanBalance = loan.remainingBalance;
+      }
+    }
 
     currentAllMarketMembers = updatedShared.allMarketMembers;
     updatedLineStates[line] = updatedLineState;
@@ -798,6 +873,9 @@ export function processYear(
     sharedUnearnedPremium += updatedShared.unearnedPremium;
   }
 
+  // Repaid principal + interest returns to the shared investment pool.
+  sharedInvestments += loanRepaymentsReturnedToPool;
+
   const updatedPoolState: PoolState = {
     cash: sharedCash,
     investments: sharedInvestments,
@@ -809,9 +887,69 @@ export function processYear(
       ...poolState.lines,
       ...updatedLineStates,
     },
+    interLineLoans,
   };
 
+  // Detect deficient lines that don't already carry a loan — these become
+  // offers the player resolves before the year is committed.
+  const loanOffers: LoanOffer[] = lineResults
+    .filter(({ line, result }) =>
+      result.endingSurplus < 0 && !interLineLoans.some(l => l.borrowingLine === line)
+    )
+    .map(({ line, result }) => ({
+      line,
+      deficit: -result.endingSurplus,
+      rateAtOrigination: invResult.returnRate,
+    }));
+
   const result = aggregateLineResults(lineResults, priorPoolResult);
+
+  return { updatedPoolState, result, lineResults, loanOffers, priorPoolResult };
+}
+
+// Finalize a processed year after the player has chosen which loan offers to
+// authorize. Authorized lines are lifted to zero surplus and a loan is recorded;
+// declined lines keep their negative surplus. Re-aggregates the pool result so
+// pool-level totals reflect the authorizations.
+export function applyLoanAuthorizations(
+  processed: ProcessYearResult,
+  yearNumber: number,
+  authorizedLines: CoverageLine[]
+): { updatedPoolState: PoolState; result: ResultSet } {
+  const authorized = new Set(authorizedLines);
+  const newLoans = [...processed.updatedPoolState.interLineLoans];
+  const updatedLines = { ...processed.updatedPoolState.lines };
+
+  for (const offer of processed.loanOffers) {
+    if (!authorized.has(offer.line)) continue;
+
+    // Record the loan and lift the borrowing line to zero surplus.
+    newLoans.push({
+      borrowingLine: offer.line,
+      principal: offer.deficit,
+      remainingBalance: offer.deficit,
+      rateAtOrigination: offer.rateAtOrigination,
+      yearOriginated: yearNumber,
+    });
+
+    const entry = processed.lineResults.find(lr => lr.line === offer.line);
+    if (entry) {
+      entry.result.endingSurplus = 0;
+      entry.result.availableSurplus = 0;
+      entry.result.availableFunding = 0;
+      entry.result.outstandingLoanBalance = offer.deficit;
+      entry.result.loanOriginatedThisYear = offer.deficit;
+    }
+    updatedLines[offer.line] = { ...updatedLines[offer.line], surplus: 0 };
+  }
+
+  const updatedPoolState: PoolState = {
+    ...processed.updatedPoolState,
+    lines: updatedLines,
+    interLineLoans: newLoans,
+  };
+
+  const result = aggregateLineResults(processed.lineResults, processed.priorPoolResult);
 
   return { updatedPoolState, result };
 }
@@ -964,6 +1102,12 @@ function aggregateLineResults(
     investmentReturnRate: first.investmentReturnRate,
     investedAssets: sum('investedAssets'),
     investmentIncome: sum('investmentIncome'),
+
+    outstandingLoanBalance: sum('outstandingLoanBalance'),
+    loanRepaymentApplied: sum('loanRepaymentApplied'),
+    loanInterestAccrued: sum('loanInterestAccrued'),
+    loanOriginatedThisYear: sum('loanOriginatedThisYear'),
+    dividendBlocked: results.some(r => r.dividendBlocked),
 
     selectedFundingConfidenceLevel: first.selectedFundingConfidenceLevel,
     selectedFundingCLF: first.selectedFundingCLF,

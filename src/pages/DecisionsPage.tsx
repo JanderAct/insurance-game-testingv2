@@ -13,6 +13,8 @@ interface DecisionsPageProps {
   estimatedPremium: number;
   estimatedExpectedLoss: number;
   disabled?: boolean;
+  wcOutstandingLoan?: number;   // WC's outstanding inter-line loan balance (0 if none)
+  wcDividendBlocked?: boolean;  // true if WC carried a negative surplus in (dividend blocked)
 }
 
 const FUNDING_LEVEL_LABELS: Record<number, string> = {
@@ -35,6 +37,7 @@ function defaultDecisions(yearNumber: number): DecisionSet {
     underwritingStrictness: SLIDER_RANGES.underwritingStrictness.default,
     riskControlPct: SLIDER_RANGES.riskControlPct.default,
     reinsuranceLevel: SLIDER_RANGES.reinsuranceLevel.default,
+    loanRepaymentAggressiveness: 0.5,
   };
   return {
     yearNumber,
@@ -47,7 +50,7 @@ function defaultDecisions(yearNumber: number): DecisionSet {
   };
 }
 
-export default function DecisionsPage({ decisions, onChange, yearNumber, estimatedPremium, estimatedExpectedLoss, disabled = false }: DecisionsPageProps) {
+export default function DecisionsPage({ decisions, onChange, yearNumber, estimatedPremium, estimatedExpectedLoss, disabled = false, wcOutstandingLoan = 0, wcDividendBlocked = false }: DecisionsPageProps) {
   const wc = decisions.byLine.WC;
   const set = (key: keyof LineDecisionSet, val: number) =>
     onChange({ ...decisions, byLine: { ...decisions.byLine, WC: { ...wc, [key]: val } } });
@@ -87,7 +90,10 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
         <SectionCard title="Pricing & Funding" icon={<DollarSign size={16} />}>
           <SliderInput label="Rate Change" value={wc.rateChange} min={SLIDER_RANGES.rateChange.min} max={SLIDER_RANGES.rateChange.max} step={SLIDER_RANGES.rateChange.step} onChange={v => set('rateChange', v)} formatValue={rateDisplay} leftLabel="Decrease" rightLabel="Increase" valueColor={wc.rateChange > 0.05 ? 'text-amber-600' : wc.rateChange < -0.05 ? 'text-blue-600' : 'text-gray-700'} disabled={disabled} helpText="Higher rates improve premium adequacy but reduce member retention." />
           <SliderInput label="Funding Confidence Level" value={wc.fundingConfidenceLevel} min={SLIDER_RANGES.fundingConfidenceLevel.min} max={SLIDER_RANGES.fundingConfidenceLevel.max} step={SLIDER_RANGES.fundingConfidenceLevel.step} onChange={v => set('fundingConfidenceLevel', v)} formatValue={v => `${getFundingLabel(v)} (${(v * 100).toFixed(0)}%)`} leftLabel="Lower Confidence" rightLabel="Higher Confidence" disabled={disabled} helpText="Sets the reserve confidence level. Higher levels strengthen the balance sheet." />
-          <SliderInput label="Dividend / Return of Pool Premium" value={wc.dividendPct} min={SLIDER_RANGES.dividendPct.min} max={SLIDER_RANGES.dividendPct.max} step={SLIDER_RANGES.dividendPct.step} onChange={v => set('dividendPct', v)} formatValue={pctDisplay} leftLabel="None" rightLabel="High" valueColor={wc.dividendPct > 0 ? 'text-emerald-600' : 'text-gray-500'} disabled={disabled} helpText="Returns value to members." />
+          <SliderInput label="Dividend / Return of Pool Premium" value={wc.dividendPct} min={SLIDER_RANGES.dividendPct.min} max={SLIDER_RANGES.dividendPct.max} step={SLIDER_RANGES.dividendPct.step} onChange={v => set('dividendPct', v)} formatValue={pctDisplay} leftLabel="None" rightLabel="High" valueColor={wc.dividendPct > 0 ? 'text-emerald-600' : 'text-gray-500'} disabled={disabled || wcDividendBlocked} helpText="Returns value to members." />
+          {wcDividendBlocked && (
+            <p className="text-xs text-red-600 -mt-3">Dividend blocked: this line carried a negative surplus in from last year.</p>
+          )}
           <SliderInput label="Assessment" value={wc.assessmentPct} min={SLIDER_RANGES.assessmentPct.min} max={SLIDER_RANGES.assessmentPct.max} step={SLIDER_RANGES.assessmentPct.step} onChange={v => set('assessmentPct', v)} formatValue={pctDisplay} leftLabel="None" rightLabel="High" valueColor={wc.assessmentPct > 0 ? 'text-red-600' : 'text-gray-500'} disabled={disabled} helpText="Additional calls on members beyond premium." />
         </SectionCard>
 
@@ -107,6 +113,24 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
             <span className="font-semibold text-gray-800">{equitiesPct.toFixed(0)}%</span>
           </div>
           <p className="text-xs text-gray-500">Higher expected return, higher volatility, with an occasional down year.</p>
+
+          {wcOutstandingLoan > 0 && (
+            <div className="pt-3 border-t border-gray-100">
+              <p className="text-xs text-amber-700 mb-2">
+                This line has an outstanding inter-line loan of {formatCurrency(wcOutstandingLoan)}.
+              </p>
+              <SliderInput
+                label="Loan Repayment Aggressiveness"
+                value={wc.loanRepaymentAggressiveness}
+                min={0} max={1} step={0.05}
+                onChange={v => set('loanRepaymentAggressiveness', v)}
+                formatValue={v => `${(v * 100).toFixed(0)}%`}
+                leftLabel="Slow" rightLabel="Fast"
+                disabled={disabled}
+                helpText="Share of this line's positive net income used to repay the loan before it flows to the line's own surplus."
+              />
+            </div>
+          )}
         </SectionCard>
 
         <SectionCard title="Reinsurance Program" icon={<Shield size={16} />}>

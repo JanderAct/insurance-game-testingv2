@@ -331,6 +331,7 @@ export function generateStartingPoolState(
       GL: glLineState,
       Property: propertyLineState,
     },
+    interLineLoans: [],
   };
 
   const startingFinancials: StartingFinancials = {

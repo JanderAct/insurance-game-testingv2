@@ -209,6 +209,31 @@ export default function ResultsPage({ lockedResults }: ResultsPageProps) {
               )}
             </ResultCard>
 
+            {(result.outstandingLoanBalance > 0 || result.loanOriginatedThisYear > 0 || result.loanRepaymentApplied > 0 || result.dividendBlocked) && (
+              <ResultCard title="Inter-Line Loan" icon={<AlertTriangle size={16} />}>
+                {result.loanOriginatedThisYear > 0 && (
+                  <Row label="Loan Originated This Year" value={formatCurrency(result.loanOriginatedThisYear)} valueColor="text-amber-600" />
+                )}
+                {result.loanInterestAccrued > 0 && (
+                  <Row label="Interest Accrued" value={formatCurrency(result.loanInterestAccrued)} />
+                )}
+                {result.loanRepaymentApplied > 0 && (
+                  <Row label="Repayment Applied (from net income)" value={formatCurrency(result.loanRepaymentApplied)} valueColor="text-emerald-600" />
+                )}
+                <Row
+                  label="Outstanding Loan Balance"
+                  value={formatCurrency(result.outstandingLoanBalance)}
+                  valueColor={result.outstandingLoanBalance > 0 ? 'text-amber-600' : 'text-emerald-600'}
+                  bold
+                />
+                {result.dividendBlocked && (
+                  <p className="text-xs text-red-600 mt-2">
+                    A line carried a negative surplus into this year — its dividend was blocked.
+                  </p>
+                )}
+              </ResultCard>
+            )}
+
             <ResultCard title="Funding Rate Build-Up" icon={<Target size={16} />}>
               {(() => {
                 const rateAtConfidenceLevel = result.poolPremium / Math.max(result.activeExposure * 10_000, 1);

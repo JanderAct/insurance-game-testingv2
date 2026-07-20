@@ -11,12 +11,13 @@ import {
   History as HistoryIcon,
 } from 'lucide-react';
 
-import type { GameState, GameSetupSettings, DecisionSet, StartingFinancials, Member } from './types/simulation';
+import type { GameState, GameSetupSettings, DecisionSet, StartingFinancials, Member, CoverageLine } from './types/simulation';
 import { SLIDER_RANGES, ASSET_ALLOCATION_DEFAULT } from './data/defaultAssumptions';
 import { generateGameInstance, generateStartingPoolState } from './utils/instanceGenerator';
-import { processYear } from './utils/simulationEngine';
+import { processYear, applyLoanAuthorizations, type ProcessYearResult } from './utils/simulationEngine';
 import { generateHistoricalYears } from './utils/historyGenerator';
 import { getMemberExposure } from './utils/lineHelpers';
+import LoanPromptModal from './components/LoanPromptModal';
 
 import Header from './components/Header';
 import TabNav, { type TabId } from './components/TabNav';
@@ -52,6 +53,7 @@ function defaultDecisions(yearNumber: number): DecisionSet {
     underwritingStrictness: SLIDER_RANGES.underwritingStrictness.default,
     riskControlPct: SLIDER_RANGES.riskControlPct.default,
     reinsuranceLevel: SLIDER_RANGES.reinsuranceLevel.default,
+    loanRepaymentAggressiveness: 0.5,
   };
   return {
     yearNumber,
@@ -82,11 +84,14 @@ export default function App() {
   const [startingFinancials, setStartingFinancials] = useState<StartingFinancials | null>(null);
   const [initialMembers, setInitialMembers] = useState<Member[]>([]);
   const [currentDecisions, setCurrentDecisions] = useState<DecisionSet>(defaultDecisions(1));
+  // A year that has been processed but is awaiting the player's loan decisions
+  // before it can be committed (see handleAdvanceYear / handleResolveLoans).
+  const [pendingYear, setPendingYear] = useState<ProcessYearResult | null>(null);
 
   // Load persisted game from localStorage if available
   React.useEffect(() => {
     try {
-      const saved = localStorage.getItem('riskpool_gamestate_v3');
+      const saved = localStorage.getItem('riskpool_gamestate_v4');
       if (saved) {
         const { gameState: gs, startingFinancials: sf, initialMembers: im, currentDecisions: cd } = JSON.parse(saved);
 
@@ -99,19 +104,19 @@ export default function App() {
           setActiveTab('dashboard');
         } else {
           // Bad saved state - clear it
-          localStorage.removeItem('riskpool_gamestate_v3');
+          localStorage.removeItem('riskpool_gamestate_v4');
         }
       }
     } catch {
       // ignore parse errors - clear corrupted data
-      localStorage.removeItem('riskpool_gamestate_v3');
+      localStorage.removeItem('riskpool_gamestate_v4');
     }
   }, []);
 
   function persistState(gs: GameState, sf: StartingFinancials, im: Member[], cd: DecisionSet) {
     try {
       localStorage.setItem(
-        'riskpool_gamestate_v3',
+        'riskpool_gamestate_v4',
         JSON.stringify({
           gameState: gs,
           startingFinancials: sf,
@@ -152,39 +157,59 @@ export default function App() {
     setActiveTab('history');
   }, []);
 
-  const handleAdvanceYear = useCallback(() => {
-    if (!gameState || gameState.isComplete) return;
-
-    const { updatedPoolState, result } = processYear(gameState, currentDecisions);
-
-    const nextYearNumber = gameState.currentYearNumber + 1;
-    const isComplete = nextYearNumber > gameState.setup.gameLength;
-
+  // Commit a fully-resolved processed year (loan offers, if any, already handled).
+  const commitYear = useCallback((baseGs: GameState, updatedPoolState: GameState['poolState'], result: GameState['lockedResults'][number]) => {
+    const nextYearNumber = baseGs.currentYearNumber + 1;
+    const isComplete = nextYearNumber > baseGs.setup.gameLength;
     const nextDecisions = defaultDecisions(nextYearNumber);
 
     const newGs: GameState = {
-      ...gameState,
+      ...baseGs,
       currentYearNumber: nextYearNumber,
       isComplete,
       poolState: updatedPoolState,
-      lockedResults: [...gameState.lockedResults, result],
+      lockedResults: [...baseGs.lockedResults, result],
       currentDecisions: nextDecisions,
     };
 
     setGameState(newGs);
     setCurrentDecisions(nextDecisions);
     persistState(newGs, startingFinancials!, initialMembers, nextDecisions);
-
-    // Navigate to results after locking
     setActiveTab('results');
-  }, [gameState, currentDecisions, startingFinancials, initialMembers]);
+  }, [startingFinancials, initialMembers]);
+
+  const handleAdvanceYear = useCallback(() => {
+    if (!gameState || gameState.isComplete) return;
+
+    const processed = processYear(gameState, currentDecisions);
+
+    // If any line ended negative without a loan, pause to let the player
+    // authorize/decline before committing the year.
+    if (processed.loanOffers.length > 0) {
+      setPendingYear(processed);
+      return;
+    }
+
+    commitYear(gameState, processed.updatedPoolState, processed.result);
+  }, [gameState, currentDecisions, commitYear]);
+
+  const handleResolveLoans = useCallback((authorizedLines: string[]) => {
+    if (!gameState || !pendingYear) return;
+    const { updatedPoolState, result } = applyLoanAuthorizations(
+      pendingYear,
+      gameState.currentYearNumber,
+      authorizedLines as CoverageLine[]
+    );
+    setPendingYear(null);
+    commitYear(gameState, updatedPoolState, result);
+  }, [gameState, pendingYear, commitYear]);
 
   const handleNewGame = useCallback(() => {
     setGameState(null);
     setStartingFinancials(null);
     setInitialMembers([]);
     setCurrentDecisions(defaultDecisions(1));
-    localStorage.removeItem('riskpool_gamestate_v3');
+    localStorage.removeItem('riskpool_gamestate_v4');
     setActiveTab('setup');
   }, []);
 
@@ -281,6 +306,8 @@ export default function App() {
             estimatedPremium={estimatedPremium}
             estimatedExpectedLoss={estimatedExpectedLoss}
             disabled={gameState.isComplete}
+            wcOutstandingLoan={gameState.poolState.interLineLoans.find(l => l.borrowingLine === 'WC')?.remainingBalance ?? 0}
+            wcDividendBlocked={(gameState.lockedResults[gameState.lockedResults.length - 1]?.byLine.WC.endingSurplus ?? 0) < 0}
           />
         )}
 
@@ -313,6 +340,10 @@ export default function App() {
           />
         )}
       </main>
+
+      {pendingYear && (
+        <LoanPromptModal offers={pendingYear.loanOffers} onResolve={handleResolveLoans} />
+      )}
     </div>
   );
 }
