@@ -358,6 +358,38 @@ bill-moving inputs that exist today.
 
 ---
 
+### Stage 2.7 — Per-Line Decision Editing (GL & Property inputs)
+
+**⚠️ Depends on:** the per-line decision *editing UX* question being resolved first
+(see decisions-chat brainstorm: Pool-tab-edits-all vs. line-tab-only vs.
+read-only-pool-summary vs. labeled-hybrid). Do NOT build this until that model is
+chosen — it determines how the controls behave.
+
+**Goal:** Let the player set per-line decisions independently for every active line,
+not just WC. Today GL and Property calculate and display correctly, but only WC's
+decision inputs are wired for editing, so all lines effectively move on WC's inputs.
+
+**The work:**
+- Wire decision input controls for GL and Property (rate change, underwriting
+  strictness, risk control %, reinsurance level, CLF, dividend %, assessment %, and
+  loan repayment aggressiveness when a loan is active), consistent with the per-line
+  view pattern from Stage 2.1.
+- Implement editing per the chosen UX model (A/B/C/hybrid).
+- Pool-level decisions (asset allocation) remain pool-level.
+
+**Regression expectation:** a WC-only game on seed MAMC6EA4, baseline, must still match
+the v4 WC baseline exactly — adding GL/PR editing must not change WC behavior.
+
+**Test:** in a 3-line game, set different decisions per line (e.g. +5% rate on GL, 0% on
+WC, a dividend on Property) and confirm each line's results respond only to its own
+inputs; confirm Decision History (Stage 2.2) reflects the per-line choices correctly.
+
+**Note:** numbered 2.7 (not 2.6) intentionally, to avoid renumbering existing stages.
+Sequenced after the read-only Phase 2 stages (2.2, 2.3) because those are unblocked
+while this one waits on the editing-UX decision.
+
+---
+
 ### Phase 3 — Reserve Development System
 
 #### Stage 3.1 — Accident-year triangle data model + per-line development patterns
