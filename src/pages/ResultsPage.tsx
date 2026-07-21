@@ -7,6 +7,7 @@ import {
   DollarSign,
   AlertTriangle,
   Target,
+  GitCompare,
 } from 'lucide-react';
 import type { LineResultSet, LineView } from '../types/simulation';
 import {
@@ -23,12 +24,69 @@ interface ResultsPageProps {
   lineView: LineView;
 }
 
+// Stage 2.3 — Individual-Year Comparison. 'goodUp'/'goodDown' color the change
+// direction; 'neutral' metrics are never colored since their direction isn't
+// inherently good or bad (e.g. more premium could mean growth or a forced rate
+// hike; more reserves could mean a bigger book or adverse development; more
+// reinsurance recovery only correlates with having had bigger losses).
+type MetricPolarity = 'goodUp' | 'goodDown' | 'neutral';
+type MetricKind = 'currency' | 'ratio';
+
+interface ComparisonMetric {
+  key: string;
+  label: string;
+  kind: MetricKind;
+  polarity: MetricPolarity;
+  getValue: (r: LineResultSet) => number;
+}
+
+const COMPARISON_METRICS: ComparisonMetric[] = [
+  { key: 'premium', label: 'Pool Premium', kind: 'currency', polarity: 'neutral', getValue: r => r.poolPremium },
+  { key: 'ultimateLosses', label: 'Ultimate Losses (Gross)', kind: 'currency', polarity: 'goodDown', getValue: r => r.grossUltimateLoss },
+  { key: 'netLosses', label: 'Net Ultimate Loss', kind: 'currency', polarity: 'goodDown', getValue: r => r.netUltimateLoss },
+  { key: 'lossRatio', label: 'Actual Loss Ratio', kind: 'ratio', polarity: 'goodDown', getValue: r => r.actualLossRatio },
+  { key: 'combinedRatio', label: 'Actual Combined Ratio', kind: 'ratio', polarity: 'goodDown', getValue: r => r.actualCombinedRatio },
+  { key: 'reserves', label: 'Ending Gross Reserve', kind: 'currency', polarity: 'neutral', getValue: r => r.endingGrossReserve },
+  { key: 'reinsRecovery', label: 'Reinsurance Recovery', kind: 'currency', polarity: 'neutral', getValue: r => r.reinsuranceRecovery },
+  { key: 'investmentIncome', label: 'Investment Income', kind: 'currency', polarity: 'goodUp', getValue: r => r.investmentIncome },
+  { key: 'netIncome', label: 'Net Income', kind: 'currency', polarity: 'goodUp', getValue: r => r.netIncome },
+  { key: 'endingSurplus', label: 'Ending Surplus', kind: 'currency', polarity: 'goodUp', getValue: r => r.endingSurplus },
+];
+
+// Never Infinity/NaN: division only happens when prior !== 0.
+function formatPctChange(prior: number, current: number): string {
+  if (prior === 0 && current === 0) return '—';
+  if (prior === 0) return 'N/A';
+  const pct = ((current - prior) / Math.abs(prior)) * 100;
+  return `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`;
+}
+
+function formatChange(kind: MetricKind, change: number): string {
+  if (kind === 'ratio') {
+    const pts = change * 100;
+    return `${pts >= 0 ? '+' : ''}${pts.toFixed(1)} pts`;
+  }
+  const sign = change >= 0 ? '+' : '-';
+  return `${sign}${formatCurrency(Math.abs(change))}`;
+}
+
+function changeColor(polarity: MetricPolarity, change: number): string {
+  if (polarity === 'neutral' || change === 0) return 'text-gray-600';
+  const isGoodDirection = polarity === 'goodUp' ? change > 0 : change < 0;
+  return isGoodDirection ? 'text-emerald-600' : 'text-red-600';
+}
+
+function formatMetricValue(kind: MetricKind, value: number): string {
+  return kind === 'ratio' ? formatPct(value) : formatCurrency(value);
+}
+
 export default function ResultsPage({ lockedResults, lineView }: ResultsPageProps) {
   const [selectedYear, setSelectedYear] = useState<number>(
     lockedResults.length > 0 ? lockedResults[lockedResults.length - 1].yearNumber : 1
   );
 
   const result = lockedResults.find(r => r.yearNumber === selectedYear);
+  const priorResult = lockedResults.find(r => r.yearNumber === selectedYear - 1);
 
   return (
     <div className="max-w-screen-2xl mx-auto px-4 py-6 space-y-6">
@@ -74,6 +132,55 @@ export default function ResultsPage({ lockedResults, lineView }: ResultsPageProp
               </div>
             </div>
           )}
+
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-gray-100 bg-gray-50/60 flex items-center gap-2">
+              <GitCompare size={16} className="text-blue-600" />
+              <h3 className="font-bold text-gray-900 text-sm">Year-over-Year Comparison{lineView !== 'pool' ? ` — ${lineView}` : ''}</h3>
+            </div>
+            <div className="p-5">
+              {!priorResult ? (
+                <p className="text-sm text-gray-500 italic">
+                  {selectedYear === 1
+                    ? 'This is Year 1 — no prior year to compare.'
+                    : 'No prior locked year available to compare against.'}
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-200">
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Metric</th>
+                        <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Prior Year</th>
+                        <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Current Year</th>
+                        <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Change</th>
+                        <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">% Change</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {COMPARISON_METRICS.map(metric => {
+                        const priorValue = metric.getValue(priorResult);
+                        const currentValue = metric.getValue(result);
+                        const change = currentValue - priorValue;
+                        return (
+                          <tr key={metric.key} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-3 py-2 text-gray-600">{metric.label}</td>
+                            <td className="px-3 py-2 text-right font-mono text-gray-500">{formatMetricValue(metric.kind, priorValue)}</td>
+                            <td className="px-3 py-2 text-right font-mono font-semibold text-gray-800">{formatMetricValue(metric.kind, currentValue)}</td>
+                            <td className={`px-3 py-2 text-right font-mono font-semibold ${changeColor(metric.polarity, change)}`}>{formatChange(metric.kind, change)}</td>
+                            <td className={`px-3 py-2 text-right font-mono ${changeColor(metric.polarity, change)}`}>{formatPctChange(priorValue, currentValue)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <p className="text-xs text-gray-400 mt-4 border-t border-gray-100 pt-3">
+                Shock Events: not yet implemented — Phase 4 will show which specific event(s) fired this year.
+              </p>
+            </div>
+          </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <ResultCard title="Decision Summary" icon={<ClipboardList size={16} />}>
