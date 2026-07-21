@@ -434,6 +434,46 @@ tie out.
 
 ---
 
+### Stage 2.9 — Per-Line Investments Rework (segregated portfolios)
+
+**Status:** BLOCKED — documentation of a planned change only, NOT a build instruction. Do not
+implement any of this until explicitly unblocked. Reverses the Tier 1 "shared investments"
+decision. All design sub-questions otherwise resolved (see
+DECISIONS_CHANGE_per_line_investments.md).
+
+**Goal:** Change investments from one shared/commingled pool portfolio (single pool-level
+allocation) to per-line segregated portfolios — each line invests its own assets with its
+own cash/bonds/equities allocation, keeping its own gains/losses. Rationale: asset-liability
+duration matching (WC's long tail vs. Property's short tail).
+
+**The work:**
+- Rework the investment engine (was Stage 1.5): each line gets its own sub-portfolio and its
+  own allocation. Remove the "allocate shared income by contribution share" mechanic — each
+  line simply earns/loses on its own portfolio.
+- Move the asset-allocation decision from pool-level to per-line.
+- Update the inter-line loan rate source (Stage 1.6): the rate becomes the pool's
+  ASSET-WEIGHTED BLENDED investment return for that year (each line's return weighted by its
+  invested assets), still fixed at origination. Keep inter-line borrowing otherwise intact —
+  lines invest separately but can still lend surplus to each other.
+- Correlated risk is now ISOLATED per line by design (a bond-heavy line is insulated from a
+  market drop that hits an equity-heavy line). Do not re-engineer pool-wide investment
+  correlation.
+- Remove the "Pool" tab from the DECISION-oriented pages (Decisions, Decision History) — no
+  pool-level decisions remain. KEEP the Pool tab on results pages (Dashboard, Financials,
+  Results, year-comparison) where it means combined results.
+- Update DECISIONS docs: asset allocation moves to the per-line section.
+
+**Regression / baselines:** unlike prior changes, this shifts WC-only numbers too (WC now has
+its own portfolio, not a shared one). Capture a fresh v5 baseline set (all configs) after
+implementing. Confirm every line still ties out (Surplus Tie-Out Difference ~0).
+
+**Test:** in a 3-line game, set different allocations per line (e.g. WC bond-heavy, GL
+equity-heavy); confirm each line's investment income tracks its OWN allocation, a market
+swing hits only the equity-heavy line's surplus, the loan rate reflects the asset-weighted
+blend, and the Pool tab is gone from Decisions/Decision History but present on results pages.
+
+---
+
 ### Phase 3 — Reserve Development System
 
 #### Stage 3.1 — Accident-year triangle data model + per-line development patterns
