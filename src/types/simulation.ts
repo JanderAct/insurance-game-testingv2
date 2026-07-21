@@ -366,6 +366,10 @@ export interface ResultSet {
 // A single line's own result for the year, before pool-level aggregation.
 export type LineResultSet = Omit<ResultSet, 'byLine'>;
 
+// UI display filter (Stage 2.1): 'pool' shows the combined/summed totals;
+// a specific line filters every figure on the page to that line's slice.
+export type LineView = 'pool' | CoverageLine;
+
 // Per-line pool state (rolled from year to year)
 export interface LinePoolState {
   rateLevel: number;           // cumulative rate index (starts at 100)

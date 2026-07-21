@@ -1,17 +1,18 @@
 import { TrendingUp, Users, Shield, DollarSign, Activity, BarChart2, Globe, Star } from 'lucide-react';
-import type { ResultSet, StartingFinancials, HistoricalYear } from '../types/simulation';
+import type { LineResultSet, StartingFinancials, HistoricalYear, LineView } from '../types/simulation';
 import StatCard from '../components/StatCard';
 import { formatCurrency, formatPct, colorForRatio, colorForSurplus } from '../utils/formatters';
 
 interface DashboardPageProps {
-  lockedResults: ResultSet[];
+  lockedResults: LineResultSet[];
   historicalYears: HistoricalYear[];
   startingFinancials: StartingFinancials;
   currentYearNumber: number;
   startingYear: number;
+  lineView: LineView;
 }
 
-export default function DashboardPage({ lockedResults, historicalYears, startingFinancials, currentYearNumber, startingYear }: DashboardPageProps) {
+export default function DashboardPage({ lockedResults, historicalYears, startingFinancials, currentYearNumber, startingYear, lineView }: DashboardPageProps) {
   // The last historical year is anchored to exactly match Year 0 (startingFinancials),
   // so it's excluded here to avoid showing the same opening position twice.
   const priorHistoricalYears = historicalYears.slice(0, -1);
@@ -31,12 +32,17 @@ export default function DashboardPage({ lockedResults, historicalYears, starting
   return (
     <div className="max-w-screen-2xl mx-auto px-4 py-6 space-y-6">
       <div>
-        <h2 className="text-xl font-bold text-gray-900">Dashboard</h2>
+        <h2 className="text-xl font-bold text-gray-900">Dashboard{lineView !== 'pool' ? ` — ${lineView}` : ''}</h2>
         <p className="text-gray-500 text-sm">
           {lockedResults.length === 0
             ? 'Starting position — no years completed yet.'
             : `Through Year ${currentYearNumber - 1} — ${lockedResults.length} year${lockedResults.length !== 1 ? 's' : ''} completed`}
         </p>
+        {lineView !== 'pool' && (
+          <p className="text-xs text-amber-600 mt-1">
+            Showing the {lineView} line's own figures. Pre-game history and the starting position below remain pool-wide.
+          </p>
+        )}
       </div>
 
       {/* Summary Cards */}

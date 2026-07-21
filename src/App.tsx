@@ -9,15 +9,20 @@ import {
   Calculator,
   Table,
   History as HistoryIcon,
+  Layers,
+  HardHat,
+  Scale,
+  Building2,
 } from 'lucide-react';
 
-import type { GameState, GameSetupSettings, DecisionSet, StartingFinancials, Member, CoverageLine } from './types/simulation';
+import type { GameState, GameSetupSettings, DecisionSet, StartingFinancials, Member, CoverageLine, LineView } from './types/simulation';
 import { SLIDER_RANGES, ASSET_ALLOCATION_DEFAULT } from './data/defaultAssumptions';
 import { generateGameInstance, generateStartingPoolState } from './utils/instanceGenerator';
 import { processYear, applyLoanAuthorizations, type ProcessYearResult } from './utils/simulationEngine';
 import { generateHistoricalYears } from './utils/historyGenerator';
-import { getMemberExposure } from './utils/lineHelpers';
+import { getMemberExposure, selectResultView } from './utils/lineHelpers';
 import LoanPromptModal from './components/LoanPromptModal';
+import type { LineLoanInfo } from './pages/DecisionsPage';
 
 import Header from './components/Header';
 import TabNav, { type TabId } from './components/TabNav';
@@ -66,6 +71,16 @@ function defaultDecisions(yearNumber: number): DecisionSet {
   };
 }
 
+// Pages that support the Pool / per-line view toggle (Stage 2.1).
+const LINE_VIEW_PAGES: TabId[] = ['dashboard', 'decisions', 'financials', 'results'];
+
+const LINE_VIEW_ICONS: Record<LineView, React.ReactNode> = {
+  pool: <Layers size={14} />,
+  WC: <HardHat size={14} />,
+  GL: <Scale size={14} />,
+  Property: <Building2 size={14} />,
+};
+
 const TABS = [
   { id: 'setup' as TabId, label: 'Game Setup', icon: <Settings size={16} /> },
   { id: 'history' as TabId, label: 'Pool History', icon: <HistoryIcon size={16} /> },
@@ -87,6 +102,9 @@ export default function App() {
   // A year that has been processed but is awaiting the player's loan decisions
   // before it can be committed (see handleAdvanceYear / handleResolveLoans).
   const [pendingYear, setPendingYear] = useState<ProcessYearResult | null>(null);
+  // Stage 2.1 Pool/line view toggle. Display-only — not persisted to
+  // localStorage, and not part of GameState/DecisionSet.
+  const [lineViewRaw, setLineView] = useState<LineView>('pool');
 
   // Load persisted game from localStorage if available
   React.useEffect(() => {
@@ -153,6 +171,7 @@ export default function App() {
     setStartingFinancials(sf);
     setInitialMembers(initMembers);
     setCurrentDecisions(cd);
+    setLineView('pool');
     persistState(gs, sf, initMembers, cd);
     setActiveTab('history');
   }, []);
@@ -209,6 +228,7 @@ export default function App() {
     setStartingFinancials(null);
     setInitialMembers([]);
     setCurrentDecisions(defaultDecisions(1));
+    setLineView('pool');
     localStorage.removeItem('riskpool_gamestate_v4');
     setActiveTab('setup');
   }, []);
@@ -221,6 +241,30 @@ export default function App() {
   }, [gameState, startingFinancials, initialMembers]);
 
   const isStarted = gameState?.isStarted ?? false;
+  const activeLines = gameState?.setup.activeLines ?? [];
+
+  // Guard against a stale selection (e.g. a loaded save with fewer active
+  // lines than were selected before) by falling back to 'pool'.
+  const lineView: LineView = lineViewRaw === 'pool' || activeLines.includes(lineViewRaw as CoverageLine)
+    ? lineViewRaw
+    : 'pool';
+
+  const viewResults = React.useMemo(() => {
+    if (!gameState) return [];
+    return selectResultView(gameState.lockedResults, lineView);
+  }, [gameState, lineView]);
+
+  const lineLoanInfo = React.useMemo(() => {
+    const lastResult = gameState?.lockedResults[gameState.lockedResults.length - 1];
+    const info: Record<CoverageLine, LineLoanInfo> = { WC: { balance: 0, dividendBlocked: false }, GL: { balance: 0, dividendBlocked: false }, Property: { balance: 0, dividendBlocked: false } };
+    for (const line of (['WC', 'GL', 'Property'] as CoverageLine[])) {
+      info[line] = {
+        balance: gameState?.poolState.interLineLoans.find(l => l.borrowingLine === line)?.remainingBalance ?? 0,
+        dividendBlocked: (lastResult?.byLine[line]?.endingSurplus ?? 0) < 0,
+      };
+    }
+    return info;
+  }, [gameState]);
 
   const historicalYears = React.useMemo(() => {
     if (!gameState || !startingFinancials) return [];
@@ -275,6 +319,19 @@ export default function App() {
         />
       )}
 
+      {isStarted && LINE_VIEW_PAGES.includes(activeTab) && (
+        <TabNav<LineView>
+          tabs={[
+            { id: 'pool', label: 'Pool', icon: LINE_VIEW_ICONS.pool },
+            ...activeLines.map(line => ({ id: line as LineView, label: line, icon: LINE_VIEW_ICONS[line] })),
+          ]}
+          activeTab={lineView}
+          onSelect={setLineView}
+          stickyTop={108}
+          zIndex={20}
+        />
+      )}
+
       <main>
         {activeTab === 'setup' && (
           <SetupPage onStart={handleStartGame} />
@@ -282,11 +339,12 @@ export default function App() {
 
         {activeTab === 'dashboard' && gameState && startingFinancials && (
           <DashboardPage
-            lockedResults={gameState.lockedResults}
+            lockedResults={viewResults}
             historicalYears={historicalYears}
             startingFinancials={startingFinancials}
             currentYearNumber={gameState.currentYearNumber}
             startingYear={gameState.setup.startingYear}
+            lineView={lineView}
           />
         )}
 
@@ -306,21 +364,22 @@ export default function App() {
             estimatedPremium={estimatedPremium}
             estimatedExpectedLoss={estimatedExpectedLoss}
             disabled={gameState.isComplete}
-            wcOutstandingLoan={gameState.poolState.interLineLoans.find(l => l.borrowingLine === 'WC')?.remainingBalance ?? 0}
-            wcDividendBlocked={(gameState.lockedResults[gameState.lockedResults.length - 1]?.byLine.WC.endingSurplus ?? 0) < 0}
+            lineView={lineView}
+            lineLoanInfo={lineLoanInfo}
           />
         )}
 
         {activeTab === 'financials' && gameState && startingFinancials && (
           <FinancialsPage
-            lockedResults={gameState.lockedResults}
+            lockedResults={viewResults}
             historicalYears={historicalYears}
             startingFinancials={startingFinancials}
+            lineView={lineView}
           />
         )}
 
         {activeTab === 'results' && gameState && (
-          <ResultsPage lockedResults={gameState.lockedResults} />
+          <ResultsPage lockedResults={viewResults} lineView={lineView} />
         )}
 
         {activeTab === SPREADSHEET_TAB && gameState && (

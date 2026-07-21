@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { FileText, Target } from 'lucide-react';
-import type { ResultSet, StartingFinancials, HistoricalYear } from '../types/simulation';
+import type { LineResultSet, StartingFinancials, HistoricalYear, LineView } from '../types/simulation';
 import { deriveAnnualStatement, deriveHistoricalStatement, deriveOpeningStatement } from '../utils/financialStatementEngine';
 import { formatCurrency, formatPct, colorForNetIncome } from '../utils/formatters';
 
 interface FinancialsPageProps {
-  lockedResults: ResultSet[];
+  lockedResults: LineResultSet[];
   historicalYears: HistoricalYear[];
   startingFinancials: StartingFinancials;
+  lineView: LineView;
 }
 
 function formatYearEndDate(calendarYear: number): string {
@@ -15,7 +16,7 @@ function formatYearEndDate(calendarYear: number): string {
   return `12/31/${yy}`;
 }
 
-export default function FinancialsPage({ lockedResults, historicalYears, startingFinancials }: FinancialsPageProps) {
+export default function FinancialsPage({ lockedResults, historicalYears, startingFinancials, lineView }: FinancialsPageProps) {
   // Chronological order: earliest historical year first, Year 0 (the opening
   // position) last among the "prior" entries, then Year 1 onward below it.
   const openingYear = historicalYears[historicalYears.length - 1];
@@ -48,8 +49,13 @@ export default function FinancialsPage({ lockedResults, historicalYears, startin
     <div className="max-w-screen-2xl mx-auto px-4 py-6 space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-xl font-bold text-gray-900">Financial Statements</h2>
+          <h2 className="text-xl font-bold text-gray-900">Financial Statements{lineView !== 'pool' ? ` — ${lineView}` : ''}</h2>
           <p className="text-gray-500 text-sm">Select a year to view the full statement</p>
+          {lineView !== 'pool' && (
+            <p className="text-xs text-amber-600 mt-1">
+              Showing the {lineView} line's own statement for locked years. History and Opening entries remain pool-wide.
+            </p>
+          )}
         </div>
         <select value={String(selectedIdx)} onChange={e => setSelectedIdx(parseInt(e.target.value))} className="border border-gray-300 rounded-lg px-4 py-2 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
           {yearOptions.map(opt => (<option key={String(opt.value)} value={String(opt.value)}>{opt.label}</option>))}

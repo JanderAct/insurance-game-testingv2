@@ -8,7 +8,7 @@ import {
   AlertTriangle,
   Target,
 } from 'lucide-react';
-import type { ResultSet } from '../types/simulation';
+import type { LineResultSet, LineView } from '../types/simulation';
 import {
   formatCurrency,
   formatPct,
@@ -19,10 +19,11 @@ import {
 import { REINSURANCE_PROGRAMS } from '../data/defaultAssumptions';
 
 interface ResultsPageProps {
-  lockedResults: ResultSet[];
+  lockedResults: LineResultSet[];
+  lineView: LineView;
 }
 
-export default function ResultsPage({ lockedResults }: ResultsPageProps) {
+export default function ResultsPage({ lockedResults, lineView }: ResultsPageProps) {
   const [selectedYear, setSelectedYear] = useState<number>(
     lockedResults.length > 0 ? lockedResults[lockedResults.length - 1].yearNumber : 1
   );
@@ -33,7 +34,7 @@ export default function ResultsPage({ lockedResults }: ResultsPageProps) {
     <div className="max-w-screen-2xl mx-auto px-4 py-6 space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-xl font-bold text-gray-900">Annual Results</h2>
+          <h2 className="text-xl font-bold text-gray-900">Annual Results{lineView !== 'pool' ? ` — ${lineView}` : ''}</h2>
           <p className="text-gray-500 text-sm">Detailed breakdown for each completed year</p>
         </div>
 
@@ -96,7 +97,11 @@ export default function ResultsPage({ lockedResults }: ResultsPageProps) {
                 label="Reinsurance Level"
                 value={`${result.decisions.reinsuranceLevel} — ${REINSURANCE_PROGRAMS[result.decisions.reinsuranceLevel]?.label ?? ''}`}
               />
-              <Row label="Asset Allocation" value={`Cash ${result.assetAllocation.cashPct.toFixed(0)}% / Bonds ${result.assetAllocation.bondsPct.toFixed(0)}% / Equities ${result.assetAllocation.equitiesPct.toFixed(0)}%`} />
+              {lineView === 'pool' ? (
+                <Row label="Asset Allocation" value={`Cash ${result.assetAllocation.cashPct.toFixed(0)}% / Bonds ${result.assetAllocation.bondsPct.toFixed(0)}% / Equities ${result.assetAllocation.equitiesPct.toFixed(0)}%`} />
+              ) : (
+                <p className="text-xs text-gray-400 italic">Asset allocation is a pool-level setting — switch to Pool view to see it.</p>
+              )}
             </ResultCard>
 
             <ResultCard title="Membership" icon={<TrendingUp size={16} />}>
@@ -314,7 +319,13 @@ export default function ResultsPage({ lockedResults }: ResultsPageProps) {
                 <h3 className="font-bold text-gray-900 text-sm">What Happened This Year</h3>
               </div>
               <div className="p-5">
-                <p className="text-gray-700 text-sm leading-relaxed">{result.narrativeExplanation}</p>
+                {result.narrativeExplanation ? (
+                  <p className="text-gray-700 text-sm leading-relaxed">{result.narrativeExplanation}</p>
+                ) : (
+                  <p className="text-gray-400 text-sm italic">
+                    No narrative for this line — narratives are generated pool-wide only. Switch to Pool view to read it.
+                  </p>
+                )}
               </div>
             </div>
           </div>

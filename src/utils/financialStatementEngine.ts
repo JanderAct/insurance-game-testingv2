@@ -1,6 +1,6 @@
 // Financial Statement engine for Risk Pool Simulation v1
 
-import type { ResultSet, StartingFinancials, HistoricalYear } from '../types/simulation';
+import type { LineResultSet, StartingFinancials, HistoricalYear } from '../types/simulation';
 import { SLIDER_RANGES } from '../data/defaultAssumptions';
 
 export interface IncomeStatement {
@@ -111,7 +111,7 @@ export interface AnnualFinancialStatement {
   fundingDetail: FundingDetail | null;  // null for historical years — no player-selected funding confidence exists pre-game
 }
 
-export function deriveAnnualStatement(result: ResultSet): AnnualFinancialStatement {
+export function deriveAnnualStatement(result: LineResultSet): AnnualFinancialStatement {
   const incomeStatement: IncomeStatement = {
     poolPremium: result.poolPremium,
     adminExpense: result.adminExpense,
