@@ -13,6 +13,7 @@ import {
   HardHat,
   Scale,
   Building2,
+  ScrollText,
 } from 'lucide-react';
 
 import type { GameState, GameSetupSettings, DecisionSet, StartingFinancials, Member, CoverageLine, LineView } from './types/simulation';
@@ -29,6 +30,7 @@ import TabNav, { type TabId } from './components/TabNav';
 import SetupPage from './pages/SetupPage';
 import DashboardPage from './pages/DashboardPage';
 import DecisionsPage from './pages/DecisionsPage';
+import DecisionHistoryPage from './pages/DecisionHistoryPage';
 import FinancialsPage from './pages/FinancialsPage';
 import ResultsPage from './pages/ResultsPage';
 import MembershipPage from './pages/MembershipPage';
@@ -72,7 +74,7 @@ function defaultDecisions(yearNumber: number): DecisionSet {
 }
 
 // Pages that support the Pool / per-line view toggle (Stage 2.1).
-const LINE_VIEW_PAGES: TabId[] = ['dashboard', 'decisions', 'financials', 'results'];
+const LINE_VIEW_PAGES: TabId[] = ['dashboard', 'decisions', 'decisionHistory', 'financials', 'results'];
 
 const LINE_VIEW_ICONS: Record<LineView, React.ReactNode> = {
   pool: <Layers size={14} />,
@@ -86,6 +88,7 @@ const TABS = [
   { id: 'history' as TabId, label: 'Pool History', icon: <HistoryIcon size={16} /> },
   { id: 'dashboard' as TabId, label: 'Dashboard', icon: <LayoutDashboard size={16} /> },
   { id: 'decisions' as TabId, label: 'Decisions', icon: <ClipboardList size={16} /> },
+  { id: 'decisionHistory' as TabId, label: 'Decision History', icon: <ScrollText size={16} /> },
   { id: 'financials' as TabId, label: 'Financial Statements', icon: <FileText size={16} /> },
   { id: 'results' as TabId, label: 'Results', icon: <BarChart2 size={16} /> },
   { id: SPREADSHEET_TAB, label: 'Result Spreadsheet', icon: <Table size={16} /> },
@@ -367,6 +370,10 @@ export default function App() {
             lineView={lineView}
             lineLoanInfo={lineLoanInfo}
           />
+        )}
+
+        {activeTab === 'decisionHistory' && gameState && (
+          <DecisionHistoryPage lockedResults={viewResults} lineView={lineView} />
         )}
 
         {activeTab === 'financials' && gameState && startingFinancials && (
