@@ -319,6 +319,42 @@ export function generateStartingPoolState(
     totalMarketExposure,
   };
 
+  // --- Consistent per-line opening surplus allocation ---
+  // The engine gives each active line its contribution-share of the shared
+  // opening assets (cash/investments/other) when it builds that line's Year 1
+  // balance sheet. So each line's STORED starting surplus must be consistent
+  // with that — its share of the shared net opening assets, less its own net
+  // reserves — or Year 1 fails to tie out. (The prior "WC holds all the assets,
+  // other lines hold only their reserves" split made GL/Property launch with a
+  // spuriously negative surplus and a Year 1 tie-out gap equal to the shared
+  // assets they actually control.)
+  //
+  // We distribute the pool's single opening surplus across active lines,
+  // weighted by each line's net reserve. This conserves the pool total exactly
+  // (it only redistributes it), keeps a WC-only game byte-identical (a single
+  // active line gets weight 1 -> SHARED_NET - wcNetReserve, WC's existing
+  // value), uses no RNG (seed stream untouched), and leaves no line underwater
+  // for a solvent pool.
+  const sharedNetOpeningAssets = cash + investments + otherAssets - unearnedPremium - otherLiabilities;
+  const lineStateByLine: Record<CoverageLine, LinePoolState> = {
+    WC: wcLineState,
+    GL: glLineState,
+    Property: propertyLineState,
+  };
+  const activeNetReserves = activeLines.map(line => ({
+    line,
+    netReserve: lineStateByLine[line].grossUnpaidReserve - lineStateByLine[line].reinsuranceRecoverable,
+  }));
+  const totalActiveNetReserve = activeNetReserves.reduce((s, x) => s + x.netReserve, 0);
+  const totalOpeningSurplus = sharedNetOpeningAssets - totalActiveNetReserve;
+  const positiveNetReserveTotal = activeNetReserves.reduce((s, x) => s + Math.max(0, x.netReserve), 0);
+  for (const { line, netReserve } of activeNetReserves) {
+    const weight = positiveNetReserveTotal > 0
+      ? Math.max(0, netReserve) / positiveNetReserveTotal
+      : 1 / activeLines.length;
+    lineStateByLine[line].surplus = totalOpeningSurplus * weight;
+  }
+
   const poolState: PoolState = {
     cash,
     investments,
