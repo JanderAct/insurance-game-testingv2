@@ -253,12 +253,10 @@ export function generateStartingPoolState(
           members: allMembersWithStatus,
           grossUnpaidReserve: glGrossUnpaidReserve,
           reinsuranceRecoverable: glReinsuranceRecoverable,
-          // GL contributes no assets of its own at bootstrap (cash/investments are
-          // shared and already fully reflected in WC's starting surplus above), so
-          // its starting surplus is simply the negative of its net starting reserve
-          // liability — this keeps pool-level surplus (WC + GL) exactly equal to
-          // shared assets minus total liabilities across both lines.
+          // Placeholder — the redistribution block below assigns every active
+          // line its weighted share of the opening surplus and investments.
           surplus: glReinsuranceRecoverable - glGrossUnpaidReserve,
+          investedAssets: 0,
           totalMarketExposure: glTotalMarketExposure,
         };
       })()
@@ -294,10 +292,9 @@ export function generateStartingPoolState(
           members: allMembersWithStatus,
           grossUnpaidReserve: propertyGrossUnpaidReserve,
           reinsuranceRecoverable: propertyReinsuranceRecoverable,
-          // Same convention as GL: Property contributes no assets of its own
-          // at bootstrap, so its starting surplus is the negative of its net
-          // starting reserve liability (see GL's comment above).
+          // Placeholder — see the redistribution block below (same as GL).
           surplus: propertyReinsuranceRecoverable - propertyGrossUnpaidReserve,
+          investedAssets: 0,
           totalMarketExposure: propertyTotalMarketExposure,
         };
       })()
@@ -316,6 +313,7 @@ export function generateStartingPoolState(
     grossUnpaidReserve,
     reinsuranceRecoverable,
     surplus,
+    investedAssets: 0, // assigned by the redistribution block below
     totalMarketExposure,
   };
 
@@ -353,11 +351,15 @@ export function generateStartingPoolState(
       ? Math.max(0, netReserve) / positiveNetReserveTotal
       : 1 / activeLines.length;
     lineStateByLine[line].surplus = totalOpeningSurplus * weight;
+    // Stage 2.9: the opening investment portfolio is likewise split into
+    // per-line segregated portfolios by the same weight. Conserves the pool
+    // total exactly, uses no RNG, and gives a solo line the full amount
+    // (weight 1) — identical to what it controlled under the shared model.
+    lineStateByLine[line].investedAssets = investments * weight;
   }
 
   const poolState: PoolState = {
     cash,
-    investments,
     otherAssets,
     unearnedPremium,
     otherLiabilities,

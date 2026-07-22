@@ -436,10 +436,13 @@ tie out.
 
 ### Stage 2.9 — Per-Line Investments Rework (segregated portfolios)
 
-**Status:** BLOCKED — documentation of a planned change only, NOT a build instruction. Do not
-implement any of this until explicitly unblocked. Reverses the Tier 1 "shared investments"
-decision. All design sub-questions otherwise resolved (see
-DECISIONS_CHANGE_per_line_investments.md).
+**Status:** ✅ BUILT (unblocked and implemented in the build thread). Reverses the Tier 1
+"shared investments" decision. Design sub-questions resolved in
+DECISIONS_CHANGE_per_line_investments.md, plus two settled during the build: loan money is a
+real transfer funded by the other lines in proportion to lending capacity, with repayments
+(principal + interest) returning to the same lenders in the same fixed shares; and a lender is
+never pushed to negative surplus — if the other lines can't cover the full deficit, no loan is
+offered (the player's remedy is an assessment).
 
 **Goal:** Change investments from one shared/commingled pool portfolio (single pool-level
 allocation) to per-line segregated portfolios — each line invests its own assets with its

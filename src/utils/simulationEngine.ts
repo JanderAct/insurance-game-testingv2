@@ -36,12 +36,12 @@ function lineRngLabel(base: string, line: CoverageLine): string {
   return line === 'WC' ? base : `${base}_${line}`;
 }
 
-// Shared (pool-level, cross-line) context needed to process a single line's year.
-// cash/investments/otherAssets/otherLiabilities are this line's allocated SHARE
-// of the pool's shared balance sheet (see processYear); investedAssets/
-// investmentIncome/investmentReturnRate come from one pool-level investment
-// draw, likewise split by share, so a single commingled portfolio isn't
-// independently re-rolled per line.
+// Context needed to process a single line's year. cash/otherAssets/
+// otherLiabilities are this line's allocated SHARE of the pool's shared balance
+// sheet (see processYear). investments/investedAssets are this line's OWN
+// segregated portfolio (Stage 2.9 — carried on LinePoolState, not split from a
+// shared pot), and investmentIncome/investmentReturnRate come from this line's
+// own seeded draw against its own allocation.
 interface LineYearContext {
   instance: GameInstance;
   yearNumber: number;
@@ -59,10 +59,10 @@ interface LineYearContext {
   priorResult?: LineResultSet;
 }
 
-// Shared fields this line's year processing updates.
+// Shared fields this line's year processing updates. Investments are absent —
+// each line's ending portfolio goes to its own LinePoolState.investedAssets.
 interface LineYearShared {
   cash: number;
-  investments: number;
   otherAssets: number;
   unearnedPremium: number;
   otherLiabilities: number;
@@ -271,8 +271,8 @@ export function processLineYear(
   const quotaShareLosses = excessLosses - reinsuranceRecovery;
 
   // --- Investment Income ---
-  // Drawn once for the whole pool (see processYear) and passed in already
-  // split by this line's share of the shared, commingled portfolio.
+  // This line's own segregated portfolio (Stage 2.9): drawn in processYear from
+  // this line's own invested assets and its own asset allocation.
   const investedAssets = ctx.investedAssets;
   const investmentIncome = ctx.investmentIncome;
   const investmentReturnRate = ctx.investmentReturnRate;
@@ -434,8 +434,10 @@ export function processLineYear(
     endingCash = newCash + drawFromInvestments;
     endingInvestments = investmentsBeforeSweep - drawFromInvestments;
   }
-  endingCash = Math.max(0, endingCash);
-  endingInvestments = Math.max(0, endingInvestments);
+  // No flooring at zero here: a line in deep distress can legitimately carry
+  // negative cash (its portfolio is exhausted and it owes more than it holds).
+  // Flooring would silently create assets and break the surplus tie-out.
+  // Healthy games never reach this state (v4 baselines all tie out at 0).
 
   const totalAssets =
     endingCash +
@@ -696,13 +698,13 @@ export function processLineYear(
     grossUnpaidReserve: endingGrossReserve,
     reinsuranceRecoverable: endingReinsRecoverable,
     surplus: endingSurplus,
+    investedAssets: endingInvestments,
 
     totalMarketExposure,
   };
 
   const updatedShared: LineYearShared = {
     cash: endingCash,
-    investments: endingInvestments,
     otherAssets: ctx.otherAssets,
     unearnedPremium,
     otherLiabilities,
@@ -712,12 +714,20 @@ export function processLineYear(
   return { updatedLineState, updatedShared, result };
 }
 
-// Each active line's share of the shared cash/investments/other-assets pool,
-// proportional to what that line itself has contributed to the pool's net
-// worth (its own surplus plus its own net unpaid reserve, floored above
-// zero so a deeply negative line still gets a minimal, not negative, share).
-// For a single active line this is always 1 regardless of the formula, so
-// a WC-only game's non-investment numbers are unaffected by this change.
+// Each active line's share of the shared cash/other-assets pool. The weight is
+// exactly what makes the line's allocated slice of the shared pot reproduce its
+// own stored surplus (so the surplus rollforward ties out every year):
+//   slice_needed = surplus + netReserve − investedAssets
+// because surplus = [cash&otherAssets slice] + investedAssets + reinsRecoverable
+// − grossReserve − [otherLiabilities slice]. Stage 2.9 subtracts investedAssets
+// (each line's own portfolio is no longer part of the shared pot); before that,
+// the pot included investments and the weight was surplus + netReserve. The sum
+// of these weights equals the pot total by balance-sheet identity, so slices are
+// exact and the rollforward ties out by construction. A weight may legitimately
+// be NEGATIVE (a line whose shared-liabilities slice exceeds its shared-assets
+// slice) — no flooring, or the identity breaks and every line's tie-out drifts.
+// For a single active line the share is always 1 regardless of the formula, so
+// a WC-only game is unaffected.
 function computeContributionShares(
   poolState: PoolState,
   activeLines: CoverageLine[]
@@ -725,19 +735,30 @@ function computeContributionShares(
   const raw = activeLines.map(line => {
     const ls = poolState.lines[line];
     const netReserve = Math.max(0, ls.grossUnpaidReserve - ls.reinsuranceRecoverable);
-    return Math.max(1, ls.surplus + netReserve);
+    return ls.surplus + netReserve - ls.investedAssets;
   });
   const total = raw.reduce((s, v) => s + v, 0);
   const shares = {} as Record<CoverageLine, number>;
+  if (total === 0) {
+    activeLines.forEach(line => { shares[line] = 1 / activeLines.length; });
+    return shares;
+  }
   activeLines.forEach((line, i) => { shares[line] = raw[i] / total; });
   return shares;
 }
 
 // A deficient line at year-end that the player may cover with an inter-line loan.
+// Stage 2.9: the loan is a real transfer from specific lending lines' invested
+// assets. lenderShares (fixed at origination) says which lines fund it and in
+// what proportion. An offer only exists when the other lines can cover the FULL
+// deficit without any lender's own surplus going negative — otherwise no offer
+// is made and the line simply carries its negative surplus (the player can
+// respond with an assessment).
 export interface LoanOffer {
   line: CoverageLine;
   deficit: number;              // positive amount needed to bring the line to zero surplus
-  rateAtOrigination: number;    // this year's realized pool investment return, offered rate
+  rateAtOrigination: number;    // the pool's asset-weighted blended investment return this year
+  lenderShares: Partial<Record<CoverageLine, number>>; // each lender's share of the loan, sums to 1
 }
 
 // Full output of a processed year. loanOffers is non-empty only when one or
@@ -769,18 +790,6 @@ export function processYear(
   const activeLines = setup.activeLines;
   const shares = computeContributionShares(poolState, activeLines);
 
-  // Investment income is drawn ONCE for the whole shared, commingled
-  // portfolio (same seeded call site as before, unkeyed by line — a WC-only
-  // game draws exactly what it always did), then split across active lines
-  // by their contribution share below.
-  const investRng = deriveSubRng(instance.seed, yearNumber, 'invest');
-  const poolInvestedAssets = poolState.investments;
-  const invResult = simulateInvestmentReturn(
-    poolInvestedAssets,
-    decisions.assetAllocation,
-    investRng
-  );
-
   // Working copy of the loan ledger — repayments mutate balances / remove
   // paid-off loans below.
   let interLineLoans = poolState.interLineLoans.map(loan => ({ ...loan }));
@@ -789,11 +798,17 @@ export function processYear(
   const lineResults: Array<{ line: CoverageLine; result: LineResultSet }> = [];
   const updatedLineStates: Partial<Record<CoverageLine, LinePoolState>> = {};
   let sharedCash = 0;
-  let sharedInvestments = 0;
   let sharedOtherAssets = 0;
   let sharedOtherLiabilities = 0;
   let sharedUnearnedPremium = 0;
-  let loanRepaymentsReturnedToPool = 0;
+  // Loan repayments owed back to each lending line this year (principal +
+  // interest, since interest is embedded in the growing balance). Credited to
+  // the lenders after the line loop so processing order doesn't matter.
+  const lenderCredits: Partial<Record<CoverageLine, number>> = {};
+  // For the asset-weighted blended pool return (the Stage 2.9 loan rate):
+  // each line's realized return weighted by its beginning invested assets.
+  let totalInvestedForBlend = 0;
+  let totalInvestmentIncomeForBlend = 0;
 
   // Sequential fold: each line sees the shared roster as updated by lines
   // already processed this year (a member withdrawing from one line becomes
@@ -801,10 +816,25 @@ export function processYear(
   // removed from lines it's already active on).
   for (const line of activeLines) {
     const share = shares[line];
+    const lineState = poolState.lines[line];
+    const lineDecisions = decisions.byLine[line];
     // A line that carried a negative surplus in from last year (declined a
     // loan) has its dividend blocked this year.
     const priorLineSurplus = priorPoolResult?.byLine[line]?.endingSurplus;
     const dividendBlocked = priorLineSurplus !== undefined && priorLineSurplus < 0;
+
+    // Stage 2.9: each line's investment return is drawn from its OWN seeded
+    // stream against its OWN invested assets and allocation. WC keeps the
+    // original unsuffixed 'invest' label (same convention as members/losses/
+    // dev), so a WC-only game's draw is unchanged.
+    const investRng = deriveSubRng(instance.seed, yearNumber, lineRngLabel('invest', line));
+    const invResult = simulateInvestmentReturn(
+      lineState.investedAssets,
+      lineDecisions.assetAllocation,
+      investRng
+    );
+    totalInvestedForBlend += lineState.investedAssets;
+    totalInvestmentIncomeForBlend += invResult.income;
 
     const ctx: LineYearContext = {
       instance,
@@ -812,12 +842,12 @@ export function processYear(
       calendarYear,
       allMarketMembers: currentAllMarketMembers,
       cash: poolState.cash * share,
-      investments: poolState.investments * share,
+      investments: lineState.investedAssets,
       otherAssets: poolState.otherAssets * share,
       otherLiabilities: poolState.otherLiabilities * share,
-      assetAllocation: decisions.assetAllocation,
-      investedAssets: poolInvestedAssets * share,
-      investmentIncome: invResult.income * share,
+      assetAllocation: lineDecisions.assetAllocation,
+      investedAssets: lineState.investedAssets,
+      investmentIncome: invResult.income,
       investmentReturnRate: invResult.returnRate,
       dividendBlocked,
       priorResult: priorPoolResult?.byLine[line],
@@ -825,8 +855,8 @@ export function processYear(
 
     const { updatedLineState, updatedShared, result } = processLineYear(
       line,
-      poolState.lines[line],
-      decisions.byLine[line],
+      lineState,
+      lineDecisions,
       ctx
     );
 
@@ -835,23 +865,38 @@ export function processYear(
     if (loan) {
       const interest = loan.remainingBalance * loan.rateAtOrigination;
       loan.remainingBalance += interest;
-      const aggressiveness = Math.max(0, Math.min(1, decisions.byLine[line].loanRepaymentAggressiveness));
+      const aggressiveness = Math.max(0, Math.min(1, lineDecisions.loanRepaymentAggressiveness));
       const skim = aggressiveness * Math.max(0, result.netIncome);
-      const applied = Math.min(skim, loan.remainingBalance);
+      // A repayment can't exceed what the line actually holds in liquid assets
+      // (investments + cash) — paying more would drive balances negative and
+      // fabricate money on next year's balance sheet.
+      const liquidAssets = Math.max(0, result.endingInvestments + result.endingCash);
+      const applied = Math.min(skim, loan.remainingBalance, liquidAssets);
       loan.remainingBalance -= applied;
 
-      // The skimmed income leaves the line (diverted to debt service) and
-      // returns to the shared pool; interest is this year's carrying cost.
+      // The skimmed income leaves the borrowing line (diverted to debt
+      // service) and flows back to the lending lines in their fixed
+      // origination shares; interest is this year's carrying cost. The
+      // payment comes out of investments first, then cash.
+      const fromInvestments = Math.min(applied, Math.max(0, result.endingInvestments));
+      const fromCash = applied - fromInvestments;
       result.loanInterestAccrued = interest;
       result.loanRepaymentApplied = applied;
       result.endingSurplus -= applied;
       result.availableSurplus = result.endingSurplus;
       result.availableFunding = result.endingSurplus;
-      result.endingInvestments -= applied;
+      result.endingInvestments -= fromInvestments;
+      result.endingCash -= fromCash;
       result.totalAssets -= applied;
-      loanRepaymentsReturnedToPool += applied;
+      updatedShared.cash = result.endingCash;
+
+      for (const [lender, lenderShare] of Object.entries(loan.lenderShares)) {
+        lenderCredits[lender as CoverageLine] =
+          (lenderCredits[lender as CoverageLine] ?? 0) + applied * (lenderShare ?? 0);
+      }
 
       updatedLineState.surplus = result.endingSurplus;
+      updatedLineState.investedAssets = result.endingInvestments;
 
       // Close the loan once effectively repaid.
       if (loan.remainingBalance <= 1) {
@@ -867,18 +912,35 @@ export function processYear(
     lineResults.push({ line, result });
 
     sharedCash += updatedShared.cash;
-    sharedInvestments += updatedShared.investments;
     sharedOtherAssets += updatedShared.otherAssets;
     sharedOtherLiabilities += updatedShared.otherLiabilities;
     sharedUnearnedPremium += updatedShared.unearnedPremium;
   }
 
-  // Repaid principal + interest returns to the shared investment pool.
-  sharedInvestments += loanRepaymentsReturnedToPool;
+  // --- Credit this year's loan repayments back to the lending lines ---
+  // Applied after the loop so it works regardless of the order the borrower
+  // and lenders were processed in.
+  for (const [lenderKey, credit] of Object.entries(lenderCredits)) {
+    const lender = lenderKey as CoverageLine;
+    if (!credit) continue;
+    const entry = lineResults.find(lr => lr.line === lender);
+    const lenderState = updatedLineStates[lender];
+    if (!entry || !lenderState) continue;
+    entry.result.endingSurplus += credit;
+    entry.result.availableSurplus = entry.result.endingSurplus;
+    entry.result.availableFunding = entry.result.endingSurplus;
+    entry.result.endingInvestments += credit;
+    entry.result.totalAssets += credit;
+    lenderState.surplus = entry.result.endingSurplus;
+    lenderState.investedAssets = entry.result.endingInvestments;
+  }
+
+  const blendedReturnRate = totalInvestedForBlend > 0
+    ? totalInvestmentIncomeForBlend / totalInvestedForBlend
+    : 0;
 
   const updatedPoolState: PoolState = {
     cash: sharedCash,
-    investments: sharedInvestments,
     otherAssets: sharedOtherAssets,
     unearnedPremium: sharedUnearnedPremium,
     otherLiabilities: sharedOtherLiabilities,
@@ -891,16 +953,41 @@ export function processYear(
   };
 
   // Detect deficient lines that don't already carry a loan — these become
-  // offers the player resolves before the year is committed.
-  const loanOffers: LoanOffer[] = lineResults
-    .filter(({ line, result }) =>
-      result.endingSurplus < 0 && !interLineLoans.some(l => l.borrowingLine === line)
-    )
-    .map(({ line, result }) => ({
+  // offers the player resolves before the year is committed. Stage 2.9: an
+  // offer only exists when the OTHER lines can fund the full deficit without
+  // any lender's own surplus (or portfolio) going negative. Lending capacity
+  // is consumed offer-by-offer so that authorizing every offer can never
+  // overdraw a lender. A deficit no one can cover gets no offer — the line
+  // carries its negative surplus (dividend blocked next year) and the player
+  // can respond with an assessment.
+  const lendingCapacity: Partial<Record<CoverageLine, number>> = {};
+  for (const { line, result } of lineResults) {
+    lendingCapacity[line] = Math.max(0, Math.min(result.endingSurplus, result.endingInvestments));
+  }
+
+  const loanOffers: LoanOffer[] = [];
+  for (const { line, result } of lineResults) {
+    if (result.endingSurplus >= 0 || interLineLoans.some(l => l.borrowingLine === line)) continue;
+    const deficit = -result.endingSurplus;
+
+    const lenders = activeLines.filter(l => l !== line && (lendingCapacity[l] ?? 0) > 0);
+    const totalCapacity = lenders.reduce((s, l) => s + (lendingCapacity[l] ?? 0), 0);
+    if (totalCapacity < deficit) continue; // no viable loan — auto-declined
+
+    const lenderShares: Partial<Record<CoverageLine, number>> = {};
+    for (const l of lenders) {
+      const lenderShare = (lendingCapacity[l] ?? 0) / totalCapacity;
+      lenderShares[l] = lenderShare;
+      lendingCapacity[l] = (lendingCapacity[l] ?? 0) - deficit * lenderShare;
+    }
+
+    loanOffers.push({
       line,
-      deficit: -result.endingSurplus,
-      rateAtOrigination: invResult.returnRate,
-    }));
+      deficit,
+      rateAtOrigination: blendedReturnRate,
+      lenderShares,
+    });
+  }
 
   const result = aggregateLineResults(lineResults, priorPoolResult);
 
@@ -908,9 +995,13 @@ export function processYear(
 }
 
 // Finalize a processed year after the player has chosen which loan offers to
-// authorize. Authorized lines are lifted to zero surplus and a loan is recorded;
-// declined lines keep their negative surplus. Re-aggregates the pool result so
-// pool-level totals reflect the authorizations.
+// authorize. Stage 2.9: authorization is a REAL transfer — each lending line's
+// invested assets are debited by its share of the deficit (its surplus drops
+// accordingly, never below zero by construction of the offer), and the
+// borrowing line's invested assets are credited by the full deficit, which
+// brings its surplus to zero by balance-sheet identity. Declined lines keep
+// their negative surplus. Re-aggregates the pool result so pool-level totals
+// reflect the authorizations.
 export function applyLoanAuthorizations(
   processed: ProcessYearResult,
   yearNumber: number,
@@ -923,24 +1014,51 @@ export function applyLoanAuthorizations(
   for (const offer of processed.loanOffers) {
     if (!authorized.has(offer.line)) continue;
 
-    // Record the loan and lift the borrowing line to zero surplus.
     newLoans.push({
       borrowingLine: offer.line,
       principal: offer.deficit,
       remainingBalance: offer.deficit,
       rateAtOrigination: offer.rateAtOrigination,
       yearOriginated: yearNumber,
+      lenderShares: offer.lenderShares,
     });
 
+    // Debit each lending line by its share of the deficit.
+    for (const [lenderKey, lenderShare] of Object.entries(offer.lenderShares)) {
+      const lender = lenderKey as CoverageLine;
+      const amount = offer.deficit * (lenderShare ?? 0);
+      if (amount <= 0) continue;
+      const lenderEntry = processed.lineResults.find(lr => lr.line === lender);
+      if (lenderEntry) {
+        lenderEntry.result.endingSurplus -= amount;
+        lenderEntry.result.availableSurplus = lenderEntry.result.endingSurplus;
+        lenderEntry.result.availableFunding = lenderEntry.result.endingSurplus;
+        lenderEntry.result.endingInvestments -= amount;
+        lenderEntry.result.totalAssets -= amount;
+      }
+      updatedLines[lender] = {
+        ...updatedLines[lender],
+        surplus: updatedLines[lender].surplus - amount,
+        investedAssets: updatedLines[lender].investedAssets - amount,
+      };
+    }
+
+    // Credit the borrowing line with the full deficit.
     const entry = processed.lineResults.find(lr => lr.line === offer.line);
     if (entry) {
       entry.result.endingSurplus = 0;
       entry.result.availableSurplus = 0;
       entry.result.availableFunding = 0;
+      entry.result.endingInvestments += offer.deficit;
+      entry.result.totalAssets += offer.deficit;
       entry.result.outstandingLoanBalance = offer.deficit;
       entry.result.loanOriginatedThisYear = offer.deficit;
     }
-    updatedLines[offer.line] = { ...updatedLines[offer.line], surplus: 0 };
+    updatedLines[offer.line] = {
+      ...updatedLines[offer.line],
+      surplus: 0,
+      investedAssets: updatedLines[offer.line].investedAssets + offer.deficit,
+    };
   }
 
   const updatedPoolState: PoolState = {
@@ -1099,7 +1217,11 @@ function aggregateLineResults(
     beginningReinsRecoverable: sum('beginningReinsRecoverable'),
     endingReinsRecoverable: sum('endingReinsRecoverable'),
 
-    investmentReturnRate: first.investmentReturnRate,
+    // Stage 2.9: per-line portfolios make the pool return an asset-weighted
+    // blend of each line's own realized return, not any single line's rate.
+    investmentReturnRate: sum('investedAssets') > 0
+      ? sum('investmentIncome') / sum('investedAssets')
+      : first.investmentReturnRate,
     investedAssets: sum('investedAssets'),
     investmentIncome: sum('investmentIncome'),
 

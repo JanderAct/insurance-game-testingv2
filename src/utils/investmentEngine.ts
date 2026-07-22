@@ -1,6 +1,8 @@
 // Investment engine for Risk Pool Simulation v1
-// Models the shared, commingled portfolio as a blend of three asset classes
-// (cash/bonds/equities), weighted by the player's pool-level allocation.
+// Models a single portfolio as a blend of three asset classes (cash/bonds/
+// equities), weighted by an allocation. Stage 2.9: called once per active line
+// with that line's own invested assets and its own allocation — portfolios are
+// segregated per line, not commingled.
 
 import { SeededRandom } from './random';
 import type { AssetAllocation } from '../types/simulation';

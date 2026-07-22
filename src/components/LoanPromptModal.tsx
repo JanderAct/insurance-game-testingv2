@@ -27,9 +27,10 @@ export default function LoanPromptModal({ offers, onResolve }: LoanPromptModalPr
         <div className="p-5 space-y-4">
           <p className="text-sm text-gray-600">
             {offers.length === 1 ? 'A coverage line' : 'One or more coverage lines'} ended
-            the year with a negative surplus. You can authorize an inter-line loan from the
-            shared pool to bring the line back to zero, or decline and let it carry the
-            deficit forward (which blocks that line's dividend next year).
+            the year with a negative surplus. You can authorize an inter-line loan — a real
+            transfer from the other lines' invested assets, repaid to them with interest — to
+            bring the line back to zero, or decline and let it carry the deficit forward
+            (which blocks that line's dividend next year).
           </p>
 
           <div className="space-y-3">
@@ -41,9 +42,14 @@ export default function LoanPromptModal({ offers, onResolve }: LoanPromptModalPr
                     Deficit {formatCurrency(o.deficit)}
                   </span>
                 </div>
+                <p className="text-xs text-gray-500 mb-1">
+                  Loan rate (the pool's asset-weighted blended investment return this year,
+                  fixed for the loan's life): <span className="font-semibold">{(o.rateAtOrigination * 100).toFixed(2)}%</span>
+                </p>
                 <p className="text-xs text-gray-500 mb-2">
-                  Loan rate (this year's realized pool investment return, fixed for the loan's
-                  life): <span className="font-semibold">{(o.rateAtOrigination * 100).toFixed(2)}%</span>
+                  Funded by: {Object.entries(o.lenderShares)
+                    .map(([l, s]) => `${l} ${((s ?? 0) * 100).toFixed(0)}%`)
+                    .join(', ')} — repayments (principal + interest) flow back to {Object.keys(o.lenderShares).length === 1 ? 'that line' : 'those lines'}.
                 </p>
                 <div className="flex gap-2">
                   <button

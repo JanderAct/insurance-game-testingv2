@@ -1,6 +1,6 @@
 import React from 'react';
 import { DollarSign, TrendingUp, BarChart2, Shield, RotateCcw, ClipboardList } from 'lucide-react';
-import type { DecisionSet, LineDecisionSet, LineView, CoverageLine } from '../types/simulation';
+import type { DecisionSet, LineDecisionSet, CoverageLine } from '../types/simulation';
 import SliderInput from '../components/SliderInput';
 import { SLIDER_RANGES, REINSURANCE_PROGRAMS, FULL_TRANSFER_COST_PCT_OF_PREMIUM, SELF_FUNDED_DISCOUNT_PCT, ASSET_ALLOCATION_DEFAULT } from '../data/defaultAssumptions';
 import { formatCurrency } from '../utils/formatters';
@@ -18,7 +18,9 @@ interface DecisionsPageProps {
   estimatedPremium: number;
   estimatedExpectedLoss: number;
   disabled?: boolean;
-  lineView: LineView;
+  // Stage 2.9: decisions are all per-line, so this page has no Pool view —
+  // it always shows a specific coverage line.
+  lineView: CoverageLine;
   lineLoanInfo: Record<CoverageLine, LineLoanInfo>;
 }
 
@@ -34,7 +36,8 @@ function getFundingLabel(v: number): string {
 const UW_LABELS = ['Very Flexible', 'Flexible', 'Somewhat Flexible', 'Moderate-Flexible', 'Moderate', 'Moderate-Strict', 'Somewhat Strict', 'Strict', 'Very Strict', 'Extremely Strict', 'Maximum Strict'];
 
 function defaultDecisions(yearNumber: number): DecisionSet {
-  const lineDefaults = {
+  // Fresh object per line (allocation is nested, so lines must not share a reference).
+  const lineDefaults = () => ({
     rateChange: SLIDER_RANGES.rateChange.default,
     fundingConfidenceLevel: SLIDER_RANGES.fundingConfidenceLevel.default,
     dividendPct: SLIDER_RANGES.dividendPct.default,
@@ -42,39 +45,40 @@ function defaultDecisions(yearNumber: number): DecisionSet {
     underwritingStrictness: SLIDER_RANGES.underwritingStrictness.default,
     riskControlPct: SLIDER_RANGES.riskControlPct.default,
     reinsuranceLevel: SLIDER_RANGES.reinsuranceLevel.default,
+    assetAllocation: { ...ASSET_ALLOCATION_DEFAULT },
     loanRepaymentAggressiveness: 0.5,
-  };
+  });
   return {
     yearNumber,
-    assetAllocation: { ...ASSET_ALLOCATION_DEFAULT },
     byLine: {
-      WC: lineDefaults,
-      GL: lineDefaults,
-      Property: lineDefaults,
+      WC: lineDefaults(),
+      GL: lineDefaults(),
+      Property: lineDefaults(),
     },
   };
 }
 
 export default function DecisionsPage({ decisions, onChange, yearNumber, estimatedPremium, estimatedExpectedLoss, disabled = false, lineView, lineLoanInfo }: DecisionsPageProps) {
-  // WC is the only line with real per-line decision editing today (Stage 1.3
-  // note: full per-line editing is a later stage). Pool view edits WC too,
-  // since that's exactly today's behavior before this view toggle existed.
+  // WC is the only line with real per-line decision editing today (full
+  // per-line editing is Stage 2.7, a later stage).
   const editableLine: CoverageLine = 'WC';
-  const isEditableView = lineView === 'pool' || lineView === editableLine;
-  const selectedLine: CoverageLine = lineView === 'pool' ? editableLine : lineView;
+  const isEditableView = lineView === editableLine;
+  const selectedLine: CoverageLine = lineView;
   const selectedLineDecisions = decisions.byLine[selectedLine];
   const selectedLoanInfo = lineLoanInfo[selectedLine];
 
   const wc = decisions.byLine.WC;
-  const set = (key: keyof LineDecisionSet, val: number) =>
+  const set = (key: keyof LineDecisionSet, val: number | LineDecisionSet['assetAllocation']) =>
     onChange({ ...decisions, byLine: { ...decisions.byLine, WC: { ...wc, [key]: val } } });
 
-  const { cashPct, bondsPct } = decisions.assetAllocation;
+  // Stage 2.9: allocation is a per-line decision — these sliders edit WC's own
+  // portfolio (GL/Property run on fixed defaults until Stage 2.7).
+  const { cashPct, bondsPct } = wc.assetAllocation;
   const equitiesPct = Math.max(0, 100 - cashPct - bondsPct);
   const setCashPct = (val: number) =>
-    onChange({ ...decisions, assetAllocation: { cashPct: val, bondsPct: Math.min(bondsPct, 100 - val), equitiesPct: Math.max(0, 100 - val - Math.min(bondsPct, 100 - val)) } });
+    set('assetAllocation', { cashPct: val, bondsPct: Math.min(bondsPct, 100 - val), equitiesPct: Math.max(0, 100 - val - Math.min(bondsPct, 100 - val)) });
   const setBondsPct = (val: number) =>
-    onChange({ ...decisions, assetAllocation: { cashPct: Math.min(cashPct, 100 - val), bondsPct: val, equitiesPct: Math.max(0, 100 - val - Math.min(cashPct, 100 - val)) } });
+    set('assetAllocation', { cashPct: Math.min(cashPct, 100 - val), bondsPct: val, equitiesPct: Math.max(0, 100 - val - Math.min(cashPct, 100 - val)) });
 
   const reinsStructure = getReinsuranceStructure(wc.reinsuranceLevel, estimatedPremium, estimatedExpectedLoss);
   const prog = REINSURANCE_PROGRAMS[wc.reinsuranceLevel];
@@ -90,8 +94,8 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
     <div className="max-w-screen-2xl mx-auto px-4 py-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold text-gray-900">Year {yearNumber} Decisions{lineView !== 'pool' ? ` — ${lineView}` : ''}</h2>
-          <p className="text-gray-500 text-sm">Configure your pool's strategy for this year</p>
+          <h2 className="text-xl font-bold text-gray-900">Year {yearNumber} Decisions — {lineView}</h2>
+          <p className="text-gray-500 text-sm">Configure this line's strategy for the year</p>
         </div>
         {!disabled && isEditableView && (
           <button onClick={() => onChange(defaultDecisions(yearNumber))} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition-colors px-3 py-1.5 rounded-lg hover:bg-gray-100">
@@ -160,11 +164,11 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
           <ReadOnlyLineDecisions line={selectedLine} lineDecisions={selectedLineDecisions} loanInfo={selectedLoanInfo} />
         )}
 
-        <SectionCard title="Investment & Reserving" icon={<BarChart2 size={16} />}>
-          {lineView === 'pool' ? (
+        <SectionCard title="Investment Allocation" icon={<BarChart2 size={16} />}>
+          {isEditableView ? (
             <>
               <p className="text-xs text-gray-500 -mt-2">
-                Unlike the sliders above, this allocation is shared across every active line's investment portfolio, not just this one.
+                This allocation applies to the {lineView} line's own segregated investment portfolio — each line invests separately and keeps its own gains and losses.
               </p>
               <SliderInput label="Cash %" value={cashPct} min={0} max={100} step={1} onChange={setCashPct} formatValue={v => `${v.toFixed(0)}%`} leftLabel="None" rightLabel="All Cash" disabled={disabled} helpText="Low return, very low volatility." />
               <SliderInput label="Bonds %" value={bondsPct} min={0} max={100} step={1} onChange={setBondsPct} formatValue={v => `${v.toFixed(0)}%`} leftLabel="None" rightLabel="All Bonds" disabled={disabled} helpText="Moderate return, moderate volatility." />
@@ -175,9 +179,16 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
               <p className="text-xs text-gray-500">Higher expected return, higher volatility, with an occasional down year.</p>
             </>
           ) : (
-            <p className="text-sm text-gray-500 italic">
-              Asset allocation is a pool-level setting shared across all lines — switch to Pool view to see or adjust it.
-            </p>
+            <>
+              <p className="text-sm text-amber-700">
+                Per-line editing for {lineView} isn't available yet — this line invests its own portfolio on the fixed default allocation below. Full per-line editing arrives in a later stage.
+              </p>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+                <DataRow label="Cash %" value={`${selectedLineDecisions.assetAllocation.cashPct.toFixed(0)}%`} />
+                <DataRow label="Bonds %" value={`${selectedLineDecisions.assetAllocation.bondsPct.toFixed(0)}%`} />
+                <DataRow label="Equities %" value={`${selectedLineDecisions.assetAllocation.equitiesPct.toFixed(0)}%`} />
+              </div>
+            </>
           )}
         </SectionCard>
       </div>

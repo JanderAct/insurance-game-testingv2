@@ -22,7 +22,7 @@ yet built.
 | Dividend % | Per line | 🟢 (moves to per-line 🔵) | Returns cash to members | Member goodwill vs. surplus growth |
 | Assessment % | Per line | 🟢 (moves to per-line 🔵) | Charges members extra, above premium | Fast cash vs. member goodwill |
 | Reserve strategy | Per line | 🔵 | Sets carried reserve vs. indicated reserve | Reported surplus now vs. future adverse-development risk |
-| Asset allocation (cash/bonds/equities) | Pool | 🔵 | Blends investment return/volatility | Growth potential vs. stability |
+| Asset allocation (cash/bonds/equities) | Per line | 🟢 | Blends that line's own portfolio return/volatility | Growth potential vs. stability |
 | Loan repayment aggressiveness | Per line (conditional) | 🔵 | % of net income used to pay down an inter-line loan | Faster debt payoff vs. faster surplus rebuild |
 | Authorize inter-line loan | Per line (event-triggered) | 🔵 | Zeroes out a negative line surplus | Debt + interest vs. a visibly deficient line |
 | Reinsurance basis (aggregate/occurrence/combined) | Per line | 🔵 | Changes *how* reinsurance responds to losses | Broad protection vs. large-claim protection vs. cost |
@@ -266,42 +266,59 @@ mechanic reaches members through one realistic channel instead of needing bespok
 
 ---
 
-### Asset Allocation (Cash / Bonds / Equities) 🔵 (Phase 1.5, pool-level)
-**Mechanism:** Replaces the old single risk slider with three blended components — cash (low
-return, low volatility), bonds (moderate), equities (higher expected return, higher volatility,
-occasional downside) — combined per the player's allocation percentages. Income is shared across
-the pool's investment portfolio, then allocated back to each line by its contribution share.
+### Asset Allocation (Cash / Bonds / Equities) 🟢 (Stage 1.5, reworked per-line in Stage 2.9)
+**Mechanism:** Three blended components — cash (low return, low volatility), bonds (moderate),
+equities (higher expected return, higher volatility, occasional downside) — combined per the
+player's allocation percentages. Stage 2.9: each line invests its OWN segregated portfolio with
+its OWN allocation and keeps its own gains and losses. There is no shared pool portfolio and no
+"allocate income back by contribution share" step — a line's investment income is simply its own
+invested assets times its own realized blended return. (Only WC's allocation is player-editable
+until Stage 2.7 per-line editing; GL/Property run on the 10/80/10 default meanwhile.)
 
-**Immediate effects:** More equities → higher expected investment income, but more variance
-year-to-year (including real risk of a down year). More cash/bonds → lower, steadier income.
+**Immediate effects:** More equities → higher expected investment income for that line, but more
+variance year-to-year (including real risk of a down year). More cash/bonds → lower, steadier
+income. The effect lands only on the line whose allocation it is.
 
 **Second-order effects:**
-- Because investment income feeds every line's surplus, a bad equities year during the *same*
-  year as a bad loss year (or a shock event) compounds — two sources of surplus pressure landing
-  together. This is a real correlated-risk lesson: investment risk and underwriting risk aren't
-  independent from the player's perspective even though they're mechanically separate systems.
-- A pool sitting close to a capital-adequacy threshold has a much stronger reason to hold more
-  cash/bonds — not because equities are "bad," but because the pool can't afford the downside
+- Investment risk is ISOLATED per line by design: a bond-heavy line is insulated from a market
+  swing that hits an equity-heavy line's surplus. Pool-wide compounding still exists — shared
+  shock events can hit multiple lines' losses at once, and a hit line can draw on the others
+  via an inter-line loan — but it no longer flows through a common portfolio.
+- The asset-liability duration teaching point: WC's long payout tail (7–10 yr) can tolerate more
+  portfolio volatility than Property's short tail (3–4 yr), so different lines *should* want
+  different allocations — that's the point of segregating them.
+- A line sitting close to a capital-adequacy threshold has a much stronger reason to hold more
+  cash/bonds — not because equities are "bad," but because that line can't afford the downside
   variance right now. This mirrors real insurer investment policy (surplus adequacy drives asset
   allocation conservatism), and is a good teaching moment.
 
 **Interacts with:** Reinsurance level and reserve strategy — all three are ultimately different
-levers on the same underlying question ("how much volatility can this pool absorb"), just
-applied to different risk sources (claims tail, reserve adequacy, investment markets).
+levers on the same underlying question ("how much volatility can this line absorb"), just
+applied to different risk sources (claims tail, reserve adequacy, investment markets). Also the
+inter-line loan rate: the pool's asset-weighted blended return across every line's portfolio
+sets the rate a borrowing line pays.
 
 ---
 
-### Inter-Line Loan Authorization & Repayment Aggressiveness 🔵 (Phase 1.6)
+### Inter-Line Loan Authorization & Repayment Aggressiveness 🟢 (Stage 1.6, reworked in Stage 2.9)
 **Mechanism:** Triggered automatically when a line's ending surplus is negative. Player chooses
-to authorize (pool lends at that year's realized investment return rate, fixed at origination)
-or decline (line carries negative surplus forward, dividend blocked, capital-adequacy/IRIS flags
-raised). If authorized, a separate `loanRepaymentAggressiveness` decision (0-100%) determines
-what share of that line's future positive net income goes to debt paydown vs. that line's own
-surplus growth.
+to authorize or decline (declined: line carries negative surplus forward, dividend blocked,
+capital-adequacy/IRIS flags raised). Stage 2.9: the loan is a REAL transfer — the other lines
+fund it out of their invested assets in proportion to their lending capacity, and repayments
+(principal + interest, since interest compounds into the balance) flow back to those same
+lenders in the same fixed shares. The rate is the pool's asset-weighted blended investment
+return that year (each line's realized return weighted by its invested assets), fixed at
+origination. A lender is never pushed negative: each line's lending capacity is capped at what
+it can give while keeping its own surplus (and portfolio) non-negative, and if the other lines
+can't cover the full deficit, NO offer is made — the deficient line simply carries its negative
+surplus and the player's remedy is an assessment. If authorized, a separate
+`loanRepaymentAggressiveness` decision (0-100%) determines what share of that line's future
+positive net income goes to debt paydown vs. that line's own surplus growth.
 
-**Immediate effects:** Authorizing brings the line back to zero immediately, at the cost of future
-income and an unfavorable-if-badly-timed interest rate (locked to whatever the pool's investment
-return happened to be that year).
+**Immediate effects:** Authorizing brings the borrowing line back to zero immediately — and
+visibly dents the lending lines' surplus by the same total (they get it back with interest as
+repayments come in). The rate is unfavorable-if-badly-timed, locked to whatever the pool's
+blended investment return happened to be that year.
 
 **Second-order effects:**
 - High repayment aggressiveness clears the debt fast but effectively freezes that line's own

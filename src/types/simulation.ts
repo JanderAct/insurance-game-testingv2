@@ -133,34 +133,41 @@ export interface LineDecisionSet {
   underwritingStrictness: number; // 0-10
   riskControlPct: number;         // 0.00 to 0.08 of premium
   reinsuranceLevel: number;       // 0-4
+  assetAllocation: AssetAllocation;    // this line's own segregated portfolio allocation (Stage 2.9)
   loanRepaymentAggressiveness: number; // 0.00 to 1.00 — share of positive net income used to
                                        // repay an outstanding inter-line loan first; only
                                        // relevant while that line carries a loan balance
 }
 
-// An inter-line loan from the shared pool to a single line whose surplus went
-// negative. Tracked at the pool level (see PoolState.interLineLoans). At most
-// one outstanding loan per borrowing line at a time.
+// An inter-line loan from specific lending lines to a single line whose surplus
+// went negative. Tracked at the pool level (see PoolState.interLineLoans). At
+// most one outstanding loan per borrowing line at a time. Stage 2.9: the money
+// is a real transfer out of the lending lines' invested assets; repayments
+// (principal + interest) flow back to the same lenders in the same fixed shares.
 export interface InterLineLoan {
   borrowingLine: CoverageLine;
   principal: number;              // original amount borrowed (the deficit that was covered)
   remainingBalance: number;       // outstanding principal + accrued interest, reduced by repayments
-  rateAtOrigination: number;      // that year's realized pool investment return, fixed for the loan's life
+  rateAtOrigination: number;      // the pool's asset-weighted blended investment return that year,
+                                  // fixed for the loan's life
   yearOriginated: number;
+  lenderShares: Partial<Record<CoverageLine, number>>; // each lending line's share of the loan
+                                                       // (sums to 1), fixed at origination
 }
 
-// Shared investment portfolio allocation across cash/bonds/equities. Pool-level
-// (one shared, commingled portfolio) — must sum to 100.
+// Investment portfolio allocation across cash/bonds/equities. Per-line (Stage
+// 2.9: each line invests its own segregated portfolio) — must sum to 100.
 export interface AssetAllocation {
   cashPct: number;
   bondsPct: number;
   equitiesPct: number;
 }
 
-// Player decisions for a given year: pool-level fields plus one LineDecisionSet per line
+// Player decisions for a given year: one LineDecisionSet per line. All decisions
+// are per-line (Stage 2.9 moved asset allocation, the last pool-level decision,
+// into LineDecisionSet).
 export interface DecisionSet {
   yearNumber: number;
-  assetAllocation: AssetAllocation; // pool-level (shared asset pool)
   byLine: Record<CoverageLine, LineDecisionSet>;
 }
 
@@ -195,7 +202,8 @@ export interface ResultSet {
 
   // Decisions echoed
   decisions: LineDecisionSet;
-  assetAllocation: AssetAllocation; // pool-level decision, echoed for this line's result
+  assetAllocation: AssetAllocation; // this line's own allocation decision, echoed
+                                    // (pool-level aggregate shows the first line's as a placeholder)
 
   // Membership
   activeMembers: number;
@@ -385,13 +393,16 @@ export interface LinePoolState {
   grossUnpaidReserve: number;
   reinsuranceRecoverable: number;
   surplus: number;
+  investedAssets: number;      // this line's own segregated investment portfolio (Stage 2.9),
+                               // carried forward year to year like surplus
   totalMarketExposure: number;
 }
 
-// Pool ongoing state: fields shared across all lines, plus one LinePoolState per line
+// Pool ongoing state: fields shared across all lines, plus one LinePoolState per
+// line. Investments are NOT here — each line holds its own portfolio (Stage 2.9);
+// cash/otherAssets/otherLiabilities remain shared and are split by contribution share.
 export interface PoolState {
   cash: number;
-  investments: number;
   otherAssets: number;
   unearnedPremium: number;
   otherLiabilities: number;

@@ -1,4 +1,5 @@
 import type { CoverageLine, LineDecisionSet, LinePoolState, LineResultSet, LineView, Member, ResultSet } from '../types/simulation';
+import { ASSET_ALLOCATION_DEFAULT } from '../data/defaultAssumptions';
 
 export function getMemberExposure(member: Member, line: CoverageLine): number {
   return member.exposureByLine[line] ?? 0;
@@ -27,6 +28,7 @@ export function emptyLinePoolState(): LinePoolState {
     grossUnpaidReserve: 0,
     reinsuranceRecoverable: 0,
     surplus: 0,
+    investedAssets: 0,
     totalMarketExposure: 0,
   };
 }
@@ -40,6 +42,7 @@ export function emptyLineDecisionSet(): LineDecisionSet {
     underwritingStrictness: 5,
     riskControlPct: 0,
     reinsuranceLevel: 0,
+    assetAllocation: { ...ASSET_ALLOCATION_DEFAULT },
     loanRepaymentAggressiveness: 0.5,
   };
 }

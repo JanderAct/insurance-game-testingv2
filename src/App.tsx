@@ -52,7 +52,8 @@ function seedFromInstanceId(id: string): number {
 }
 
 function defaultDecisions(yearNumber: number): DecisionSet {
-  const lineDefaults = {
+  // Fresh object per line (allocation is nested, so lines must not share a reference).
+  const lineDefaults = () => ({
     rateChange: SLIDER_RANGES.rateChange.default,
     fundingConfidenceLevel: SLIDER_RANGES.fundingConfidenceLevel.default,
     dividendPct: SLIDER_RANGES.dividendPct.default,
@@ -60,21 +61,25 @@ function defaultDecisions(yearNumber: number): DecisionSet {
     underwritingStrictness: SLIDER_RANGES.underwritingStrictness.default,
     riskControlPct: SLIDER_RANGES.riskControlPct.default,
     reinsuranceLevel: SLIDER_RANGES.reinsuranceLevel.default,
+    assetAllocation: { ...ASSET_ALLOCATION_DEFAULT },
     loanRepaymentAggressiveness: 0.5,
-  };
+  });
   return {
     yearNumber,
-    assetAllocation: { ...ASSET_ALLOCATION_DEFAULT },
     byLine: {
-      WC: lineDefaults,
-      GL: lineDefaults,
-      Property: lineDefaults,
+      WC: lineDefaults(),
+      GL: lineDefaults(),
+      Property: lineDefaults(),
     },
   };
 }
 
 // Pages that support the Pool / per-line view toggle (Stage 2.1).
 const LINE_VIEW_PAGES: TabId[] = ['dashboard', 'decisions', 'decisionHistory', 'financials', 'results'];
+
+// Decision-scoped pages (Stage 2.9): every decision is now per-line, so these
+// pages have no Pool tab — 'Pool' remains only where it means combined RESULTS.
+const DECISION_SCOPE_PAGES: TabId[] = ['decisions', 'decisionHistory'];
 
 const LINE_VIEW_ICONS: Record<LineView, React.ReactNode> = {
   pool: <Layers size={14} />,
@@ -112,7 +117,7 @@ export default function App() {
   // Load persisted game from localStorage if available
   React.useEffect(() => {
     try {
-      const saved = localStorage.getItem('riskpool_gamestate_v4');
+      const saved = localStorage.getItem('riskpool_gamestate_v5');
       if (saved) {
         const { gameState: gs, startingFinancials: sf, initialMembers: im, currentDecisions: cd } = JSON.parse(saved);
 
@@ -125,19 +130,19 @@ export default function App() {
           setActiveTab('dashboard');
         } else {
           // Bad saved state - clear it
-          localStorage.removeItem('riskpool_gamestate_v4');
+          localStorage.removeItem('riskpool_gamestate_v5');
         }
       }
     } catch {
       // ignore parse errors - clear corrupted data
-      localStorage.removeItem('riskpool_gamestate_v4');
+      localStorage.removeItem('riskpool_gamestate_v5');
     }
   }, []);
 
   function persistState(gs: GameState, sf: StartingFinancials, im: Member[], cd: DecisionSet) {
     try {
       localStorage.setItem(
-        'riskpool_gamestate_v4',
+        'riskpool_gamestate_v5',
         JSON.stringify({
           gameState: gs,
           startingFinancials: sf,
@@ -232,7 +237,7 @@ export default function App() {
     setInitialMembers([]);
     setCurrentDecisions(defaultDecisions(1));
     setLineView('pool');
-    localStorage.removeItem('riskpool_gamestate_v4');
+    localStorage.removeItem('riskpool_gamestate_v5');
     setActiveTab('setup');
   }, []);
 
@@ -252,10 +257,18 @@ export default function App() {
     ? lineViewRaw
     : 'pool';
 
+  // Decision-scoped pages have no Pool view (Stage 2.9): if the shared line
+  // selection is 'pool' while one of those pages is open, show the first
+  // active line instead. Results pages keep 'pool' untouched.
+  const isDecisionScopePage = DECISION_SCOPE_PAGES.includes(activeTab);
+  const effectiveLineView: LineView = isDecisionScopePage && lineView === 'pool'
+    ? (activeLines[0] ?? 'WC')
+    : lineView;
+
   const viewResults = React.useMemo(() => {
     if (!gameState) return [];
-    return selectResultView(gameState.lockedResults, lineView);
-  }, [gameState, lineView]);
+    return selectResultView(gameState.lockedResults, effectiveLineView);
+  }, [gameState, effectiveLineView]);
 
   const lineLoanInfo = React.useMemo(() => {
     const lastResult = gameState?.lockedResults[gameState.lockedResults.length - 1];
@@ -325,10 +338,11 @@ export default function App() {
       {isStarted && LINE_VIEW_PAGES.includes(activeTab) && (
         <TabNav<LineView>
           tabs={[
-            { id: 'pool', label: 'Pool', icon: LINE_VIEW_ICONS.pool },
+            // No Pool tab on decision-scoped pages — all decisions are per-line (Stage 2.9).
+            ...(isDecisionScopePage ? [] : [{ id: 'pool' as LineView, label: 'Pool', icon: LINE_VIEW_ICONS.pool }]),
             ...activeLines.map(line => ({ id: line as LineView, label: line, icon: LINE_VIEW_ICONS[line] })),
           ]}
-          activeTab={lineView}
+          activeTab={effectiveLineView}
           onSelect={setLineView}
           stickyTop={108}
           zIndex={20}
@@ -367,13 +381,13 @@ export default function App() {
             estimatedPremium={estimatedPremium}
             estimatedExpectedLoss={estimatedExpectedLoss}
             disabled={gameState.isComplete}
-            lineView={lineView}
+            lineView={effectiveLineView as CoverageLine}
             lineLoanInfo={lineLoanInfo}
           />
         )}
 
         {activeTab === 'decisionHistory' && gameState && (
-          <DecisionHistoryPage lockedResults={viewResults} lineView={lineView} />
+          <DecisionHistoryPage lockedResults={viewResults} lineView={effectiveLineView as CoverageLine} />
         )}
 
         {activeTab === 'financials' && gameState && startingFinancials && (
