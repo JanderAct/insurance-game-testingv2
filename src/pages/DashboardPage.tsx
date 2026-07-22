@@ -8,26 +8,29 @@ interface DashboardPageProps {
   historicalYears: HistoricalYear[];
   startingFinancials: StartingFinancials;
   currentYearNumber: number;
-  startingYear: number;
   lineView: LineView;
 }
 
-export default function DashboardPage({ lockedResults, historicalYears, startingFinancials, currentYearNumber, startingYear, lineView }: DashboardPageProps) {
-  // The last historical year is anchored to exactly match Year 0 (startingFinancials),
-  // so it's excluded here to avoid showing the same opening position twice.
+export default function DashboardPage({ lockedResults, historicalYears, startingFinancials, currentYearNumber, lineView }: DashboardPageProps) {
+  // Stage 2.10: the last historical entry is the real year 0 — the simulated
+  // pre-game year whose ending position IS the Year 1 opening. It renders as
+  // the highlighted Year 0 row; earlier entries (-2, -1) render above it.
   const priorHistoricalYears = historicalYears.slice(0, -1);
+  const openingYear = historicalYears[historicalYears.length - 1];
   const last = lockedResults[lockedResults.length - 1];
 
-  const displaySurplus = last?.endingSurplus ?? startingFinancials.surplus;
-  const displayPremium = last?.totalMemberCharge ?? startingFinancials.annualPremium;
+  // Fallbacks before any live year is locked come from the view-filtered
+  // year-0 history entry (per-line correct), then pool-level startingFinancials.
+  const displaySurplus = last?.endingSurplus ?? openingYear?.endingSurplus ?? startingFinancials.surplus;
+  const displayPremium = last?.totalMemberCharge ?? openingYear?.totalMemberCharge ?? startingFinancials.annualPremium;
   const displayLossRatio = last ? last.poolLosses / Math.max(last.poolPremium, 1) : undefined;
   const displayUnderwritingIncome = last?.underwritingIncome;
   const displayInvestmentIncome = last?.investmentIncome;
-  const displayMembers = last?.activeMembers ?? startingFinancials.activeMembers;
-  const displayExposure = last?.activeExposure ?? startingFinancials.activeExposure;
-  const displayMarketShare = last?.marketShare ?? startingFinancials.marketShare;
+  const displayMembers = last?.activeMembers ?? openingYear?.activeMembers ?? startingFinancials.activeMembers;
+  const displayExposure = last?.activeExposure ?? openingYear?.activeExposure ?? startingFinancials.activeExposure;
+  const displayMarketShare = last?.marketShare ?? openingYear?.marketShare ?? startingFinancials.marketShare;
   const displaySatisfaction = last?.memberSatisfaction ?? startingFinancials.memberSatisfaction;
-  const displayFunding = last?.capitalAdequacyStatus ?? 'Not yet calculated';
+  const displayFunding = last?.capitalAdequacyStatus ?? openingYear?.capitalAdequacyStatus ?? 'Not yet calculated';
 
   return (
     <div className="max-w-screen-2xl mx-auto px-4 py-6 space-y-6">
@@ -40,7 +43,7 @@ export default function DashboardPage({ lockedResults, historicalYears, starting
         </p>
         {lineView !== 'pool' && (
           <p className="text-xs text-amber-600 mt-1">
-            Showing the {lineView} line's own figures. Pre-game history and the starting position below remain pool-wide.
+            Showing the {lineView} line's own figures — including its own simulated pre-game history (Stage 2.10).
           </p>
         )}
       </div>
@@ -153,20 +156,22 @@ export default function DashboardPage({ lockedResults, historicalYears, starting
                     <td className="px-4 py-3 text-sky-600/70 font-medium">{formatPct(year.marketShare)}</td>
                   </tr>
                 ))}
-                <tr className="bg-blue-50/40 hover:bg-blue-50 transition-colors">
-                  <td className="px-4 py-3 font-bold text-gray-900">0</td>
-                  <td className="px-4 py-3 text-gray-600">{startingYear - 1}</td>
-                  <td className="px-4 py-3 font-medium text-gray-900">{formatCurrency(startingFinancials.annualPremium, true)}</td>
-                  <td className="px-4 py-3 text-gray-700">{formatCurrency(startingFinancials.annualPremium * startingFinancials.expectedLossRatio, true)}</td>
-                  <td className="px-4 py-3 text-gray-700">{formatCurrency(startingFinancials.annualPremium * startingFinancials.expectedLossRatio, true)}</td>
-                  <td className={`px-4 py-3 font-semibold ${colorForRatio(startingFinancials.expectedLossRatio)}`}>{formatPct(startingFinancials.expectedLossRatio)}</td>
-                  <td className="px-4 py-3 text-gray-400">&mdash;</td>
-                  <td className="px-4 py-3 text-gray-400">&mdash;</td>
-                  <td className="px-4 py-3 text-gray-400">&mdash;</td>
-                  <td className={`px-4 py-3 font-bold ${colorForSurplus(startingFinancials.surplus)}`}>{formatCurrency(startingFinancials.surplus, true)}</td>
-                  <td className="px-4 py-3 text-gray-600">{startingFinancials.activeMembers}</td>
-                  <td className="px-4 py-3 text-sky-600 font-medium">{formatPct(startingFinancials.marketShare)}</td>
-                </tr>
+                {openingYear && (
+                  <tr className="bg-blue-50/40 hover:bg-blue-50 transition-colors">
+                    <td className="px-4 py-3 font-bold text-gray-900">0</td>
+                    <td className="px-4 py-3 text-gray-600">{openingYear.calendarYear}</td>
+                    <td className="px-4 py-3 font-medium text-gray-900">{formatCurrency(openingYear.totalMemberCharge, true)}</td>
+                    <td className="px-4 py-3 text-gray-700">{formatCurrency(openingYear.grossUltimateLoss, true)}</td>
+                    <td className="px-4 py-3 text-gray-700">{formatCurrency(openingYear.netUltimateLoss, true)}</td>
+                    <td className={`px-4 py-3 font-semibold ${colorForRatio(openingYear.poolLosses / Math.max(openingYear.poolPremium, 1))}`}>{formatPct(openingYear.poolLosses / Math.max(openingYear.poolPremium, 1))}</td>
+                    <td className={openingYear.underwritingIncome >= 0 ? 'px-4 py-3 text-emerald-600/70' : 'px-4 py-3 text-red-600/70'}>{formatCurrency(openingYear.underwritingIncome, true)}</td>
+                    <td className="px-4 py-3 text-gray-700">{formatCurrency(openingYear.investmentIncome, true)}</td>
+                    <td className={openingYear.netIncome >= 0 ? 'px-4 py-3 font-semibold text-emerald-600/70' : 'px-4 py-3 font-semibold text-red-600/70'}>{formatCurrency(openingYear.netIncome, true)}</td>
+                    <td className={`px-4 py-3 font-bold ${colorForSurplus(openingYear.endingSurplus)}`}>{formatCurrency(openingYear.endingSurplus, true)}</td>
+                    <td className="px-4 py-3 text-gray-600">{openingYear.activeMembers}</td>
+                    <td className="px-4 py-3 text-sky-600 font-medium">{formatPct(openingYear.marketShare)}</td>
+                  </tr>
+                )}
                 {lockedResults.map(r => (
                   <tr key={r.yearNumber} className="hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-3 font-bold text-gray-900">{r.yearNumber}</td>

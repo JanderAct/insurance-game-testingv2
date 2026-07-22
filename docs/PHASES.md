@@ -493,6 +493,46 @@ blend, and the Pool tab is gone from Decisions/Decision History but present on r
 
 ---
 
+### Stage 2.10 — Per-Line Prior Histories (each line simulates its own pre-game past)
+
+**Status:** ✅ BUILT (see docs/STAGE_2.10_spec.md for the full spec). Build-thread resolutions:
+- Year 1 receives the pre-game year 0 as its real priorResult (the history feeds the game's
+  prior-year linkage, not just the opening balances).
+- Opening adequacy is enforced by REJECT-AND-REDRAW, never by clamping: every active line must
+  end the pre-game sim at Adequate or better (Excess Available Surplus ≥ 0, the game's existing
+  capital-adequacy definition). If any line ends below that, the 3 pre-game years re-simulate on
+  a deterministically derived alternate seed (seed + attempt × 997) until all lines pass — the
+  scan order is fixed, so the same seed always lands on the same accepted history. Live years
+  always run on the true seed regardless of which attempt was accepted. Books stay tied out; no
+  phantom surplus is ever created.
+- Members recruited during pre-game years carry negative yearJoined values (cosmetic, accepted).
+
+**Goal:** Replace the single pool/WC-level synthetic pre-game history with a per-line one. Each
+active line generates its OWN 3-year pre-game past by running the SAME engine (processYear →
+processLineYear) at default decisions on pre-game yearNumbers -2/-1/0, and each line's pre-game
+ending state (surplus, reserve cohorts, invested assets, rate level, member roster) becomes its
+Year 1 opening position. The old synthetic historyGenerator is deleted.
+
+**Seeding:** deterministic and isolated by construction — every engine draw is
+deriveSubRng(seed, yearNumber, label), a pure stateless function, so pre-game years -2..0 use
+sub-streams fully disjoint from live years 1..N (per line, mirroring Stage 2.9's line-suffixed
+labels) and pre-game RNG consumption cannot shift live-year draws.
+
+**UI:** Pool History gains the Pool/per-line view tabs and shows each line's own 3 simulated
+years (title: "Three-Year … History", last column = Opening / Year 0) — this also closes
+UI_REFINEMENTS item 4 (WC-scaled Pool History). Dashboard's pre-game rows and Year 0 row, and
+Financial Statements' History/Opening entries, are now real per-line results (full statements
+via the same deriveAnnualStatement path as live years). localStorage bumped to v6.
+
+**Regression:** baseline-shifting for EVERY config (openings are now the product of a simulated
+history, not fixed draws) — WC-only no longer matches v5/v6; v7 baselines captured after this
+stage. Verified: determinism (same seed → byte-identical history/state/live years), isolation
+(live Y1 byte-identical whether or not unrelated pre-game sims ran first), exact opening
+hand-off per line, tie-out 0 in all pre-game and live years for all configs, and per-line
+histories drawing from distinct streams.
+
+---
+
 ### Phase 3 — Reserve Development System
 
 #### Stage 3.1 — Accident-year triangle data model + per-line development patterns

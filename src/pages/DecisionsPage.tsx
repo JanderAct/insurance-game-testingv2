@@ -2,9 +2,10 @@ import React from 'react';
 import { DollarSign, TrendingUp, BarChart2, Shield, RotateCcw } from 'lucide-react';
 import type { DecisionSet, LineDecisionSet, CoverageLine } from '../types/simulation';
 import SliderInput from '../components/SliderInput';
-import { SLIDER_RANGES, REINSURANCE_PROGRAMS, FULL_TRANSFER_COST_PCT_OF_PREMIUM, SELF_FUNDED_DISCOUNT_PCT, ASSET_ALLOCATION_DEFAULT } from '../data/defaultAssumptions';
+import { SLIDER_RANGES, REINSURANCE_PROGRAMS, FULL_TRANSFER_COST_PCT_OF_PREMIUM, SELF_FUNDED_DISCOUNT_PCT } from '../data/defaultAssumptions';
 import { formatCurrency } from '../utils/formatters';
 import { getReinsuranceStructure } from '../utils/reinsuranceEngine';
+import { defaultLineDecisionSet } from '../utils/decisionDefaults';
 
 export interface LineLoanInfo {
   balance: number;
@@ -42,17 +43,7 @@ function resetLineToDefaults(decisions: DecisionSet, line: CoverageLine): Decisi
     ...decisions,
     byLine: {
       ...decisions.byLine,
-      [line]: {
-        rateChange: SLIDER_RANGES.rateChange.default,
-        fundingConfidenceLevel: SLIDER_RANGES.fundingConfidenceLevel.default,
-        dividendPct: SLIDER_RANGES.dividendPct.default,
-        assessmentPct: SLIDER_RANGES.assessmentPct.default,
-        underwritingStrictness: SLIDER_RANGES.underwritingStrictness.default,
-        riskControlPct: SLIDER_RANGES.riskControlPct.default,
-        reinsuranceLevel: SLIDER_RANGES.reinsuranceLevel.default,
-        assetAllocation: { ...ASSET_ALLOCATION_DEFAULT },
-        loanRepaymentAggressiveness: 0.5,
-      },
+      [line]: defaultLineDecisionSet(),
     },
   };
 }

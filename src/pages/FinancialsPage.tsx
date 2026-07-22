@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
 import { FileText, Target } from 'lucide-react';
-import type { LineResultSet, StartingFinancials, HistoricalYear, LineView } from '../types/simulation';
-import { deriveAnnualStatement, deriveHistoricalStatement, deriveOpeningStatement } from '../utils/financialStatementEngine';
+import type { LineResultSet, LineView } from '../types/simulation';
+import { deriveAnnualStatement } from '../utils/financialStatementEngine';
 import { formatCurrency, formatPct, colorForNetIncome } from '../utils/formatters';
 
 interface FinancialsPageProps {
   lockedResults: LineResultSet[];
-  historicalYears: HistoricalYear[];
-  startingFinancials: StartingFinancials;
+  // Stage 2.10: the pre-game years are REAL engine results (yearNumbers -2..0,
+  // already filtered to the current view), so they get full real statements
+  // through the same deriveAnnualStatement path as locked years.
+  priorResults: LineResultSet[];
   lineView: LineView;
 }
 
@@ -16,34 +18,26 @@ function formatYearEndDate(calendarYear: number): string {
   return `12/31/${yy}`;
 }
 
-export default function FinancialsPage({ lockedResults, historicalYears, startingFinancials, lineView }: FinancialsPageProps) {
-  // Chronological order: earliest historical year first, Year 0 (the opening
+export default function FinancialsPage({ lockedResults, priorResults, lineView }: FinancialsPageProps) {
+  // Chronological order: earliest pre-game year first, Year 0 (the opening
   // position) last among the "prior" entries, then Year 1 onward below it.
-  const openingYear = historicalYears[historicalYears.length - 1];
-  const earlierHistoricalYears = historicalYears.slice(0, -1);
+  const openingYear = priorResults[priorResults.length - 1];
+  const earlierPriorYears = priorResults.slice(0, -1);
 
-  const [selectedIdx, setSelectedIdx] = useState<number>(openingYear?.historyYearNumber ?? 0);
+  const [selectedIdx, setSelectedIdx] = useState<number>(openingYear?.yearNumber ?? 0);
 
   const yearOptions: { label: string; value: number }[] = [
-    ...earlierHistoricalYears.map(y => ({ label: `${formatYearEndDate(y.calendarYear)} (History)`, value: y.historyYearNumber })),
-    ...(openingYear ? [{ label: `Year 0 — ${formatYearEndDate(openingYear.calendarYear)} (Opening)`, value: openingYear.historyYearNumber }] : []),
+    ...earlierPriorYears.map(y => ({ label: `${formatYearEndDate(y.calendarYear)} (History)`, value: y.yearNumber })),
+    ...(openingYear ? [{ label: `Year 0 — ${formatYearEndDate(openingYear.calendarYear)} (Opening)`, value: openingYear.yearNumber }] : []),
     ...lockedResults.map(r => ({ label: `Year ${r.yearNumber} — ${formatYearEndDate(r.calendarYear)}`, value: r.yearNumber })),
   ];
 
-  const isOpening = openingYear && selectedIdx === openingYear.historyYearNumber;
-  const selectedHistorical = !isOpening && selectedIdx < 0
-    ? earlierHistoricalYears.find(y => y.historyYearNumber === selectedIdx)
-    : undefined;
+  const isOpening = !!openingYear && selectedIdx === openingYear.yearNumber;
   const selectedResult = selectedIdx > 0
     ? lockedResults.find(r => r.yearNumber === selectedIdx)
-    : undefined;
-  const statement = selectedResult
-    ? deriveAnnualStatement(selectedResult)
-    : isOpening
-      ? deriveOpeningStatement(openingYear, startingFinancials)
-      : selectedHistorical
-        ? deriveHistoricalStatement(selectedHistorical)
-        : null;
+    : priorResults.find(r => r.yearNumber === selectedIdx);
+  const statement = selectedResult ? deriveAnnualStatement(selectedResult) : null;
+  const isLiveYear = selectedIdx > 0;
 
   return (
     <div className="max-w-screen-2xl mx-auto px-4 py-6 space-y-6">
@@ -53,7 +47,7 @@ export default function FinancialsPage({ lockedResults, historicalYears, startin
           <p className="text-gray-500 text-sm">Select a year to view the full statement</p>
           {lineView !== 'pool' && (
             <p className="text-xs text-amber-600 mt-1">
-              Showing the {lineView} line's own statement for locked years. History and Opening entries remain pool-wide.
+              Showing the {lineView} line's own statements — including its own pre-game history and opening position (Stage 2.10).
             </p>
           )}
         </div>
@@ -65,8 +59,8 @@ export default function FinancialsPage({ lockedResults, historicalYears, startin
       {statement && (
         <div className="space-y-5">
           <SectionHeader
-            title={`Financial Statements — ${selectedResult ? `Year ${statement.yearNumber}` : isOpening ? 'Year 0 (Opening)' : 'History'} — ${formatYearEndDate(statement.calendarYear)}`}
-            subtitle={selectedResult ? `Locked results for Year ${statement.yearNumber}` : isOpening ? 'Opening position before any player decisions' : 'Pre-game historical statement (read-only)'}
+            title={`Financial Statements — ${isLiveYear ? `Year ${statement.yearNumber}` : isOpening ? 'Year 0 (Opening)' : 'History'} — ${formatYearEndDate(statement.calendarYear)}`}
+            subtitle={isLiveYear ? `Locked results for Year ${statement.yearNumber}` : isOpening ? 'Opening position — the last simulated pre-game year; its ending balance sheet is the Year 1 opening' : 'Simulated pre-game year (read-only, default decisions)'}
           />
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <StatementCard title="Income Statement">

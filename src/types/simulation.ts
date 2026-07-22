@@ -421,6 +421,10 @@ export interface GameState {
   poolState: PoolState;
   lockedResults: ResultSet[];
   currentDecisions: DecisionSet;
+  // Stage 2.10: the 3 simulated pre-game years (yearNumbers -2, -1, 0), run
+  // through the real engine at default decisions. Year 0's ending state IS the
+  // Year 1 opening position; year 0's result is Year 1's priorResult.
+  priorHistory: ResultSet[];
 }
 
 // Starting financial position

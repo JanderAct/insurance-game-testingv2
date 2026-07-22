@@ -88,8 +88,11 @@ change what data the export contains.
 ---
 
 ## 4. Pool History opening figures are WC-scaled regardless of active lines
-**Status:** deferred (identified by Claude Code during the Year 1 initialization fix). Display
-only — confirmed harmless to the surplus tie-out and all live calculations.
+**Status:** RESOLVED by build-plan Stage 2.10 (per-line prior histories). The synthetic
+WC-scaled history generator was deleted entirely; each line now simulates its own real 3-year
+pre-game past through the engine, and the Pool History page gained the Pool/per-line view tabs
+showing each line's own history (Dashboard's pre-game rows and Financial Statements' History/
+Opening entries are real per-line results too). Kept below for reference.
 
 **The issue:** `startingFinancials` — the opening position shown on the Pool History page (the
 pre-game historical years + Year 0 opening figures) — is still computed as if the pool is

@@ -785,7 +785,11 @@ export function processYear(
   const yearNumber = currentYearNumber;
   const calendarYear = setup.startingYear + yearNumber - 1;
 
-  const priorPoolResult = gameState.lockedResults[gameState.lockedResults.length - 1];
+  // Stage 2.10: live Year 1 sees the last pre-game year (year 0) as its prior
+  // year — the game continues from its simulated history. Inside the pre-game
+  // sim itself, priorHistory is empty, so year -2 has no prior (correct).
+  const priorPoolResult = gameState.lockedResults[gameState.lockedResults.length - 1]
+    ?? gameState.priorHistory[gameState.priorHistory.length - 1];
 
   const activeLines = setup.activeLines;
   const shares = computeContributionShares(poolState, activeLines);

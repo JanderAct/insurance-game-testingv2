@@ -17,10 +17,10 @@ import {
 } from 'lucide-react';
 
 import type { GameState, GameSetupSettings, DecisionSet, StartingFinancials, Member, CoverageLine, LineView } from './types/simulation';
-import { SLIDER_RANGES, ASSET_ALLOCATION_DEFAULT } from './data/defaultAssumptions';
-import { generateGameInstance, generateStartingPoolState } from './utils/instanceGenerator';
+import { generateGameInstance } from './utils/instanceGenerator';
 import { processYear, applyLoanAuthorizations, type ProcessYearResult } from './utils/simulationEngine';
-import { generateHistoricalYears } from './utils/historyGenerator';
+import { runPriorHistory, toHistoricalYear } from './utils/priorHistoryEngine';
+import { defaultDecisionSet } from './utils/decisionDefaults';
 import { getMemberExposure, selectResultView } from './utils/lineHelpers';
 import LoanPromptModal from './components/LoanPromptModal';
 import type { LineLoanInfo } from './pages/DecisionsPage';
@@ -51,31 +51,9 @@ function seedFromInstanceId(id: string): number {
   return hash;
 }
 
-function defaultDecisions(yearNumber: number): DecisionSet {
-  // Fresh object per line (allocation is nested, so lines must not share a reference).
-  const lineDefaults = () => ({
-    rateChange: SLIDER_RANGES.rateChange.default,
-    fundingConfidenceLevel: SLIDER_RANGES.fundingConfidenceLevel.default,
-    dividendPct: SLIDER_RANGES.dividendPct.default,
-    assessmentPct: SLIDER_RANGES.assessmentPct.default,
-    underwritingStrictness: SLIDER_RANGES.underwritingStrictness.default,
-    riskControlPct: SLIDER_RANGES.riskControlPct.default,
-    reinsuranceLevel: SLIDER_RANGES.reinsuranceLevel.default,
-    assetAllocation: { ...ASSET_ALLOCATION_DEFAULT },
-    loanRepaymentAggressiveness: 0.5,
-  });
-  return {
-    yearNumber,
-    byLine: {
-      WC: lineDefaults(),
-      GL: lineDefaults(),
-      Property: lineDefaults(),
-    },
-  };
-}
-
-// Pages that support the Pool / per-line view toggle (Stage 2.1).
-const LINE_VIEW_PAGES: TabId[] = ['dashboard', 'decisions', 'decisionHistory', 'financials', 'results'];
+// Pages that support the Pool / per-line view toggle (Stage 2.1; 'history'
+// added in Stage 2.10 — each line now has its own real pre-game history).
+const LINE_VIEW_PAGES: TabId[] = ['history', 'dashboard', 'decisions', 'decisionHistory', 'financials', 'results'];
 
 // Decision-scoped pages (Stage 2.9): every decision is now per-line, so these
 // pages have no Pool tab — 'Pool' remains only where it means combined RESULTS.
@@ -106,7 +84,7 @@ export default function App() {
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [startingFinancials, setStartingFinancials] = useState<StartingFinancials | null>(null);
   const [initialMembers, setInitialMembers] = useState<Member[]>([]);
-  const [currentDecisions, setCurrentDecisions] = useState<DecisionSet>(defaultDecisions(1));
+  const [currentDecisions, setCurrentDecisions] = useState<DecisionSet>(defaultDecisionSet(1));
   // A year that has been processed but is awaiting the player's loan decisions
   // before it can be committed (see handleAdvanceYear / handleResolveLoans).
   const [pendingYear, setPendingYear] = useState<ProcessYearResult | null>(null);
@@ -117,32 +95,32 @@ export default function App() {
   // Load persisted game from localStorage if available
   React.useEffect(() => {
     try {
-      const saved = localStorage.getItem('riskpool_gamestate_v5');
+      const saved = localStorage.getItem('riskpool_gamestate_v6');
       if (saved) {
         const { gameState: gs, startingFinancials: sf, initialMembers: im, currentDecisions: cd } = JSON.parse(saved);
 
         // Validate critical fields exist before restoring
-        if (gs && sf && sf.totalMarketExposure !== undefined && sf.surplus !== undefined) {
+        if (gs && sf && Array.isArray(gs.priorHistory) && sf.totalMarketExposure !== undefined && sf.surplus !== undefined) {
           setGameState(gs);
           setStartingFinancials(sf);
           setInitialMembers(im ?? []);
-          setCurrentDecisions(cd ?? defaultDecisions(gs.currentYearNumber));
+          setCurrentDecisions(cd ?? defaultDecisionSet(gs.currentYearNumber));
           setActiveTab('dashboard');
         } else {
           // Bad saved state - clear it
-          localStorage.removeItem('riskpool_gamestate_v5');
+          localStorage.removeItem('riskpool_gamestate_v6');
         }
       }
     } catch {
       // ignore parse errors - clear corrupted data
-      localStorage.removeItem('riskpool_gamestate_v5');
+      localStorage.removeItem('riskpool_gamestate_v6');
     }
   }, []);
 
   function persistState(gs: GameState, sf: StartingFinancials, im: Member[], cd: DecisionSet) {
     try {
       localStorage.setItem(
-        'riskpool_gamestate_v5',
+        'riskpool_gamestate_v6',
         JSON.stringify({
           gameState: gs,
           startingFinancials: sf,
@@ -158,7 +136,9 @@ export default function App() {
   const handleStartGame = useCallback((settings: GameSetupSettings) => {
     const seed = seedFromInstanceId(settings.instanceId);
     const instance = generateGameInstance(settings.instanceId, seed);
-    const { poolState, startingFinancials: sf } = generateStartingPoolState(instance, settings.startingYear, settings.activeLines);
+    // Stage 2.10: each active line simulates its own 3-year pre-game past
+    // through the real engine; the ending state is the Year 1 opening position.
+    const { poolState, startingFinancials: sf, priorHistory } = runPriorHistory(instance, settings);
 
     const initMembers = poolState.lines.WC.members.filter(m => m.status === 'active');
 
@@ -170,10 +150,11 @@ export default function App() {
       isComplete: false,
       poolState,
       lockedResults: [],
-      currentDecisions: defaultDecisions(1),
+      currentDecisions: defaultDecisionSet(1),
+      priorHistory,
     };
 
-    const cd = defaultDecisions(1);
+    const cd = defaultDecisionSet(1);
 
     setGameState(gs);
     setStartingFinancials(sf);
@@ -188,7 +169,7 @@ export default function App() {
   const commitYear = useCallback((baseGs: GameState, updatedPoolState: GameState['poolState'], result: GameState['lockedResults'][number]) => {
     const nextYearNumber = baseGs.currentYearNumber + 1;
     const isComplete = nextYearNumber > baseGs.setup.gameLength;
-    const nextDecisions = defaultDecisions(nextYearNumber);
+    const nextDecisions = defaultDecisionSet(nextYearNumber);
 
     const newGs: GameState = {
       ...baseGs,
@@ -235,9 +216,9 @@ export default function App() {
     setGameState(null);
     setStartingFinancials(null);
     setInitialMembers([]);
-    setCurrentDecisions(defaultDecisions(1));
+    setCurrentDecisions(defaultDecisionSet(1));
     setLineView('pool');
-    localStorage.removeItem('riskpool_gamestate_v5');
+    localStorage.removeItem('riskpool_gamestate_v6');
     setActiveTab('setup');
   }, []);
 
@@ -282,14 +263,18 @@ export default function App() {
     return info;
   }, [gameState]);
 
-  const historicalYears = React.useMemo(() => {
-    if (!gameState || !startingFinancials) return [];
-    return generateHistoricalYears(
-      gameState.instance,
-      startingFinancials,
-      gameState.setup.startingYear
-    );
-  }, [gameState?.instance, gameState?.setup.startingYear, startingFinancials]);
+  // Stage 2.10: the pre-game history is real per-line engine output. Filter it
+  // to the current view (pool aggregate or a single line), then adapt to the
+  // HistoricalYear display shape the history-aware pages render.
+  const viewPriorResults = React.useMemo(() => {
+    if (!gameState) return [];
+    return selectResultView(gameState.priorHistory, lineView);
+  }, [gameState, lineView]);
+
+  const historicalYears = React.useMemo(
+    () => viewPriorResults.map(toHistoricalYear),
+    [viewPriorResults]
+  );
 
   // Tabs are disabled before game starts (except setup)
   const tabs = TABS.map(t => ({
@@ -370,7 +355,6 @@ export default function App() {
             historicalYears={historicalYears}
             startingFinancials={startingFinancials}
             currentYearNumber={gameState.currentYearNumber}
-            startingYear={gameState.setup.startingYear}
             lineView={lineView}
           />
         )}
@@ -380,6 +364,7 @@ export default function App() {
             historicalYears={historicalYears}
             scenarioId={gameState.setup.instanceId}
             startingYear={gameState.setup.startingYear}
+            lineView={lineView}
           />
         )}
 
@@ -403,8 +388,7 @@ export default function App() {
         {activeTab === 'financials' && gameState && startingFinancials && (
           <FinancialsPage
             lockedResults={viewResults}
-            historicalYears={historicalYears}
-            startingFinancials={startingFinancials}
+            priorResults={viewPriorResults}
             lineView={lineView}
           />
         )}

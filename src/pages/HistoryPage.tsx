@@ -1,11 +1,14 @@
 import { Activity, DollarSign, Shield, Users } from 'lucide-react';
-import type { HistoricalYear } from '../types/simulation';
+import type { HistoricalYear, LineView } from '../types/simulation';
 import { colorForRatio, formatCurrency, formatPct } from '../utils/formatters';
 
 interface HistoryPageProps {
+  // Stage 2.10: real simulated pre-game years (already filtered to the current
+  // view — pool aggregate or a single line — and adapted for display).
   historicalYears: HistoricalYear[];
   scenarioId: string;
   startingYear: number;
+  lineView: LineView;
 }
 
 interface HistoryRow {
@@ -14,7 +17,7 @@ interface HistoryRow {
   className?: (year: HistoricalYear) => string;
 }
 
-export default function HistoryPage({ historicalYears, scenarioId, startingYear }: HistoryPageProps) {
+export default function HistoryPage({ historicalYears, scenarioId, startingYear, lineView }: HistoryPageProps) {
   if (historicalYears.length === 0) return null;
 
   const first = historicalYears[0];
@@ -22,10 +25,11 @@ export default function HistoryPage({ historicalYears, scenarioId, startingYear 
   const combinedChange = last.actualCombinedRatio - first.actualCombinedRatio;
   const surplusChange = last.endingSurplus - first.endingSurplus;
   const memberChange = last.activeMembers - first.activeMembers;
+  const exposureLabel = lineView === 'Property' ? 'TIV Exposure' : 'Payroll Exposure';
 
   const operatingRows: HistoryRow[] = [
     { label: 'Active Members', value: year => String(year.activeMembers) },
-    { label: 'Payroll Exposure', value: year => `$${year.activeExposure.toFixed(2)}M` },
+    { label: exposureLabel, value: year => `$${year.activeExposure.toFixed(2)}M` },
     { label: 'Market Share (% of Exposure)', value: year => formatPct(year.marketShare) },
     { label: 'Pool Premium Rate per $100 Payroll', value: year => `$${year.poolPremiumRatePer100.toFixed(2)}` },
   ];
@@ -82,10 +86,11 @@ export default function HistoryPage({ historicalYears, scenarioId, startingYear 
     <div className="max-w-screen-2xl mx-auto px-4 py-6 space-y-6">
       <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-2">
         <div>
-          <h2 className="text-xl font-bold text-gray-900">Four-Year Pool History</h2>
+          <h2 className="text-xl font-bold text-gray-900">Three-Year {lineView === 'pool' ? 'Pool' : lineView} History</h2>
           <p className="text-sm text-gray-500 mt-1">
-            Historical results for scenario <span className="font-mono font-semibold text-gray-700">{scenarioId}</span>.
-            {' '}The {startingYear - 1} closing position becomes Dashboard Year 0.
+            Simulated pre-game years for scenario <span className="font-mono font-semibold text-gray-700">{scenarioId}</span>,
+            {' '}run through the same engine as live years at default decisions.
+            {' '}The {startingYear - 1} closing position IS the Year 1 opening position.
           </p>
         </div>
         <div className="text-xs text-gray-500 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
@@ -98,7 +103,7 @@ export default function HistoryPage({ historicalYears, scenarioId, startingYear 
           icon={<Activity size={17} />}
           label="Latest Actual Combined Ratio"
           value={formatPct(last.actualCombinedRatio)}
-          detail={`${combinedChange >= 0 ? 'Up' : 'Down'} ${formatPct(Math.abs(combinedChange))} over four years`}
+          detail={`${combinedChange >= 0 ? 'Up' : 'Down'} ${formatPct(Math.abs(combinedChange))} over the history`}
           valueClass={colorForRatio(last.actualCombinedRatio)}
         />
         <SummaryCard
@@ -129,7 +134,8 @@ export default function HistoryPage({ historicalYears, scenarioId, startingYear 
       <HistoryTable title="Reserves & Capital" icon={<Shield size={17} />} years={historicalYears} rows={capitalRows} />
 
       <div className="bg-gray-100 border border-gray-200 rounded-xl px-4 py-3 text-xs text-gray-600">
-        This history is read-only and generated before play. It uses neutral historical management assumptions and does not consume any of the player’s ten decision years.
+        This history is read-only, simulated through the real engine at default decisions before play begins
+        (each line runs its own past), and does not consume any of the player’s decision years.
       </div>
     </div>
   );
