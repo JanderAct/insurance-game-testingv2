@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Pool Risk Game — Decision Tree</title>
+<style>
+  :root {
+    --ink: #1c2430;
+    --ink-soft: #4a5568;
+    --ink-faint: #8993a3;
+    --paper: #f7f5f0;
+    --card: #ffffff;
+    --line: #d8d3c7;
+    --pool: #6b5b95;
+    --pool-bg: #efecf6;
+    --perline: #1d6f5e;
+    --perline-bg: #e6f2ee;
+    --event: #a15c2e;
+    --event-bg: #f7ece1;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 40px 24px 80px;
+    background: var(--paper);
+    font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+    color: var(--ink);
+  }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  h1 {
+    font-size: 28px;
+    font-weight: 600;
+    margin: 0 0 6px;
+    letter-spacing: -0.01em;
+  }
+  .subtitle {
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    font-size: 14px;
+    color: var(--ink-soft);
+    margin: 0 0 28px;
+    max-width: 640px;
+    line-height: 1.5;
+  }
+  .legend {
+    display: flex;
+    gap: 18px;
+    flex-wrap: wrap;
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    margin-bottom: 32px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--line);
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .dot.pool { background: var(--pool); }
+  .dot.perline { background: var(--perline); }
+  .dot.event { background: var(--event); }
+
+  .branch {
+    margin-bottom: 26px;
+    border: 1px solid var(--line);
+    background: var(--card);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .branch > summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    font-weight: 600;
+    font-size: 15px;
+  }
+  .branch > summary::-webkit-details-marker { display: none; }
+  .branch > summary::before {
+    content: "›";
+    display: inline-block;
+    font-size: 18px;
+    color: var(--ink-faint);
+    transition: transform 0.15s ease;
+    width: 14px;
+  }
+  .branch[open] > summary::before { transform: rotate(90deg); }
+  .branch.pool > summary { background: var(--pool-bg); color: var(--pool); }
+  .branch.perline > summary { background: var(--perline-bg); color: var(--perline); }
+  .branch.event > summary { background: var(--event-bg); color: var(--event); }
+  .branch-body { padding: 6px 20px 18px; }
+
+  .category { margin: 14px 0 4px; }
+  .category-label {
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-faint);
+    margin: 18px 0 8px;
+    padding-left: 2px;
+  }
+
+  details.decision {
+    border-left: 2px solid var(--line);
+    margin: 8px 0;
+    padding-left: 14px;
+  }
+  details.decision > summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 6px 0;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 15.5px;
+  }
+  details.decision > summary::-webkit-details-marker { display: none; }
+  details.decision > summary::before {
+    content: "＋";
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    font-size: 11px;
+    color: var(--ink-faint);
+    margin-right: 8px;
+  }
+  details.decision[open] > summary::before { content: "－"; }
+  .dec-name { display: flex; align-items: baseline; }
+  .status {
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    margin-left: 8px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+  .status.live { background: #e2ede4; color: #2f6b45; }
+  .status.designed { background: #eae4f3; color: #6b4fa0; }
+  .tradeoff {
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    font-size: 12.5px;
+    color: var(--ink-faint);
+    text-align: right;
+    white-space: nowrap;
+  }
+  .dec-detail {
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    font-size: 13.5px;
+    line-height: 1.6;
+    color: var(--ink-soft);
+    padding: 2px 0 14px;
+  }
+  .dec-detail p { margin: 0 0 8px; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .tag {
+    font-size: 11px;
+    padding: 3px 9px;
+    border-radius: 20px;
+    background: #eef0ec;
+    color: var(--ink-soft);
+    border: 1px solid var(--line);
+  }
+  .conditional-note {
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    font-size: 12px;
+    font-style: italic;
+    color: var(--event);
+    margin-top: 2px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Yearly decision tree</h1>
+  <p class="subtitle">Every choice a player makes each year, organized by who makes it and when. Click any branch or decision to expand it. Tags show which outcomes that decision touches — see the Decision Impact Map for the full cause-and-effect chains.</p>
+
+  <div class="legend">
+    <span><span class="dot pool"></span>Pool-level — one choice for the whole pool</span>
+    <span><span class="dot perline"></span>Per-line — made separately for each active coverage line</span>
+    <span><span class="dot event"></span>Event-triggered — only appears when a condition is met</span>
+  </div>
+
+  <!-- POOL LEVEL -->
+  <details class="branch pool" open>
+    <summary>Pool-level decisions</summary>
+    <div class="branch-body">
+      <details class="decision">
+        <summary>
+          <span class="dec-name">Asset allocation (cash / bonds / equities)<span class="status designed">designed</span></span>
+          <span class="tradeoff">growth vs. stability</span>
+        </summary>
+        <div class="dec-detail">
+          <p>Sets the blend of the shared investment portfolio. Income is allocated back to each line by its share of contributed assets. More equities raises expected return but adds real downside variance; more cash/bonds is steadier but grows slower.</p>
+          <div class="tags"><span class="tag">Investment income</span><span class="tag">Surplus stability</span><span class="tag">Correlated risk with shock events</span></div>
+        </div>
+      </details>
+    </div>
+  </details>
+
+  <!-- PER LINE -->
+  <details class="branch perline" open>
+    <summary>Per-line decisions <span style="font-weight:400; font-size:12px; opacity:0.8;">— made independently for each active coverage line</span></summary>
+    <div class="branch-body">
+
+      <div class="category-label">Pricing &amp; growth</div>
+
+      <details class="decision">
+        <summary>
+          <span class="dec-name">Rate change<span class="status live">live</span></span>
+          <span class="tradeoff">revenue vs. retention</span>
+        </summary>
+        <div class="dec-detail">
+          <p>Multiplies the charged premium rate. Does not change expected losses — pure premium moves independently. A rate increase directly reduces satisfaction and retention; a decrease attracts new members.</p>
+          <div class="tags"><span class="tag">Premium</span><span class="tag">Satisfaction</span><span class="tag">Retention</span><span class="tag">Growth</span><span class="tag">Investment income (via cash)</span></div>
+        </div>
+      </details>
+
+      <details class="decision">
+        <summary>
+          <span class="dec-name">Underwriting strictness<span class="status live">live</span></span>
+          <span class="tradeoff">growth speed vs. book quality</span>
+        </summary>
+        <div class="dec-detail">
+          <p>Filters the new-member candidate pool toward higher risk quality above a threshold. Improves average risk quality (and therefore loss predictability) over time, at the cost of slower growth.</p>
+          <div class="tags"><span class="tag">Growth</span><span class="tag">Risk quality</span><span class="tag">Loss volatility (delayed)</span></div>
+        </div>
+      </details>
+
+      <details class="decision">
+        <summary>
+          <span class="dec-name">Funding confidence level (CLF)<span class="status live">live</span></span>
+          <span class="tradeoff">price competitiveness vs. pricing safety margin</span>
+        </summary>
+        <div class="dec-detail">
+          <p>Loads an actuarial safety margin into the charged rate. Higher CLF means pricing is built around a more conservative loss estimate — costs more, but only affects the rate, not booked reserves.</p>
+          <div class="tags"><span class="tag">Premium</span><span class="tag">Satisfaction (slight)</span><span class="tag">Pricing safety margin</span></div>
+        </div>
+      </details>
+
+      <div class="category-label">Risk management</div>
+
+      <details class="decision">
+        <summary>
+          <span class="dec-name">Risk control %<span class="status live">live</span></span>
+          <span class="tradeoff">cash now vs. lower losses later</span>
+        </summary>
+        <div class="dec-detail">
+          <p>A direct expense today that slowly builds effectiveness over a multi-year lag, then reduces future expected losses. Effectiveness decays fast — especially if spending drops near zero — making this a real multi-year commitment, not a one-off toggle.</p>
+          <div class="tags"><span class="tag">Underwriting income (now)</span><span class="tag">Expected losses (delayed)</span><span class="tag">Loss volatility (delayed)</span></div>
+        </div>
+      </details>
+
+      <details class="decision">
+        <summary>
+          <span class="dec-name">Reinsurance level &amp; basis<span class="status live">live</span> <span class="status designed">basis: designed</span></span>
+          <span class="tradeoff">cost vs. protection from tail losses</span>
+        </summary>
+        <div class="dec-detail">
+          <p>Level sets retention/attachment, cost, and recovery. Basis (aggregate / occurrence / combined) determines whether protection responds to the year's total losses, a single large claim, or both — occurrence coverage is what catches one catastrophic claim that an aggregate-only program might let through untouched.</p>
+          <div class="tags"><span class="tag">Reinsurance cost</span><span class="tag">Surplus volatility</span><span class="tag">Large-claim protection</span><span class="tag">Experience-rated cost (future years)</span></div>
+        </div>
+      </details>
+
+      <div class="category-label">Capital management</div>
+
+      <details class="decision">
+        <summary>
+          <span class="dec-name">Reserve strategy<span class="status designed">designed</span></span>
+          <span class="tradeoff">reported surplus now vs. future adverse-development risk</span>
+        </summary>
+        <div class="dec-detail">
+          <p>Preset (aggressive / moderate / conservative / very conservative) sets carried reserve as a multiplier on the indicated reserve. Thinner reserves boost this year's surplus but leave less room to absorb adverse development or a legislative shock later — and drive IRIS ratios 11/12/13 directly.</p>
+          <div class="tags"><span class="tag">Surplus (now)</span><span class="tag">IRIS ratios</span><span class="tag">Adverse development risk</span><span class="tag">Indicated rate (funding load)</span></div>
+        </div>
+      </details>
+
+      <details class="decision">
+        <summary>
+          <span class="dec-name">Dividend %<span class="status live">live</span> <span class="status designed">per-line: designed</span></span>
+          <span class="tradeoff">member goodwill vs. surplus growth</span>
+        </summary>
+        <div class="dec-detail">
+          <p>Direct expense that returns cash to members. Strongly boosts satisfaction and retention, but reduces this year's surplus and future investable assets. A line that just took an adverse development hit probably shouldn't be paying a big one.</p>
+          <div class="tags"><span class="tag">Satisfaction (strong)</span><span class="tag">Retention</span><span class="tag">Surplus / investable assets</span></div>
+        </div>
+      </details>
+
+      <details class="decision">
+        <summary>
+          <span class="dec-name">Assessment %<span class="status live">live</span> <span class="status designed">per-line: designed</span></span>
+          <span class="tradeoff">fast cash vs. member goodwill</span>
+        </summary>
+        <div class="dec-detail">
+          <p>Charges members extra, on top of premium. Fast way to shore up a shortfall, but meaningfully hurts satisfaction, retention, and new-member attraction — damage that compounds if used repeatedly.</p>
+          <div class="tags"><span class="tag">Cash (immediate)</span><span class="tag">Satisfaction</span><span class="tag">Retention</span><span class="tag">Growth</span></div>
+        </div>
+      </details>
+
+    </div>
+  </details>
+
+  <!-- EVENT TRIGGERED -->
+  <details class="branch event">
+    <summary>Event-triggered decisions <span style="font-weight:400; font-size:12px; opacity:0.85;">— only appear when a condition is met</span></summary>
+    <div class="branch-body">
+
+      <details class="decision">
+        <summary>
+          <span class="dec-name">Authorize inter-line loan<span class="status designed">designed</span></span>
+          <span class="tradeoff">debt + interest vs. a visibly deficient line</span>
+        </summary>
+        <div class="dec-detail">
+          <p class="conditional-note">Appears only when a line's ending surplus is negative.</p>
+          <p>Authorizing borrows from the shared pool at that year's realized investment return, fixed at origination, bringing the line back to zero. Declining leaves the line's surplus negative — likely blocking its dividend next year and flagging on capital adequacy / IRIS views.</p>
+          <div class="tags"><span class="tag">Line surplus</span><span class="tag">Capital adequacy status</span><span class="tag">Dividend eligibility</span></div>
+        </div>
+      </details>
+
+      <details class="decision">
+        <summary>
+          <span class="dec-name">Loan repayment aggressiveness<span class="status designed">designed</span></span>
+          <span class="tradeoff">faster debt payoff vs. faster surplus rebuild</span>
+        </summary>
+        <div class="dec-detail">
+          <p class="conditional-note">Appears only while that line has an outstanding inter-line loan balance.</p>
+          <p>Sets what share of that line's positive net income repays the loan before flowing to its own surplus. High aggressiveness clears debt fast but freezes that line's own growth (and likely its dividend) longer than a gentler repayment pace would.</p>
+          <div class="tags"><span class="tag">Line surplus (near-term)</span><span class="tag">Debt payoff speed</span><span class="tag">Dividend eligibility</span></div>
+        </div>
+      </details>
+
+    </div>
+  </details>
+
+</div>
+</body>
+</html>

@@ -1,16 +1,26 @@
 # Stage 1.2 Regression Baseline — WC-only
 
 **Seed / Instance ID:** `MAMC6EA4`
-**Configuration:** Workers' Compensation only, default decisions each year (rates held roughly
-flat, 75% funding confidence, no assessments/dividends, no risk control spend).
+**Configuration:** Workers' Compensation only. **No manual decision changes at all** — the three
+years were produced by simply hitting "Lock Year" three times, so every year ran on the built-in
+`defaultDecisions()` values (default rate change, 75% funding confidence, no dividend/assessment,
+default underwriting/risk control/reinsurance/investment).
 **Captured:** before Stage 1.2 (state-type refactor), on post-Stage-1.1 code.
 
 ## How to use this
-After Stage 1.2, start a new game with seed `MAMC6EA4`, WC-only, and play three years making the
-**same default decisions**. Every number below must match. Any drift = a bug introduced by the
-refactor (Stage 1.2 is a pure restructure and must not change the math). The two internal
-tie-outs (ending surplus → next beginning surplus; ending reserve → next beginning reserve) held
-across all three years in the baseline, so they must hold after the refactor too.
+After Stage 1.2, start a new game with seed `MAMC6EA4`, WC-only, and simply hit **Lock Year three
+times with no manual changes** — identical to how this baseline was made. Every number below must
+match exactly. Any drift = a bug introduced by the refactor (Stage 1.2 is a pure restructure and
+must not change the math). The two internal tie-outs (ending surplus → next beginning surplus;
+ending reserve → next beginning reserve) held across all three years, so they must hold after the
+refactor too.
+
+**Second check (non-default paths):** the baseline above only exercises the *default* decision
+path. After the default regression passes, do one extra unrecorded run on the same seed where you
+actually move a slider or two (set a rate increase, pay a dividend) — just to confirm the
+refactored per-line decision structures don't break when decisions are non-default. There's no
+"before" number to match here (you changed the inputs); you're only confirming it doesn't crash
+or produce obviously broken output.
 
 ---
 
