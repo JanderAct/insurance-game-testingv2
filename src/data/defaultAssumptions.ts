@@ -274,6 +274,14 @@ export const TIV_TYPE_MULTIPLIER: Record<string, number> = {
   'Special District': 1.0,
 };
 
+// Calibration: scale every member's Property TIV up by this factor so the
+// Property book is a substantial third line (~$5-10M premium) rather than a
+// rounding error. Applied in memberCatalog's tivFor(). Rate and loss ratio are
+// unchanged, and losses are exposure-proportional (mean loss = TIV ×
+// purePremiumPer100 × 10,000), so scaling TIV scales premium and losses
+// together — the loss ratio is invariant.
+export const PROPERTY_TIV_SCALE = 7;
+
 export const PROPERTY_STARTING_RATE_PER_100 = { min: 0.10, max: 0.30 };
 export const PROPERTY_EXPECTED_LOSS_RATIO = { min: 0.45, max: 0.60 };
 export const PROPERTY_STARTING_FINANCIALS = {

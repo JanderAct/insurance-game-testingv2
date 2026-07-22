@@ -1,5 +1,5 @@
 import type { Member, MemberType, SizeCategory } from '../types/simulation';
-import { TIV_RANGES, TIV_TYPE_MULTIPLIER } from './defaultAssumptions';
+import { TIV_RANGES, TIV_TYPE_MULTIPLIER, PROPERTY_TIV_SCALE } from './defaultAssumptions';
 
 const MEMBER_TYPES: MemberType[] = [
   'City',
@@ -46,7 +46,15 @@ function tivFor(index: number, size: SizeCategory, type: MemberType): number {
   const position = (index * 7) % 10; // different offset than exposureFor's position
   const { min, max } = TIV_RANGES[size];
   const base = min + (max - min) * (position / 9);
-  return Number((base * TIV_TYPE_MULTIPLIER[type]).toFixed(2));
+  // Round the unscaled TIV to 2dp FIRST, then apply the calibration scale, so
+  // every member's TIV is exactly PROPERTY_TIV_SCALE × its unscaled value. This
+  // keeps the scale a clean proportional multiplier: the exposure-targeted
+  // enrollment boundary scales identically, so the enrolled roster is unchanged
+  // and Property's loss ratio is invariant to the scale — only the dollar
+  // magnitude moves. (Rounding base×mult×scale together would instead perturb
+  // the enrollment boundary and drift the ratio.)
+  const unscaledTiv = Number((base * TIV_TYPE_MULTIPLIER[type]).toFixed(2));
+  return unscaledTiv * PROPERTY_TIV_SCALE;
 }
 
 // This catalog is deliberately independent of the game seed. Every game uses
