@@ -21,33 +21,37 @@ import {
 } from '../data/defaultAssumptions';
 import type { CoverageLine } from '../types/simulation';
 
-// Each active line independently enrolls its own starting members: iterate the
-// 100-member market in a seeded random order, accumulating that line's enrolled
-// exposure (WC payroll / GL payroll / Property TIV) until it lands inside the
-// STARTING_EXPOSURE_SHARE band of the line's total market exposure. A member
-// whose exposure would push the running total past the 35% cap is skipped in
-// favor of smaller members later in the order, so the landing is always inside
-// the band — single pass, no retries, deterministic per seed. The exposure
-// target drives the member count; there is no separate count draw or quality
-// screen at enrollment (underwriting strictness screening remains a live-year
-// recruitment mechanic and can't apply before any decisions exist).
+// Each active line independently enrolls its own starting members. First it
+// draws its own seeded TARGET share within the STARTING_EXPOSURE_SHARE band
+// (25-35%) — so different seeds/lines land at different points across the band,
+// not always at the 25% floor. Then it iterates the 100-member market in a
+// seeded random order, accumulating that line's enrolled exposure (WC payroll /
+// GL payroll / Property TIV) until it reaches that drawn target. A member whose
+// exposure would push the running total past the target is skipped in favor of
+// smaller members later in the order, so the landing is always at-or-just-below
+// the target (hence inside the band) — single pass, no retries, deterministic
+// per seed. The exposure target drives the member count; there is no separate
+// count draw or quality screen at enrollment (underwriting strictness screening
+// remains a live-year recruitment mechanic and can't apply before any decisions
+// exist). The target draw and the shuffle share this line's own derived stream,
+// so both are deterministic per seed and independent of the other lines.
 function selectStartingLineMembers(
   allMembers: Member[],
   line: CoverageLine,
   rng: SeededRandom
 ): Set<string> {
   const totalExposure = allMembers.reduce((s, m) => s + getMemberExposure(m, line), 0);
-  const minTarget = STARTING_EXPOSURE_SHARE.min * totalExposure;
-  const maxTarget = STARTING_EXPOSURE_SHARE.max * totalExposure;
+  const targetShare = rng.range(STARTING_EXPOSURE_SHARE.min, STARTING_EXPOSURE_SHARE.max);
+  const targetExposure = targetShare * totalExposure;
 
   const order = rng.shuffle([...allMembers]);
   const selected = new Set<string>();
   let enrolled = 0;
 
   for (const member of order) {
-    if (enrolled >= minTarget) break;
+    if (enrolled >= targetExposure) break;
     const exposure = getMemberExposure(member, line);
-    if (exposure <= 0 || enrolled + exposure > maxTarget) continue;
+    if (exposure <= 0 || enrolled + exposure > targetExposure) continue;
     selected.add(member.id);
     enrolled += exposure;
   }
