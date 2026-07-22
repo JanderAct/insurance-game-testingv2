@@ -3,13 +3,12 @@
 // Premium = Exposure($M) × Rate_per_$100_payroll × 10,000
 
 import type { GameInstance, Member, PoolState, LinePoolState, StartingFinancials, ReserveCohort } from '../types/simulation';
-import { SeededRandom } from './random';
+import { SeededRandom, deriveSubRng } from './random';
 import { getPredefinedMarketMembers } from '../data/memberCatalog';
 import { getMemberExposure, emptyLinePoolState } from './lineHelpers';
 import {
   STARTING_FINANCIALS,
-  STARTING_MEMBER_RANGE,
-  STARTING_POOL_EXPOSURE,
+  STARTING_EXPOSURE_SHARE,
   STARTING_RATE_PER_100,
   RESERVE_PAYDOWN_PCT,
   GL_STARTING_RATE_PER_100,
@@ -22,37 +21,45 @@ import {
 } from '../data/defaultAssumptions';
 import type { CoverageLine } from '../types/simulation';
 
-function assignStartingMembers(allMembers: Member[], rng: SeededRandom, targetCount: number, startingYear: number): Member[] {
-  let bestSelection: Member[] = [];
-  let bestScore = Number.POSITIVE_INFINITY;
+// Each active line independently enrolls its own starting members: iterate the
+// 100-member market in a seeded random order, accumulating that line's enrolled
+// exposure (WC payroll / GL payroll / Property TIV) until it lands inside the
+// STARTING_EXPOSURE_SHARE band of the line's total market exposure. A member
+// whose exposure would push the running total past the 35% cap is skipped in
+// favor of smaller members later in the order, so the landing is always inside
+// the band — single pass, no retries, deterministic per seed. The exposure
+// target drives the member count; there is no separate count draw or quality
+// screen at enrollment (underwriting strictness screening remains a live-year
+// recruitment mechanic and can't apply before any decisions exist).
+function selectStartingLineMembers(
+  allMembers: Member[],
+  line: CoverageLine,
+  rng: SeededRandom
+): Set<string> {
+  const totalExposure = allMembers.reduce((s, m) => s + getMemberExposure(m, line), 0);
+  const minTarget = STARTING_EXPOSURE_SHARE.min * totalExposure;
+  const maxTarget = STARTING_EXPOSURE_SHARE.max * totalExposure;
 
-  // Try several seeded selections and keep the one closest to the target
-  // payroll band with a balanced average risk quality.
-  for (let attempt = 0; attempt < 250; attempt++) {
-    const shuffled = [...allMembers];
-    rng.shuffle(shuffled);
-    const candidate = shuffled.slice(0, targetCount);
-    const exposure = candidate.reduce((sum, member) => sum + getMemberExposure(member, 'WC'), 0);
-    const averageRisk = candidate.reduce((sum, member) => sum + member.riskQuality, 0) / candidate.length;
-    const exposurePenalty = exposure < STARTING_POOL_EXPOSURE.min
-      ? STARTING_POOL_EXPOSURE.min - exposure
-      : exposure > STARTING_POOL_EXPOSURE.max
-        ? exposure - STARTING_POOL_EXPOSURE.max
-        : 0;
-    const score = exposurePenalty * 10 + Math.abs(averageRisk - 5.25);
+  const order = rng.shuffle([...allMembers]);
+  const selected = new Set<string>();
+  let enrolled = 0;
 
-    if (score < bestScore) {
-      bestScore = score;
-      bestSelection = candidate;
-    }
+  for (const member of order) {
+    if (enrolled >= minTarget) break;
+    const exposure = getMemberExposure(member, line);
+    if (exposure <= 0 || enrolled + exposure > maxTarget) continue;
+    selected.add(member.id);
+    enrolled += exposure;
   }
 
-  return bestSelection.map(m => ({
-    ...m,
-    status: 'active' as const,
-    yearJoined: 1,
-    calendarYearJoined: startingYear,
-  }));
+  return selected;
+}
+
+// Per-line RNG label for the enrollment stream — WC unsuffixed, matching the
+// engine's lineRngLabel convention, so each line's roster is deterministic per
+// seed AND independent of which other lines are active.
+function enrollLabel(line: CoverageLine): string {
+  return line === 'WC' ? 'enroll' : `enroll_${line}`;
 }
 
 // Generate starting reserve cohorts from the beginning gross unpaid reserve
@@ -166,18 +173,44 @@ export function generateStartingPoolState(
   const rng = new SeededRandom(instance.seed + 777);
 
   const allMarketMembers = getPredefinedMarketMembers();
-  const startingMemberCount = rng.intRange(STARTING_MEMBER_RANGE.min, STARTING_MEMBER_RANGE.max);
-  const startingPoolMembers = assignStartingMembers(allMarketMembers, rng, startingMemberCount, startingYear);
-  const startingMemberIds = new Set(startingPoolMembers.map(m => m.id));
 
+  // Each active line draws its OWN starting roster (different but overlapping
+  // sets) from its own derived stream — enrollment happens here, BEFORE the
+  // pre-game years simulate on the enrolled books.
+  const enrolledIdsByLine: Partial<Record<CoverageLine, Set<string>>> = {};
+  for (const line of activeLines) {
+    enrolledIdsByLine[line] = selectStartingLineMembers(
+      allMarketMembers,
+      line,
+      deriveSubRng(instance.seed, 0, enrollLabel(line))
+    );
+  }
+
+  const lineMembers = (line: CoverageLine): Member[] => {
+    const ids = enrolledIdsByLine[line] ?? new Set<string>();
+    return allMarketMembers.map(m => ({
+      ...m,
+      status: ids.has(m.id) ? ('active' as const) : ('prospect' as const),
+      yearJoined: ids.has(m.id) ? 1 : 0,
+      calendarYearJoined: ids.has(m.id) ? startingYear : 0,
+    }));
+  };
+
+  // Shared market roster: a member is 'active' if it's enrolled in ANY active
+  // line (only 'withdrawn' blocks recruitment elsewhere, so multi-line
+  // membership keeps working exactly as in live years).
+  const activeInAnyLine = new Set<string>(
+    activeLines.flatMap(line => [...(enrolledIdsByLine[line] ?? [])])
+  );
   const allMembersWithStatus: Member[] = allMarketMembers.map(m => ({
     ...m,
-    status: startingMemberIds.has(m.id) ? ('active' as const) : ('prospect' as const),
-    yearJoined: startingMemberIds.has(m.id) ? 1 : 0,
-    calendarYearJoined: startingMemberIds.has(m.id) ? startingYear : 0,
+    status: activeInAnyLine.has(m.id) ? ('active' as const) : ('prospect' as const),
+    yearJoined: activeInAnyLine.has(m.id) ? 1 : 0,
+    calendarYearJoined: activeInAnyLine.has(m.id) ? startingYear : 0,
   }));
 
-  const activeMembers = allMembersWithStatus.filter(m => m.status === 'active');
+  const wcMembers = lineMembers('WC');
+  const activeMembers = wcMembers.filter(m => m.status === 'active');
 
   let activeExposure = activeMembers.reduce((sum, m) => sum + getMemberExposure(m, 'WC'), 0);
   let totalMarketExposure = allMarketMembers.reduce((sum, m) => sum + getMemberExposure(m, 'WC'), 0);
@@ -250,7 +283,7 @@ export function generateStartingPoolState(
           averageRiskQuality: parseFloat(riskQuality.toFixed(1)),
           riskControlEffectiveness: 0,
           reserveCohorts: glStartingReserveCohorts,
-          members: allMembersWithStatus,
+          members: lineMembers('GL'),
           grossUnpaidReserve: glGrossUnpaidReserve,
           reinsuranceRecoverable: glReinsuranceRecoverable,
           // Placeholder — the redistribution block below assigns every active
@@ -289,7 +322,7 @@ export function generateStartingPoolState(
           averageRiskQuality: parseFloat(riskQuality.toFixed(1)),
           riskControlEffectiveness: 0,
           reserveCohorts: propertyStartingReserveCohorts,
-          members: allMembersWithStatus,
+          members: lineMembers('Property'),
           grossUnpaidReserve: propertyGrossUnpaidReserve,
           reinsuranceRecoverable: propertyReinsuranceRecoverable,
           // Placeholder — see the redistribution block below (same as GL).
@@ -309,7 +342,7 @@ export function generateStartingPoolState(
     averageRiskQuality: parseFloat(riskQuality.toFixed(1)),
     riskControlEffectiveness: 0,
     reserveCohorts: startingReserveCohorts,
-    members: allMembersWithStatus,
+    members: wcMembers,
     grossUnpaidReserve,
     reinsuranceRecoverable,
     surplus,

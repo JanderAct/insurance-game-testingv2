@@ -27,12 +27,11 @@ import {
   RISK_CONTROL_PARAMS,
   EXPOSURE_RANGES,
   SIZE_WEIGHTS,
-  STARTING_POOL_EXPOSURE,
+  STARTING_EXPOSURE_SHARE,
   TOTAL_MARKET_EXPOSURE,
   STARTING_RATE_PER_100,
   STARTING_FINANCIALS,
   SLIDER_RANGES,
-  STARTING_MEMBER_RANGE,
   TOTAL_MARKET_MEMBERS,
   RESERVE_PAYDOWN_PCT,
 } from '../data/defaultAssumptions';
@@ -854,18 +853,11 @@ function buildAssumptionRows(): AuditRow[] {
         'Used to create the pool’s competitive universe. Does not mean all members are active in the player pool.',
     },
     {
-      metric: 'Starting Member Range',
-      value: `${STARTING_MEMBER_RANGE.min} to ${STARTING_MEMBER_RANGE.max}`,
-      formula: 'Starting active member count range.',
+      metric: 'Starting Exposure Share (per line)',
+      value: `${(STARTING_EXPOSURE_SHARE.min * 100).toFixed(0)}% to ${(STARTING_EXPOSURE_SHARE.max * 100).toFixed(0)}%`,
+      formula: "Each active line independently enrolls members (seeded random order) until its enrolled exposure reaches this share of the line's total market exposure.",
       note:
-        'Controls initial pool size. A larger starting pool is usually more stable because exposure is spread across more members.',
-    },
-    {
-      metric: 'Starting Pool Exposure Range',
-      value: `${STARTING_POOL_EXPOSURE.min}M to ${STARTING_POOL_EXPOSURE.max}M`,
-      formula: 'Starting pool payroll exposure range.',
-      note:
-        'Payroll exposure is the rating base. This drives premium volume and expected loss volume.',
+        'The exposure target drives the starting member count per line; lines start with different but overlapping rosters.',
     },
     {
       metric: 'Total Market Exposure Range',

@@ -224,8 +224,11 @@ export const EXPOSURE_RANGES: Record<string, { min: number; max: number }> = {
 // Size category probability weights — mostly small entities
 export const SIZE_WEIGHTS = [0.55, 0.30, 0.12, 0.03];
 
-// Starting pool payroll exposure targets ($M)
-export const STARTING_POOL_EXPOSURE = { min: 50, max: 75 };
+// Starting enrollment per line: each active line independently enrolls members
+// (seeded random order) until its enrolled exposure reaches this share of the
+// market's TOTAL exposure for that line (WC payroll / GL payroll / Property
+// TIV). The exposure target drives the member count, not the other way around.
+export const STARTING_EXPOSURE_SHARE = { min: 0.25, max: 0.35 };
 
 // Total market payroll exposure targets ($M)
 export const TOTAL_MARKET_EXPOSURE = { min: 180, max: 300 };
@@ -305,8 +308,6 @@ export const SLIDER_RANGES = {
   reinsuranceLevel: { min: 0, max: 4, step: 1, default: 2 },
 };
 
-// Starting pool member count range
-export const STARTING_MEMBER_RANGE = { min: 20, max: 35 };
 export const TOTAL_MARKET_MEMBERS = 100;
 
 // Reserve paydown percentage per year

@@ -533,6 +533,29 @@ histories drawing from distinct streams.
 
 ---
 
+### Market-structure change — per-line independent starting enrollment (post-2.10)
+
+**Status:** ✅ BUILT. Each active line now draws its OWN starting roster independently, by
+EXPOSURE SHARE: members are iterated in a per-line seeded random order (`enroll` /
+`enroll_GL` / `enroll_Property` sub-streams — deterministic per seed AND independent of which
+other lines are active), accumulating that line's enrolled exposure (WC payroll / GL payroll /
+Property TIV) until it lands inside `STARTING_EXPOSURE_SHARE` (25–35%) of the line's total
+market exposure. A member that would push past the 35% cap is skipped in favor of smaller
+members later in the order, so the landing is always in-band — single pass, no retries. The
+exposure target drives the member count (the old 20–35 count draw and the 250-shuffle WC-payroll
+scorer, `assignStartingMembers` / `STARTING_MEMBER_RANGE` / `STARTING_POOL_EXPOSURE`, are
+deleted). No quality screen at enrollment — underwriting strictness screening remains a
+live-year recruitment mechanic (no player decisions exist before year 1).
+
+Lines start with DIFFERENT but overlapping rosters (one entity can be active in multiple lines);
+the shared market roster marks a member active if enrolled in ANY line, matching live-year
+semantics. Enrollment happens in the bootstrap, BEFORE pre-game year -2, so the Stage 2.10
+pre-game sim (and its reject-and-redraw adequacy loop, which never touches the bootstrap) runs
+on the enrolled books. GL still shares WC's payroll VALUES — only its roster differs.
+Baseline-shifting for every config (part of the pre-v7 batch).
+
+---
+
 ### Phase 3 — Reserve Development System
 
 #### Stage 3.1 — Accident-year triangle data model + per-line development patterns
