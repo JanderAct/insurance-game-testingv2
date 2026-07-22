@@ -404,7 +404,11 @@ export default function App() {
         )}
 
         {activeTab === SPREADSHEET_TAB && gameState && (
-          <ResultSpreadsheetPage lockedResults={gameState.lockedResults} />
+          <ResultSpreadsheetPage
+            lockedResults={gameState.lockedResults}
+            activeLines={gameState.setup.activeLines}
+            instanceId={gameState.setup.instanceId}
+          />
         )}
 
         {activeTab === AUDIT_TAB && gameState && (

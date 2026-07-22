@@ -1,23 +1,19 @@
 import React, { useMemo, useState } from 'react';
+import * as XLSX from 'xlsx';
 import { Download, ClipboardList, Table, Users } from 'lucide-react';
-import type { ResultSet } from '../types/simulation';
+import type { CoverageLine, ResultSet } from '../types/simulation';
 import { formatCurrency, formatPct } from '../utils/formatters';
 import { REINSURANCE_PROGRAMS } from '../data/defaultAssumptions';
 import { getMemberExposure } from '../utils/lineHelpers';
+import { type SpreadsheetMetric, buildResultsWorkbook, buildExportFilename } from '../utils/resultsExport';
 
 interface ResultSpreadsheetPageProps {
   lockedResults: ResultSet[];
+  activeLines: CoverageLine[];
+  instanceId: string;
 }
 
-interface SpreadsheetMetric {
-  key: string;
-  category: string;
-  label: string;
-  value: (result: ResultSet) => string | number;
-  csvValue?: (result: ResultSet) => string | number;
-}
-
-export default function ResultSpreadsheetPage({ lockedResults }: ResultSpreadsheetPageProps) {
+export default function ResultSpreadsheetPage({ lockedResults, activeLines, instanceId }: ResultSpreadsheetPageProps) {
   const [selectedYear, setSelectedYear] = useState<number>(
     lockedResults.length > 0 ? lockedResults[lockedResults.length - 1].yearNumber : 1
   );
@@ -672,8 +668,8 @@ export default function ResultSpreadsheetPage({ lockedResults }: ResultSpreadshe
     );
   }
 
-  const resultCsv = buildVerticalResultCsv(lockedResults, resultMetrics);
   const memberCsv = buildMemberCsv(selectedResult);
+  const exportFilename = buildExportFilename(instanceId, activeLines, lockedResults);
 
   return (
     <div className="max-w-screen-2xl mx-auto px-4 py-6 space-y-6">
@@ -700,11 +696,14 @@ export default function ResultSpreadsheetPage({ lockedResults }: ResultSpreadshe
 
           <button
             type="button"
-            onClick={() => downloadCsv('source-game-year-results-vertical.csv', resultCsv)}
+            onClick={() => {
+              const wb = buildResultsWorkbook(lockedResults, activeLines, resultMetrics);
+              XLSX.writeFile(wb, exportFilename);
+            }}
             className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
           >
             <Download size={16} />
-            Download Results CSV
+            Download Results (.xlsx)
           </button>
 
           <button
@@ -923,29 +922,6 @@ function SpreadsheetTable({
       )}
     </div>
   );
-}
-
-function buildVerticalResultCsv(results: ResultSet[], metrics: SpreadsheetMetric[]): string {
-  const header = [
-    escapeCsv('Category'),
-    escapeCsv('Metric'),
-    ...results.map(result => escapeCsv(`Year ${result.yearNumber} / ${result.calendarYear}`)),
-  ].join(',');
-
-  const rows = metrics.map(metric => {
-    const cells = [
-      escapeCsv(metric.category),
-      escapeCsv(metric.label),
-      ...results.map(result => {
-        const value = metric.csvValue ? metric.csvValue(result) : metric.value(result);
-        return escapeCsv(value);
-      }),
-    ];
-
-    return cells.join(',');
-  });
-
-  return [header, ...rows].join('\n');
 }
 
 function buildMemberCsv(result: ResultSet | undefined): string {

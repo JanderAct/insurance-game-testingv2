@@ -392,6 +392,12 @@ while this one waits on the editing-UX decision.
 
 ### Stage 2.8 — Multi-Line Results Export (.xlsx, tab per line)
 
+**Status:** ✅ BUILT. Pool tab drops the Asset Allocation row (no pool-level allocation since
+Stage 2.9) and splits the unit-mixing exposure rows (Active/Total Market/Written Exposure,
+Market Share) into one row per active line instead of a single summed figure — Property's TIV
+and WC/GL's payroll can't be added together meaningfully. Every other Pool-tab row (including
+investment income/return/assets, which ARE meaningful blended pool-wide) is unchanged.
+
 **Goal:** Replace the current single-sheet CSV results export with a multi-tab Excel (.xlsx)
 workbook that breaks out every active coverage line separately, plus a combined Pool tab. Today's
 export only shows one set of results (pool-level combined, or a single line when only one is
