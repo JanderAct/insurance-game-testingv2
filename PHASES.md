@@ -360,6 +360,16 @@ bill-moving inputs that exist today.
 
 ### Stage 2.7 — Per-Line Decision Editing (GL & Property inputs)
 
+**Status:** ✅ BUILT. UX model chosen: **Model A (strict per-line)** — each line's decisions are
+edited only on that line's own tab (WC/GL/Property); no pool-wide "apply to all" shortcut. Every
+per-line decision is now editable per line, including asset allocation (moved per-line in Stage
+2.9). "Reset to Defaults" resets only the current line. UI-only change — no engine edits (the
+engine already processed each line with its own `decisions.byLine[line]`; only the Decisions page
+was previously WC-hardcoded). Note: because the operating cash / other-assets pot is shared and
+split by contribution weight (Stage 1.5/2.9), a change in one line's surplus produces a
+sub-basis-point ripple in the others' cash slice in later years — inherent to the pool model, not
+a Stage 2.7 artifact; segregated investment portfolios and same-year pricing/losses stay isolated.
+
 **⚠️ Depends on:** the per-line decision *editing UX* question being resolved first
 (see decisions-chat brainstorm: Pool-tab-edits-all vs. line-tab-only vs.
 read-only-pool-summary vs. labeled-hybrid). Do NOT build this until that model is

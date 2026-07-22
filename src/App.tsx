@@ -297,25 +297,35 @@ export default function App() {
     disabled: !isStarted && t.id !== 'setup',
   }));
 
+  // Decisions-page reinsurance preview estimates, scoped to the line currently
+  // being edited (Stage 2.7). Uses that line's own exposure basis — payroll for
+  // WC/GL, TIV for Property — its own ratePer100 / purePremiumPer100, and its
+  // own rateChange. These are intentionally simple previews; the real premium
+  // is recomputed per line in simulationEngine.ts at lock.
+  const decisionLine = effectiveLineView === 'pool' ? 'WC' : (effectiveLineView as CoverageLine);
+  const decisionLineRateChange = currentDecisions.byLine[decisionLine].rateChange;
+
   const estimatedPremium = React.useMemo(() => {
     if (!gameState) return 5_000_000;
 
-    const activeMembers = gameState.poolState.lines.WC.members.filter(m => m.status === 'active');
-    const exposure = activeMembers.reduce((s, m) => s + getMemberExposure(m, 'WC'), 0);
+    const lineState = gameState.poolState.lines[decisionLine];
+    const exposure = lineState.members
+      .filter(m => m.status === 'active')
+      .reduce((s, m) => s + getMemberExposure(m, decisionLine), 0);
 
-    // Current estimate is intentionally simple for the Decisions page preview.
-    // Actual premium is calculated in simulationEngine.ts when the year is processed.
-    return exposure * gameState.poolState.lines.WC.ratePer100 * (1 + currentDecisions.byLine.WC.rateChange) * 10_000;
-  }, [gameState, currentDecisions.byLine.WC.rateChange]);
+    return exposure * lineState.ratePer100 * (1 + decisionLineRateChange) * 10_000;
+  }, [gameState, decisionLine, decisionLineRateChange]);
 
   const estimatedExpectedLoss = React.useMemo(() => {
     if (!gameState) return 3_500_000;
 
-    const activeMembers = gameState.poolState.lines.WC.members.filter(m => m.status === 'active');
-    const exposure = activeMembers.reduce((s, m) => s + getMemberExposure(m, 'WC'), 0);
+    const lineState = gameState.poolState.lines[decisionLine];
+    const exposure = lineState.members
+      .filter(m => m.status === 'active')
+      .reduce((s, m) => s + getMemberExposure(m, decisionLine), 0);
 
-    return exposure * gameState.poolState.lines.WC.purePremiumPer100 * 10_000;
-  }, [gameState]);
+    return exposure * lineState.purePremiumPer100 * 10_000;
+  }, [gameState, decisionLine]);
 
   return (
     <div className="min-h-screen bg-gray-50">
