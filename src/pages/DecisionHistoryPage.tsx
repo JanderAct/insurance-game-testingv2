@@ -49,12 +49,6 @@ export default function DecisionHistoryPage({ lockedResults, lineView }: Decisio
         )}
       </div>
 
-      {lineView !== 'WC' && (
-        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-          Per-line decision editing for {lineDisplayName(lineView)} isn't available yet — every year below reflects that line's fixed default decisions, not a player choice.
-        </p>
-      )}
-
       {rows.length === 0 ? (
         <div className="text-center py-20 text-gray-400">
           <ScrollText size={48} className="mx-auto mb-4 opacity-30" />

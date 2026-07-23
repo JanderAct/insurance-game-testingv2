@@ -42,11 +42,6 @@ export default function DashboardPage({ lockedResults, historicalYears, starting
             ? 'Starting position — no years completed yet.'
             : `Through Year ${currentYearNumber - 1} — ${lockedResults.length} year${lockedResults.length !== 1 ? 's' : ''} completed`}
         </p>
-        {lineView !== 'pool' && (
-          <p className="text-xs text-amber-600 mt-1">
-            Showing the {lineDisplayName(lineView)} line's own figures — including its own simulated pre-game history (Stage 2.10).
-          </p>
-        )}
       </div>
 
       {/* Summary Cards */}

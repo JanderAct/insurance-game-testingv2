@@ -46,11 +46,6 @@ export default function FinancialsPage({ lockedResults, priorResults, lineView }
         <div>
           <h2 className="text-xl font-bold text-gray-900">Financial Statements{lineView !== 'pool' ? ` — ${lineDisplayName(lineView)}` : ''}</h2>
           <p className="text-gray-500 text-sm">Select a year to view the full statement</p>
-          {lineView !== 'pool' && (
-            <p className="text-xs text-amber-600 mt-1">
-              Showing the {lineDisplayName(lineView)} line's own statements — including its own pre-game history and opening position (Stage 2.10).
-            </p>
-          )}
         </div>
         <select value={String(selectedIdx)} onChange={e => setSelectedIdx(parseInt(e.target.value))} className="border border-gray-300 rounded-lg px-4 py-2 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
           {yearOptions.map(opt => (<option key={String(opt.value)} value={String(opt.value)}>{opt.label}</option>))}
