@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import type { LoanOffer } from '../utils/simulationEngine';
 import { formatCurrency } from '../utils/formatters';
+import { LINE_FULL_NAME } from '../utils/lineDisplay';
 
 interface LoanPromptModalProps {
   offers: LoanOffer[];
@@ -37,7 +38,7 @@ export default function LoanPromptModal({ offers, onResolve }: LoanPromptModalPr
             {offers.map(o => (
               <div key={o.line} className="border border-gray-200 rounded-lg p-3">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="font-semibold text-gray-900">{o.line}</span>
+                  <span className="font-semibold text-gray-900">{LINE_FULL_NAME[o.line]}</span>
                   <span className="text-sm text-red-600 font-mono">
                     Deficit {formatCurrency(o.deficit)}
                   </span>
@@ -48,7 +49,7 @@ export default function LoanPromptModal({ offers, onResolve }: LoanPromptModalPr
                 </p>
                 <p className="text-xs text-gray-500 mb-2">
                   Funded by: {Object.entries(o.lenderShares)
-                    .map(([l, s]) => `${l} ${((s ?? 0) * 100).toFixed(0)}%`)
+                    .map(([l, s]) => `${LINE_FULL_NAME[l as keyof typeof LINE_FULL_NAME]} ${((s ?? 0) * 100).toFixed(0)}%`)
                     .join(', ')} — repayments (principal + interest) flow back to {Object.keys(o.lenderShares).length === 1 ? 'that line' : 'those lines'}.
                 </p>
                 <div className="flex gap-2">

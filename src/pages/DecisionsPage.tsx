@@ -7,6 +7,7 @@ import { SLIDER_RANGES, REINSURANCE_PROGRAMS, FULL_TRANSFER_COST_PCT_OF_PREMIUM,
 import { formatCurrency } from '../utils/formatters';
 import { getReinsuranceStructure } from '../utils/reinsuranceEngine';
 import { defaultLineDecisionSet } from '../utils/decisionDefaults';
+import { lineDisplayName } from '../utils/lineDisplay';
 
 export interface LineLoanInfo {
   balance: number;
@@ -78,12 +79,12 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
     <div className="max-w-screen-2xl mx-auto px-4 py-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold text-gray-900">Year {yearNumber} Decisions — {lineView}</h2>
+          <h2 className="text-xl font-bold text-gray-900">Year {yearNumber} Decisions — {lineDisplayName(lineView)}</h2>
           <p className="text-gray-500 text-sm">Configure this line's strategy for the year</p>
         </div>
         {!disabled && (
           <button onClick={() => onChange(resetLineToDefaults(decisions, selectedLine))} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition-colors px-3 py-1.5 rounded-lg hover:bg-gray-100">
-            <RotateCcw size={14} /> Reset {selectedLine} to Defaults
+            <RotateCcw size={14} /> Reset {lineDisplayName(selectedLine)} to Defaults
           </button>
         )}
       </div>
@@ -144,7 +145,7 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
 
         <SectionCard title="Investment Allocation" icon={<BarChart2 size={16} />}>
           <p className="text-xs text-gray-500 -mt-2">
-            This allocation applies to the {lineView} line's own segregated investment portfolio — each line invests separately and keeps its own gains and losses.
+            This allocation applies to the {lineDisplayName(lineView)} line's own segregated investment portfolio — each line invests separately and keeps its own gains and losses.
           </p>
           <AllocationBar value={d.assetAllocation} onChange={setAllocation} disabled={disabled} />
         </SectionCard>

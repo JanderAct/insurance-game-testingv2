@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ScrollText, ArrowUpDown } from 'lucide-react';
 import type { CoverageLine, LineResultSet } from '../types/simulation';
 import { REINSURANCE_PROGRAMS } from '../data/defaultAssumptions';
+import { lineDisplayName } from '../utils/lineDisplay';
 
 interface DecisionHistoryPageProps {
   lockedResults: LineResultSet[];
@@ -35,8 +36,8 @@ export default function DecisionHistoryPage({ lockedResults, lineView }: Decisio
     <div className="max-w-screen-2xl mx-auto px-4 py-6 space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-xl font-bold text-gray-900">Decision History — {lineView}</h2>
-          <p className="text-gray-500 text-sm">Every locked year's decisions for the {lineView} line.</p>
+          <h2 className="text-xl font-bold text-gray-900">Decision History — {lineDisplayName(lineView)}</h2>
+          <p className="text-gray-500 text-sm">Every locked year's decisions for the {lineDisplayName(lineView)} line.</p>
         </div>
         {rows.length > 1 && (
           <button
@@ -50,7 +51,7 @@ export default function DecisionHistoryPage({ lockedResults, lineView }: Decisio
 
       {lineView !== 'WC' && (
         <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-          Per-line decision editing for {lineView} isn't available yet — every year below reflects that line's fixed default decisions, not a player choice.
+          Per-line decision editing for {lineDisplayName(lineView)} isn't available yet — every year below reflects that line's fixed default decisions, not a player choice.
         </p>
       )}
 

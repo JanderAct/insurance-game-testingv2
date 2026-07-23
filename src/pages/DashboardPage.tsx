@@ -2,6 +2,7 @@ import { TrendingUp, Users, Shield, DollarSign, Activity, BarChart2, Globe, Star
 import type { LineResultSet, StartingFinancials, HistoricalYear, LineView } from '../types/simulation';
 import StatCard from '../components/StatCard';
 import { formatCurrency, formatPct, colorForRatio, colorForSurplus } from '../utils/formatters';
+import { lineDisplayName } from '../utils/lineDisplay';
 
 interface DashboardPageProps {
   lockedResults: LineResultSet[];
@@ -35,7 +36,7 @@ export default function DashboardPage({ lockedResults, historicalYears, starting
   return (
     <div className="max-w-screen-2xl mx-auto px-4 py-6 space-y-6">
       <div>
-        <h2 className="text-xl font-bold text-gray-900">Dashboard{lineView !== 'pool' ? ` — ${lineView}` : ''}</h2>
+        <h2 className="text-xl font-bold text-gray-900">Dashboard{lineView !== 'pool' ? ` — ${lineDisplayName(lineView)}` : ''}</h2>
         <p className="text-gray-500 text-sm">
           {lockedResults.length === 0
             ? 'Starting position — no years completed yet.'
@@ -43,7 +44,7 @@ export default function DashboardPage({ lockedResults, historicalYears, starting
         </p>
         {lineView !== 'pool' && (
           <p className="text-xs text-amber-600 mt-1">
-            Showing the {lineView} line's own figures — including its own simulated pre-game history (Stage 2.10).
+            Showing the {lineDisplayName(lineView)} line's own figures — including its own simulated pre-game history (Stage 2.10).
           </p>
         )}
       </div>

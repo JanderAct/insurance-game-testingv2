@@ -3,6 +3,7 @@ import { FileText, Target } from 'lucide-react';
 import type { LineResultSet, LineView } from '../types/simulation';
 import { deriveAnnualStatement } from '../utils/financialStatementEngine';
 import { formatCurrency, formatPct, colorForNetIncome } from '../utils/formatters';
+import { lineDisplayName } from '../utils/lineDisplay';
 
 interface FinancialsPageProps {
   lockedResults: LineResultSet[];
@@ -43,11 +44,11 @@ export default function FinancialsPage({ lockedResults, priorResults, lineView }
     <div className="max-w-screen-2xl mx-auto px-4 py-6 space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-xl font-bold text-gray-900">Financial Statements{lineView !== 'pool' ? ` — ${lineView}` : ''}</h2>
+          <h2 className="text-xl font-bold text-gray-900">Financial Statements{lineView !== 'pool' ? ` — ${lineDisplayName(lineView)}` : ''}</h2>
           <p className="text-gray-500 text-sm">Select a year to view the full statement</p>
           {lineView !== 'pool' && (
             <p className="text-xs text-amber-600 mt-1">
-              Showing the {lineView} line's own statements — including its own pre-game history and opening position (Stage 2.10).
+              Showing the {lineDisplayName(lineView)} line's own statements — including its own pre-game history and opening position (Stage 2.10).
             </p>
           )}
         </div>

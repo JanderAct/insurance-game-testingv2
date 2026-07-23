@@ -1,6 +1,7 @@
 import { Activity, DollarSign, Shield, Users } from 'lucide-react';
 import type { HistoricalYear, LineView } from '../types/simulation';
 import { colorForRatio, formatCurrency, formatPct } from '../utils/formatters';
+import { lineDisplayName } from '../utils/lineDisplay';
 
 interface HistoryPageProps {
   // Stage 2.10: real simulated pre-game years (already filtered to the current
@@ -86,7 +87,7 @@ export default function HistoryPage({ historicalYears, scenarioId, startingYear,
     <div className="max-w-screen-2xl mx-auto px-4 py-6 space-y-6">
       <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-2">
         <div>
-          <h2 className="text-xl font-bold text-gray-900">Three-Year {lineView === 'pool' ? 'Pool' : lineView} History</h2>
+          <h2 className="text-xl font-bold text-gray-900">Three-Year {lineDisplayName(lineView)} History</h2>
           <p className="text-sm text-gray-500 mt-1">
             Simulated pre-game years for scenario <span className="font-mono font-semibold text-gray-700">{scenarioId}</span>,
             {' '}run through the same engine as live years at default decisions.

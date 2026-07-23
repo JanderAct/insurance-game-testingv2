@@ -18,6 +18,7 @@ import {
   colorForSurplus,
 } from '../utils/formatters';
 import { REINSURANCE_PROGRAMS } from '../data/defaultAssumptions';
+import { lineDisplayName } from '../utils/lineDisplay';
 
 interface ResultsPageProps {
   lockedResults: LineResultSet[];
@@ -92,7 +93,7 @@ export default function ResultsPage({ lockedResults, lineView }: ResultsPageProp
     <div className="max-w-screen-2xl mx-auto px-4 py-6 space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-xl font-bold text-gray-900">Annual Results{lineView !== 'pool' ? ` — ${lineView}` : ''}</h2>
+          <h2 className="text-xl font-bold text-gray-900">Annual Results{lineView !== 'pool' ? ` — ${lineDisplayName(lineView)}` : ''}</h2>
           <p className="text-gray-500 text-sm">Detailed breakdown for each completed year</p>
         </div>
 
@@ -136,7 +137,7 @@ export default function ResultsPage({ lockedResults, lineView }: ResultsPageProp
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
             <div className="px-5 py-3.5 border-b border-gray-100 bg-gray-50/60 flex items-center gap-2">
               <GitCompare size={16} className="text-blue-600" />
-              <h3 className="font-bold text-gray-900 text-sm">Year-over-Year Comparison{lineView !== 'pool' ? ` — ${lineView}` : ''}</h3>
+              <h3 className="font-bold text-gray-900 text-sm">Year-over-Year Comparison{lineView !== 'pool' ? ` — ${lineDisplayName(lineView)}` : ''}</h3>
             </div>
             <div className="p-5">
               {!priorResult ? (

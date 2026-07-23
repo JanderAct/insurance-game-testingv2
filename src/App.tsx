@@ -22,6 +22,7 @@ import { processYear, applyLoanAuthorizations, type ProcessYearResult } from './
 import { runPriorHistory, toHistoricalYear } from './utils/priorHistoryEngine';
 import { defaultDecisionSet } from './utils/decisionDefaults';
 import { getMemberExposure, selectResultView } from './utils/lineHelpers';
+import { LINE_FULL_NAME } from './utils/lineDisplay';
 import LoanPromptModal from './components/LoanPromptModal';
 import type { LineLoanInfo } from './pages/DecisionsPage';
 
@@ -335,7 +336,7 @@ export default function App() {
           tabs={[
             // No Pool tab on decision-scoped pages — all decisions are per-line (Stage 2.9).
             ...(isDecisionScopePage ? [] : [{ id: 'pool' as LineView, label: 'Pool', icon: LINE_VIEW_ICONS.pool }]),
-            ...activeLines.map(line => ({ id: line as LineView, label: line, icon: LINE_VIEW_ICONS[line] })),
+            ...activeLines.map(line => ({ id: line as LineView, label: LINE_FULL_NAME[line], icon: LINE_VIEW_ICONS[line] })),
           ]}
           activeTab={effectiveLineView}
           onSelect={setLineView}
