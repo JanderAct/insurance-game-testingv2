@@ -224,6 +224,18 @@ export const EXPOSURE_RANGES: Record<string, { min: number; max: number }> = {
 // Size category probability weights — mostly small entities
 export const SIZE_WEIGHTS = [0.55, 0.30, 0.12, 0.03];
 
+// Per-line opening capital (seed-fix-per-line-opening): each active line's
+// opening surplus = this multiple × that line's own opening premium. Sized to
+// each line's risk — WC highest (long-tail reserve-development risk), Property
+// high (short-tail but catastrophe fat-tail risk), GL moderate. Config-
+// independent by construction (depends only on the line's own premium), which
+// replaces the old net-reserve-weighted split of a single shared pot.
+export const STARTING_CAPITAL_TO_PREMIUM: Record<string, number> = {
+  WC: 1.0,
+  GL: 0.7,
+  Property: 0.9,
+};
+
 // Starting enrollment per line: each active line independently enrolls members
 // (seeded random order) until its enrolled exposure reaches this share of the
 // market's TOTAL exposure for that line (WC payroll / GL payroll / Property
@@ -237,9 +249,11 @@ export const TOTAL_MARKET_EXPOSURE = { min: 180, max: 300 };
 export const STARTING_RATE_PER_100 = { min: 5.00, max: 10.00 };
 
 // GL (General Liability) starting assumptions. GL shares WC's payroll exposure
-// base, but liability is lower-frequency/higher-severity than WC's injury/
-// medical exposure, so its charged rate and loss cost per payroll dollar are
-// set meaningfully lower than WC's. Tunable placeholders — calibrate by feel.
+// base. Calibrated so GL is a substantial ~$7-10M-premium line: the rate was
+// scaled ×5 (from 1.50-3.00 to 7.50-15.00 per $100 payroll). Loss cost per
+// exposure = rate × expected-loss-ratio, so scaling the rate scales the loss
+// cost by the same factor — GL's loss ratio is unchanged (a bigger book at the
+// same profitability, not a margin change).
 export const GL_STARTING_RATE_PER_100 = { min: 1.50, max: 3.00 };
 export const GL_EXPECTED_LOSS_RATIO = { min: 0.55, max: 0.70 };
 export const GL_STARTING_FINANCIALS = {

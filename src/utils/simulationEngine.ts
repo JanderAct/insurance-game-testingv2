@@ -1082,7 +1082,7 @@ export function applyLoanAuthorizations(
 // descriptive/rate fields (rate level, CLF, decisions echo, status strings)
 // show the first active line's value as a placeholder until Stage 2.1 adds a
 // real per-line view. byLine always carries the full accurate per-line data.
-function aggregateLineResults(
+export function aggregateLineResults(
   lineResults: Array<{ line: CoverageLine; result: LineResultSet }>,
   priorPoolResult: ResultSet | undefined
 ): ResultSet {

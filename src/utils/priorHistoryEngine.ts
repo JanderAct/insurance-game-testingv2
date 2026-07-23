@@ -1,25 +1,26 @@
-// Stage 2.10 — per-line prior histories.
+// Stage 2.10 + seed-fix-per-line-opening — per-line prior histories.
 //
 // Each active line gets a REAL simulated 3-year pre-game past (yearNumbers -2,
-// -1, 0) produced by the same engine as live years (processYear ->
-// processLineYear), at default decisions. Year 0's ending state IS the Year 1
-// opening position — the history feeds the game, it isn't just display.
+// -1, 0) produced by the same engine as live years, at default decisions. Each
+// line is simulated IN ISOLATION (a single-line pre-game), so its history is
+// config-independent: WC's pre-game is byte-identical whether the game is
+// WC-only, WC+GL, or WC+GL+Property. There is no shared roster fold and no
+// pool-wide reseed across lines during the pre-game. The per-line ending states
+// are then assembled into the Year 1 opening pool; live years (Y1+) resume the
+// normal multi-line shared-cash fold, which reproduces each line's stored
+// surplus (so tie-out holds with cash still pooled).
 //
-// Seeding: every engine draw is deriveSubRng(seed, yearNumber, label) — a pure
-// stateless function — so pre-game years -2..0 use sub-streams fully disjoint
-// from live years 1..N, and running the pre-game sim cannot shift any live
-// draw. Reproducible by construction: same seed -> same history, always.
+// Seeding: every engine draw is deriveSubRng(seed, yearNumber, label), a pure
+// stateless function; each line's streams are label-keyed to that line, so a
+// line at attempt 0 uses the true instance seed and is unaffected by whether
+// other lines exist or needed a redraw.
 //
-// Adequacy (reject-and-redraw, NO clamping): every active line must begin the
-// game rated at least Adequate (excessAvailableSurplus >= 0 — the game's
-// existing capital-adequacy definition). If any line ends the pre-game sim
-// below that, the 3 pre-game years are re-simulated on a deterministically
-// derived alternate seed (seed + attempt * 997, the same accept/reject seed
-// convention the old synthetic history generator used) until every line ends
-// Adequate-or-better. The accepted history is fully real and ties out — no
-// phantom surplus is ever injected. The scan order is fixed, so the same seed
-// always lands on the same accepted attempt. Live years always use the true
-// instance seed regardless of which attempt was accepted.
+// Adequacy (PER-LINE reject-and-redraw, NO clamping): each active line must end
+// its pre-game rated at least Adequate (excessAvailableSurplus >= 0). If a line
+// ends below that, ONLY that line re-simulates on a deterministically derived
+// alternate seed (seed + attempt * 997) until it passes — one line's redraw
+// never reseeds another. Deterministic: same seed -> same per-line redraw path
+// -> same history, every config. The accepted history is real and ties out.
 
 import type {
   CoverageLine,
@@ -28,45 +29,73 @@ import type {
   GameState,
   HistoricalYear,
   LineResultSet,
+  LinePoolState,
+  Member,
   PoolState,
   ResultSet,
   StartingFinancials,
 } from '../types/simulation';
 import { generateStartingPoolState } from './instanceGenerator';
-import { processYear } from './simulationEngine';
+import { processYear, aggregateLineResults } from './simulationEngine';
+import { emptyLinePoolState } from './lineHelpers';
 import { defaultDecisionSet } from './decisionDefaults';
 
 export const PRE_GAME_YEARS = 3; // yearNumbers -2, -1, 0
 const MAX_HISTORY_ATTEMPTS = 500;
 
 export interface PriorHistoryResult {
-  priorHistory: ResultSet[];      // the 3 accepted pre-game years, oldest first
+  priorHistory: ResultSet[];      // the 3 accepted pre-game years, oldest first (pool aggregate)
   poolState: PoolState;           // ending state after year 0 = Year 1 opening
   startingFinancials: StartingFinancials;
-  historyAttempt: number;         // which derived seed was accepted (0 = base seed)
+  historyAttempt: number;         // max accepted per-line attempt (0 = all lines passed on base seed)
 }
 
-// Simulate the 3 pre-game years from the bootstrap position on one candidate
-// seed. Loan offers are auto-declined (no player exists pre-game); a line that
-// dips negative mid-history can still recover — only the ENDING position is
-// gated by the adequacy check.
-function simulateCandidate(
+// One line's accepted solo pre-game: the 3 per-line yearly results plus its
+// ending line state and its own ending shared operating items.
+interface LinePreGame {
+  line: CoverageLine;
+  lineResults: LineResultSet[];   // years -2, -1, 0 for this line
+  lineState: LinePoolState;       // ending state (Year 1 opening for this line)
+  cash: number;                   // this line's own ending operating cash
+  otherAssets: number;
+  otherLiabilities: number;
+  unearnedPremium: number;
+  members: Member[];              // this line's ending roster
+  attempt: number;
+}
+
+// Run one line's 3 pre-game years IN ISOLATION (single-line sim) on a given
+// candidate seed. Loan offers can't arise (single line), and the ending is
+// gated by that line's own adequacy in the caller.
+function simulateLineCandidate(
   instance: GameInstance,
   setup: GameSetupSettings,
-  bootstrapPoolState: PoolState,
+  line: CoverageLine,
   attempt: number
-): { priorHistory: ResultSet[]; poolState: PoolState } {
+): { lineResults: LineResultSet[]; poolState: PoolState; pooled: ResultSet[] } {
   const candidateInstance: GameInstance = attempt === 0
     ? instance
     : { ...instance, seed: (instance.seed + attempt * 997) >>> 0 };
 
+  const soloSetup: GameSetupSettings = { ...setup, activeLines: [line] };
+  const { poolState: bootstrap } = generateStartingPoolState(
+    candidateInstance,
+    setup.startingYear - PRE_GAME_YEARS,
+    [line]
+  );
+  // Relabel this line's seed reserve cohorts 3 years older so they don't
+  // collide with the pre-game years' own new accident-year cohorts.
+  bootstrap.lines[line].reserveCohorts = bootstrap.lines[line].reserveCohorts.map(
+    c => ({ ...c, yearNumber: c.yearNumber - PRE_GAME_YEARS })
+  );
+
   let gs: GameState = {
-    setup,
+    setup: soloSetup,
     instance: candidateInstance,
-    currentYearNumber: -(PRE_GAME_YEARS - 1), // -2
+    currentYearNumber: -(PRE_GAME_YEARS - 1),
     isStarted: true,
     isComplete: false,
-    poolState: structuredClone(bootstrapPoolState),
+    poolState: bootstrap,
     lockedResults: [],
     currentDecisions: defaultDecisionSet(-(PRE_GAME_YEARS - 1)),
     priorHistory: [],
@@ -74,8 +103,6 @@ function simulateCandidate(
 
   for (let y = -(PRE_GAME_YEARS - 1); y <= 0; y++) {
     const processed = processYear(gs, defaultDecisionSet(y));
-    // Committing the pre-authorization result IS the auto-decline: a deficient
-    // line keeps its negative surplus (and blocked dividend next year).
     gs = {
       ...gs,
       currentYearNumber: y + 1,
@@ -84,66 +111,107 @@ function simulateCandidate(
     };
   }
 
-  return { priorHistory: gs.lockedResults, poolState: gs.poolState };
+  return {
+    lineResults: gs.lockedResults.map(r => r.byLine[line]),
+    poolState: gs.poolState,
+    pooled: gs.lockedResults,
+  };
 }
 
-function minLineExcessSurplus(lastResult: ResultSet, activeLines: CoverageLine[]): number {
-  return Math.min(...activeLines.map(line => lastResult.byLine[line].excessAvailableSurplus));
+// Per-line reject-and-redraw: re-simulate ONLY this line until it ends Adequate.
+function runLinePreGame(
+  instance: GameInstance,
+  setup: GameSetupSettings,
+  line: CoverageLine
+): LinePreGame {
+  let best: { c: ReturnType<typeof simulateLineCandidate>; attempt: number; minExcess: number } | null = null;
+
+  for (let attempt = 0; attempt < MAX_HISTORY_ATTEMPTS; attempt++) {
+    const c = simulateLineCandidate(instance, setup, line, attempt);
+    const excess = c.lineResults[c.lineResults.length - 1].excessAvailableSurplus;
+    if (excess >= 0) return finalizeLine(c, line, attempt);
+    if (!best || excess > best.minExcess) best = { c, attempt, minExcess: excess };
+  }
+
+  console.warn(
+    `Prior history (${line}): no attempt of ${MAX_HISTORY_ATTEMPTS} ended Adequate; ` +
+    `using best attempt ${best!.attempt} (excess surplus ${Math.round(best!.minExcess)}).`
+  );
+  return finalizeLine(best!.c, line, best!.attempt);
+}
+
+function finalizeLine(
+  c: ReturnType<typeof simulateLineCandidate>,
+  line: CoverageLine,
+  attempt: number
+): LinePreGame {
+  return {
+    line,
+    lineResults: c.lineResults,
+    lineState: c.poolState.lines[line],
+    cash: c.poolState.cash,
+    otherAssets: c.poolState.otherAssets,
+    otherLiabilities: c.poolState.otherLiabilities,
+    unearnedPremium: c.poolState.unearnedPremium,
+    members: c.poolState.lines[line].members,
+    attempt,
+  };
 }
 
 export function runPriorHistory(
   instance: GameInstance,
   setup: GameSetupSettings
 ): PriorHistoryResult {
-  // The bootstrap draws now describe the pool's position 3 years BEFORE game
-  // start (same draw sequence as before — the seed stream is untouched — only
-  // the calendar labeling shifts). Its seed reserve cohorts are relabeled 3
-  // years older so they don't collide with the pre-game years' own new
-  // accident-year cohorts (pure relabel — cohort math never reads yearNumber).
-  const { poolState: bootstrapPoolState } = generateStartingPoolState(
-    instance,
-    setup.startingYear - PRE_GAME_YEARS,
-    setup.activeLines
-  );
-  for (const line of setup.activeLines) {
-    const ls = bootstrapPoolState.lines[line];
-    ls.reserveCohorts = ls.reserveCohorts.map(c => ({ ...c, yearNumber: c.yearNumber - PRE_GAME_YEARS }));
+  // Simulate each active line's pre-game in isolation (config-independent).
+  const perLine = setup.activeLines.map(line => runLinePreGame(instance, setup, line));
+
+  // --- Assemble the Year 1 opening pool from the per-line ending states ---
+  // Per-line surplus/invested/reserves/roster come straight from each line's
+  // own solo pre-game. Shared operating items (cash / other assets / other
+  // liabilities) are the SUM across lines. The pool total is internally
+  // consistent (each solo line's balance sheet ties, and summing preserves
+  // that), so the live-year contribution-share split reproduces each line's
+  // stored surplus and Year 1 ties out.
+  const lines = {} as Record<CoverageLine, LinePoolState>;
+  for (const line of (['WC', 'GL', 'Property'] as CoverageLine[])) {
+    const pg = perLine.find(p => p.line === line);
+    lines[line] = pg ? pg.lineState : emptyLinePoolState();
   }
 
-  let best: { candidate: ReturnType<typeof simulateCandidate>; attempt: number; minExcess: number } | null = null;
+  // Shared market roster: a member is 'active' if active in ANY line's ending
+  // roster (matches the live-year shared-market semantics).
+  const activeIds = new Set<string>();
+  for (const pg of perLine) {
+    for (const m of pg.members) if (m.status === 'active') activeIds.add(m.id);
+  }
+  const baseMembers = perLine[0]?.members ?? [];
+  const allMarketMembers: Member[] = baseMembers.map(m => ({
+    ...m,
+    status: activeIds.has(m.id) ? ('active' as const) : ('prospect' as const),
+  }));
 
-  for (let attempt = 0; attempt < MAX_HISTORY_ATTEMPTS; attempt++) {
-    const candidate = simulateCandidate(instance, setup, bootstrapPoolState, attempt);
-    const lastResult = candidate.priorHistory[candidate.priorHistory.length - 1];
-    const minExcess = minLineExcessSurplus(lastResult, setup.activeLines);
+  const poolState: PoolState = {
+    cash: perLine.reduce((s, p) => s + p.cash, 0),
+    otherAssets: perLine.reduce((s, p) => s + p.otherAssets, 0),
+    unearnedPremium: perLine.reduce((s, p) => s + p.unearnedPremium, 0),
+    otherLiabilities: perLine.reduce((s, p) => s + p.otherLiabilities, 0),
+    allMarketMembers,
+    lines,
+    interLineLoans: [],
+  };
 
-    if (minExcess >= 0) {
-      return finalize(candidate, attempt);
-    }
-    if (!best || minExcess > best.minExcess) {
-      best = { candidate, attempt, minExcess };
-    }
+  // Pool-level pre-game history = per-year aggregate across the active lines.
+  const priorHistory: ResultSet[] = [];
+  for (let i = 0; i < PRE_GAME_YEARS; i++) {
+    const lineResults = perLine.map(p => ({ line: p.line, result: p.lineResults[i] }));
+    priorHistory.push(aggregateLineResults(lineResults, priorHistory[i - 1]));
   }
 
-  // Pathological seed: no attempt produced an all-lines-Adequate ending. Fall
-  // back to the closest attempt (still a real, tied-out history — just below
-  // Adequate on some line) rather than clamping or injecting surplus.
-  console.warn(
-    `Prior history: no attempt of ${MAX_HISTORY_ATTEMPTS} ended all lines Adequate; ` +
-    `using best attempt ${best!.attempt} (min excess surplus ${Math.round(best!.minExcess)}).`
-  );
-  return finalize(best!.candidate, best!.attempt);
-}
-
-function finalize(
-  candidate: { priorHistory: ResultSet[]; poolState: PoolState },
-  attempt: number
-): PriorHistoryResult {
   return {
-    priorHistory: candidate.priorHistory,
-    poolState: candidate.poolState,
-    startingFinancials: deriveStartingFinancials(candidate.poolState, candidate.priorHistory),
-    historyAttempt: attempt,
+    priorHistory,
+    poolState,
+    startingFinancials: deriveStartingFinancials(poolState, priorHistory),
+    historyAttempt: Math.max(0, ...perLine.map(p => p.attempt)),
   };
 }
 

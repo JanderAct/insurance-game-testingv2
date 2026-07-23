@@ -9,6 +9,8 @@ import { getMemberExposure, emptyLinePoolState } from './lineHelpers';
 import {
   STARTING_FINANCIALS,
   STARTING_EXPOSURE_SHARE,
+  STARTING_CAPITAL_TO_PREMIUM,
+  OPERATING_CASH_PCT_OF_PREMIUM,
   STARTING_RATE_PER_100,
   RESERVE_PAYDOWN_PCT,
   GL_STARTING_RATE_PER_100,
@@ -354,49 +356,48 @@ export function generateStartingPoolState(
     totalMarketExposure,
   };
 
-  // --- Consistent per-line opening surplus allocation ---
-  // The engine gives each active line its contribution-share of the shared
-  // opening assets (cash/investments/other) when it builds that line's Year 1
-  // balance sheet. So each line's STORED starting surplus must be consistent
-  // with that — its share of the shared net opening assets, less its own net
-  // reserves — or Year 1 fails to tie out. (The prior "WC holds all the assets,
-  // other lines hold only their reserves" split made GL/Property launch with a
-  // spuriously negative surplus and a Year 1 tie-out gap equal to the shared
-  // assets they actually control.)
-  //
-  // We distribute the pool's single opening surplus across active lines,
-  // weighted by each line's net reserve. This conserves the pool total exactly
-  // (it only redistributes it), keeps a WC-only game byte-identical (a single
-  // active line gets weight 1 -> SHARED_NET - wcNetReserve, WC's existing
-  // value), uses no RNG (seed stream untouched), and leaves no line underwater
-  // for a solvent pool.
-  const sharedNetOpeningAssets = cash + investments + otherAssets - unearnedPremium - otherLiabilities;
+  // --- Per-line opening capital (seed-fix-per-line-opening) ---
+  // Each active line's opening surplus = STARTING_CAPITAL_TO_PREMIUM[line] × its
+  // OWN opening premium (its enrolled exposure × its rate). Invested assets are
+  // the balance-sheet plug that realizes that surplus; operating cash is the
+  // line's own 15%-of-premium target. This depends only on the line's own
+  // premium/reserves — config-independent — replacing the old net-reserve-
+  // weighted split of one shared pot (which made a line's opening depend on
+  // which other lines were active). The shared cash/other-assets pool becomes
+  // the SUM of each active line's own operating items; the live-year
+  // contribution-share split then faithfully reproduces each line's stored
+  // surplus (the split is constructed to do exactly that when the pool total is
+  // internally consistent — see computeContributionShares), so Year 1 ties out
+  // with cash still pooled.
   const lineStateByLine: Record<CoverageLine, LinePoolState> = {
     WC: wcLineState,
     GL: glLineState,
     Property: propertyLineState,
   };
-  const activeNetReserves = activeLines.map(line => ({
-    line,
-    netReserve: lineStateByLine[line].grossUnpaidReserve - lineStateByLine[line].reinsuranceRecoverable,
-  }));
-  const totalActiveNetReserve = activeNetReserves.reduce((s, x) => s + x.netReserve, 0);
-  const totalOpeningSurplus = sharedNetOpeningAssets - totalActiveNetReserve;
-  const positiveNetReserveTotal = activeNetReserves.reduce((s, x) => s + Math.max(0, x.netReserve), 0);
-  for (const { line, netReserve } of activeNetReserves) {
-    const weight = positiveNetReserveTotal > 0
-      ? Math.max(0, netReserve) / positiveNetReserveTotal
-      : 1 / activeLines.length;
-    lineStateByLine[line].surplus = totalOpeningSurplus * weight;
-    // Stage 2.9: the opening investment portfolio is likewise split into
-    // per-line segregated portfolios by the same weight. Conserves the pool
-    // total exactly, uses no RNG, and gives a solo line the full amount
-    // (weight 1) — identical to what it controlled under the shared model.
-    lineStateByLine[line].investedAssets = investments * weight;
-  }
+  // otherAssets / otherLiabilities are drawn once (small placeholders); assign
+  // them to the FIRST active line so the pool totals include them exactly once
+  // and every line's balance sheet stays self-consistent.
+  let poolCash = 0;
+  activeLines.forEach((line, idx) => {
+    const ls = lineStateByLine[line];
+    const activeExp = ls.members
+      .filter(m => m.status === 'active')
+      .reduce((s, m) => s + getMemberExposure(m, line), 0);
+    const linePremium = activeExp * ls.ratePer100 * 10_000;
+    const targetSurplus = (STARTING_CAPITAL_TO_PREMIUM[line] ?? 1.0) * linePremium;
+    const lineCash = OPERATING_CASH_PCT_OF_PREMIUM * linePremium;
+    const lineOtherAssets = idx === 0 ? otherAssets : 0;
+    const lineOtherLiab = idx === 0 ? otherLiabilities : 0;
+    // surplus = cash + invested + reinsRec + otherAssets − grossReserve − otherLiab
+    // ⇒ invested = surplus + grossReserve + otherLiab − reinsRec − cash − otherAssets
+    ls.investedAssets = targetSurplus + ls.grossUnpaidReserve + lineOtherLiab
+      - ls.reinsuranceRecoverable - lineCash - lineOtherAssets;
+    ls.surplus = targetSurplus;
+    poolCash += lineCash;
+  });
 
   const poolState: PoolState = {
-    cash,
+    cash: poolCash,
     otherAssets,
     unearnedPremium,
     otherLiabilities,
