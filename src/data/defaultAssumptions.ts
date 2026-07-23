@@ -254,7 +254,7 @@ export const STARTING_RATE_PER_100 = { min: 5.00, max: 10.00 };
 // exposure = rate × expected-loss-ratio, so scaling the rate scales the loss
 // cost by the same factor — GL's loss ratio is unchanged (a bigger book at the
 // same profitability, not a margin change).
-export const GL_STARTING_RATE_PER_100 = { min: 1.50, max: 3.00 };
+export const GL_STARTING_RATE_PER_100 = { min: 7.50, max: 15.00 };
 export const GL_EXPECTED_LOSS_RATIO = { min: 0.55, max: 0.70 };
 export const GL_STARTING_FINANCIALS = {
   grossUnpaidReserve: { min: 1_000_000, max: 2_500_000 },
