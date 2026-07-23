@@ -243,7 +243,7 @@ export default function ResultsPage({ lockedResults, lineView }: ResultsPageProp
                 label={`Pool Premium Rate at ${(result.selectedFundingConfidenceLevel * 100).toFixed(0)}% CLF`}
                 value={`$${(result.poolPremium / Math.max(result.activeExposure * 10_000, 1)).toFixed(2)}`}
               />
-              <Row label="Written Payroll ($M)" value={formatMillions(result.writtenExposure)} />
+              <Row label={lineView === 'Property' ? 'Written TIV' : 'Written Payroll ($M)'} value={formatMillions(result.writtenExposure)} />
               <Row label="Pool Premium" value={formatCurrency(result.poolPremium)} />
               <Row label="Admin Expense" value={formatCurrency(result.adminExpense)} />
               <Row label="Pool Premium & Admin Expense" value={formatCurrency(result.poolPremiumAndAdminExpense)} />

@@ -104,6 +104,7 @@ export function buildLineMetrics(baseMetrics: SpreadsheetMetric[], line: Coverag
     activeExposure: 'Active TIV Exposure ($M)',
     totalMarketExposure: 'Total Market TIV ($M)',
     purePremiumRatePer100: 'Pure Premium Rate per $100 TIV',
+    writtenExposure: 'Written TIV ($M)',
   } : {};
 
   const relabeled = baseMetrics.map(m => relabel[m.key] ? { ...m, label: relabel[m.key] } : m);
