@@ -2,6 +2,7 @@ import React from 'react';
 import { DollarSign, TrendingUp, BarChart2, Shield, RotateCcw } from 'lucide-react';
 import type { DecisionSet, LineDecisionSet, CoverageLine } from '../types/simulation';
 import SliderInput from '../components/SliderInput';
+import AllocationBar from '../components/AllocationBar';
 import { SLIDER_RANGES, REINSURANCE_PROGRAMS, FULL_TRANSFER_COST_PCT_OF_PREMIUM, SELF_FUNDED_DISCOUNT_PCT } from '../data/defaultAssumptions';
 import { formatCurrency } from '../utils/formatters';
 import { getReinsuranceStructure } from '../utils/reinsuranceEngine';
@@ -59,14 +60,9 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
   const set = (key: keyof LineDecisionSet, val: number | LineDecisionSet['assetAllocation']) =>
     onChange({ ...decisions, byLine: { ...decisions.byLine, [selectedLine]: { ...d, [key]: val } } });
 
-  // Asset allocation is a per-line decision (Stage 2.9) — these sliders edit
-  // the selected line's own segregated portfolio.
-  const { cashPct, bondsPct } = d.assetAllocation;
-  const equitiesPct = Math.max(0, 100 - cashPct - bondsPct);
-  const setCashPct = (val: number) =>
-    set('assetAllocation', { cashPct: val, bondsPct: Math.min(bondsPct, 100 - val), equitiesPct: Math.max(0, 100 - val - Math.min(bondsPct, 100 - val)) });
-  const setBondsPct = (val: number) =>
-    set('assetAllocation', { cashPct: Math.min(cashPct, 100 - val), bondsPct: val, equitiesPct: Math.max(0, 100 - val - Math.min(cashPct, 100 - val)) });
+  // Asset allocation is a per-line decision (Stage 2.9) — the bar edits the
+  // selected line's own segregated portfolio.
+  const setAllocation = (allocation: LineDecisionSet['assetAllocation']) => set('assetAllocation', allocation);
 
   const reinsStructure = getReinsuranceStructure(d.reinsuranceLevel, estimatedPremium, estimatedExpectedLoss);
   const prog = REINSURANCE_PROGRAMS[d.reinsuranceLevel];
@@ -150,13 +146,7 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
           <p className="text-xs text-gray-500 -mt-2">
             This allocation applies to the {lineView} line's own segregated investment portfolio — each line invests separately and keeps its own gains and losses.
           </p>
-          <SliderInput label="Cash %" value={cashPct} min={0} max={100} step={1} onChange={setCashPct} formatValue={v => `${v.toFixed(0)}%`} leftLabel="None" rightLabel="All Cash" disabled={disabled} helpText="Low return, very low volatility." />
-          <SliderInput label="Bonds %" value={bondsPct} min={0} max={100} step={1} onChange={setBondsPct} formatValue={v => `${v.toFixed(0)}%`} leftLabel="None" rightLabel="All Bonds" disabled={disabled} helpText="Moderate return, moderate volatility." />
-          <div className="flex justify-between items-center bg-gray-50 rounded-lg px-3 py-2 border border-gray-200">
-            <span className="text-sm text-gray-600">Equities % (remainder)</span>
-            <span className="font-semibold text-gray-800">{equitiesPct.toFixed(0)}%</span>
-          </div>
-          <p className="text-xs text-gray-500">Higher expected return, higher volatility, with an occasional down year.</p>
+          <AllocationBar value={d.assetAllocation} onChange={setAllocation} disabled={disabled} />
         </SectionCard>
       </div>
     </div>
