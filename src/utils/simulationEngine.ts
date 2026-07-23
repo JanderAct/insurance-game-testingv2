@@ -5,7 +5,7 @@ import type { GameState, PoolState, DecisionSet, LinePoolState, LineDecisionSet,
 import { SeededRandom, deriveSubRng } from './random';
 import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, MEMBER_LOSS_VOLATILITY, RISK_CONTROL_PARAMS, LINE_RESERVE_PAYDOWN_PCT, OPERATING_CASH_PCT_OF_PREMIUM, FULL_TRANSFER_COST_PCT_OF_PREMIUM, SELF_FUNDED_DISCOUNT_PCT } from '../data/defaultAssumptions';
 import { getReinsuranceStructure, calculateReinsuranceCost, calculateReinsuranceRecovery } from './reinsuranceEngine';
-import { simulateInvestmentReturn } from './investmentEngine';
+import { simulateMarketReturns, blendInvestmentReturn } from './investmentEngine';
 import { simulateMemberMovement } from './membershipEngine';
 import { generateNarrative } from './narrativeEngine';
 import { getMemberExposure } from './lineHelpers';
@@ -814,6 +814,15 @@ export function processYear(
   let totalInvestedForBlend = 0;
   let totalInvestmentIncomeForBlend = 0;
 
+  // Draw the shared market ONCE per year at the asset-class level (cash, bonds,
+  // equities) and apply it to every line. Randomness lives at the asset class,
+  // not per line, so two lines with the same allocation earn the same return
+  // rate; each line differs only by its allocation and its own asset base. The
+  // stream is the unsuffixed 'invest' label (unchanged for a WC-only game).
+  const marketReturns = simulateMarketReturns(
+    deriveSubRng(instance.seed, yearNumber, 'invest')
+  );
+
   // Sequential fold: each line sees the shared roster as updated by lines
   // already processed this year (a member withdrawing from one line becomes
   // ineligible for new recruitment into the next, but isn't retroactively
@@ -827,15 +836,12 @@ export function processYear(
     const priorLineSurplus = priorPoolResult?.byLine[line]?.endingSurplus;
     const dividendBlocked = priorLineSurplus !== undefined && priorLineSurplus < 0;
 
-    // Stage 2.9: each line's investment return is drawn from its OWN seeded
-    // stream against its OWN invested assets and allocation. WC keeps the
-    // original unsuffixed 'invest' label (same convention as members/losses/
-    // dev), so a WC-only game's draw is unchanged.
-    const investRng = deriveSubRng(instance.seed, yearNumber, lineRngLabel('invest', line));
-    const invResult = simulateInvestmentReturn(
+    // Blend this year's shared market by this line's own allocation and asset
+    // base (pure, no per-line draw): same allocation -> same rate across lines.
+    const invResult = blendInvestmentReturn(
       lineState.investedAssets,
       lineDecisions.assetAllocation,
-      investRng
+      marketReturns
     );
     totalInvestedForBlend += lineState.investedAssets;
     totalInvestmentIncomeForBlend += invResult.income;
