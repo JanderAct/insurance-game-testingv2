@@ -3,7 +3,13 @@
 export function formatCurrency(value: number, compact = false): string {
   if (compact) {
     if (Math.abs(value) >= 1_000_000) {
-      return `$${(value / 1_000_000).toFixed(2)}M`;
+      const millions = value / 1_000_000;
+      // Round before comparing so a value just under $1B (e.g. 999,999,999)
+      // doesn't display as "$1000.00M" instead of correctly bumping to B.
+      if (Math.abs(Number(millions.toFixed(2))) >= 1000) {
+        return `$${(value / 1_000_000_000).toFixed(2)}B`;
+      }
+      return `$${millions.toFixed(2)}M`;
     }
     if (Math.abs(value) >= 1_000) {
       return `$${(value / 1_000).toFixed(1)}K`;
@@ -15,6 +21,19 @@ export function formatCurrency(value: number, compact = false): string {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(value);
+}
+
+// For figures already expressed in millions (payroll/TIV exposure). Rolls up
+// to billions at 1000M ($1B) so a large exposure figure doesn't display as an
+// unreadable 4+ digit millions number — e.g. "$4177.95M" becomes "$4.18B".
+// Below $1B, formatting is unchanged from the plain "$X.XXM" convention.
+export function formatMillions(valueInMillions: number, decimals = 2): string {
+  // Round before comparing so a value just under 1000M doesn't display as
+  // "$1000.00M" instead of correctly bumping to B.
+  if (Math.abs(Number(valueInMillions.toFixed(decimals))) >= 1000) {
+    return `$${(valueInMillions / 1000).toFixed(decimals)}B`;
+  }
+  return `$${valueInMillions.toFixed(decimals)}M`;
 }
 
 export function formatPct(value: number, decimals = 1): string {

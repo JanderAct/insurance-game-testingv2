@@ -1,6 +1,6 @@
 import { Activity, DollarSign, Shield, Users } from 'lucide-react';
 import type { HistoricalYear, LineView } from '../types/simulation';
-import { colorForRatio, formatCurrency, formatPct } from '../utils/formatters';
+import { colorForRatio, formatCurrency, formatMillions, formatPct } from '../utils/formatters';
 import { lineDisplayName } from '../utils/lineDisplay';
 
 interface HistoryPageProps {
@@ -30,7 +30,7 @@ export default function HistoryPage({ historicalYears, scenarioId, startingYear,
 
   const operatingRows: HistoryRow[] = [
     { label: 'Active Members', value: year => String(year.activeMembers) },
-    { label: exposureLabel, value: year => `$${year.activeExposure.toFixed(2)}M` },
+    { label: exposureLabel, value: year => formatMillions(year.activeExposure) },
     { label: 'Market Share (% of Exposure)', value: year => formatPct(year.marketShare) },
     { label: 'Pool Premium Rate per $100 Payroll', value: year => `$${year.poolPremiumRatePer100.toFixed(2)}` },
   ];

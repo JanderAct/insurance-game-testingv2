@@ -12,6 +12,7 @@ import {
 import type { LineResultSet, LineView } from '../types/simulation';
 import {
   formatCurrency,
+  formatMillions,
   formatPct,
   colorForRatio,
   colorForNetIncome,
@@ -230,8 +231,8 @@ export default function ResultsPage({ lockedResults, lineView }: ResultsPageProp
               <Row label="Member Retention Rate" value={formatPct(result.memberRetentionRate)} />
               <Row label="Member Satisfaction" value={`${result.memberSatisfaction.toFixed(1)} / 10`} />
               <Row label="Avg. Risk Quality" value={`${result.averageRiskQuality.toFixed(1)} / 10`} />
-              <Row label="Payroll Exposure ($M)" value={`$${result.activeExposure.toFixed(2)}M`} />
-              <Row label="Total Market Payroll ($M)" value={`$${result.totalMarketExposure.toFixed(2)}M`} />
+              <Row label="Payroll Exposure ($M)" value={formatMillions(result.activeExposure)} />
+              <Row label="Total Market Payroll ($M)" value={formatMillions(result.totalMarketExposure)} />
               <Row label="Exposure-Based Market Share" value={formatPct(result.marketShare)} valueColor="text-sky-600" />
             </ResultCard>
 
@@ -242,7 +243,7 @@ export default function ResultsPage({ lockedResults, lineView }: ResultsPageProp
                 label={`Pool Premium Rate at ${(result.selectedFundingConfidenceLevel * 100).toFixed(0)}% CLF`}
                 value={`$${(result.poolPremium / Math.max(result.activeExposure * 10_000, 1)).toFixed(2)}`}
               />
-              <Row label="Written Payroll ($M)" value={`$${result.writtenExposure.toFixed(2)}M`} />
+              <Row label="Written Payroll ($M)" value={formatMillions(result.writtenExposure)} />
               <Row label="Pool Premium" value={formatCurrency(result.poolPremium)} />
               <Row label="Admin Expense" value={formatCurrency(result.adminExpense)} />
               <Row label="Pool Premium & Admin Expense" value={formatCurrency(result.poolPremiumAndAdminExpense)} />

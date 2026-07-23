@@ -1,7 +1,7 @@
 import { TrendingUp, Users, Shield, DollarSign, Activity, BarChart2, Globe, Star } from 'lucide-react';
 import type { LineResultSet, StartingFinancials, HistoricalYear, LineView } from '../types/simulation';
 import StatCard from '../components/StatCard';
-import { formatCurrency, formatPct, colorForRatio, colorForSurplus } from '../utils/formatters';
+import { formatCurrency, formatMillions, formatPct, colorForRatio, colorForSurplus } from '../utils/formatters';
 import { lineDisplayName } from '../utils/lineDisplay';
 
 interface DashboardPageProps {
@@ -57,7 +57,7 @@ export default function DashboardPage({ lockedResults, historicalYears, starting
           label="Gross Premium & Admin Expense"
           value={formatCurrency(displayPremium, true)}
           icon={<TrendingUp size={16} />}
-          sub={`$${formatNumber(displayExposure, 2)}M payroll`}
+          sub={`${formatMillions(displayExposure)} payroll`}
         />
         <StatCard
           label="Pool Loss Ratio"
@@ -110,9 +110,9 @@ export default function DashboardPage({ lockedResults, historicalYears, starting
         />
         <StatCard
           label="Payroll Exposure ($M)"
-          value={`$${formatNumber(displayExposure, 2)}M`}
+          value={formatMillions(displayExposure)}
           icon={<BarChart2 size={16} />}
-          sub={`Market total: $${formatNumber(startingFinancials.totalMarketExposure, 2)}M`}
+          sub={`Market total: ${formatMillions(startingFinancials.totalMarketExposure)}`}
         />
       </div>
 
@@ -196,8 +196,4 @@ export default function DashboardPage({ lockedResults, historicalYears, starting
       </div>
     </div>
   );
-}
-
-function formatNumber(n: number, decimals = 0): string {
-  return n.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 }

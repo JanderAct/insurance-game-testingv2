@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Users, UserPlus, UserMinus, Globe } from 'lucide-react';
 import type { ResultSet, Member, StartingFinancials } from '../types/simulation';
-import { formatPct } from '../utils/formatters';
+import { formatMillions, formatPct } from '../utils/formatters';
 import { getMemberExposure } from '../utils/lineHelpers';
 
 interface MembershipPageProps {
@@ -69,8 +69,8 @@ export default function MembershipPage({ lockedResults, startingFinancials, init
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 p-4 grid grid-cols-2 sm:grid-cols-4 gap-4 shadow-sm">
-        <Metric label="Payroll Exposure ($M)" value={`$${activeExposure.toFixed(2)}M`} />
-        <Metric label="Total Market Payroll ($M)" value={`$${totalMarketExposure.toFixed(2)}M`} />
+        <Metric label="Payroll Exposure ($M)" value={formatMillions(activeExposure)} />
+        <Metric label="Total Market Payroll ($M)" value={formatMillions(totalMarketExposure)} />
         <Metric label="Avg. Risk Quality" value={`${avgRiskQuality.toFixed(1)} / 10`} />
         <Metric label="Avg. Satisfaction" value={`${satisfaction.toFixed(1)} / 10`} />
       </div>
@@ -118,7 +118,7 @@ function MemberRow({ member }: { member: Member }) {
       <td className="px-4 py-3 font-medium text-gray-900">{member.name}</td>
       <td className="px-4 py-3 text-gray-600"><span className="bg-gray-100 text-gray-700 text-xs px-2 py-0.5 rounded-full whitespace-nowrap">{member.type}</span></td>
       <td className="px-4 py-3 text-gray-600"><SizeBadge size={member.sizeCategory} /></td>
-      <td className="px-4 py-3 font-mono text-gray-800">${getMemberExposure(member, 'WC').toFixed(2)}M</td>
+      <td className="px-4 py-3 font-mono text-gray-800">{formatMillions(getMemberExposure(member, 'WC'))}</td>
       <td className="px-4 py-3 text-gray-600">{member.calendarYearJoined > 0 ? member.calendarYearJoined : '—'}</td>
       <td className={`px-4 py-3 font-semibold ${qualityColor}`}>{member.riskQuality.toFixed(1)}</td>
       <td className={`px-4 py-3 font-semibold ${satColor}`}>{member.satisfaction.toFixed(1)}</td>
