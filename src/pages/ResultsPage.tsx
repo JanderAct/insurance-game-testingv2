@@ -39,19 +39,26 @@ interface ComparisonMetric {
   kind: MetricKind;
   polarity: MetricPolarity;
   getValue: (r: LineResultSet) => number;
+  // Fixed per-metric rule (not a dynamic threshold, so a metric always behaves
+  // the same way): metrics with a small/volatile base exaggerate trivial
+  // moves as a % (e.g. a $10K rise in investment income reading as the
+  // largest % on the board). Those show an em-dash instead; the $ change
+  // column is unaffected. Loss ratio/combined ratio already show
+  // percentage-POINT deltas in the $ change column and are left as-is here.
+  showPctChange: boolean;
 }
 
 const COMPARISON_METRICS: ComparisonMetric[] = [
-  { key: 'premium', label: 'Pool Premium', kind: 'currency', polarity: 'neutral', getValue: r => r.poolPremium },
-  { key: 'ultimateLosses', label: 'Ultimate Losses (Gross)', kind: 'currency', polarity: 'goodDown', getValue: r => r.grossUltimateLoss },
-  { key: 'netLosses', label: 'Net Ultimate Loss', kind: 'currency', polarity: 'goodDown', getValue: r => r.netUltimateLoss },
-  { key: 'lossRatio', label: 'Actual Loss Ratio', kind: 'ratio', polarity: 'goodDown', getValue: r => r.actualLossRatio },
-  { key: 'combinedRatio', label: 'Actual Combined Ratio', kind: 'ratio', polarity: 'goodDown', getValue: r => r.actualCombinedRatio },
-  { key: 'reserves', label: 'Ending Gross Reserve', kind: 'currency', polarity: 'neutral', getValue: r => r.endingGrossReserve },
-  { key: 'reinsRecovery', label: 'Reinsurance Recovery', kind: 'currency', polarity: 'neutral', getValue: r => r.reinsuranceRecovery },
-  { key: 'investmentIncome', label: 'Investment Income', kind: 'currency', polarity: 'goodUp', getValue: r => r.investmentIncome },
-  { key: 'netIncome', label: 'Net Income', kind: 'currency', polarity: 'goodUp', getValue: r => r.netIncome },
-  { key: 'endingSurplus', label: 'Ending Surplus', kind: 'currency', polarity: 'goodUp', getValue: r => r.endingSurplus },
+  { key: 'premium', label: 'Pool Premium', kind: 'currency', polarity: 'neutral', getValue: r => r.poolPremium, showPctChange: true },
+  { key: 'ultimateLosses', label: 'Ultimate Losses (Gross)', kind: 'currency', polarity: 'goodDown', getValue: r => r.grossUltimateLoss, showPctChange: true },
+  { key: 'netLosses', label: 'Net Ultimate Loss', kind: 'currency', polarity: 'goodDown', getValue: r => r.netUltimateLoss, showPctChange: true },
+  { key: 'lossRatio', label: 'Actual Loss Ratio', kind: 'ratio', polarity: 'goodDown', getValue: r => r.actualLossRatio, showPctChange: true },
+  { key: 'combinedRatio', label: 'Actual Combined Ratio', kind: 'ratio', polarity: 'goodDown', getValue: r => r.actualCombinedRatio, showPctChange: true },
+  { key: 'reserves', label: 'Ending Gross Reserve', kind: 'currency', polarity: 'neutral', getValue: r => r.endingGrossReserve, showPctChange: true },
+  { key: 'reinsRecovery', label: 'Reinsurance Recovery', kind: 'currency', polarity: 'neutral', getValue: r => r.reinsuranceRecovery, showPctChange: false },
+  { key: 'investmentIncome', label: 'Investment Income', kind: 'currency', polarity: 'goodUp', getValue: r => r.investmentIncome, showPctChange: false },
+  { key: 'netIncome', label: 'Net Income', kind: 'currency', polarity: 'goodUp', getValue: r => r.netIncome, showPctChange: false },
+  { key: 'endingSurplus', label: 'Ending Surplus', kind: 'currency', polarity: 'goodUp', getValue: r => r.endingSurplus, showPctChange: true },
 ];
 
 // Never Infinity/NaN: division only happens when prior !== 0.
@@ -169,7 +176,7 @@ export default function ResultsPage({ lockedResults, lineView }: ResultsPageProp
                             <td className="px-3 py-2 text-right font-mono text-gray-500">{formatMetricValue(metric.kind, priorValue)}</td>
                             <td className="px-3 py-2 text-right font-mono font-semibold text-gray-800">{formatMetricValue(metric.kind, currentValue)}</td>
                             <td className={`px-3 py-2 text-right font-mono font-semibold ${changeColor(metric.polarity, change)}`}>{formatChange(metric.kind, change)}</td>
-                            <td className={`px-3 py-2 text-right font-mono ${changeColor(metric.polarity, change)}`}>{formatPctChange(priorValue, currentValue)}</td>
+                            <td className={`px-3 py-2 text-right font-mono ${changeColor(metric.polarity, change)}`}>{metric.showPctChange ? formatPctChange(priorValue, currentValue) : '—'}</td>
                           </tr>
                         );
                       })}
