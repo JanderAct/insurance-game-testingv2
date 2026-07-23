@@ -121,7 +121,6 @@ export default function FinancialsPage({ lockedResults, priorResults, lineView }
                   )}
                 </>
               )}
-              <div className="text-xs text-gray-500 mt-2">Change: {formatCurrency(statement.surplusRollforward.change)} ({formatPct(statement.surplusRollforward.changePct)})</div>
             </StatementCard>
 
             {/* Funding Target & Adequacy — only applies to played years; historical years have no player-selected funding confidence */}
