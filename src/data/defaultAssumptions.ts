@@ -225,15 +225,31 @@ export const EXPOSURE_RANGES: Record<string, { min: number; max: number }> = {
 export const SIZE_WEIGHTS = [0.55, 0.30, 0.12, 0.03];
 
 // Per-line opening capital (seed-fix-per-line-opening): each active line's
-// opening surplus = this multiple × that line's own opening premium. Sized to
-// each line's risk — WC highest (long-tail reserve-development risk), Property
-// high (short-tail but catastrophe fat-tail risk), GL moderate. Config-
+// opening surplus = this multiple × that line's own opening premium. Config-
 // independent by construction (depends only on the line's own premium), which
 // replaces the old net-reserve-weighted split of a single shared pot.
+// Tuned (investment-and-opening-tuning) so the 3-year pre-game typically lands
+// each line's Year-1 opening inside its OPENING_MULTIPLE_BAND below; the
+// two-sided pre-game redraw is the guarantee, these are the primary mechanism.
 export const STARTING_CAPITAL_TO_PREMIUM: Record<string, number> = {
-  WC: 1.0,
-  GL: 0.7,
-  Property: 0.9,
+  WC: 0.70,
+  GL: 0.45,
+  Property: 0.18,
+};
+
+// Pre-game acceptance band (per line): the line's Year-1 opening surplus must
+// land within [min, max] × that line's own Required Reserve Margin, or its
+// pre-game redraws on its own derived seed. PER-LINE on purpose — checking at
+// pool level would reintroduce config-dependence. Property's band is higher
+// because Required Reserve Margin measures RESERVE risk, structurally small
+// for a short-tail line (margin ≈ 0.64× premium vs WC's 1.16×); Property's
+// real exposure is catastrophe/underwriting risk that the margin metric
+// doesn't capture, so it must hold a larger multiple of that small margin to
+// carry comparable surplus against its premium.
+export const OPENING_MULTIPLE_BAND: Record<string, { min: number; max: number }> = {
+  WC: { min: 1.35, max: 2.0 },
+  GL: { min: 1.35, max: 2.0 },
+  Property: { min: 2.0, max: 3.0 },
 };
 
 // Starting enrollment per line: each active line independently enrolls members

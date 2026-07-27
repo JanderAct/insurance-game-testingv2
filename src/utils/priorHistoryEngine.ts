@@ -15,11 +15,13 @@
 // line at attempt 0 uses the true instance seed and is unaffected by whether
 // other lines exist or needed a redraw.
 //
-// Adequacy (PER-LINE reject-and-redraw, NO clamping): each active line must end
-// its pre-game rated at least Adequate (excessAvailableSurplus >= 0). If a line
-// ends below that, ONLY that line re-simulates on a deterministically derived
-// alternate seed (seed + attempt * 997) until it passes — one line's redraw
-// never reseeds another. Deterministic: same seed -> same per-line redraw path
+// Opening band (PER-LINE reject-and-redraw, NO clamping): each active line
+// must end its pre-game with opening surplus inside that line's own
+// OPENING_MULTIPLE_BAND — [min, max] × its own Required Reserve Margin
+// (two-sided: too weak AND too strong both redraw). If a line lands outside,
+// ONLY that line re-simulates on a deterministically derived alternate seed
+// (seed + attempt * 997) until it lands in-band — one line's redraw never
+// reseeds another. Deterministic: same seed -> same per-line redraw path
 // -> same history, every config. The accepted history is real and ties out.
 
 import type {
@@ -36,6 +38,7 @@ import type {
   StartingFinancials,
 } from '../types/simulation';
 import { generateStartingPoolState } from './instanceGenerator';
+import { OPENING_MULTIPLE_BAND } from '../data/defaultAssumptions';
 import { processYear, aggregateLineResults } from './simulationEngine';
 import { emptyLinePoolState } from './lineHelpers';
 import { defaultDecisionSet } from './decisionDefaults';
@@ -118,24 +121,30 @@ function simulateLineCandidate(
   };
 }
 
-// Per-line reject-and-redraw: re-simulate ONLY this line until it ends Adequate.
+// Per-line reject-and-redraw: re-simulate ONLY this line until its opening
+// surplus lands inside this line's own OPENING_MULTIPLE_BAND (two-sided).
 function runLinePreGame(
   instance: GameInstance,
   setup: GameSetupSettings,
   line: CoverageLine
 ): LinePreGame {
-  let best: { c: ReturnType<typeof simulateLineCandidate>; attempt: number; minExcess: number } | null = null;
+  const band = OPENING_MULTIPLE_BAND[line] ?? { min: 1.35, max: 2.0 };
+  let best: { c: ReturnType<typeof simulateLineCandidate>; attempt: number; distance: number } | null = null;
 
   for (let attempt = 0; attempt < MAX_HISTORY_ATTEMPTS; attempt++) {
     const c = simulateLineCandidate(instance, setup, line, attempt);
-    const excess = c.lineResults[c.lineResults.length - 1].excessAvailableSurplus;
-    if (excess >= 0) return finalizeLine(c, line, attempt);
-    if (!best || excess > best.minExcess) best = { c, attempt, minExcess: excess };
+    const last = c.lineResults[c.lineResults.length - 1];
+    const multiple = last.endingSurplus / Math.max(last.reserveRiskMarginNeeded, 1);
+    if (multiple >= band.min && multiple <= band.max) return finalizeLine(c, line, attempt);
+    // Distance to the band (0 inside): the fallback keeps the closest miss.
+    const distance = multiple < band.min ? band.min - multiple : multiple - band.max;
+    if (!best || distance < best.distance) best = { c, attempt, distance };
   }
 
   console.warn(
-    `Prior history (${line}): no attempt of ${MAX_HISTORY_ATTEMPTS} ended Adequate; ` +
-    `using best attempt ${best!.attempt} (excess surplus ${Math.round(best!.minExcess)}).`
+    `Prior history (${line}): no attempt of ${MAX_HISTORY_ATTEMPTS} landed in the ` +
+    `[${band.min}, ${band.max}]x opening band; using closest attempt ${best!.attempt} ` +
+    `(missed by ${best!.distance.toFixed(2)}x).`
   );
   return finalizeLine(best!.c, line, best!.attempt);
 }
