@@ -110,3 +110,22 @@ later years.
 are — a deliberate engine change with its own ripples (how a line pays claims if its own cash runs
 dry, interaction with inter-line loans). That's its own scoped decision, NOT a patch to fold into
 another stage. Only pursue if perfect dollar-level line independence is ever explicitly wanted.
+
+### UPDATE (investment-and-opening-tuning) — residual re-measured and re-accepted, larger
+**Ruling:** accepted (option a) after the new investment model (~40% higher returns) amplified
+the coupling. The current documented residual, measured across 12 seeds × 2 config-pairs
+(solo-vs-duo and solo-vs-tri):
+
+> **Pre-game and live Y1 strictly config-independent; Y2 rare ≤1-member flip (~1 in 24
+> config-pairs); Y3 occasional (3 in 24). Non-flip surplus drift ≤0.184%.**
+
+Where a flip occurs, that seed's affected line diverges across configs from the flip year on
+(~2% surplus by Y3 on the observed case). Each config individually still ties out to zero and is
+fully deterministic — this is cross-CONFIG drift only, invisible inside any single game.
+
+**Trajectory (on record, not a fix request):** this residual SCALES with the pool's numbers.
+It grew ~6× (from ≤0.03% to ≤0.184% non-flip drift, and the first-flip year moved from Y3-only
+to occasionally Y2) when investment returns rose ~40%, because the shared-cash slice differences
+compound through investment income. The loss-distribution rework and Phase 3 reserves will likely
+amplify it further. Per-line cash segregation (above) is the eventual lever if it ever becomes
+visible in play.
