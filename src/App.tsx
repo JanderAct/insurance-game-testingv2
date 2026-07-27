@@ -56,9 +56,6 @@ function seedFromInstanceId(id: string): number {
 // added in Stage 2.10 — each line now has its own real pre-game history).
 const LINE_VIEW_PAGES: TabId[] = ['history', 'dashboard', 'decisions', 'decisionHistory', 'financials', 'results'];
 
-// Decision-scoped pages (Stage 2.9): every decision is now per-line, so these
-// pages have no Pool tab — 'Pool' remains only where it means combined RESULTS.
-const DECISION_SCOPE_PAGES: TabId[] = ['decisions', 'decisionHistory'];
 
 const LINE_VIEW_ICONS: Record<LineView, React.ReactNode> = {
   pool: <Layers size={14} />,
@@ -96,7 +93,7 @@ export default function App() {
   // Load persisted game from localStorage if available
   React.useEffect(() => {
     try {
-      const saved = localStorage.getItem('riskpool_gamestate_v6');
+      const saved = localStorage.getItem('riskpool_gamestate_v7');
       if (saved) {
         const { gameState: gs, startingFinancials: sf, initialMembers: im, currentDecisions: cd } = JSON.parse(saved);
 
@@ -109,19 +106,19 @@ export default function App() {
           setActiveTab('dashboard');
         } else {
           // Bad saved state - clear it
-          localStorage.removeItem('riskpool_gamestate_v6');
+          localStorage.removeItem('riskpool_gamestate_v7');
         }
       }
     } catch {
       // ignore parse errors - clear corrupted data
-      localStorage.removeItem('riskpool_gamestate_v6');
+      localStorage.removeItem('riskpool_gamestate_v7');
     }
   }, []);
 
   function persistState(gs: GameState, sf: StartingFinancials, im: Member[], cd: DecisionSet) {
     try {
       localStorage.setItem(
-        'riskpool_gamestate_v6',
+        'riskpool_gamestate_v7',
         JSON.stringify({
           gameState: gs,
           startingFinancials: sf,
@@ -219,7 +216,7 @@ export default function App() {
     setInitialMembers([]);
     setCurrentDecisions(defaultDecisionSet(1));
     setLineView('pool');
-    localStorage.removeItem('riskpool_gamestate_v6');
+    localStorage.removeItem('riskpool_gamestate_v7');
     setActiveTab('setup');
   }, []);
 
@@ -239,13 +236,9 @@ export default function App() {
     ? lineViewRaw
     : 'pool';
 
-  // Decision-scoped pages have no Pool view (Stage 2.9): if the shared line
-  // selection is 'pool' while one of those pages is open, show the first
-  // active line instead. Results pages keep 'pool' untouched.
-  const isDecisionScopePage = DECISION_SCOPE_PAGES.includes(activeTab);
-  const effectiveLineView: LineView = isDecisionScopePage && lineView === 'pool'
-    ? (activeLines[0] ?? 'WC')
-    : lineView;
+  // Decision pages regained their Pool tab (pool-wide allocation + risk
+  // control decisions live there); every line-view page now honors 'pool'.
+  const effectiveLineView: LineView = lineView;
 
   const viewResults = React.useMemo(() => {
     if (!gameState) return [];
@@ -334,8 +327,7 @@ export default function App() {
       {isStarted && LINE_VIEW_PAGES.includes(activeTab) && (
         <TabNav<LineView>
           tabs={[
-            // No Pool tab on decision-scoped pages — all decisions are per-line (Stage 2.9).
-            ...(isDecisionScopePage ? [] : [{ id: 'pool' as LineView, label: 'Pool', icon: LINE_VIEW_ICONS.pool }]),
+            { id: 'pool' as LineView, label: 'Pool', icon: LINE_VIEW_ICONS.pool },
             ...activeLines.map(line => ({ id: line as LineView, label: LINE_FULL_NAME[line], icon: LINE_VIEW_ICONS[line] })),
           ]}
           activeTab={effectiveLineView}
@@ -377,13 +369,13 @@ export default function App() {
             estimatedPremium={estimatedPremium}
             estimatedExpectedLoss={estimatedExpectedLoss}
             disabled={gameState.isComplete}
-            lineView={effectiveLineView as CoverageLine}
+            lineView={effectiveLineView}
             lineLoanInfo={lineLoanInfo}
           />
         )}
 
         {activeTab === 'decisionHistory' && gameState && (
-          <DecisionHistoryPage lockedResults={viewResults} lineView={effectiveLineView as CoverageLine} />
+          <DecisionHistoryPage lockedResults={viewResults} lineView={effectiveLineView} />
         )}
 
         {activeTab === 'financials' && gameState && startingFinancials && (

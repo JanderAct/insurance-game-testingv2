@@ -124,16 +124,20 @@ export interface GameSetupSettings {
   activeLines: CoverageLine[];  // coverage lines the pool writes (at least one)
 }
 
-// Per-line player decisions for a given year
+// Per-line player decisions for a given year.
+// riskControlPct and assetAllocation are POOL-WIDE decisions (set once on
+// DecisionSet below); the copies here are projected from the pool values at
+// processYear entry so the engine and each line's locked result snapshot keep
+// their existing per-line shape. The UI edits only the DecisionSet-level pair.
 export interface LineDecisionSet {
   rateChange: number;             // -0.20 to +0.30 as decimal
   fundingConfidenceLevel: number; // 0.50 to 0.95
   dividendPct: number;            // 0.00 to 0.15 of premium
   assessmentPct: number;          // 0.00 to 0.25 of premium
   underwritingStrictness: number; // 0-10
-  riskControlPct: number;         // 0.00 to 0.08 of premium
+  riskControlPct: number;         // 0.00 to 0.08 of premium (projected from DecisionSet.riskControlPct)
   reinsuranceLevel: number;       // 0-4
-  assetAllocation: AssetAllocation;    // this line's own segregated portfolio allocation (Stage 2.9)
+  assetAllocation: AssetAllocation;    // projected from DecisionSet.assetAllocation
   loanRepaymentAggressiveness: number; // 0.00 to 1.00 — share of positive net income used to
                                        // repay an outstanding inter-line loan first; only
                                        // relevant while that line carries a loan balance
@@ -155,20 +159,25 @@ export interface InterLineLoan {
                                                        // (sums to 1), fixed at origination
 }
 
-// Investment portfolio allocation across cash/bonds/equities. Per-line (Stage
-// 2.9: each line invests its own segregated portfolio) — must sum to 100.
+// Investment portfolio allocation across cash/bonds/equities — must sum to
+// 100. The ALLOCATION DECISION is pool-wide (one policy for every line), but
+// portfolios stay segregated per line (Stage 2.9): each line applies this
+// shared allocation to its own invested assets against the shared market draw.
 export interface AssetAllocation {
   cashPct: number;
   bondsPct: number;
   equitiesPct: number;
 }
 
-// Player decisions for a given year: one LineDecisionSet per line. All decisions
-// are per-line (Stage 2.9 moved asset allocation, the last pool-level decision,
-// into LineDecisionSet).
+// Player decisions for a given year: one LineDecisionSet per line, plus the
+// two POOL-WIDE decisions — investment allocation and risk-control intensity.
+// Pool-wide means one policy value; each line still applies it to its OWN
+// base (own invested assets / own premium), so effects stay line-sized.
 export interface DecisionSet {
   yearNumber: number;
   byLine: Record<CoverageLine, LineDecisionSet>;
+  assetAllocation: AssetAllocation;  // pool-wide investment policy
+  riskControlPct: number;            // pool-wide risk-control intensity (0.00-0.08 of each line's own premium)
 }
 
 // Reinsurance structure derived from level selection

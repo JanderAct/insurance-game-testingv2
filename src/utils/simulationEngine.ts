@@ -779,8 +779,22 @@ export interface ProcessYearResult {
 // of the loan logic is inert — a healthy WC-only game is byte-identical to v3.
 export function processYear(
   gameState: GameState,
-  decisions: DecisionSet
+  rawDecisions: DecisionSet
 ): ProcessYearResult {
+  // Pool-wide decisions (investment allocation, risk-control intensity) are
+  // projected into every line's decision slice here — single source of truth
+  // at the DecisionSet level, while the engine below and each line's locked
+  // result snapshot keep their existing per-line shape untouched.
+  const decisions: DecisionSet = {
+    ...rawDecisions,
+    byLine: Object.fromEntries(
+      (Object.keys(rawDecisions.byLine) as CoverageLine[]).map(l => [l, {
+        ...rawDecisions.byLine[l],
+        assetAllocation: { ...rawDecisions.assetAllocation },
+        riskControlPct: rawDecisions.riskControlPct,
+      }])
+    ) as Record<CoverageLine, LineDecisionSet>,
+  };
   const { instance, poolState, currentYearNumber, setup } = gameState;
   const yearNumber = currentYearNumber;
   const calendarYear = setup.startingYear + yearNumber - 1;
@@ -811,6 +825,9 @@ export function processYear(
   const lenderCredits: Partial<Record<CoverageLine, number>> = {};
   // For the asset-weighted blended pool return (the Stage 2.9 loan rate):
   // each line's realized return weighted by its beginning invested assets.
+  // With the pool-wide allocation every line earns the same rate, so the
+  // blend trivially equals that shared rate — kept as a weighted blend so
+  // the loan rate stays correct-by-construction either way.
   let totalInvestedForBlend = 0;
   let totalInvestmentIncomeForBlend = 0;
 

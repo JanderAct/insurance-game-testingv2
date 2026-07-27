@@ -1,14 +1,14 @@
 import { useState } from 'react';
 import { ScrollText, ArrowUpDown } from 'lucide-react';
-import type { CoverageLine, LineResultSet } from '../types/simulation';
+import type { LineResultSet, LineView } from '../types/simulation';
 import { REINSURANCE_PROGRAMS } from '../data/defaultAssumptions';
 import { lineDisplayName } from '../utils/lineDisplay';
 
 interface DecisionHistoryPageProps {
   lockedResults: LineResultSet[];
-  // Stage 2.9: decisions are all per-line, so this page has no Pool view —
-  // it always shows a specific coverage line.
-  lineView: CoverageLine;
+  // 'pool' shows the pool-wide decisions per year (investment allocation,
+  // risk control); a coverage line shows that line's own decisions.
+  lineView: LineView;
 }
 
 function pctDisplay(v: number, decimals = 1): string {
@@ -21,6 +21,7 @@ function rateDisplay(v: number): string {
 
 export default function DecisionHistoryPage({ lockedResults, lineView }: DecisionHistoryPageProps) {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const isPool = lineView === 'pool';
 
   const rows = [...lockedResults].sort((a, b) =>
     sortDir === 'asc' ? a.yearNumber - b.yearNumber : b.yearNumber - a.yearNumber
@@ -28,16 +29,31 @@ export default function DecisionHistoryPage({ lockedResults, lineView }: Decisio
 
   // Only show the loan repayment column at all if this line ever had loan
   // activity — avoids a permanently-empty column for the common no-loan case.
-  const showLoanColumn = lockedResults.some(
+  const showLoanColumn = !isPool && lockedResults.some(
     r => r.outstandingLoanBalance > 0 || r.loanOriginatedThisYear > 0
   );
+
+  // Pool view: the two pool-wide decisions per year. Every line's locked
+  // snapshot carries the identical projected values, so the pool aggregate's
+  // decisions slice is the pool decision record.
+  const headers = isPool
+    ? ['Yr', 'Calendar', 'Cash %', 'Bonds %', 'Equities %', 'Risk Control %']
+    : [
+        'Yr', 'Calendar', 'Rate Change', 'Funding Confidence', 'Dividend %', 'Assessment %',
+        'Underwriting Strictness', 'Reinsurance Level',
+        ...(showLoanColumn ? ['Loan Repayment Aggressiveness'] : []),
+      ];
 
   return (
     <div className="max-w-screen-2xl mx-auto px-4 py-6 space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h2 className="text-xl font-bold text-gray-900">Decision History — {lineDisplayName(lineView)}</h2>
-          <p className="text-gray-500 text-sm">Every locked year's decisions for the {lineDisplayName(lineView)} line.</p>
+          <p className="text-gray-500 text-sm">
+            {isPool
+              ? "Every locked year's pool-wide decisions (each line applies them to its own base)."
+              : `Every locked year's decisions for the ${lineDisplayName(lineView)} line.`}
+          </p>
         </div>
         {rows.length > 1 && (
           <button
@@ -61,12 +77,7 @@ export default function DecisionHistoryPage({ lockedResults, lineView }: Decisio
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  {[
-                    'Yr', 'Calendar', 'Rate Change', 'Funding Confidence', 'Dividend %', 'Assessment %',
-                    'Underwriting Strictness', 'Risk Control %', 'Reinsurance Level',
-                    'Cash %', 'Bonds %', 'Equities %',
-                    ...(showLoanColumn ? ['Loan Repayment Aggressiveness'] : []),
-                  ].map(h => (
+                  {headers.map(h => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -76,29 +87,36 @@ export default function DecisionHistoryPage({ lockedResults, lineView }: Decisio
                   <tr key={r.yearNumber} className="hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-3 font-bold text-gray-900">{r.yearNumber}</td>
                     <td className="px-4 py-3 text-gray-600">{r.calendarYear}</td>
-                    <td className={`px-4 py-3 font-medium ${r.decisions.rateChange > 0.05 ? 'text-amber-600' : r.decisions.rateChange < -0.05 ? 'text-blue-600' : 'text-gray-700'}`}>
-                      {rateDisplay(r.decisions.rateChange)}
-                    </td>
-                    <td className="px-4 py-3">{pctDisplay(r.decisions.fundingConfidenceLevel, 0)}</td>
-                    <td className="px-4 py-3">
-                      {pctDisplay(r.decisions.dividendPct)}
-                      {r.dividendBlocked && <span className="text-red-600 text-xs ml-1">(blocked)</span>}
-                    </td>
-                    <td className="px-4 py-3">{pctDisplay(r.decisions.assessmentPct)}</td>
-                    <td className="px-4 py-3">{r.decisions.underwritingStrictness} / 10</td>
-                    <td className="px-4 py-3">{pctDisplay(r.decisions.riskControlPct)}</td>
-                    <td className="px-4 py-3">
-                      {r.decisions.reinsuranceLevel} — {REINSURANCE_PROGRAMS[r.decisions.reinsuranceLevel]?.label ?? ''}
-                    </td>
-                    <td className="px-4 py-3">{r.decisions.assetAllocation.cashPct.toFixed(0)}%</td>
-                    <td className="px-4 py-3">{r.decisions.assetAllocation.bondsPct.toFixed(0)}%</td>
-                    <td className="px-4 py-3">{r.decisions.assetAllocation.equitiesPct.toFixed(0)}%</td>
-                    {showLoanColumn && (
-                      <td className="px-4 py-3">
-                        {(r.outstandingLoanBalance > 0 || r.loanOriginatedThisYear > 0)
-                          ? pctDisplay(r.decisions.loanRepaymentAggressiveness, 0)
-                          : <span className="text-gray-400">—</span>}
-                      </td>
+                    {isPool ? (
+                      <>
+                        <td className="px-4 py-3">{r.decisions.assetAllocation.cashPct.toFixed(0)}%</td>
+                        <td className="px-4 py-3">{r.decisions.assetAllocation.bondsPct.toFixed(0)}%</td>
+                        <td className="px-4 py-3">{r.decisions.assetAllocation.equitiesPct.toFixed(0)}%</td>
+                        <td className="px-4 py-3">{pctDisplay(r.decisions.riskControlPct)}</td>
+                      </>
+                    ) : (
+                      <>
+                        <td className={`px-4 py-3 font-medium ${r.decisions.rateChange > 0.05 ? 'text-amber-600' : r.decisions.rateChange < -0.05 ? 'text-blue-600' : 'text-gray-700'}`}>
+                          {rateDisplay(r.decisions.rateChange)}
+                        </td>
+                        <td className="px-4 py-3">{pctDisplay(r.decisions.fundingConfidenceLevel, 0)}</td>
+                        <td className="px-4 py-3">
+                          {pctDisplay(r.decisions.dividendPct)}
+                          {r.dividendBlocked && <span className="text-red-600 text-xs ml-1">(blocked)</span>}
+                        </td>
+                        <td className="px-4 py-3">{pctDisplay(r.decisions.assessmentPct)}</td>
+                        <td className="px-4 py-3">{r.decisions.underwritingStrictness} / 10</td>
+                        <td className="px-4 py-3">
+                          {r.decisions.reinsuranceLevel} — {REINSURANCE_PROGRAMS[r.decisions.reinsuranceLevel]?.label ?? ''}
+                        </td>
+                        {showLoanColumn && (
+                          <td className="px-4 py-3">
+                            {(r.outstandingLoanBalance > 0 || r.loanOriginatedThisYear > 0)
+                              ? pctDisplay(r.decisions.loanRepaymentAggressiveness, 0)
+                              : <span className="text-gray-400">—</span>}
+                          </td>
+                        )}
+                      </>
                     )}
                   </tr>
                 ))}

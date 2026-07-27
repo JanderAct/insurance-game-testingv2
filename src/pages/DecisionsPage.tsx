@@ -1,9 +1,9 @@
 import React from 'react';
 import { DollarSign, TrendingUp, BarChart2, Shield, RotateCcw } from 'lucide-react';
-import type { DecisionSet, LineDecisionSet, CoverageLine } from '../types/simulation';
+import type { DecisionSet, LineDecisionSet, CoverageLine, LineView } from '../types/simulation';
 import SliderInput from '../components/SliderInput';
 import AllocationBar from '../components/AllocationBar';
-import { SLIDER_RANGES, REINSURANCE_PROGRAMS, FULL_TRANSFER_COST_PCT_OF_PREMIUM, SELF_FUNDED_DISCOUNT_PCT } from '../data/defaultAssumptions';
+import { SLIDER_RANGES, REINSURANCE_PROGRAMS, FULL_TRANSFER_COST_PCT_OF_PREMIUM, SELF_FUNDED_DISCOUNT_PCT, ASSET_ALLOCATION_DEFAULT } from '../data/defaultAssumptions';
 import { formatCurrency } from '../utils/formatters';
 import { getReinsuranceStructure } from '../utils/reinsuranceEngine';
 import { defaultLineDecisionSet } from '../utils/decisionDefaults';
@@ -21,9 +21,9 @@ interface DecisionsPageProps {
   estimatedPremium: number;
   estimatedExpectedLoss: number;
   disabled?: boolean;
-  // Stage 2.9: decisions are all per-line, so this page has no Pool view —
-  // it always shows a specific coverage line.
-  lineView: CoverageLine;
+  // 'pool' hosts the two pool-wide decisions (investment allocation, risk
+  // control); each coverage line's tab edits that line's own decisions.
+  lineView: LineView;
   lineLoanInfo: Record<CoverageLine, LineLoanInfo>;
 }
 
@@ -51,19 +51,21 @@ function resetLineToDefaults(decisions: DecisionSet, line: CoverageLine): Decisi
 }
 
 export default function DecisionsPage({ decisions, onChange, yearNumber, estimatedPremium, estimatedExpectedLoss, disabled = false, lineView, lineLoanInfo }: DecisionsPageProps) {
-  // Stage 2.7: every active line's decisions are edited on its own tab. The
-  // page always shows one specific line (lineView); all controls read and
-  // write that line's slice of decisions.byLine.
+  // Pool tab: the two pool-wide decisions. One allocation policy and one
+  // risk-control intensity for the whole pool — each line applies them to its
+  // OWN base (own segregated portfolio / own premium).
+  if (lineView === 'pool') {
+    return <PoolDecisionsView decisions={decisions} onChange={onChange} yearNumber={yearNumber} disabled={disabled} />;
+  }
+
+  // Stage 2.7: every active line's remaining decisions are edited on its own
+  // tab, strict per-line (Model A) — no cross-line "apply to all".
   const selectedLine: CoverageLine = lineView;
   const d = decisions.byLine[selectedLine];
   const selectedLoanInfo = lineLoanInfo[selectedLine];
 
   const set = (key: keyof LineDecisionSet, val: number | LineDecisionSet['assetAllocation']) =>
     onChange({ ...decisions, byLine: { ...decisions.byLine, [selectedLine]: { ...d, [key]: val } } });
-
-  // Asset allocation is a per-line decision (Stage 2.9) — the bar edits the
-  // selected line's own segregated portfolio.
-  const setAllocation = (allocation: LineDecisionSet['assetAllocation']) => set('assetAllocation', allocation);
 
   const reinsStructure = getReinsuranceStructure(d.reinsuranceLevel, estimatedPremium, estimatedExpectedLoss);
   const prog = REINSURANCE_PROGRAMS[d.reinsuranceLevel];
@@ -102,7 +104,7 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
 
         <SectionCard title="Growth & Underwriting" icon={<TrendingUp size={16} />}>
           <SliderInput label="Underwriting Strictness" value={d.underwritingStrictness} min={SLIDER_RANGES.underwritingStrictness.min} max={SLIDER_RANGES.underwritingStrictness.max} step={SLIDER_RANGES.underwritingStrictness.step} onChange={v => set('underwritingStrictness', v)} formatValue={v => `${v}/10 — ${UW_LABELS[Math.round(v)]}`} leftLabel="Flexible" rightLabel="Strict" disabled={disabled} helpText="Strict underwriting improves risk quality." />
-          <SliderInput label="Risk Control Investment" value={d.riskControlPct} min={SLIDER_RANGES.riskControlPct.min} max={SLIDER_RANGES.riskControlPct.max} step={SLIDER_RANGES.riskControlPct.step} onChange={v => set('riskControlPct', v)} formatValue={pctDisplay} leftLabel="Low" rightLabel="High" valueColor={d.riskControlPct > 0.03 ? 'text-emerald-600' : 'text-gray-600'} disabled={disabled} helpText="Investment in member safety and training." />
+          <p className="text-xs text-gray-400">Risk control investment is set pool-wide — see the Pool tab.</p>
         </SectionCard>
 
         {outstandingLoanSlider(d, set, selectedLoanInfo, disabled)}
@@ -143,11 +145,69 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
           </div>
         </SectionCard>
 
+      </div>
+    </div>
+  );
+}
+
+// Pool tab: the two pool-wide decisions. Portfolios remain segregated per
+// line (Stage 2.9) — every line applies this one allocation policy to its own
+// invested assets, and the one risk-control intensity to its own premium.
+function PoolDecisionsView({ decisions, onChange, yearNumber, disabled }: {
+  decisions: DecisionSet;
+  onChange: (d: DecisionSet) => void;
+  yearNumber: number;
+  disabled: boolean;
+}) {
+  const pctDisplay = (v: number) => `${(v * 100).toFixed(1)}%`;
+  const resetPool = () => onChange({
+    ...decisions,
+    assetAllocation: { ...ASSET_ALLOCATION_DEFAULT },
+    riskControlPct: SLIDER_RANGES.riskControlPct.default,
+  });
+
+  return (
+    <div className="max-w-screen-2xl mx-auto px-4 py-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-bold text-gray-900">Year {yearNumber} Decisions — Pool</h2>
+          <p className="text-gray-500 text-sm">Pool-wide policies applied by every line to its own base</p>
+        </div>
+        {!disabled && (
+          <button onClick={resetPool} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition-colors px-3 py-1.5 rounded-lg hover:bg-gray-100">
+            <RotateCcw size={14} /> Reset Pool to Defaults
+          </button>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <SectionCard title="Investment Allocation" icon={<BarChart2 size={16} />}>
           <p className="text-xs text-gray-500 -mt-2">
-            This allocation applies to the {lineDisplayName(lineView)} line's own segregated investment portfolio — each line invests separately and keeps its own gains and losses.
+            One allocation policy for the whole pool. Each line still invests its own segregated
+            assets and keeps its own gains and losses — every line simply follows this policy, so
+            all lines earn the same return rate on their own asset bases.
           </p>
-          <AllocationBar value={d.assetAllocation} onChange={setAllocation} disabled={disabled} />
+          <AllocationBar
+            value={decisions.assetAllocation}
+            onChange={allocation => onChange({ ...decisions, assetAllocation: allocation })}
+            disabled={disabled}
+          />
+        </SectionCard>
+
+        <SectionCard title="Loss Prevention" icon={<TrendingUp size={16} />}>
+          <SliderInput
+            label="Risk Control Investment"
+            value={decisions.riskControlPct}
+            min={SLIDER_RANGES.riskControlPct.min} max={SLIDER_RANGES.riskControlPct.max} step={SLIDER_RANGES.riskControlPct.step}
+            onChange={v => onChange({ ...decisions, riskControlPct: v })}
+            formatValue={pctDisplay} leftLabel="Low" rightLabel="High"
+            valueColor={decisions.riskControlPct > 0.03 ? 'text-emerald-600' : 'text-gray-600'}
+            disabled={disabled}
+            helpText="Investment in member safety and training, as a percentage of premium. Each line spends this percentage of its own premium and earns the loss reduction on its own book."
+          />
+          <p className="text-xs text-gray-500">
+            The percentage is an intensity, not a pot to divide — each line's spend scales with its own size.
+          </p>
         </SectionCard>
       </div>
     </div>

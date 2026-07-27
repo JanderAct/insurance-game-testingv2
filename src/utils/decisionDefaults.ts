@@ -28,5 +28,8 @@ export function defaultDecisionSet(yearNumber: number): DecisionSet {
       GL: defaultLineDecisionSet(),
       Property: defaultLineDecisionSet(),
     },
+    // Pool-wide decisions (projected into every line at processYear entry).
+    assetAllocation: { ...ASSET_ALLOCATION_DEFAULT },
+    riskControlPct: SLIDER_RANGES.riskControlPct.default,
   };
 }

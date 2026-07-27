@@ -213,11 +213,7 @@ export default function ResultsPage({ lockedResults, lineView }: ResultsPageProp
                 label="Reinsurance Level"
                 value={`${result.decisions.reinsuranceLevel} — ${REINSURANCE_PROGRAMS[result.decisions.reinsuranceLevel]?.label ?? ''}`}
               />
-              {lineView !== 'pool' ? (
-                <Row label="Asset Allocation" value={`Cash ${result.assetAllocation.cashPct.toFixed(0)}% / Bonds ${result.assetAllocation.bondsPct.toFixed(0)}% / Equities ${result.assetAllocation.equitiesPct.toFixed(0)}%`} />
-              ) : (
-                <p className="text-xs text-gray-400 italic">Asset allocation is set per line — switch to a line view to see that line's allocation.</p>
-              )}
+              <Row label="Asset Allocation (pool-wide)" value={`Cash ${result.assetAllocation.cashPct.toFixed(0)}% / Bonds ${result.assetAllocation.bondsPct.toFixed(0)}% / Equities ${result.assetAllocation.equitiesPct.toFixed(0)}%`} />
             </ResultCard>
 
             <ResultCard title="Membership" icon={<TrendingUp size={16} />}>
