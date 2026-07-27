@@ -104,7 +104,6 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
 
         <SectionCard title="Growth & Underwriting" icon={<TrendingUp size={16} />}>
           <SliderInput label="Underwriting Strictness" value={d.underwritingStrictness} min={SLIDER_RANGES.underwritingStrictness.min} max={SLIDER_RANGES.underwritingStrictness.max} step={SLIDER_RANGES.underwritingStrictness.step} onChange={v => set('underwritingStrictness', v)} formatValue={v => `${v}/10 — ${UW_LABELS[Math.round(v)]}`} leftLabel="Flexible" rightLabel="Strict" disabled={disabled} helpText="Strict underwriting improves risk quality." />
-          <p className="text-xs text-gray-400">Risk control investment is set pool-wide — see the Pool tab.</p>
         </SectionCard>
 
         {outstandingLoanSlider(d, set, selectedLoanInfo, disabled)}
@@ -182,11 +181,6 @@ function PoolDecisionsView({ decisions, onChange, yearNumber, disabled }: {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <SectionCard title="Investment Allocation" icon={<BarChart2 size={16} />}>
-          <p className="text-xs text-gray-500 -mt-2">
-            One allocation policy for the whole pool. Each line still invests its own segregated
-            assets and keeps its own gains and losses — every line simply follows this policy, so
-            all lines earn the same return rate on their own asset bases.
-          </p>
           <AllocationBar
             value={decisions.assetAllocation}
             onChange={allocation => onChange({ ...decisions, assetAllocation: allocation })}
@@ -205,9 +199,6 @@ function PoolDecisionsView({ decisions, onChange, yearNumber, disabled }: {
             disabled={disabled}
             helpText="Investment in member safety and training, as a percentage of premium. Each line spends this percentage of its own premium and earns the loss reduction on its own book."
           />
-          <p className="text-xs text-gray-500">
-            The percentage is an intensity, not a pot to divide — each line's spend scales with its own size.
-          </p>
         </SectionCard>
       </div>
     </div>
