@@ -59,35 +59,69 @@ export default function FinancialsPage({ lockedResults, priorResults, lineView }
             subtitle={isLiveYear ? `Locked results for Year ${statement.yearNumber}` : isOpening ? 'Opening position — the last simulated pre-game year; its ending balance sheet is the Year 1 opening' : 'Simulated pre-game year (read-only, default decisions)'}
           />
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <StatementCard title="Income Statement">
-              <ISLine label="Pool Premium" value={formatCurrency(statement.incomeStatement.poolPremium)} />
-              <ISLine label="Admin Expense" value={formatCurrency(statement.incomeStatement.adminExpense)} />
-              <ISLine label="Pool Premium & Admin Expense" value={formatCurrency(statement.incomeStatement.poolPremiumAndAdminExpense)} />
-              <ISLine label="Reinsurance Cost" value={formatCurrency(statement.incomeStatement.reinsuranceCost)} />
-              <ISLine label="Self-Funded Discount" value={`(${formatCurrency(statement.incomeStatement.selfFundedDiscount)})`} valueColor="text-emerald-600" />
-              <ISLine label="Gross Premium & Admin Expense" value={formatCurrency(statement.incomeStatement.totalMemberCharge)} bold />
-              <ISLine label="Assessments" value={formatCurrency(statement.incomeStatement.assessments)} />
-              <div className="border-t border-gray-200 my-2" />
-              <ISLine label="Ultimate Losses" value={formatCurrency(statement.incomeStatement.grossUltimateLoss)} />
-              <ISLine label="Pool Losses" value={formatCurrency(statement.incomeStatement.poolLosses)} />
-              <ISLine label="Excess Losses" value={formatCurrency(statement.incomeStatement.excessLosses)} />
-              <ISLine label="Quota Share Losses" value={formatCurrency(statement.incomeStatement.quotaShareLosses)} />
-              <ISLine label="Reinsurance Losses" value={formatCurrency(statement.incomeStatement.reinsuranceRecovery)} />
-              <ISLine label="Net Ultimate Loss" value={formatCurrency(statement.incomeStatement.netUltimateLoss)} />
-              <div className="border-t border-gray-200 my-2" />
-              <ISLine label="Net Incurred Loss" value={`(${formatCurrency(statement.incomeStatement.netIncurredLoss)})`} valueColor="text-red-600" />
-              <ISLine label="Admin Expense" value={`(${formatCurrency(statement.incomeStatement.operatingExpense)})`} valueColor="text-red-600" />
-              <ISLine label="Risk Control Investment" value={`(${formatCurrency(statement.incomeStatement.riskControlInvestment)})`} valueColor="text-red-600" />
-              <ISLine label="Reinsurance Cost" value={`(${formatCurrency(statement.incomeStatement.reinsuranceCost)})`} valueColor="text-red-600" />
-              <ISLine label="Dividends / Returned Pool Premium" value={`(${formatCurrency(statement.incomeStatement.dividends)})`} valueColor="text-red-600" />
-              {selectedResult && (
-                <p className="text-xs text-gray-400 -mt-1">Includes prior-year reserve development: {formatCurrency(statement.incomeStatement.priorYearDevelopment)} ({statement.incomeStatement.priorYearDevelopment >= 0 ? 'favorable' : 'adverse'})</p>
-              )}
-              <div className="border-t border-gray-200 my-2" />
-              <ISLine label="Underwriting Income" value={formatCurrency(statement.incomeStatement.underwritingIncome)} bold valueColor={colorForNetIncome(statement.incomeStatement.underwritingIncome)} />
-              <ISLine label="Investment Income" value={formatCurrency(statement.incomeStatement.investmentIncome)} valueColor={statement.incomeStatement.investmentIncome >= 0 ? 'text-emerald-600' : 'text-red-600'} />
-              <div className="border-t border-gray-200 my-2" />
-              <ISLine label="Net Income" value={formatCurrency(statement.incomeStatement.netIncome)} bold valueColor={colorForNetIncome(statement.incomeStatement.netIncome)} />
+            <StatementCard title="Statement of Revenues, Expenses & Changes in Net Position">
+              {(() => {
+                const is = statement.incomeStatement;
+                // Pass-throughs shown GROSS: reinsurance and admin appear as
+                // both revenue (collected from members) and expense (paid out).
+                const totalOperatingRevenues = is.reinsuranceCost + is.poolPremium + is.adminExpense - is.selfFundedDiscount + is.assessments;
+                // Prior accident years' NET incurred: net paid + change in net
+                // unpaid on prior cohorts (development net of ceded, including
+                // closed-cohort runoff). Current + recoveries + prior ties to
+                // netIncurredLoss as an algebraic identity — no plug.
+                const priorYearClaims = is.netIncurredLoss - is.netUltimateLoss;
+                const totalOperatingExpenses = is.reinsuranceCost + is.netIncurredLoss + is.operatingExpense + is.riskControlInvestment + is.dividends;
+                // Not modeled yet — rendered only when non-zero, so hidden today.
+                const additionalPaidInCapital = 0;
+                const restatements = 0;
+                const showRestatedBlock = additionalPaidInCapital !== 0 || restatements !== 0;
+                return (
+                  <>
+                    <SectionLabel text="Operating revenues" />
+                    <ISLine label="Premiums for transferred risk" value={formatCurrency(is.reinsuranceCost)} indent />
+                    <ISLine label="Contributions for retained risk" value={formatCurrency(is.poolPremium)} indent />
+                    <ISLine label="Administration fees" value={formatCurrency(is.adminExpense)} indent />
+                    <ISLine label="Less: self-funded discount" value={`(${formatCurrency(is.selfFundedDiscount)})`} indent />
+                    <ISLine label="Member assessments" value={formatCurrency(is.assessments)} indent />
+                    <ISLine label="Total operating revenues" value={formatCurrency(totalOperatingRevenues)} bold />
+
+                    <SectionLabel text="Operating expenses" />
+                    <ISLine label="Transferred risk & insurance expense" value={formatCurrency(is.reinsuranceCost)} indent />
+                    <ISLine label="Provision for claims:" value="" indent />
+                    <ISLine label="Current year claims" value={formatCurrency(is.grossUltimateLoss)} indent2 />
+                    {is.reinsuranceRecovery !== 0 && (
+                      <ISLine label="Less: reinsurance recoveries" value={`(${formatCurrency(is.reinsuranceRecovery)})`} indent2 />
+                    )}
+                    <ISLine label="Prior year claims" value={formatCurrency(priorYearClaims)} indent2 />
+                    <ISLine label="Provision for claims, net" value={formatCurrency(is.netIncurredLoss)} indent2 />
+                    <ISLine label="General administrative services" value={formatCurrency(is.operatingExpense)} indent />
+                    <ISLine label="Loss prevention expenses" value={formatCurrency(is.riskControlInvestment)} indent />
+                    <ISLine label="Member dividends & returned premium" value={formatCurrency(is.dividends)} indent />
+                    <ISLine label="Total operating expenses" value={formatCurrency(totalOperatingExpenses)} bold />
+
+                    <div className="border-t border-gray-200 my-2" />
+                    <ISLine label="Operating income (loss)" value={formatCurrency(is.underwritingIncome)} bold valueColor={colorForNetIncome(is.underwritingIncome)} />
+
+                    <SectionLabel text="Nonoperating revenues (expenses)" />
+                    <ISLine label="Investment income, net of investment expense" value={formatCurrency(is.investmentIncome)} indent valueColor={is.investmentIncome >= 0 ? 'text-emerald-600' : 'text-red-600'} />
+                    <ISLine label="Total nonoperating revenues (expenses)" value={formatCurrency(is.investmentIncome)} bold />
+
+                    <div className="border-t border-gray-200 my-2" />
+                    <ISLine label="Change in net position" value={formatCurrency(is.netIncome)} bold valueColor={colorForNetIncome(is.netIncome)} />
+
+                    <SectionLabel text="Net position" />
+                    <ISLine label="Beginning of year" value={formatCurrency(statement.surplusRollforward.beginingSurplus)} indent />
+                    {showRestatedBlock && (
+                      <>
+                        <ISLine label="Additional paid in capital" value={formatCurrency(additionalPaidInCapital)} indent />
+                        <ISLine label="Restatements" value={formatCurrency(restatements)} indent />
+                        <ISLine label="Beginning of year, as restated" value={formatCurrency(statement.surplusRollforward.beginingSurplus + additionalPaidInCapital + restatements)} indent />
+                      </>
+                    )}
+                    <ISLine label="Net position, end of year" value={formatCurrency(statement.surplusRollforward.endingSurplus)} bold valueColor={statement.surplusRollforward.endingSurplus >= 0 ? 'text-emerald-700' : 'text-red-700'} />
+                  </>
+                );
+              })()}
             </StatementCard>
             <StatementCard title="Ending Balance Sheet">
               <BSLine label="Cash & Cash Equivalents" value={formatCurrency(statement.balanceSheet.cash)} />
@@ -206,8 +240,16 @@ function BSLine({ label, value, bold, highlight, valueColor = 'text-gray-800' }:
   );
 }
 
-function ISLine({ label, value, bold, valueColor = 'text-gray-800' }: { label: string; value: string; bold?: boolean; valueColor?: string }) {
-  return BSLine({ label, value, bold, valueColor });
+function ISLine({ label, value, bold, valueColor = 'text-gray-800', indent, indent2 }: { label: string; value: string; bold?: boolean; valueColor?: string; indent?: boolean; indent2?: boolean }) {
+  return (
+    <div className={indent2 ? 'pl-8' : indent ? 'pl-4' : ''}>
+      {BSLine({ label, value, bold, valueColor })}
+    </div>
+  );
+}
+
+function SectionLabel({ text }: { text: string }) {
+  return <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide pt-2">{text}</p>;
 }
 
 function MetricRow({ label, value, valueColor = 'text-gray-800' }: { label: string; value: string; valueColor?: string }) {
