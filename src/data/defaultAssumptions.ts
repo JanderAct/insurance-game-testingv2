@@ -67,43 +67,43 @@ export const FUNDING_CLF_TABLE: Record<number, number> = {
 // income does not dominate underwriting results. Cash and bonds essentially
 // never have a real down year; equities does, by design, to make the
 // allocation decision carry real risk/return tradeoff.
+// Single-regime model: one normal draw per class per year, minus a fee.
+// Means/SDs are GROSS of fees and are whole-period historical values that
+// already include crash years — there is deliberately NO separate downside
+// regime (that would double-count the downside; market crashes are the Phase 4
+// shock-event system's job). minReturn/maxReturn are inert sanity rails only —
+// wide enough (3.4σ+) that they essentially never fire; they exist to prevent
+// nonsense like a sub−100% draw producing negative invested assets, not to
+// shape the distribution.
 export interface AssetClassAssumption {
-  expectedReturn: number;
-  standardDeviation: number;
-  minReturn: number;
-  maxReturn: number;
-  downsideProbability: number;
-  downsideMeanReturn: number;
-  downsideStandardDeviation: number;
+  expectedReturn: number;      // gross annual mean
+  standardDeviation: number;   // gross annual SD
+  feeRate: number;             // subtracted from every draw (net = draw − fee)
+  minReturn: number;           // net clamp floor (sanity rail)
+  maxReturn: number;           // net clamp ceiling (sanity rail)
 }
 
 export const ASSET_CLASS_ASSUMPTIONS: Record<'cash' | 'bonds' | 'equities', AssetClassAssumption> = {
   cash: {
-    expectedReturn: 0.020,
-    standardDeviation: 0.003,
-    minReturn: 0.005,
-    maxReturn: 0.035,
-    downsideProbability: 0,
-    downsideMeanReturn: 0.005,
-    downsideStandardDeviation: 0.002,
+    expectedReturn: 0.0419,
+    standardDeviation: 0.0040,
+    feeRate: 0.00040,
+    minReturn: 0.0,
+    maxReturn: 0.08,
   },
   bonds: {
-    expectedReturn: 0.035,
-    standardDeviation: 0.020,
-    minReturn: -0.04,
-    maxReturn: 0.09,
-    downsideProbability: 0.10,
-    downsideMeanReturn: -0.02,
-    downsideStandardDeviation: 0.015,
+    expectedReturn: 0.0520,
+    standardDeviation: 0.0404,
+    feeRate: 0.00124,
+    minReturn: -0.20,
+    maxReturn: 0.25,
   },
   equities: {
-    expectedReturn: 0.075,
-    standardDeviation: 0.110,
-    minReturn: -0.30,
-    maxReturn: 0.35,
-    downsideProbability: 0.18,
-    downsideMeanReturn: -0.15,
-    downsideStandardDeviation: 0.08,
+    expectedReturn: 0.0826,
+    standardDeviation: 0.1825,
+    feeRate: 0.00124,
+    minReturn: -0.60,
+    maxReturn: 0.70,
   },
 };
 

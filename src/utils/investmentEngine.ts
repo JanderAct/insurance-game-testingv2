@@ -19,14 +19,13 @@ import { ASSET_CLASS_ASSUMPTIONS, type AssetClassAssumption } from '../data/defa
 export interface InvestmentResult {
   returnRate: number;
   income: number;
-  isShockYear: boolean;
 }
 
-// One realized return per asset class for a given year — the shared market.
+// One realized NET return per asset class for a given year — the shared market.
 export interface MarketReturns {
-  cash: { returnRate: number; isDownside: boolean };
-  bonds: { returnRate: number; isDownside: boolean };
-  equities: { returnRate: number; isDownside: boolean };
+  cash: number;
+  bonds: number;
+  equities: number;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -46,17 +45,13 @@ function normalizeAllocation(allocation: AssetAllocation): AssetAllocation {
   };
 }
 
-function simulateAssetClassReturn(assumption: AssetClassAssumption, rng: SeededRandom): { returnRate: number; isDownside: boolean } {
-  const isDownside = assumption.downsideProbability > 0 && rng.chance(assumption.downsideProbability);
-
-  const simulatedReturn = isDownside
-    ? rng.normal(assumption.downsideMeanReturn, assumption.downsideStandardDeviation)
-    : rng.normal(assumption.expectedReturn, assumption.standardDeviation);
-
-  return {
-    returnRate: clamp(simulatedReturn, assumption.minReturn, assumption.maxReturn),
-    isDownside,
-  };
+// Single-regime draw: one normal(mean, sd) per class per year, minus the
+// class's fee, then clamped to the inert sanity rails. Equivalent to Excel's
+// NORM.INV(RAND(), Mean, SD) − Fee. Crash-year adversity lives in the drawn
+// distribution itself (whole-period historical mean/SD) — no downside regime.
+function simulateAssetClassReturn(assumption: AssetClassAssumption, rng: SeededRandom): number {
+  const netReturn = rng.normal(assumption.expectedReturn, assumption.standardDeviation) - assumption.feeRate;
+  return clamp(netReturn, assumption.minReturn, assumption.maxReturn);
 }
 
 // Draw the shared market for one year: one realized return per asset class.
@@ -81,17 +76,13 @@ export function blendInvestmentReturn(
   const normalized = normalizeAllocation(allocation);
 
   const returnRate =
-    (normalized.cashPct / 100) * market.cash.returnRate +
-    (normalized.bondsPct / 100) * market.bonds.returnRate +
-    (normalized.equitiesPct / 100) * market.equities.returnRate;
+    (normalized.cashPct / 100) * market.cash +
+    (normalized.bondsPct / 100) * market.bonds +
+    (normalized.equitiesPct / 100) * market.equities;
 
   const income = investedAssets * returnRate;
 
-  return {
-    returnRate,
-    income,
-    isShockYear: market.bonds.isDownside || market.equities.isDownside,
-  };
+  return { returnRate, income };
 }
 
 // Convenience wrapper: draw a fresh market and blend it in one call.

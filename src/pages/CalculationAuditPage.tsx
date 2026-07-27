@@ -913,7 +913,7 @@ function buildAssumptionRows(): AuditRow[] {
       metric: 'Asset Class Assumptions',
       value: Object.entries(ASSET_CLASS_ASSUMPTIONS)
         .map(([cls, a]) =>
-          `${labelize(cls)}: Return ${formatPct(a.expectedReturn)}, Vol ${formatPct(a.standardDeviation)}, Down-year Chance ${formatPct(a.downsideProbability)}`
+          `${labelize(cls)}: Return ${formatPct(a.expectedReturn)} gross, Vol ${formatPct(a.standardDeviation)}, Fee ${formatPct(a.feeRate, 3)}`
         )
         .join('\n'),
       formula: 'Cash/bonds/equities return and volatility assumptions, blended by the player\'s asset allocation.',
