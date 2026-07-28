@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { FileText, Target } from 'lucide-react';
-import type { LineResultSet, LineView } from '../types/simulation';
+import type { CoverageLine, LineResultSet, LineView, ResultSet } from '../types/simulation';
 import { deriveAnnualStatement } from '../utils/financialStatementEngine';
 import { formatCurrency, formatPct, colorForNetIncome } from '../utils/formatters';
 import { lineDisplayName } from '../utils/lineDisplay';
+import { LINE_RESERVE_PAYDOWN_PCT } from '../data/defaultAssumptions';
 
 interface FinancialsPageProps {
   lockedResults: LineResultSet[];
@@ -123,22 +124,63 @@ export default function FinancialsPage({ lockedResults, priorResults, lineView }
                 );
               })()}
             </StatementCard>
-            <StatementCard title="Ending Balance Sheet">
-              <BSLine label="Cash & Cash Equivalents" value={formatCurrency(statement.balanceSheet.cash)} />
-              <BSLine label="Investments" value={formatCurrency(statement.balanceSheet.investments)} />
-              <BSLine label="Other Assets" value={formatCurrency(statement.balanceSheet.otherAssets)} />
-              <BSLine label="Total Assets" value={formatCurrency(statement.balanceSheet.totalAssets)} bold />
-              <div className="border-t border-gray-200 my-2" />
-              <BSLine label="Unpaid Loss & LAE Reserve, net of reinsurance" value={formatCurrency(statement.balanceSheet.netUnpaidReserve)} />
-              <BSLine label="Unearned Pool Premium" value={formatCurrency(statement.balanceSheet.unearnedPremium)} />
-              <BSLine label="Other Liabilities" value={formatCurrency(statement.balanceSheet.otherLiabilities)} />
-              <BSLine label="Total Liabilities" value={formatCurrency(statement.balanceSheet.totalLiabilities)} bold />
-              <div className="border-t border-gray-200 my-2" />
-              <BSLine label="Net Equity / Surplus" value={formatCurrency(statement.balanceSheet.surplus)} bold highlight valueColor={statement.balanceSheet.surplus >= 0 ? 'text-emerald-700' : 'text-red-700'} />
-              <p className="text-xs text-gray-400 mt-2">Balance check: Assets ({formatCurrency(statement.balanceSheet.totalAssets)}) − Liabilities ({formatCurrency(statement.balanceSheet.totalLiabilities)}) = {formatCurrency(statement.balanceSheet.surplus)}</p>
-              {selectedResult && (
-                <p className="text-xs text-gray-500 mt-1 italic">Unpaid loss reserve represents expected unpaid losses, not a CLF-loaded funding target.</p>
-              )}
+            <StatementCard title="Statement of Net Position">
+              {(() => {
+                const bs = statement.balanceSheet;
+                const alloc = selectedResult!.assetAllocation;
+                const investedAssets = bs.investments;
+                const cashSlice = investedAssets * (alloc.cashPct / 100);
+                const cashAndEquivalents = bs.cash + cashSlice;
+                const noncurrentInvestments = investedAssets - cashSlice;
+                const totalCurrentAssets = cashAndEquivalents + bs.otherAssets;
+                const totalNoncurrentAssets = noncurrentInvestments;
+
+                // Current portion = the share of each line's own net unpaid
+                // reserve expected to pay out within 12 months, using that
+                // line's own reserve paydown rate (the same rate the engine
+                // already applies to every cohort each year). Pool view sums
+                // each active line's own reserve x its own line's rate.
+                const pooled = selectedResult as unknown as ResultSet;
+                const lineKeys = pooled.byLine ? (Object.keys(pooled.byLine) as CoverageLine[]) : null;
+                const currentUnpaidPortion = lineKeys
+                  ? lineKeys.reduce((sum, l) => sum + pooled.byLine[l].endingNetReserve * (LINE_RESERVE_PAYDOWN_PCT[l] ?? 0), 0)
+                  : bs.netUnpaidReserve * (LINE_RESERVE_PAYDOWN_PCT[lineView as CoverageLine] ?? 0);
+                const noncurrentUnpaidPortion = bs.netUnpaidReserve - currentUnpaidPortion;
+
+                const totalCurrentLiabilities = currentUnpaidPortion + bs.otherLiabilities;
+                const totalNoncurrentLiabilities = noncurrentUnpaidPortion;
+
+                return (
+                  <>
+                    <SectionLabel text="Current assets" />
+                    <BSLine label="Cash and cash equivalents" value={formatCurrency(cashAndEquivalents)} indent />
+                    <BSLine label="Other assets" value={formatCurrency(bs.otherAssets)} indent />
+                    <BSLine label="Total current assets" value={formatCurrency(totalCurrentAssets)} bold />
+
+                    <SectionLabel text="Noncurrent assets" />
+                    <BSLine label="Investments" value={formatCurrency(totalNoncurrentAssets)} indent />
+                    <BSLine label="Total noncurrent assets" value={formatCurrency(totalNoncurrentAssets)} bold />
+
+                    <div className="border-t border-gray-200 my-2" />
+                    <BSLine label="Total assets" value={formatCurrency(bs.totalAssets)} bold highlight />
+
+                    <SectionLabel text="Current liabilities" />
+                    <BSLine label="Unpaid loss and LAE reserve, net of reinsurance — current portion" value={formatCurrency(currentUnpaidPortion)} indent />
+                    <BSLine label="Accounts payable and accrued" value={formatCurrency(bs.otherLiabilities)} indent />
+                    <BSLine label="Total current liabilities" value={formatCurrency(totalCurrentLiabilities)} bold />
+
+                    <SectionLabel text="Noncurrent liabilities" />
+                    <BSLine label="Unpaid loss and LAE reserve, net of reinsurance — noncurrent portion" value={formatCurrency(noncurrentUnpaidPortion)} indent />
+                    <BSLine label="Total noncurrent liabilities" value={formatCurrency(totalNoncurrentLiabilities)} bold />
+
+                    <div className="border-t border-gray-200 my-2" />
+                    <BSLine label="Total liabilities" value={formatCurrency(bs.totalLiabilities)} bold highlight />
+
+                    <div className="border-t border-gray-200 my-2" />
+                    <BSLine label="Net position — unrestricted" value={formatCurrency(bs.surplus)} bold highlight valueColor={bs.surplus >= 0 ? 'text-emerald-700' : 'text-red-700'} />
+                  </>
+                );
+              })()}
             </StatementCard>
             <StatementCard title="Net Equity / Surplus Rollforward">
               <BSLine label="Beginning Net Equity / Surplus" value={formatCurrency(statement.surplusRollforward.beginingSurplus)} />
@@ -230,9 +272,9 @@ function StatementCard({ title, icon, children }: { title: string; icon?: React.
   );
 }
 
-function BSLine({ label, value, bold, highlight, valueColor = 'text-gray-800' }: { label: string; value: string; bold?: boolean; highlight?: boolean; valueColor?: string }) {
+function BSLine({ label, value, bold, highlight, valueColor = 'text-gray-800', indent }: { label: string; value: string; bold?: boolean; highlight?: boolean; valueColor?: string; indent?: boolean }) {
   return (
-    <div className={`flex justify-between items-baseline gap-2 ${highlight ? 'bg-blue-50 -mx-2 px-2 py-1 rounded' : ''}`}>
+    <div className={`flex justify-between items-baseline gap-2 ${indent ? 'pl-4' : ''} ${highlight ? 'bg-blue-50 -mx-2 px-2 py-1 rounded' : ''}`}>
       <span className={`text-sm text-gray-600 ${bold ? 'font-semibold text-gray-800' : ''}`}>{label}</span>
       <span className={`text-sm font-mono ${bold ? 'font-bold' : 'font-medium'} ${valueColor} text-right`}>{value}</span>
     </div>
