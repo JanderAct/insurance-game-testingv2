@@ -129,3 +129,34 @@ to occasionally Y2) when investment returns rose ~40%, because the shared-cash s
 compound through investment income. The loss-distribution rework and Phase 3 reserves will likely
 amplify it further. Per-line cash segregation (above) is the eventual lever if it ever becomes
 visible in play.
+
+### UPDATE (remove-other-assets-liabilities) — money-side coupling ELIMINATED
+Removing the vestigial otherAssets/otherLiabilities balances didn't just shrink this residual —
+it structurally eliminated the financial half of it. Current residual, re-measured on the same
+12-seed × 2-config-pair harness:
+
+> **Pre-game and live Y1 strictly config-independent. Y2 rare ≤1-member roster flip (1 of 24
+> config-pairs); Y3 occasional (3 of 24). Zero money-side drift — non-flip cross-config surplus
+> drift is exactly 0.0000%. Remaining divergence is roster-fold only, not financial.**
+
+**Why it improved (structural, not luck):** the contribution-share weight
+(surplus + netReserve − investedAssets) is constructed so the weights sum to the shared pot.
+When the pot was three things at once (cash + otherAssets − otherLiabilities), one share vector
+could only reproduce each line's NET slice — the cash portion specifically was distorted by the
+other two components, and that distortion leaked cross-config through the operating-cash sweep
+into investments. With cash as the ONLY shared pot, the weight now equals each line's own implied
+cash slice EXACTLY (weight_L = surplus_L + netReserve_L − invested_L = cash slice_L, and
+Σweights = pool cash by balance-sheet identity), so the allocation is exact per line and the
+money-side coupling is zero by construction. Verified: WC's ending surplus is identical to the
+dollar across WC-only and WC+GL for all three live years on the reference seed.
+
+**Trajectory, revised:** the "residual grows with the pool's numbers" warning above applied to
+the money-side coupling, which no longer exists. The surviving roster-fold effect (the sequential
+shared-roster fold: a member withdrawing from one line becomes ineligible for recruitment into
+another that year) could still grow with more loss volatility, but it is NOT sensitive to the
+magnitude of the pool's numbers. Flip counts were unchanged by this change (Y2: 1, Y3: 3 of 24
+pairs — same seeds, same years).
+
+**Fix lever, revised:** full per-line cash segregation is no longer needed to address financial
+coupling — there is none. It would only address the roster-fold flips, a much smaller concern
+that lives in membership mechanics, not money.
