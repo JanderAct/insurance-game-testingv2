@@ -93,7 +93,7 @@ export default function App() {
   // Load persisted game from localStorage if available
   React.useEffect(() => {
     try {
-      const saved = localStorage.getItem('riskpool_gamestate_v7');
+      const saved = localStorage.getItem('riskpool_gamestate_v8');
       if (saved) {
         const { gameState: gs, startingFinancials: sf, initialMembers: im, currentDecisions: cd } = JSON.parse(saved);
 
@@ -106,19 +106,19 @@ export default function App() {
           setActiveTab('dashboard');
         } else {
           // Bad saved state - clear it
-          localStorage.removeItem('riskpool_gamestate_v7');
+          localStorage.removeItem('riskpool_gamestate_v8');
         }
       }
     } catch {
       // ignore parse errors - clear corrupted data
-      localStorage.removeItem('riskpool_gamestate_v7');
+      localStorage.removeItem('riskpool_gamestate_v8');
     }
   }, []);
 
   function persistState(gs: GameState, sf: StartingFinancials, im: Member[], cd: DecisionSet) {
     try {
       localStorage.setItem(
-        'riskpool_gamestate_v7',
+        'riskpool_gamestate_v8',
         JSON.stringify({
           gameState: gs,
           startingFinancials: sf,
@@ -216,7 +216,7 @@ export default function App() {
     setInitialMembers([]);
     setCurrentDecisions(defaultDecisionSet(1));
     setLineView('pool');
-    localStorage.removeItem('riskpool_gamestate_v7');
+    localStorage.removeItem('riskpool_gamestate_v8');
     setActiveTab('setup');
   }, []);
 

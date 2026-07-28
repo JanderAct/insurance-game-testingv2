@@ -31,10 +31,9 @@ export interface IncomeStatement {
 export interface BalanceSheet {
   cash: number;
   investments: number;
-  reinsuranceRecoverable: number;
   otherAssets: number;
   totalAssets: number;
-  grossUnpaidReserve: number;
+  netUnpaidReserve: number;
   unearnedPremium: number;
   otherLiabilities: number;
   totalLiabilities: number;
@@ -65,16 +64,12 @@ export interface ReinsuranceDetail {
 }
 
 export interface ReserveDetail {
-  beginningGrossReserve: number;
+  beginningNetReserve: number;
   currentYearUltimate: number;
-  grossPaidLosses: number;
+  netPaidLosses: number;
   priorYearDevelopment: number;
-  endingGrossReserve: number;
-  beginningReinsRecoverable: number;
+  endingNetReserve: number;
   currentYearReinsRecovery: number;
-  reinsReceived: number;
-  endingReinsRecoverable: number;
-  netUnpaidReserve: number;
 }
 
 // Funding Target & Adequacy detail
@@ -82,10 +77,7 @@ export interface ReserveDetail {
 export interface FundingDetail {
   selectedFundingConfidenceLevel: number;  // Player-facing selection (e.g., 75%)
   selectedFundingCLF: number;              // Backend actuarial factor
-  expectedGrossUnpaidLoss: number;         // Expected unpaid losses (gross)
-  expectedReinsuranceRecoverable: number;  // Reinsurance on unpaid losses
-  expectedNetUnpaidLoss: number;           // Net of reinsurance
-  grossFundingTarget: number;             // expectedGross × CLF
+  expectedNetUnpaidLoss: number;           // Expected unpaid losses, net of reinsurance
   netFundingTarget: number;               // expectedNet × CLF
   fundingMarginNeeded: number;            // netFundingTarget - expectedNetUnpaid
   availableFunding: number;               // endingSurplus (capital available)
@@ -140,10 +132,9 @@ export function deriveAnnualStatement(result: LineResultSet): AnnualFinancialSta
   const balanceSheet: BalanceSheet = {
     cash: result.endingCash,
     investments: result.endingInvestments,
-    reinsuranceRecoverable: result.endingReinsRecoverable,
     otherAssets: result.otherAssets,
     totalAssets: result.totalAssets,
-    grossUnpaidReserve: result.endingGrossReserve,
+    netUnpaidReserve: result.endingNetReserve,
     unearnedPremium: result.unearnedPremium,
     otherLiabilities: result.otherLiabilities,
     totalLiabilities: result.totalLiabilities,
@@ -177,26 +168,19 @@ export function deriveAnnualStatement(result: LineResultSet): AnnualFinancialSta
   };
 
   const reserveDetail: ReserveDetail = {
-    beginningGrossReserve: result.beginningGrossReserve,
+    beginningNetReserve: result.beginningNetReserve,
     currentYearUltimate: result.grossUltimateLoss,
-    grossPaidLosses: result.grossPaidLosses,
+    netPaidLosses: result.netPaidLosses,
     priorYearDevelopment: result.priorYearDevelopment,
-    endingGrossReserve: result.endingGrossReserve,
-    beginningReinsRecoverable: result.beginningReinsRecoverable,
+    endingNetReserve: result.endingNetReserve,
     currentYearReinsRecovery: result.reinsuranceRecovery,
-    reinsReceived: result.reinsuranceRecovery * 0.40,
-    endingReinsRecoverable: result.endingReinsRecoverable,
-    netUnpaidReserve: result.endingGrossReserve - result.endingReinsRecoverable,
   };
 
   // Funding detail - CLF is used for funding target, NOT accounting reserve
   const fundingDetail: FundingDetail = {
     selectedFundingConfidenceLevel: result.selectedFundingConfidenceLevel,
     selectedFundingCLF: result.selectedFundingCLF,
-    expectedGrossUnpaidLoss: result.expectedGrossUnpaidLoss,
-    expectedReinsuranceRecoverable: result.expectedReinsuranceRecoverable,
     expectedNetUnpaidLoss: result.expectedNetUnpaidLoss,
-    grossFundingTarget: result.grossFundingTarget,
     netFundingTarget: result.netFundingTarget,
     fundingMarginNeeded: result.fundingMarginNeeded,
     availableFunding: result.availableFunding,

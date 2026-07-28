@@ -67,9 +67,7 @@ export default function HistoryPage({ historicalYears, scenarioId, startingYear,
   ];
 
   const capitalRows: HistoryRow[] = [
-    { label: 'Pool Outstanding', value: year => formatCurrency(year.endingGrossReserve) },
-    { label: 'Reinsurance Recoverable Outstanding', value: year => formatCurrency(year.endingReinsuranceRecoverable) },
-    { label: 'Total Outstanding', value: year => formatCurrency(year.endingNetReserve) },
+    { label: 'Unpaid Claims Outstanding (net)', value: year => formatCurrency(year.endingNetReserve) },
     { label: 'Required Reserve Margin', value: year => formatCurrency(year.requiredReserveMargin) },
     {
       label: 'Ending Surplus',

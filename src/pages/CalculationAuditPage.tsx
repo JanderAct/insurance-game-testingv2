@@ -87,12 +87,6 @@ export default function CalculationAuditPage({ lockedResults }: CalculationAudit
   const netUltimateLossCheck = result.grossUltimateLoss - result.reinsuranceRecovery;
   const netUltimateLossDifference = result.netUltimateLoss - netUltimateLossCheck;
 
-  const netAccountingReserveCheck =
-    result.expectedGrossUnpaidLoss - result.expectedReinsuranceRecoverable;
-
-  const netAccountingReserveDifference =
-    result.expectedNetUnpaidLoss - netAccountingReserveCheck;
-
   const indicatedNetReserveCheck =
     result.expectedNetUnpaidLoss * result.selectedFundingCLF;
 
@@ -105,10 +99,12 @@ export default function CalculationAuditPage({ lockedResults }: CalculationAudit
   const reserveRiskMarginDifference =
     result.reserveRiskMarginNeeded - reserveRiskMarginCheck;
 
-  const grossIncurredLoss =
-    result.grossPaidLosses +
-    result.endingGrossReserve -
-    result.beginningGrossReserve;
+  const netIncurredLossCheck =
+    result.netPaidLosses +
+    result.endingNetReserve -
+    result.beginningNetReserve;
+
+  const netIncurredLossDifference = result.netIncurredLoss - netIncurredLossCheck;
 
   const netIncurredLossFromIncome =
     result.grossPremium +
@@ -119,9 +115,6 @@ export default function CalculationAuditPage({ lockedResults }: CalculationAudit
     result.reinsuranceCost -
     result.dividends -
     result.netIncome;
-
-  const impliedCededIncurredRecovery =
-    grossIncurredLoss - netIncurredLossFromIncome;
 
   const netIncomeCheck =
     result.grossPremium +
@@ -139,13 +132,11 @@ export default function CalculationAuditPage({ lockedResults }: CalculationAudit
     result.beginningCash +
     result.grossPremium +
     result.assessments -
-    result.grossPaidLosses +
-    impliedCededIncurredRecovery -
+    result.netPaidLosses -
     result.operatingExpense -
     result.riskControlInvestment -
     result.reinsuranceCost -
-    result.dividends -
-    (result.endingReinsRecoverable - result.beginningReinsRecoverable);
+    result.dividends;
 
   const endingInvestmentsCheck =
     result.beginningInvestments + result.investmentIncome;
@@ -153,13 +144,12 @@ export default function CalculationAuditPage({ lockedResults }: CalculationAudit
   const totalAssetsCheck =
     result.endingCash +
     result.endingInvestments +
-    result.endingReinsRecoverable +
     result.otherAssets;
 
   const totalAssetsDifference = result.totalAssets - totalAssetsCheck;
 
   const totalLiabilitiesCheck =
-    result.expectedGrossUnpaidLoss +
+    result.endingNetReserve +
     result.unearnedPremium +
     result.otherLiabilities;
 
@@ -332,70 +322,40 @@ export default function CalculationAuditPage({ lockedResults }: CalculationAudit
 
   const reserveRows: AuditRow[] = [
     {
-      metric: 'Beginning Gross Reserve',
-      value: formatCurrency(result.beginningGrossReserve),
-      formula: 'Prior unpaid gross reserve carried into the year.',
+      metric: 'Beginning Net Reserve',
+      value: formatCurrency(result.beginningNetReserve),
+      formula: 'Prior unpaid reserve (net of reinsurance) carried into the year.',
     },
     {
-      metric: 'Current-Year Gross Reserve',
-      value: formatCurrency(result.currentYearGrossReserve),
-      formula: 'Current-year gross ultimate loss × unpaid percentage assumption.',
+      metric: 'Current-Year Net Reserve',
+      value: formatCurrency(result.currentYearNetReserve),
+      formula: 'Current-year net ultimate loss × unpaid percentage assumption.',
     },
     {
-      metric: 'Gross Paid Losses',
-      value: formatCurrency(result.grossPaidLosses),
-      formula: 'Current-year paid losses + prior-year reserve cohort paydowns.',
+      metric: 'Net Paid Losses',
+      value: formatCurrency(result.netPaidLosses),
+      formula: 'Current-year net paid losses + prior-year reserve cohort paydowns.',
     },
     {
-      metric: 'Ending Gross Accounting Reserve',
-      value: formatCurrency(result.endingGrossReserve),
-      formula: 'Remaining unpaid gross reserve across all open cohorts.',
+      metric: 'Ending Net Accounting Reserve',
+      value: formatCurrency(result.endingNetReserve),
+      formula: 'Remaining unpaid reserve (net of reinsurance) across all open cohorts.',
     },
     {
-      metric: 'Beginning Reinsurance Recoverable',
-      value: formatCurrency(result.beginningReinsRecoverable),
-      formula: 'Prior reinsurance recoverable carried into the year.',
-    },
-    {
-      metric: 'Ending Reinsurance Recoverable',
-      value: formatCurrency(result.endingReinsRecoverable),
-      formula: 'Remaining recoverable on unpaid losses.',
-    },
-    {
-      metric: 'Expected Gross Unpaid Loss',
-      value: formatCurrency(result.expectedGrossUnpaidLoss),
-      formula: 'Same as ending gross accounting reserve.',
-    },
-    {
-      metric: 'Expected Reinsurance Recoverable',
-      value: formatCurrency(result.expectedReinsuranceRecoverable),
-      formula: 'Same as ending reinsurance recoverable.',
+      metric: 'Net Incurred Loss Check',
+      value: formatCurrency(netIncurredLossDifference),
+      formula: 'netIncurredLoss − (net paid + ending net reserve − beginning net reserve)',
+      note: nearZero(netIncurredLossDifference),
     },
     {
       metric: 'Expected Net Unpaid Loss',
       value: formatCurrency(result.expectedNetUnpaidLoss),
-      formula: 'Expected gross unpaid loss - expected reinsurance recoverable.',
+      formula: 'Same as ending net accounting reserve.',
     },
     {
-      metric: 'Expected Net Unpaid Loss Check Difference',
-      value: formatCurrency(netAccountingReserveDifference),
-      formula: 'Stored expected net unpaid loss - recalculated value.',
-      note: nearZero(netAccountingReserveDifference),
-    },
-    {
-      metric: 'Gross Incurred Loss',
-      value: formatCurrency(grossIncurredLoss),
-      formula: 'Gross paid losses + ending gross reserve - beginning gross reserve.',
-    },
-    {
-      metric: 'Net Incurred Loss',
+      metric: 'Net Incurred Loss (from income statement)',
       value: formatCurrency(netIncurredLossFromIncome),
-      formula: 'Derived from income statement because detailed reinsurance received is not currently stored in ResultSet.',
-    },
-    {
-      metric: 'Implied Ceded Incurred Recovery',
-      value: formatCurrency(impliedCededIncurredRecovery),
-      formula: 'Gross incurred loss - net incurred loss.',
+      formula: 'Back-solved from the income statement as a cross-check on the reserve rollforward.',
     },
     {
       metric: 'Prior-Year Development',
@@ -960,9 +920,8 @@ function buildAssumptionRows(): AuditRow[] {
         `Surplus to Premium Ratio: ${formatRangePct(STARTING_FINANCIALS.surplusToPremiumRatio)}\n` +
         `Cash: ${formatRangeCurrency(STARTING_FINANCIALS.cash)}\n` +
         `Investments: ${formatRangeCurrency(STARTING_FINANCIALS.investments)}\n` +
-        `Reinsurance Recoverable: ${formatRangeCurrency(STARTING_FINANCIALS.reinsuranceRecoverable)}\n` +
         `Other Assets: ${formatRangeCurrency(STARTING_FINANCIALS.otherAssets)}\n` +
-        `Gross Unpaid Reserve: ${formatRangeCurrency(STARTING_FINANCIALS.grossUnpaidReserve)}\n` +
+        `Net Unpaid Reserve: ${formatRangeCurrency(STARTING_FINANCIALS.grossUnpaidReserve)} less ${formatRangeCurrency(STARTING_FINANCIALS.reinsuranceRecoverable)}\n` +
         `Other Liabilities: ${formatRangeCurrency(STARTING_FINANCIALS.otherLiabilities)}\n` +
         `Starting Surplus: ${formatRangeCurrency(STARTING_FINANCIALS.startingSurplus)}`,
       formula: 'Starting financial assumption ranges used by instance generation.',

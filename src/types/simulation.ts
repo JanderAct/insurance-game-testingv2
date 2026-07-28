@@ -71,9 +71,7 @@ export interface HistoricalYear {
   quotaShareLosses: number;    // pool's retained share of Excess Losses = (1 - quota%) x excessLosses
   reinsuranceRecovery: number; // reinsurer's paid share of Excess Losses = quota% x excessLosses
   netUltimateLoss: number;
-  grossPaidLosses: number;
-  endingGrossReserve: number;
-  endingReinsuranceRecoverable: number;
+  netPaidLosses: number;
   endingNetReserve: number;
   actualLossRatio: number;
   actualExpenseRatio: number;
@@ -190,15 +188,15 @@ export interface ReinsuranceStructure {
   costPctOfPremium: number;     // approximate annual cost as % of premium
 }
 
-// Annual reserve cohort for simplified development
+// Annual reserve cohort for simplified development. NET basis: losses enter
+// net of reinsurance recoveries (recovery cash arrives in lockstep with the
+// claim payments it offsets, so there is no separate recoverable receivable).
 export interface ReserveCohort {
   yearNumber: number;
   calendarYear: number;
-  grossUltimate: number;
-  grossPaid: number;
-  grossUnpaid: number;
-  reinsuranceRecoverable: number;
-  reinsuranceReceived: number;
+  netUltimate: number;
+  netPaid: number;
+  netUnpaid: number;
   paydownPct: number;           // portion paid each year
   developmentFactor: number;    // seeded favorable/adverse dev
   closed: boolean;
@@ -264,14 +262,12 @@ export interface ResultSet {
   operatingExpense: number;
   riskControlInvestment: number;
 
-  // Reserve development
+  // Reserve development (NET basis — reserves are net of reinsurance)
   priorYearDevelopment: number; // positive = favorable, negative = adverse
-  beginningGrossReserve: number;
-  currentYearGrossReserve: number; // IBNR + case for this accident year
-  grossPaidLosses: number;
-  endingGrossReserve: number;
-  beginningReinsRecoverable: number;
-  endingReinsRecoverable: number;
+  beginningNetReserve: number;
+  currentYearNetReserve: number; // IBNR + case for this accident year, net
+  netPaidLosses: number;
+  endingNetReserve: number;
 
   // Investment
   investmentReturnRate: number;
@@ -311,11 +307,8 @@ export interface ResultSet {
   rateAdequacyRatio: number;                // actualRatePer100 / indicatedFundingRatePer100
 
   // B. Accounting Reserve / Reserve Confidence View
-  expectedGrossUnpaidLoss: number;          // Expected unpaid losses from all cohorts, gross
-  expectedReinsuranceRecoverable: number;   // Reinsurance recoverable on unpaid losses
-  expectedNetUnpaidLoss: number;            // Expected unpaid losses net of reinsurance
+  expectedNetUnpaidLoss: number;            // Expected unpaid losses (net of reinsurance)
 
-  grossFundingTarget: number;               // expectedGrossUnpaidLoss × selectedFundingCLF
   netFundingTarget: number;                 // expectedNetUnpaidLoss × selectedFundingCLF
   indicatedNetReserveAtConfidenceLevel: number; // Confidence-level indication, not booked reserve
 
@@ -399,8 +392,7 @@ export interface LinePoolState {
   riskControlEffectiveness: number; // rolling score 0-1
   reserveCohorts: ReserveCohort[];
   members: Member[];
-  grossUnpaidReserve: number;
-  reinsuranceRecoverable: number;
+  netUnpaidReserve: number;    // unpaid loss reserve, net of reinsurance
   surplus: number;
   investedAssets: number;      // this line's own segregated investment portfolio (Stage 2.9),
                                // carried forward year to year like surplus
@@ -440,10 +432,9 @@ export interface GameState {
 export interface StartingFinancials {
   cash: number;
   investments: number;
-  reinsuranceRecoverable: number;
   otherAssets: number;
   totalAssets: number;
-  grossUnpaidReserve: number;
+  netUnpaidReserve: number;    // unpaid loss reserve, net of reinsurance
   unearnedPremium: number;
   otherLiabilities: number;
   totalLiabilities: number;

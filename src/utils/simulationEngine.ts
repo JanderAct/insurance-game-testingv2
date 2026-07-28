@@ -289,26 +289,26 @@ export function processLineYear(
   const {
     developmentImpact,
     updatedCohorts,
-    grossPaidThisYear,
-    reinsReceivedThisYear,
+    netPaidThisYear,
   } = processReserveDevelopment(
     lineState.reserveCohorts,
     devRng,
     priorFundingAdequacyRatio
   );
 
-  // Current year reserve assumption: 60% unpaid, 40% paid.
-  const currentYearGrossReserve = grossUltimateLoss * 0.60;
-  const grossPaidCurrentYear = grossUltimateLoss * 0.40;
+  // Current year reserve assumption: 60% unpaid, 40% paid. NET basis —
+  // reinsurance recovery cash arrives in lockstep with the claim payments it
+  // offsets, so losses enter the reserve rollforward net of recoveries and no
+  // separate recoverable receivable exists.
+  const currentYearNetReserve = netUltimateLoss * 0.60;
+  const netPaidCurrentYear = netUltimateLoss * 0.40;
 
   const currentYearCohort: ReserveCohort = {
     yearNumber,
     calendarYear,
-    grossUltimate: grossUltimateLoss,
-    grossPaid: grossPaidCurrentYear,
-    grossUnpaid: currentYearGrossReserve,
-    reinsuranceRecoverable: reinsuranceRecovery * 0.60,
-    reinsuranceReceived: reinsuranceRecovery * 0.40,
+    netUltimate: netUltimateLoss,
+    netPaid: netPaidCurrentYear,
+    netUnpaid: currentYearNetReserve,
     paydownPct: LINE_RESERVE_PAYDOWN_PCT[line],
     developmentFactor: 1 + devRng.range(-0.05, 0.08),
     closed: false,
@@ -317,31 +317,14 @@ export function processLineYear(
   const allCohorts = [...updatedCohorts, currentYearCohort];
 
   // --- Accounting Reserves ---
-  // These are expected unpaid losses from all accident years.
-  // They are the booked balance sheet reserves and are NOT CLF-loaded.
-  const endingGrossReserve = allCohorts.reduce((s, c) => s + c.grossUnpaid, 0);
+  // These are expected unpaid losses (net of reinsurance) from all accident
+  // years. They are the booked balance sheet reserves and are NOT CLF-loaded.
+  const endingNetReserve = allCohorts.reduce((s, c) => s + c.netUnpaid, 0);
 
-  const endingReinsRecoverable = allCohorts.reduce(
-    (s, c) => s + c.reinsuranceRecoverable,
-    0
-  );
+  const expectedNetUnpaidLoss = endingNetReserve;
 
-  const expectedGrossUnpaidLoss = endingGrossReserve;
-
-  const expectedReinsuranceRecoverable = endingReinsRecoverable;
-
-  const expectedNetUnpaidLoss = Math.max(
-    0,
-    expectedGrossUnpaidLoss - expectedReinsuranceRecoverable
-  );
-
-  const beginningGrossReserve = lineState.reserveCohorts.reduce(
-    (s, c) => s + c.grossUnpaid,
-    0
-  );
-
-  const beginningReinsRecoverable = lineState.reserveCohorts.reduce(
-    (s, c) => s + c.reinsuranceRecoverable,
+  const beginningNetReserve = lineState.reserveCohorts.reduce(
+    (s, c) => s + c.netUnpaid,
     0
   );
 
@@ -354,29 +337,17 @@ export function processLineYear(
   const effectiveDividendPct = ctx.dividendBlocked ? 0 : lineDecisions.dividendPct;
   const dividends = poolPremium * effectiveDividendPct;
 
-  // Keep this as a displayed reserve development metric.
+  // Keep this as a displayed reserve development metric (net basis).
   // Do not add it separately to net income because reserve development is already captured
   // in the incurred loss formula below through the change in unpaid reserves.
   const priorYearDevelopment = developmentImpact;
 
-  const grossPaidLossesThisYear = grossPaidCurrentYear + grossPaidThisYear;
-
-  const reinsuranceReceivedThisYear =
-    reinsuranceRecovery * 0.40 + reinsReceivedThisYear;
-
-  const grossIncurredLoss =
-    grossPaidLossesThisYear +
-    endingGrossReserve -
-    beginningGrossReserve;
-
-  const cededIncurredRecovery =
-    reinsuranceReceivedThisYear +
-    endingReinsRecoverable -
-    beginningReinsRecoverable;
+  const netPaidLossesThisYear = netPaidCurrentYear + netPaidThisYear;
 
   const netIncurredLoss =
-    grossIncurredLoss -
-    cededIncurredRecovery;
+    netPaidLossesThisYear +
+    endingNetReserve -
+    beginningNetReserve;
 
   // Underwriting Income excludes investment income: it is the pool's premium/assessment
   // revenue net of losses (incl. reserve development), expenses, risk control, reinsurance,
@@ -408,8 +379,7 @@ export function processLineYear(
     beginningCash +
     totalMemberCharge +
     assessments -
-    grossPaidLossesThisYear +
-    reinsuranceReceivedThisYear -
+    netPaidLossesThisYear -
     operatingExpense -
     riskControlInvestment -
     reinsuranceCost -
@@ -442,11 +412,10 @@ export function processLineYear(
   const totalAssets =
     endingCash +
     endingInvestments +
-    endingReinsRecoverable +
     ctx.otherAssets;
 
   const totalLiabilities =
-    expectedGrossUnpaidLoss +
+    endingNetReserve +
     unearnedPremium +
     otherLiabilities;
 
@@ -475,7 +444,6 @@ export function processLineYear(
 
   // B. Reserve Confidence View
   // This is an indicated confidence-level view, not the booked accounting reserve.
-  const grossFundingTarget = expectedGrossUnpaidLoss * selectedFundingCLF;
   const netFundingTarget = expectedNetUnpaidLoss * selectedFundingCLF;
   const indicatedNetReserveAtConfidenceLevel = netFundingTarget;
 
@@ -587,12 +555,10 @@ export function processLineYear(
     riskControlInvestment,
     priorYearDevelopment,
 
-    beginningGrossReserve,
-    currentYearGrossReserve,
-    grossPaidLosses: grossPaidLossesThisYear,
-    endingGrossReserve,
-    beginningReinsRecoverable,
-    endingReinsRecoverable,
+    beginningNetReserve,
+    currentYearNetReserve,
+    netPaidLosses: netPaidLossesThisYear,
+    endingNetReserve,
 
     investmentReturnRate,
     investedAssets,
@@ -623,10 +589,7 @@ export function processLineYear(
     rateFundingGapPer100,
     rateAdequacyRatio,
 
-    expectedGrossUnpaidLoss,
-    expectedReinsuranceRecoverable,
     expectedNetUnpaidLoss,
-    grossFundingTarget,
     netFundingTarget,
     indicatedNetReserveAtConfidenceLevel,
     reserveRiskMarginNeeded,
@@ -695,8 +658,7 @@ export function processLineYear(
     reserveCohorts: allCohorts,
     members: memberResult.activeMembers,
 
-    grossUnpaidReserve: endingGrossReserve,
-    reinsuranceRecoverable: endingReinsRecoverable,
+    netUnpaidReserve: endingNetReserve,
     surplus: endingSurplus,
     investedAssets: endingInvestments,
 
@@ -718,8 +680,8 @@ export function processLineYear(
 // exactly what makes the line's allocated slice of the shared pot reproduce its
 // own stored surplus (so the surplus rollforward ties out every year):
 //   slice_needed = surplus + netReserve − investedAssets
-// because surplus = [cash&otherAssets slice] + investedAssets + reinsRecoverable
-// − grossReserve − [otherLiabilities slice]. Stage 2.9 subtracts investedAssets
+// because surplus = [cash&otherAssets slice] + investedAssets
+// − netReserve − [otherLiabilities slice]. Stage 2.9 subtracts investedAssets
 // (each line's own portfolio is no longer part of the shared pot); before that,
 // the pot included investments and the weight was surplus + netReserve. The sum
 // of these weights equals the pot total by balance-sheet identity, so slices are
@@ -734,7 +696,7 @@ function computeContributionShares(
 ): Record<CoverageLine, number> {
   const raw = activeLines.map(line => {
     const ls = poolState.lines[line];
-    const netReserve = Math.max(0, ls.grossUnpaidReserve - ls.reinsuranceRecoverable);
+    const netReserve = Math.max(0, ls.netUnpaidReserve);
     return ls.surplus + netReserve - ls.investedAssets;
   });
   const total = raw.reduce((s, v) => s + v, 0);
@@ -1237,12 +1199,10 @@ export function aggregateLineResults(
     riskControlInvestment: sum('riskControlInvestment'),
     priorYearDevelopment: sum('priorYearDevelopment'),
 
-    beginningGrossReserve: sum('beginningGrossReserve'),
-    currentYearGrossReserve: sum('currentYearGrossReserve'),
-    grossPaidLosses: sum('grossPaidLosses'),
-    endingGrossReserve: sum('endingGrossReserve'),
-    beginningReinsRecoverable: sum('beginningReinsRecoverable'),
-    endingReinsRecoverable: sum('endingReinsRecoverable'),
+    beginningNetReserve: sum('beginningNetReserve'),
+    currentYearNetReserve: sum('currentYearNetReserve'),
+    netPaidLosses: sum('netPaidLosses'),
+    endingNetReserve: sum('endingNetReserve'),
 
     // Stage 2.9: per-line portfolios make the pool return an asset-weighted
     // blend of each line's own realized return, not any single line's rate.
@@ -1274,10 +1234,7 @@ export function aggregateLineResults(
     rateFundingGapPer100: first.rateFundingGapPer100,
     rateAdequacyRatio: first.rateAdequacyRatio,
 
-    expectedGrossUnpaidLoss: sum('expectedGrossUnpaidLoss'),
-    expectedReinsuranceRecoverable: sum('expectedReinsuranceRecoverable'),
     expectedNetUnpaidLoss: sum('expectedNetUnpaidLoss'),
-    grossFundingTarget: sum('grossFundingTarget'),
     netFundingTarget: sum('netFundingTarget'),
     indicatedNetReserveAtConfidenceLevel: sum('indicatedNetReserveAtConfidenceLevel'),
     reserveRiskMarginNeeded: reserveRiskMarginNeededSum,
@@ -1341,12 +1298,10 @@ function processReserveDevelopment(
 ): {
   developmentImpact: number;
   updatedCohorts: ReserveCohort[];
-  grossPaidThisYear: number;
-  reinsReceivedThisYear: number;
+  netPaidThisYear: number;
 } {
   let developmentImpact = 0;
-  let grossPaidThisYear = 0;
-  let reinsReceivedThisYear = 0;
+  let netPaidThisYear = 0;
 
   // Reserve development is affected by prior year funding adequacy.
   // When prior funding adequacy was low, there is pressure toward adverse development.
@@ -1363,30 +1318,20 @@ function processReserveDevelopment(
       devMax = Math.max(0.95, Math.min(1.20, devMax));
 
       const devFactor = rng.range(devMin, devMax);
-      const devAdjustedUnpaid = c.grossUnpaid * devFactor;
-      const devImpact = c.grossUnpaid - devAdjustedUnpaid;
+      const devAdjustedUnpaid = c.netUnpaid * devFactor;
+      const devImpact = c.netUnpaid - devAdjustedUnpaid;
 
       const paydown = devAdjustedUnpaid * c.paydownPct;
-      grossPaidThisYear += paydown;
+      netPaidThisYear += paydown;
 
       const newUnpaid = devAdjustedUnpaid - paydown;
-
-      const reinsRatio =
-        c.reinsuranceRecoverable / Math.max(c.grossUnpaid, 1);
-
-      const reinsReceived = paydown * reinsRatio;
-      reinsReceivedThisYear += reinsReceived;
-
-      const newReinsRecoverable = newUnpaid * reinsRatio;
 
       developmentImpact += devImpact;
 
       return {
         ...c,
-        grossUnpaid: Math.max(0, newUnpaid),
-        grossPaid: c.grossPaid + paydown,
-        reinsuranceRecoverable: Math.max(0, newReinsRecoverable),
-        reinsuranceReceived: c.reinsuranceReceived + reinsReceived,
+        netUnpaid: Math.max(0, newUnpaid),
+        netPaid: c.netPaid + paydown,
         closed: newUnpaid < 1000,
       };
     });
@@ -1394,7 +1339,6 @@ function processReserveDevelopment(
   return {
     developmentImpact,
     updatedCohorts,
-    grossPaidThisYear,
-    reinsReceivedThisYear,
+    netPaidThisYear,
   };
 }

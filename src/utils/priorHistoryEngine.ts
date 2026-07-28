@@ -232,21 +232,20 @@ function deriveStartingFinancials(poolState: PoolState, priorHistory: ResultSet[
   const lines = Object.values(poolState.lines);
 
   const investments = lines.reduce((s, l) => s + l.investedAssets, 0);
-  const reinsuranceRecoverable = lines.reduce((s, l) => s + l.reinsuranceRecoverable, 0);
-  const grossUnpaidReserve = lines.reduce((s, l) => s + l.grossUnpaidReserve, 0);
 
-  const totalAssets = poolState.cash + investments + reinsuranceRecoverable + poolState.otherAssets;
-  const totalLiabilities = grossUnpaidReserve + poolState.unearnedPremium + poolState.otherLiabilities;
+  const netUnpaidReserve = lines.reduce((s, l) => s + l.netUnpaidReserve, 0);
+
+  const totalAssets = poolState.cash + investments + poolState.otherAssets;
+  const totalLiabilities = netUnpaidReserve + poolState.unearnedPremium + poolState.otherLiabilities;
   const surplus = totalAssets - totalLiabilities;
   const annualPremium = lastResult.totalMemberCharge;
 
   return {
     cash: poolState.cash,
     investments,
-    reinsuranceRecoverable,
     otherAssets: poolState.otherAssets,
     totalAssets,
-    grossUnpaidReserve,
+    netUnpaidReserve,
     unearnedPremium: poolState.unearnedPremium,
     otherLiabilities: poolState.otherLiabilities,
     totalLiabilities,
@@ -295,10 +294,8 @@ export function toHistoricalYear(r: LineResultSet): HistoricalYear {
     quotaShareLosses: r.quotaShareLosses,
     reinsuranceRecovery: r.reinsuranceRecovery,
     netUltimateLoss: r.netUltimateLoss,
-    grossPaidLosses: r.grossPaidLosses,
-    endingGrossReserve: r.endingGrossReserve,
-    endingReinsuranceRecoverable: r.endingReinsRecoverable,
-    endingNetReserve: r.expectedNetUnpaidLoss,
+    netPaidLosses: r.netPaidLosses,
+    endingNetReserve: r.endingNetReserve,
     actualLossRatio: r.actualLossRatio,
     actualExpenseRatio: r.actualExpenseRatio,
     actualCombinedRatio: r.actualCombinedRatio,

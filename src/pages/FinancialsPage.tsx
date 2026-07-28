@@ -126,11 +126,10 @@ export default function FinancialsPage({ lockedResults, priorResults, lineView }
             <StatementCard title="Ending Balance Sheet">
               <BSLine label="Cash & Cash Equivalents" value={formatCurrency(statement.balanceSheet.cash)} />
               <BSLine label="Investments" value={formatCurrency(statement.balanceSheet.investments)} />
-              <BSLine label="Reinsurance Recoverable on Unpaid Losses" value={formatCurrency(statement.balanceSheet.reinsuranceRecoverable)} />
               <BSLine label="Other Assets" value={formatCurrency(statement.balanceSheet.otherAssets)} />
               <BSLine label="Total Assets" value={formatCurrency(statement.balanceSheet.totalAssets)} bold />
               <div className="border-t border-gray-200 my-2" />
-              <BSLine label="Gross Unpaid Loss and LAE Reserve" value={formatCurrency(statement.balanceSheet.grossUnpaidReserve)} />
+              <BSLine label="Unpaid Loss & LAE Reserve, net of reinsurance" value={formatCurrency(statement.balanceSheet.netUnpaidReserve)} />
               <BSLine label="Unearned Pool Premium" value={formatCurrency(statement.balanceSheet.unearnedPremium)} />
               <BSLine label="Other Liabilities" value={formatCurrency(statement.balanceSheet.otherLiabilities)} />
               <BSLine label="Total Liabilities" value={formatCurrency(statement.balanceSheet.totalLiabilities)} bold />
@@ -138,7 +137,7 @@ export default function FinancialsPage({ lockedResults, priorResults, lineView }
               <BSLine label="Net Equity / Surplus" value={formatCurrency(statement.balanceSheet.surplus)} bold highlight valueColor={statement.balanceSheet.surplus >= 0 ? 'text-emerald-700' : 'text-red-700'} />
               <p className="text-xs text-gray-400 mt-2">Balance check: Assets ({formatCurrency(statement.balanceSheet.totalAssets)}) − Liabilities ({formatCurrency(statement.balanceSheet.totalLiabilities)}) = {formatCurrency(statement.balanceSheet.surplus)}</p>
               {selectedResult && (
-                <p className="text-xs text-gray-500 mt-1 italic">Gross Unpaid Reserve represents expected unpaid losses, not a CLF-loaded funding target.</p>
+                <p className="text-xs text-gray-500 mt-1 italic">Unpaid loss reserve represents expected unpaid losses, not a CLF-loaded funding target.</p>
               )}
             </StatementCard>
             <StatementCard title="Net Equity / Surplus Rollforward">

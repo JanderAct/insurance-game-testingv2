@@ -68,16 +68,15 @@ function enrollLabel(line: CoverageLine): string {
   return line === 'WC' ? 'enroll' : `enroll_${line}`;
 }
 
-// Generate starting reserve cohorts from the beginning gross unpaid reserve
+// Generate starting reserve cohorts from the beginning NET unpaid reserve
 // These are prior accident-year cohorts that exist before gameplay starts
 function generateStartingReserveCohorts(
-  grossUnpaidReserve: number,
-  reinsuranceRecoverable: number,
+  netUnpaidReserve: number,
   startingYear: number,
   rng: SeededRandom,
   paydownPct: number = RESERVE_PAYDOWN_PCT
 ): ReserveCohort[] {
-  if (grossUnpaidReserve <= 0) return [];
+  if (netUnpaidReserve <= 0) return [];
 
   // Create 3-5 prior accident-year cohorts
   // More recent cohorts have more unpaid; older cohorts have less
@@ -99,22 +98,20 @@ function generateStartingReserveCohorts(
     weights[i] /= weightSum;
   }
 
-  // Distribute the gross unpaid reserve across cohorts
-  let remainingReserve = grossUnpaidReserve;
-  let remainingReins = reinsuranceRecoverable;
+  // Distribute the net unpaid reserve across cohorts
+  let remainingReserve = netUnpaidReserve;
 
   for (let i = 0; i < numCohorts; i++) {
     // Last cohort gets the remainder to ensure exact sum
     const isLast = i === numCohorts - 1;
-    const cohortGrossUnpaid = isLast ? remainingReserve : grossUnpaidReserve * weights[i];
-    const cohortReins = isLast ? remainingReins : reinsuranceRecoverable * weights[i];
+    const cohortNetUnpaid = isLast ? remainingReserve : netUnpaidReserve * weights[i];
 
     // Calculate how much has been paid on this cohort (older = more paid)
     // Age determines paydown: cohorts aged 1-5 years
     const age = i + 1; // 1 = most recent (1 year ago), 5 = oldest (5 years ago)
     const paidRatio = Math.min(0.80, age * paydownPct);
-    const grossUltimate = cohortGrossUnpaid / (1 - paidRatio);
-    const grossPaid = grossUltimate * paidRatio;
+    const netUltimate = cohortNetUnpaid / (1 - paidRatio);
+    const netPaid = netUltimate * paidRatio;
 
     // Development factor based on age (older cohorts have settled more)
     const devFactor = 1 + rng.range(-0.03, 0.05) / age;
@@ -128,18 +125,15 @@ function generateStartingReserveCohorts(
     cohorts.push({
       yearNumber: cohortYearNumber,
       calendarYear: cohortCalendarYear,
-      grossUltimate,
-      grossPaid,
-      grossUnpaid: cohortGrossUnpaid,
-      reinsuranceRecoverable: cohortReins,
-      reinsuranceReceived: cohortReins * paidRatio, // Proportional to paid
+      netUltimate,
+      netPaid,
+      netUnpaid: cohortNetUnpaid,
       paydownPct,
       developmentFactor: devFactor,
       closed: false,
     });
 
-    remainingReserve -= cohortGrossUnpaid;
-    remainingReins -= cohortReins;
+    remainingReserve -= cohortNetUnpaid;
   }
 
   return cohorts;
@@ -234,33 +228,40 @@ export function generateStartingPoolState(
 
   const cash = rng.range(STARTING_FINANCIALS.cash.min, STARTING_FINANCIALS.cash.max);
   const investments = rng.range(STARTING_FINANCIALS.investments.min, STARTING_FINANCIALS.investments.max);
-  const reinsuranceRecoverable = rng.range(STARTING_FINANCIALS.reinsuranceRecoverable.min, STARTING_FINANCIALS.reinsuranceRecoverable.max);
+  // Retained solely to preserve RNG stream position. The reinsurance-recoverable
+  // concept was removed (reserves are now net of reinsurance), but this draw
+  // still consumes the bootstrap stream so that every subsequent draw — starting
+  // cash, investments, reserves, cohort development factors, member generation —
+  // lands on the same value as before. Deleting it would shift the whole sequence
+  // and re-roll every seed's opening position.
+  // The drawn value is used only locally: seededNetReserve = grossDraw - recoverableDraw.
+  const wcRecoverableDraw = rng.range(STARTING_FINANCIALS.reinsuranceRecoverable.min, STARTING_FINANCIALS.reinsuranceRecoverable.max);
   const otherAssets = rng.range(STARTING_FINANCIALS.otherAssets.min, STARTING_FINANCIALS.otherAssets.max);
-  const grossUnpaidReserve = rng.range(STARTING_FINANCIALS.grossUnpaidReserve.min, STARTING_FINANCIALS.grossUnpaidReserve.max);
+  const wcGrossReserveDraw = rng.range(STARTING_FINANCIALS.grossUnpaidReserve.min, STARTING_FINANCIALS.grossUnpaidReserve.max);
+  const netUnpaidReserve = wcGrossReserveDraw - wcRecoverableDraw;
   // Held at zero, matching every subsequent year: written premium is treated as collected
   // and earned in the year it's written, with no separate unearned-premium timing layer.
   const unearnedPremium = 0;
   const otherLiabilities = rng.range(STARTING_FINANCIALS.otherLiabilities.min, STARTING_FINANCIALS.otherLiabilities.max);
 
-  const totalAssets = cash + investments + reinsuranceRecoverable + otherAssets;
-  const totalLiabilities = grossUnpaidReserve + unearnedPremium + otherLiabilities;
+  const totalAssets = cash + investments + otherAssets;
+  const totalLiabilities = netUnpaidReserve + unearnedPremium + otherLiabilities;
   const surplus = totalAssets - totalLiabilities;
 
   const marketShare = activeExposure / Math.max(totalMarketExposure, 0.01);
 
-  // Generate starting reserve cohorts from the beginning gross unpaid reserve
+  // Generate starting reserve cohorts from the beginning NET unpaid reserve
   // These represent prior accident-year unpaid losses that will roll forward during gameplay
   const startingReserveCohorts = generateStartingReserveCohorts(
-    grossUnpaidReserve,
-    reinsuranceRecoverable,
+    netUnpaidReserve,
     startingYear,
     rng
   );
 
   // Validate sum
-  const cohortSum = startingReserveCohorts.reduce((s, c) => s + c.grossUnpaid, 0);
-  if (Math.abs(cohortSum - grossUnpaidReserve) > 1) {
-    console.warn(`Starting reserve cohort sum (${cohortSum}) does not match grossUnpaidReserve (${grossUnpaidReserve})`);
+  const cohortSum = startingReserveCohorts.reduce((s, c) => s + c.netUnpaid, 0);
+  if (Math.abs(cohortSum - netUnpaidReserve) > 1) {
+    console.warn(`Starting reserve cohort sum (${cohortSum}) does not match netUnpaidReserve (${netUnpaidReserve})`);
   }
 
   // GL bootstrap draws happen strictly after every WC draw above, so the WC-only
@@ -271,12 +272,19 @@ export function generateStartingPoolState(
         const glRatePer100 = rng.range(GL_STARTING_RATE_PER_100.min, GL_STARTING_RATE_PER_100.max);
         const glExpectedLossRatio = rng.range(GL_EXPECTED_LOSS_RATIO.min, GL_EXPECTED_LOSS_RATIO.max);
         const glPurePremiumPer100 = glRatePer100 * glExpectedLossRatio;
-        const glGrossUnpaidReserve = rng.range(GL_STARTING_FINANCIALS.grossUnpaidReserve.min, GL_STARTING_FINANCIALS.grossUnpaidReserve.max);
-        const glReinsuranceRecoverable = rng.range(GL_STARTING_FINANCIALS.reinsuranceRecoverable.min, GL_STARTING_FINANCIALS.reinsuranceRecoverable.max);
+        const glGrossReserveDraw = rng.range(GL_STARTING_FINANCIALS.grossUnpaidReserve.min, GL_STARTING_FINANCIALS.grossUnpaidReserve.max);
+        // Retained solely to preserve RNG stream position. The reinsurance-recoverable
+        // concept was removed (reserves are now net of reinsurance), but this draw
+        // still consumes the bootstrap stream so that every subsequent draw — starting
+        // cash, investments, reserves, cohort development factors, member generation —
+        // lands on the same value as before. Deleting it would shift the whole sequence
+        // and re-roll every seed's opening position.
+        // The drawn value is used only locally: seededNetReserve = grossDraw - recoverableDraw.
+        const glRecoverableDraw = rng.range(GL_STARTING_FINANCIALS.reinsuranceRecoverable.min, GL_STARTING_FINANCIALS.reinsuranceRecoverable.max);
+        const glNetUnpaidReserve = glGrossReserveDraw - glRecoverableDraw;
         const glTotalMarketExposure = allMarketMembers.reduce((sum, m) => sum + getMemberExposure(m, 'GL'), 0);
         const glStartingReserveCohorts = generateStartingReserveCohorts(
-          glGrossUnpaidReserve,
-          glReinsuranceRecoverable,
+          glNetUnpaidReserve,
           startingYear,
           rng
         );
@@ -290,11 +298,10 @@ export function generateStartingPoolState(
           riskControlEffectiveness: 0,
           reserveCohorts: glStartingReserveCohorts,
           members: lineMembers('GL'),
-          grossUnpaidReserve: glGrossUnpaidReserve,
-          reinsuranceRecoverable: glReinsuranceRecoverable,
+          netUnpaidReserve: glNetUnpaidReserve,
           // Placeholder — the redistribution block below assigns every active
           // line its weighted share of the opening surplus and investments.
-          surplus: glReinsuranceRecoverable - glGrossUnpaidReserve,
+          surplus: -glNetUnpaidReserve,
           investedAssets: 0,
           totalMarketExposure: glTotalMarketExposure,
         };
@@ -309,12 +316,19 @@ export function generateStartingPoolState(
         const propertyRatePer100 = rng.range(PROPERTY_STARTING_RATE_PER_100.min, PROPERTY_STARTING_RATE_PER_100.max);
         const propertyExpectedLossRatio = rng.range(PROPERTY_EXPECTED_LOSS_RATIO.min, PROPERTY_EXPECTED_LOSS_RATIO.max);
         const propertyPurePremiumPer100 = propertyRatePer100 * propertyExpectedLossRatio;
-        const propertyGrossUnpaidReserve = rng.range(PROPERTY_STARTING_FINANCIALS.grossUnpaidReserve.min, PROPERTY_STARTING_FINANCIALS.grossUnpaidReserve.max);
-        const propertyReinsuranceRecoverable = rng.range(PROPERTY_STARTING_FINANCIALS.reinsuranceRecoverable.min, PROPERTY_STARTING_FINANCIALS.reinsuranceRecoverable.max);
+        const propertyGrossReserveDraw = rng.range(PROPERTY_STARTING_FINANCIALS.grossUnpaidReserve.min, PROPERTY_STARTING_FINANCIALS.grossUnpaidReserve.max);
+        // Retained solely to preserve RNG stream position. The reinsurance-recoverable
+        // concept was removed (reserves are now net of reinsurance), but this draw
+        // still consumes the bootstrap stream so that every subsequent draw — starting
+        // cash, investments, reserves, cohort development factors, member generation —
+        // lands on the same value as before. Deleting it would shift the whole sequence
+        // and re-roll every seed's opening position.
+        // The drawn value is used only locally: seededNetReserve = grossDraw - recoverableDraw.
+        const propertyRecoverableDraw = rng.range(PROPERTY_STARTING_FINANCIALS.reinsuranceRecoverable.min, PROPERTY_STARTING_FINANCIALS.reinsuranceRecoverable.max);
+        const propertyNetUnpaidReserve = propertyGrossReserveDraw - propertyRecoverableDraw;
         const propertyTotalMarketExposure = allMarketMembers.reduce((sum, m) => sum + getMemberExposure(m, 'Property'), 0);
         const propertyStartingReserveCohorts = generateStartingReserveCohorts(
-          propertyGrossUnpaidReserve,
-          propertyReinsuranceRecoverable,
+          propertyNetUnpaidReserve,
           startingYear,
           rng,
           LINE_RESERVE_PAYDOWN_PCT.Property
@@ -329,10 +343,9 @@ export function generateStartingPoolState(
           riskControlEffectiveness: 0,
           reserveCohorts: propertyStartingReserveCohorts,
           members: lineMembers('Property'),
-          grossUnpaidReserve: propertyGrossUnpaidReserve,
-          reinsuranceRecoverable: propertyReinsuranceRecoverable,
+          netUnpaidReserve: propertyNetUnpaidReserve,
           // Placeholder — see the redistribution block below (same as GL).
-          surplus: propertyReinsuranceRecoverable - propertyGrossUnpaidReserve,
+          surplus: -propertyNetUnpaidReserve,
           investedAssets: 0,
           totalMarketExposure: propertyTotalMarketExposure,
         };
@@ -349,8 +362,7 @@ export function generateStartingPoolState(
     riskControlEffectiveness: 0,
     reserveCohorts: startingReserveCohorts,
     members: wcMembers,
-    grossUnpaidReserve,
-    reinsuranceRecoverable,
+    netUnpaidReserve,
     surplus,
     investedAssets: 0, // assigned by the redistribution block below
     totalMarketExposure,
@@ -388,10 +400,10 @@ export function generateStartingPoolState(
     const lineCash = OPERATING_CASH_PCT_OF_PREMIUM * linePremium;
     const lineOtherAssets = idx === 0 ? otherAssets : 0;
     const lineOtherLiab = idx === 0 ? otherLiabilities : 0;
-    // surplus = cash + invested + reinsRec + otherAssets − grossReserve − otherLiab
-    // ⇒ invested = surplus + grossReserve + otherLiab − reinsRec − cash − otherAssets
-    ls.investedAssets = targetSurplus + ls.grossUnpaidReserve + lineOtherLiab
-      - ls.reinsuranceRecoverable - lineCash - lineOtherAssets;
+    // surplus = cash + invested + otherAssets − netReserve − otherLiab
+    // ⇒ invested = surplus + netReserve + otherLiab − cash − otherAssets
+    ls.investedAssets = targetSurplus + ls.netUnpaidReserve + lineOtherLiab
+      - lineCash - lineOtherAssets;
     ls.surplus = targetSurplus;
     poolCash += lineCash;
   });
@@ -413,10 +425,9 @@ export function generateStartingPoolState(
   const startingFinancials: StartingFinancials = {
     cash,
     investments,
-    reinsuranceRecoverable,
     otherAssets,
     totalAssets,
-    grossUnpaidReserve,
+    netUnpaidReserve,
     unearnedPremium,
     otherLiabilities,
     totalLiabilities,

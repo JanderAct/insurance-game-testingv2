@@ -55,7 +55,7 @@ const COMPARISON_METRICS: ComparisonMetric[] = [
   { key: 'netLosses', label: 'Net Ultimate Loss', kind: 'currency', polarity: 'goodDown', getValue: r => r.netUltimateLoss, showPctChange: true },
   { key: 'lossRatio', label: 'Actual Loss Ratio', kind: 'ratio', polarity: 'goodDown', getValue: r => r.actualLossRatio, showPctChange: true },
   { key: 'combinedRatio', label: 'Actual Combined Ratio', kind: 'ratio', polarity: 'goodDown', getValue: r => r.actualCombinedRatio, showPctChange: true },
-  { key: 'reserves', label: 'Ending Gross Reserve', kind: 'currency', polarity: 'neutral', getValue: r => r.endingGrossReserve, showPctChange: true },
+  { key: 'reserves', label: 'Ending Net Reserve', kind: 'currency', polarity: 'neutral', getValue: r => r.endingNetReserve, showPctChange: true },
   { key: 'reinsRecovery', label: 'Reinsurance Recovery', kind: 'currency', polarity: 'neutral', getValue: r => r.reinsuranceRecovery, showPctChange: false },
   { key: 'investmentIncome', label: 'Investment Income', kind: 'currency', polarity: 'goodUp', getValue: r => r.investmentIncome, showPctChange: false },
   { key: 'netIncome', label: 'Net Income', kind: 'currency', polarity: 'goodUp', getValue: r => r.netIncome, showPctChange: false },
@@ -263,12 +263,10 @@ export default function ResultsPage({ lockedResults, lineView }: ResultsPageProp
                 value={formatCurrency(result.priorYearDevelopment)}
                 valueColor={result.priorYearDevelopment >= 0 ? 'text-emerald-600' : 'text-red-600'}
               />
-              <Row label="Beginning Gross Reserve" value={formatCurrency(result.beginningGrossReserve)} />
-              <Row label="Current-Year Gross Reserve" value={formatCurrency(result.currentYearGrossReserve)} />
-              <Row label="Gross Paid Losses" value={formatCurrency(result.grossPaidLosses)} />
-              <Row label="Ending Gross Accounting Reserve" value={formatCurrency(result.endingGrossReserve)} />
-              <Row label="Reinsurance Recoverable on Unpaid" value={formatCurrency(result.endingReinsRecoverable)} />
-              <Row label="Net Accounting Reserve" value={formatCurrency(result.expectedNetUnpaidLoss)} />
+              <Row label="Beginning Net Reserve" value={formatCurrency(result.beginningNetReserve)} />
+              <Row label="Current-Year Net Reserve" value={formatCurrency(result.currentYearNetReserve)} />
+              <Row label="Net Paid Losses" value={formatCurrency(result.netPaidLosses)} />
+              <Row label="Ending Net Accounting Reserve" value={formatCurrency(result.endingNetReserve)} />
               <p className="text-xs text-gray-500 mt-2 leading-relaxed">
                 Accounting reserves are expected unpaid claims from incurred losses. They are not multiplied by CLF.
               </p>
@@ -389,8 +387,6 @@ export default function ResultsPage({ lockedResults, lineView }: ResultsPageProp
             </ResultCard>
 
             <ResultCard title="Reserve View" icon={<Shield size={16} />}>
-              <Row label="Expected Gross Unpaid Loss" value={formatCurrency(result.expectedGrossUnpaidLoss)} />
-              <Row label="Expected Reinsurance Recoverable" value={formatCurrency(result.expectedReinsuranceRecoverable)} valueColor="text-emerald-600" />
               <Row label="Expected Net Unpaid Loss" value={formatCurrency(result.expectedNetUnpaidLoss)} />
               <div className="border-t border-gray-100 my-1" />
               <Row
