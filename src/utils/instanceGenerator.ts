@@ -236,16 +236,23 @@ export function generateStartingPoolState(
   // and re-roll every seed's opening position.
   // The drawn value is used only locally: seededNetReserve = grossDraw - recoverableDraw.
   const wcRecoverableDraw = rng.range(STARTING_FINANCIALS.reinsuranceRecoverable.min, STARTING_FINANCIALS.reinsuranceRecoverable.max);
-  const otherAssets = rng.range(STARTING_FINANCIALS.otherAssets.min, STARTING_FINANCIALS.otherAssets.max);
+  // Retained solely to preserve RNG stream position. The otherAssets/
+  // otherLiabilities concepts were removed (frozen bootstrap constants with no
+  // mechanic), but these draws still consume the bootstrap stream so every
+  // subsequent draw lands on the same value as before. Deleting them would
+  // shift the sequence and re-roll every seed's opening position. The drawn
+  // values are discarded.
+  rng.range(STARTING_FINANCIALS.otherAssets.min, STARTING_FINANCIALS.otherAssets.max);
   const wcGrossReserveDraw = rng.range(STARTING_FINANCIALS.grossUnpaidReserve.min, STARTING_FINANCIALS.grossUnpaidReserve.max);
   const netUnpaidReserve = wcGrossReserveDraw - wcRecoverableDraw;
   // Held at zero, matching every subsequent year: written premium is treated as collected
   // and earned in the year it's written, with no separate unearned-premium timing layer.
   const unearnedPremium = 0;
-  const otherLiabilities = rng.range(STARTING_FINANCIALS.otherLiabilities.min, STARTING_FINANCIALS.otherLiabilities.max);
+  // Retained solely to preserve RNG stream position (see the otherAssets draw above).
+  rng.range(STARTING_FINANCIALS.otherLiabilities.min, STARTING_FINANCIALS.otherLiabilities.max);
 
-  const totalAssets = cash + investments + otherAssets;
-  const totalLiabilities = netUnpaidReserve + unearnedPremium + otherLiabilities;
+  const totalAssets = cash + investments;
+  const totalLiabilities = netUnpaidReserve + unearnedPremium;
   const surplus = totalAssets - totalLiabilities;
 
   const marketShare = activeExposure / Math.max(totalMarketExposure, 0.01);
@@ -386,11 +393,8 @@ export function generateStartingPoolState(
     GL: glLineState,
     Property: propertyLineState,
   };
-  // otherAssets / otherLiabilities are drawn once (small placeholders); assign
-  // them to the FIRST active line so the pool totals include them exactly once
-  // and every line's balance sheet stays self-consistent.
   let poolCash = 0;
-  activeLines.forEach((line, idx) => {
+  activeLines.forEach(line => {
     const ls = lineStateByLine[line];
     const activeExp = ls.members
       .filter(m => m.status === 'active')
@@ -398,21 +402,16 @@ export function generateStartingPoolState(
     const linePremium = activeExp * ls.ratePer100 * 10_000;
     const targetSurplus = (STARTING_CAPITAL_TO_PREMIUM[line] ?? 1.0) * linePremium;
     const lineCash = OPERATING_CASH_PCT_OF_PREMIUM * linePremium;
-    const lineOtherAssets = idx === 0 ? otherAssets : 0;
-    const lineOtherLiab = idx === 0 ? otherLiabilities : 0;
-    // surplus = cash + invested + otherAssets − netReserve − otherLiab
-    // ⇒ invested = surplus + netReserve + otherLiab − cash − otherAssets
-    ls.investedAssets = targetSurplus + ls.netUnpaidReserve + lineOtherLiab
-      - lineCash - lineOtherAssets;
+    // surplus = cash + invested − netReserve
+    // ⇒ invested = surplus + netReserve − cash
+    ls.investedAssets = targetSurplus + ls.netUnpaidReserve - lineCash;
     ls.surplus = targetSurplus;
     poolCash += lineCash;
   });
 
   const poolState: PoolState = {
     cash: poolCash,
-    otherAssets,
     unearnedPremium,
-    otherLiabilities,
     allMarketMembers: allMembersWithStatus,
     lines: {
       WC: wcLineState,
@@ -425,11 +424,9 @@ export function generateStartingPoolState(
   const startingFinancials: StartingFinancials = {
     cash,
     investments,
-    otherAssets,
     totalAssets,
     netUnpaidReserve,
     unearnedPremium,
-    otherLiabilities,
     totalLiabilities,
     surplus,
     annualPremium,

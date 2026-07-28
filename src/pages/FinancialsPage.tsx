@@ -132,7 +132,7 @@ export default function FinancialsPage({ lockedResults, priorResults, lineView }
                 const cashSlice = investedAssets * (alloc.cashPct / 100);
                 const cashAndEquivalents = bs.cash + cashSlice;
                 const noncurrentInvestments = investedAssets - cashSlice;
-                const totalCurrentAssets = cashAndEquivalents + bs.otherAssets;
+                const totalCurrentAssets = cashAndEquivalents;
                 const totalNoncurrentAssets = noncurrentInvestments;
 
                 // Current portion = the share of each line's own net unpaid
@@ -147,14 +147,13 @@ export default function FinancialsPage({ lockedResults, priorResults, lineView }
                   : bs.netUnpaidReserve * (LINE_RESERVE_PAYDOWN_PCT[lineView as CoverageLine] ?? 0);
                 const noncurrentUnpaidPortion = bs.netUnpaidReserve - currentUnpaidPortion;
 
-                const totalCurrentLiabilities = currentUnpaidPortion + bs.otherLiabilities;
+                const totalCurrentLiabilities = currentUnpaidPortion;
                 const totalNoncurrentLiabilities = noncurrentUnpaidPortion;
 
                 return (
                   <>
                     <SectionLabel text="Current assets" />
                     <BSLine label="Cash and cash equivalents" value={formatCurrency(cashAndEquivalents)} indent />
-                    <BSLine label="Other assets" value={formatCurrency(bs.otherAssets)} indent />
                     <BSLine label="Total current assets" value={formatCurrency(totalCurrentAssets)} bold />
 
                     <SectionLabel text="Noncurrent assets" />
@@ -166,7 +165,6 @@ export default function FinancialsPage({ lockedResults, priorResults, lineView }
 
                     <SectionLabel text="Current liabilities" />
                     <BSLine label="Unpaid loss and LAE reserve, net of reinsurance — current portion" value={formatCurrency(currentUnpaidPortion)} indent />
-                    <BSLine label="Accounts payable and accrued" value={formatCurrency(bs.otherLiabilities)} indent />
                     <BSLine label="Total current liabilities" value={formatCurrency(totalCurrentLiabilities)} bold />
 
                     <SectionLabel text="Noncurrent liabilities" />

@@ -341,10 +341,8 @@ export interface ResultSet {
   endingCash: number;
   beginningInvestments: number;
   endingInvestments: number;
-  otherAssets: number;
   totalAssets: number;
   unearnedPremium: number;
-  otherLiabilities: number;
   totalLiabilities: number;
   beginingSurplus: number;
   endingSurplus: number;
@@ -401,12 +399,10 @@ export interface LinePoolState {
 
 // Pool ongoing state: fields shared across all lines, plus one LinePoolState per
 // line. Investments are NOT here — each line holds its own portfolio (Stage 2.9);
-// cash/otherAssets/otherLiabilities remain shared and are split by contribution share.
+// cash remains shared and is split by contribution share.
 export interface PoolState {
   cash: number;
-  otherAssets: number;
   unearnedPremium: number;
-  otherLiabilities: number;
   allMarketMembers: Member[];      // all 100 fictional members
   lines: Record<CoverageLine, LinePoolState>;
   interLineLoans: InterLineLoan[]; // pool-level ledger of outstanding inter-line loans
@@ -432,11 +428,9 @@ export interface GameState {
 export interface StartingFinancials {
   cash: number;
   investments: number;
-  otherAssets: number;
   totalAssets: number;
   netUnpaidReserve: number;    // unpaid loss reserve, net of reinsurance
   unearnedPremium: number;
-  otherLiabilities: number;
   totalLiabilities: number;
   surplus: number;
   annualPremium: number;

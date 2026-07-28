@@ -60,8 +60,6 @@ interface LinePreGame {
   lineResults: LineResultSet[];   // years -2, -1, 0 for this line
   lineState: LinePoolState;       // ending state (Year 1 opening for this line)
   cash: number;                   // this line's own ending operating cash
-  otherAssets: number;
-  otherLiabilities: number;
   unearnedPremium: number;
   members: Member[];              // this line's ending roster
   attempt: number;
@@ -159,8 +157,6 @@ function finalizeLine(
     lineResults: c.lineResults,
     lineState: c.poolState.lines[line],
     cash: c.poolState.cash,
-    otherAssets: c.poolState.otherAssets,
-    otherLiabilities: c.poolState.otherLiabilities,
     unearnedPremium: c.poolState.unearnedPremium,
     members: c.poolState.lines[line].members,
     attempt,
@@ -176,8 +172,8 @@ export function runPriorHistory(
 
   // --- Assemble the Year 1 opening pool from the per-line ending states ---
   // Per-line surplus/invested/reserves/roster come straight from each line's
-  // own solo pre-game. Shared operating items (cash / other assets / other
-  // liabilities) are the SUM across lines. The pool total is internally
+  // own solo pre-game. The shared operating cash is the SUM across lines.
+  // The pool total is internally
   // consistent (each solo line's balance sheet ties, and summing preserves
   // that), so the live-year contribution-share split reproduces each line's
   // stored surplus and Year 1 ties out.
@@ -201,9 +197,7 @@ export function runPriorHistory(
 
   const poolState: PoolState = {
     cash: perLine.reduce((s, p) => s + p.cash, 0),
-    otherAssets: perLine.reduce((s, p) => s + p.otherAssets, 0),
     unearnedPremium: perLine.reduce((s, p) => s + p.unearnedPremium, 0),
-    otherLiabilities: perLine.reduce((s, p) => s + p.otherLiabilities, 0),
     allMarketMembers,
     lines,
     interLineLoans: [],
@@ -235,19 +229,17 @@ function deriveStartingFinancials(poolState: PoolState, priorHistory: ResultSet[
 
   const netUnpaidReserve = lines.reduce((s, l) => s + l.netUnpaidReserve, 0);
 
-  const totalAssets = poolState.cash + investments + poolState.otherAssets;
-  const totalLiabilities = netUnpaidReserve + poolState.unearnedPremium + poolState.otherLiabilities;
+  const totalAssets = poolState.cash + investments;
+  const totalLiabilities = netUnpaidReserve + poolState.unearnedPremium;
   const surplus = totalAssets - totalLiabilities;
   const annualPremium = lastResult.totalMemberCharge;
 
   return {
     cash: poolState.cash,
     investments,
-    otherAssets: poolState.otherAssets,
     totalAssets,
     netUnpaidReserve,
     unearnedPremium: poolState.unearnedPremium,
-    otherLiabilities: poolState.otherLiabilities,
     totalLiabilities,
     surplus,
     annualPremium,

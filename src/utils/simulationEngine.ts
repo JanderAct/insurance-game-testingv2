@@ -36,9 +36,9 @@ function lineRngLabel(base: string, line: CoverageLine): string {
   return line === 'WC' ? base : `${base}_${line}`;
 }
 
-// Context needed to process a single line's year. cash/otherAssets/
-// otherLiabilities are this line's allocated SHARE of the pool's shared balance
-// sheet (see processYear). investments/investedAssets are this line's OWN
+// Context needed to process a single line's year. cash is this line's
+// allocated SHARE of the pool's shared operating cash (see processYear).
+// investments/investedAssets are this line's OWN
 // segregated portfolio (Stage 2.9 — carried on LinePoolState, not split from a
 // shared pot), and investmentIncome/investmentReturnRate come from this line's
 // own seeded draw against its own allocation.
@@ -49,8 +49,6 @@ interface LineYearContext {
   allMarketMembers: Member[];
   cash: number;
   investments: number;
-  otherAssets: number;
-  otherLiabilities: number;
   assetAllocation: AssetAllocation;
   investedAssets: number;
   investmentIncome: number;
@@ -63,9 +61,7 @@ interface LineYearContext {
 // each line's ending portfolio goes to its own LinePoolState.investedAssets.
 interface LineYearShared {
   cash: number;
-  otherAssets: number;
   unearnedPremium: number;
-  otherLiabilities: number;
   allMarketMembers: Member[];
 }
 
@@ -371,7 +367,6 @@ export function processLineYear(
   const beginingSurplus = lineState.surplus;
 
   const unearnedPremium = 0;
-  const otherLiabilities = ctx.otherLiabilities;
 
   const beginningCash = ctx.cash;
 
@@ -411,13 +406,11 @@ export function processLineYear(
 
   const totalAssets =
     endingCash +
-    endingInvestments +
-    ctx.otherAssets;
+    endingInvestments;
 
   const totalLiabilities =
     endingNetReserve +
-    unearnedPremium +
-    otherLiabilities;
+    unearnedPremium;
 
   const endingSurplus = totalAssets - totalLiabilities;
 
@@ -618,10 +611,8 @@ export function processLineYear(
     endingCash,
     beginningInvestments,
     endingInvestments,
-    otherAssets: ctx.otherAssets,
     totalAssets,
     unearnedPremium,
-    otherLiabilities,
     totalLiabilities,
     beginingSurplus,
     endingSurplus,
@@ -667,9 +658,7 @@ export function processLineYear(
 
   const updatedShared: LineYearShared = {
     cash: endingCash,
-    otherAssets: ctx.otherAssets,
     unearnedPremium,
-    otherLiabilities,
     allMarketMembers: updatedAllMembers,
   };
 
@@ -680,8 +669,8 @@ export function processLineYear(
 // exactly what makes the line's allocated slice of the shared pot reproduce its
 // own stored surplus (so the surplus rollforward ties out every year):
 //   slice_needed = surplus + netReserve − investedAssets
-// because surplus = [cash&otherAssets slice] + investedAssets
-// − netReserve − [otherLiabilities slice]. Stage 2.9 subtracts investedAssets
+// because surplus = [cash slice] + investedAssets − netReserve.
+// Stage 2.9 subtracts investedAssets
 // (each line's own portfolio is no longer part of the shared pot); before that,
 // the pot included investments and the weight was surplus + netReserve. The sum
 // of these weights equals the pot total by balance-sheet identity, so slices are
@@ -778,8 +767,6 @@ export function processYear(
   const lineResults: Array<{ line: CoverageLine; result: LineResultSet }> = [];
   const updatedLineStates: Partial<Record<CoverageLine, LinePoolState>> = {};
   let sharedCash = 0;
-  let sharedOtherAssets = 0;
-  let sharedOtherLiabilities = 0;
   let sharedUnearnedPremium = 0;
   // Loan repayments owed back to each lending line this year (principal +
   // interest, since interest is embedded in the growing balance). Credited to
@@ -832,8 +819,6 @@ export function processYear(
       allMarketMembers: currentAllMarketMembers,
       cash: poolState.cash * share,
       investments: lineState.investedAssets,
-      otherAssets: poolState.otherAssets * share,
-      otherLiabilities: poolState.otherLiabilities * share,
       assetAllocation: lineDecisions.assetAllocation,
       investedAssets: lineState.investedAssets,
       investmentIncome: invResult.income,
@@ -901,8 +886,6 @@ export function processYear(
     lineResults.push({ line, result });
 
     sharedCash += updatedShared.cash;
-    sharedOtherAssets += updatedShared.otherAssets;
-    sharedOtherLiabilities += updatedShared.otherLiabilities;
     sharedUnearnedPremium += updatedShared.unearnedPremium;
   }
 
@@ -930,9 +913,7 @@ export function processYear(
 
   const updatedPoolState: PoolState = {
     cash: sharedCash,
-    otherAssets: sharedOtherAssets,
     unearnedPremium: sharedUnearnedPremium,
-    otherLiabilities: sharedOtherLiabilities,
     allMarketMembers: currentAllMarketMembers,
     lines: {
       ...poolState.lines,
@@ -1261,10 +1242,8 @@ export function aggregateLineResults(
     endingCash: sum('endingCash'),
     beginningInvestments: sum('beginningInvestments'),
     endingInvestments: sum('endingInvestments'),
-    otherAssets: sum('otherAssets'),
     totalAssets: sum('totalAssets'),
     unearnedPremium: sum('unearnedPremium'),
-    otherLiabilities: sum('otherLiabilities'),
     totalLiabilities: sum('totalLiabilities'),
     beginingSurplus: sum('beginingSurplus'),
     endingSurplus: sum('endingSurplus'),

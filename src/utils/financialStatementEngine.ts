@@ -31,11 +31,9 @@ export interface IncomeStatement {
 export interface BalanceSheet {
   cash: number;
   investments: number;
-  otherAssets: number;
   totalAssets: number;
   netUnpaidReserve: number;
   unearnedPremium: number;
-  otherLiabilities: number;
   totalLiabilities: number;
   surplus: number;
 }
@@ -132,11 +130,9 @@ export function deriveAnnualStatement(result: LineResultSet): AnnualFinancialSta
   const balanceSheet: BalanceSheet = {
     cash: result.endingCash,
     investments: result.endingInvestments,
-    otherAssets: result.otherAssets,
     totalAssets: result.totalAssets,
     netUnpaidReserve: result.endingNetReserve,
     unearnedPremium: result.unearnedPremium,
-    otherLiabilities: result.otherLiabilities,
     totalLiabilities: result.totalLiabilities,
     surplus: result.endingSurplus,
   };

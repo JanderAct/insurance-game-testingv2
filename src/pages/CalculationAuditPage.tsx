@@ -143,15 +143,13 @@ export default function CalculationAuditPage({ lockedResults }: CalculationAudit
 
   const totalAssetsCheck =
     result.endingCash +
-    result.endingInvestments +
-    result.otherAssets;
+    result.endingInvestments;
 
   const totalAssetsDifference = result.totalAssets - totalAssetsCheck;
 
   const totalLiabilitiesCheck =
     result.endingNetReserve +
-    result.unearnedPremium +
-    result.otherLiabilities;
+    result.unearnedPremium;
 
   const totalLiabilitiesDifference =
     result.totalLiabilities - totalLiabilitiesCheck;
@@ -455,11 +453,6 @@ export default function CalculationAuditPage({ lockedResults }: CalculationAudit
       note: nearZero(result.endingInvestments - endingInvestmentsCheck),
     },
     {
-      metric: 'Other Assets',
-      value: formatCurrency(result.otherAssets),
-      formula: 'Other assets carried from pool state.',
-    },
-    {
       metric: 'Total Assets',
       value: formatCurrency(result.totalAssets),
       formula: 'Ending cash + ending investments + reinsurance recoverable + other assets.',
@@ -474,11 +467,6 @@ export default function CalculationAuditPage({ lockedResults }: CalculationAudit
       metric: 'Unearned Premium',
       value: formatCurrency(result.unearnedPremium),
       formula: 'Current simplified model sets unearned premium to zero.',
-    },
-    {
-      metric: 'Other Liabilities',
-      value: formatCurrency(result.otherLiabilities),
-      formula: 'Other liabilities carried from pool state.',
     },
     {
       metric: 'Total Liabilities',
@@ -920,9 +908,7 @@ function buildAssumptionRows(): AuditRow[] {
         `Surplus to Premium Ratio: ${formatRangePct(STARTING_FINANCIALS.surplusToPremiumRatio)}\n` +
         `Cash: ${formatRangeCurrency(STARTING_FINANCIALS.cash)}\n` +
         `Investments: ${formatRangeCurrency(STARTING_FINANCIALS.investments)}\n` +
-        `Other Assets: ${formatRangeCurrency(STARTING_FINANCIALS.otherAssets)}\n` +
         `Net Unpaid Reserve: ${formatRangeCurrency(STARTING_FINANCIALS.grossUnpaidReserve)} less ${formatRangeCurrency(STARTING_FINANCIALS.reinsuranceRecoverable)}\n` +
-        `Other Liabilities: ${formatRangeCurrency(STARTING_FINANCIALS.otherLiabilities)}\n` +
         `Starting Surplus: ${formatRangeCurrency(STARTING_FINANCIALS.startingSurplus)}`,
       formula: 'Starting financial assumption ranges used by instance generation.',
       note:

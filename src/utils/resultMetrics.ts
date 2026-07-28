@@ -438,13 +438,6 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
       csvValue: r => roundDollars(r.endingInvestments),
     },
     {
-      key: 'otherAssets',
-      category: 'Balance Sheet and Surplus',
-      label: 'Other Assets',
-      value: r => formatCurrency(r.otherAssets),
-      csvValue: r => roundDollars(r.otherAssets),
-    },
-    {
       key: 'totalAssets',
       category: 'Balance Sheet and Surplus',
       label: 'Total Assets',
@@ -457,13 +450,6 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
       label: 'Unearned Premium',
       value: r => formatCurrency(r.unearnedPremium),
       csvValue: r => roundDollars(r.unearnedPremium),
-    },
-    {
-      key: 'otherLiabilities',
-      category: 'Balance Sheet and Surplus',
-      label: 'Other Liabilities',
-      value: r => formatCurrency(r.otherLiabilities),
-      csvValue: r => roundDollars(r.otherLiabilities),
     },
     {
       key: 'totalLiabilities',
