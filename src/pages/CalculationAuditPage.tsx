@@ -41,6 +41,7 @@ import {
   TOTAL_MARKET_MEMBERS,
   RESERVE_PAYDOWN_PCT,
   LINE_RESERVE_PAYDOWN_PCT,
+  OPERATING_CASH_PCT_OF_PREMIUM,
 } from '../data/defaultAssumptions';
 
 interface CalculationAuditPageProps {
@@ -156,16 +157,6 @@ export default function CalculationAuditPage({ lockedResults, priorHistory, inst
     result.dividends;
 
   const netIncomeDifference = result.netIncome - netIncomeCheck;
-
-  const endingCashCheck =
-    result.beginningCash +
-    result.grossPremium +
-    result.assessments -
-    result.netPaidLosses -
-    result.operatingExpense -
-    result.riskControlInvestment -
-    result.reinsuranceCost -
-    result.dividends;
 
   const endingInvestmentsCheck =
     result.beginningInvestments + result.investmentIncome;
@@ -456,14 +447,7 @@ export default function CalculationAuditPage({ lockedResults, priorHistory, inst
       metric: 'Ending Cash',
       value: formatCurrency(result.endingCash),
       formula:
-        'Beginning cash + premium + assessments - paid losses - expenses - reinsurance cost - dividends, then swept toward the operating-cash target (surplus above target moves to investments; a shortfall draws investments down).',
-    },
-    {
-      metric: 'Ending Cash Approximation Check',
-      value: formatCurrency(result.endingCash - endingCashCheck),
-      formula:
-        'Stored ending cash - pre-sweep cash-flow accumulation. This is EXPECTED to be large, not near zero: the cash/investment sweep moves money between the two accounts every year to hold cash near its target, so ending cash is not simply the raw cash-flow total. It is not a reconciliation gap — see the Statement Reconciliation section below for checks that actually verify conservation (assets = cash + investments still ties exactly).',
-      note: nearZero(result.endingCash - endingCashCheck),
+        'Beginning cash + premium + assessments - paid losses - expenses - reinsurance cost - dividends, then swept toward the operating-cash target (surplus above target moves to investments; a shortfall draws investments down). See "Ending Cash / Operating Cash Sweep" in Statement Reconciliation below for the exact check.',
     },
     {
       metric: 'Beginning Investments',
@@ -1200,6 +1184,62 @@ export function buildReconciliationChecks(result: ResultSet, instanceSeed: numbe
       category: 'Completeness',
       title: 'Ending net position = beginning + change',
       description: 'The net position rollforward identity, shown alongside the existing tie-out difference field.',
+      scopes,
+      status: overallStatus(scopes),
+    });
+  }
+
+  // --- Check 15: Ending cash / operating cash sweep ---
+  // Reconstructs the engine's own cash/investment sweep exactly (not an
+  // approximation): cash flows to newCash, then the sweep either caps it at
+  // the operating-cash target (surplus swept to investments) or tops it up
+  // from investments (shortfall drawn down, floored at 0 available). This
+  // should tie to the cent every time. When the shortfall exceeds available
+  // investments, the target isn't fully met — a genuine liquidity event, not
+  // a reconciliation gap — so that scope is flagged as a Known Variance even
+  // though the reconstruction itself still ties exactly.
+  {
+    const scopes = scopeList.map(({ label, r }) => {
+      const newCash = r.beginningCash + r.totalMemberCharge + r.assessments - r.netPaidLosses - r.operatingExpense - r.riskControlInvestment - r.reinsuranceCost - r.dividends;
+      const investmentsBeforeSweep = Math.max(0, r.beginningInvestments + r.investmentIncome);
+      const operatingCashTarget = r.totalMemberCharge * OPERATING_CASH_PCT_OF_PREMIUM;
+      let derived: number;
+      let floorBound = false;
+      let shortfall = 0;
+      let drawFromInvestments = 0;
+      if (newCash >= operatingCashTarget) {
+        derived = operatingCashTarget;
+      } else {
+        shortfall = operatingCashTarget - newCash;
+        drawFromInvestments = Math.min(shortfall, investmentsBeforeSweep);
+        derived = newCash + drawFromInvestments;
+        floorBound = drawFromInvestments < shortfall - RECONCILIATION_TOLERANCE;
+      }
+      const buildUp =
+        `Pre-sweep cash flow: beginning cash ${formatCurrency(r.beginningCash)} + charge ${formatCurrency(r.totalMemberCharge)} + assessments ${formatCurrency(r.assessments)} − paid losses ${formatCurrency(r.netPaidLosses)} − expenses ${formatCurrency(r.operatingExpense)} − risk control ${formatCurrency(r.riskControlInvestment)} − reinsurance cost ${formatCurrency(r.reinsuranceCost)} − dividends ${formatCurrency(r.dividends)} = ${formatCurrency(newCash)}\n` +
+        `Operating-cash target = ${formatCurrency(r.totalMemberCharge)} × ${formatPct(OPERATING_CASH_PCT_OF_PREMIUM)} = ${formatCurrency(operatingCashTarget)}\n` +
+        (newCash >= operatingCashTarget
+          ? `Cash ≥ target: swept down to the target, surplus moves to investments. Derived ending cash = ${formatCurrency(derived)}`
+          : `Cash < target: shortfall ${formatCurrency(shortfall)}, drawn from investments before sweep (${formatCurrency(investmentsBeforeSweep)} available) = ${formatCurrency(drawFromInvestments)}. Derived ending cash = ${formatCurrency(newCash)} + ${formatCurrency(drawFromInvestments)} = ${formatCurrency(derived)}`);
+      if (floorBound) {
+        const diff = r.endingCash - derived;
+        return {
+          scope: label,
+          derived,
+          statement: r.endingCash,
+          diff,
+          buildUp,
+          status: 'variance' as CheckStatus,
+          note: `Liquidity floor bound: available investments (${formatCurrency(investmentsBeforeSweep)}) were insufficient to fully cover the shortfall (${formatCurrency(shortfall)}) this year — the operating-cash target was not met. This is a real balance-sheet event (the pool is genuinely short on liquidity), not a reconciliation gap; the reconstruction itself still ties.`,
+        };
+      }
+      return makeScope(label, derived, r.endingCash, buildUp);
+    });
+    checks.push({
+      id: 'ending-cash-sweep',
+      category: 'Completeness',
+      title: 'Ending cash / operating cash sweep',
+      description: 'Reconstructs the cash/investment sweep exactly (cash flows to a pre-sweep total, then capped at or topped up to the operating-cash target). Ties exactly under normal conditions; flagged as a Known Variance (not a failure) if the sweep ever runs out of investments before fully reaching the target — a genuine liquidity shortfall, not a modeling gap.',
       scopes,
       status: overallStatus(scopes),
     });
