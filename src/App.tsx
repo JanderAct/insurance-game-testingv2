@@ -399,7 +399,11 @@ export default function App() {
         )}
 
         {activeTab === AUDIT_TAB && gameState && (
-          <CalculationAuditPage lockedResults={gameState.lockedResults} />
+          <CalculationAuditPage
+            lockedResults={gameState.lockedResults}
+            priorHistory={gameState.priorHistory}
+            instanceSeed={gameState.instance.seed}
+          />
         )}
 
         {activeTab === 'membership' && gameState && startingFinancials && (

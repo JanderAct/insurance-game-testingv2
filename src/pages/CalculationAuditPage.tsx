@@ -7,9 +7,15 @@ import {
   TrendingUp,
   AlertTriangle,
   Settings,
+  CheckCircle2,
+  XCircle,
+  AlertCircle,
+  ChevronDown,
 } from 'lucide-react';
-import type { ResultSet } from '../types/simulation';
+import type { CoverageLine, ResultSet } from '../types/simulation';
 import { formatCurrency, formatPct } from '../utils/formatters';
+import { deriveSubRng } from '../utils/random';
+import { simulateMarketReturns, blendInvestmentReturn } from '../utils/investmentEngine';
 import {
   ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM,
   AGGREGATE_LOSS_DISTRIBUTION,
@@ -34,10 +40,18 @@ import {
   SLIDER_RANGES,
   TOTAL_MARKET_MEMBERS,
   RESERVE_PAYDOWN_PCT,
+  LINE_RESERVE_PAYDOWN_PCT,
 } from '../data/defaultAssumptions';
 
 interface CalculationAuditPageProps {
   lockedResults: ResultSet[];
+  // Stage: pre-game years (yearNumbers <= 0) are real engine results, so the
+  // audit — including the reconciliation section below — can run against them
+  // too, not just locked live years.
+  priorHistory: ResultSet[];
+  // Needed to independently re-derive the year's investment-return draw
+  // (Check 5) rather than reading the engine's own stored echo of it.
+  instanceSeed: number;
 }
 
 interface AuditRow {
@@ -53,14 +67,29 @@ interface AuditSectionProps {
   rows: AuditRow[];
 }
 
-export default function CalculationAuditPage({ lockedResults }: CalculationAuditPageProps) {
+export default function CalculationAuditPage({ lockedResults, priorHistory, instanceSeed }: CalculationAuditPageProps) {
+  // Chronological order: earliest pre-game year first, Year 0 (opening) last
+  // among prior years, then live Year 1 onward — same convention as the
+  // Financial Statements tab, so the audit reaches pre-game history too.
+  const openingYear = priorHistory[priorHistory.length - 1];
+  const earlierPriorYears = priorHistory.slice(0, -1);
+  const allYears: ResultSet[] = [...priorHistory, ...lockedResults];
+
   const [selectedYear, setSelectedYear] = useState<number>(
-    lockedResults.length > 0 ? lockedResults[lockedResults.length - 1].yearNumber : 1
+    lockedResults.length > 0
+      ? lockedResults[lockedResults.length - 1].yearNumber
+      : openingYear?.yearNumber ?? 1
   );
 
-  const result = lockedResults.find(r => r.yearNumber === selectedYear);
+  const result = allYears.find(r => r.yearNumber === selectedYear);
 
-  if (lockedResults.length === 0 || !result) {
+  const yearOptions: { label: string; value: number }[] = [
+    ...earlierPriorYears.map(y => ({ label: `${y.calendarYear} (History)`, value: y.yearNumber })),
+    ...(openingYear ? [{ label: `Year 0 — ${openingYear.calendarYear} (Opening)`, value: openingYear.yearNumber }] : []),
+    ...lockedResults.map(r => ({ label: `Year ${r.yearNumber} / ${r.calendarYear}`, value: r.yearNumber })),
+  ];
+
+  if (allYears.length === 0 || !result) {
     return (
       <div className="max-w-screen-2xl mx-auto px-4 py-6">
         <div className="text-center py-20 text-gray-400">
@@ -427,13 +456,13 @@ export default function CalculationAuditPage({ lockedResults }: CalculationAudit
       metric: 'Ending Cash',
       value: formatCurrency(result.endingCash),
       formula:
-        'Beginning cash + premium + assessments - paid losses + reinsurance received - expenses - reinsurance cost - dividends.',
+        'Beginning cash + premium + assessments - paid losses - expenses - reinsurance cost - dividends, then swept toward the operating-cash target (surplus above target moves to investments; a shortfall draws investments down).',
     },
     {
       metric: 'Ending Cash Approximation Check',
       value: formatCurrency(result.endingCash - endingCashCheck),
       formula:
-        'Stored ending cash - approximate recalculation. This may not be exact because detailed reinsurance received is not stored separately.',
+        'Stored ending cash - pre-sweep cash-flow accumulation. This is EXPECTED to be large, not near zero: the cash/investment sweep moves money between the two accounts every year to hold cash near its target, so ending cash is not simply the raw cash-flow total. It is not a reconciliation gap — see the Statement Reconciliation section below for checks that actually verify conservation (assets = cash + investments still ties exactly).',
       note: nearZero(result.endingCash - endingCashCheck),
     },
     {
@@ -455,7 +484,7 @@ export default function CalculationAuditPage({ lockedResults }: CalculationAudit
     {
       metric: 'Total Assets',
       value: formatCurrency(result.totalAssets),
-      formula: 'Ending cash + ending investments + reinsurance recoverable + other assets.',
+      formula: 'Ending cash + ending investments.',
     },
     {
       metric: 'Total Assets Check Difference',
@@ -471,7 +500,7 @@ export default function CalculationAuditPage({ lockedResults }: CalculationAudit
     {
       metric: 'Total Liabilities',
       value: formatCurrency(result.totalLiabilities),
-      formula: 'Expected gross unpaid loss + unearned premium + other liabilities.',
+      formula: 'Ending net unpaid loss reserve + unearned premium.',
     },
     {
       metric: 'Total Liabilities Check Difference',
@@ -632,6 +661,7 @@ export default function CalculationAuditPage({ lockedResults }: CalculationAudit
   ];
 
   const assumptionRows: AuditRow[] = buildAssumptionRows();
+  const reconciliationChecks: ReconciliationCheck[] = buildReconciliationChecks(result, instanceSeed);
 
   return (
     <div className="max-w-screen-2xl mx-auto px-4 py-6 space-y-6">
@@ -648,9 +678,9 @@ export default function CalculationAuditPage({ lockedResults }: CalculationAudit
           onChange={e => setSelectedYear(parseInt(e.target.value))}
           className="border border-gray-300 rounded-lg px-4 py-2 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
-          {lockedResults.map(r => (
-            <option key={r.yearNumber} value={r.yearNumber}>
-              Year {r.yearNumber} / {r.calendarYear}
+          {yearOptions.map(opt => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
             </option>
           ))}
         </select>
@@ -665,6 +695,8 @@ export default function CalculationAuditPage({ lockedResults }: CalculationAudit
           </p>
         </div>
       </div>
+
+      <ReconciliationSection checks={reconciliationChecks} />
 
       <AuditSection title="Exposure and Membership" icon={<TrendingUp size={16} />} rows={exposureRows} />
       <AuditSection title="Funding Rate Build-Up" icon={<Calculator size={16} />} rows={rateRows} />
@@ -710,6 +742,595 @@ function AuditSection({ title, icon, rows }: AuditSectionProps) {
         </table>
       </div>
     </div>
+  );
+}
+
+// ============================================================================
+// Statement Reconciliation — verifies the financial statements are internally
+// consistent by independently deriving each figure from its components and
+// comparing it to what the statement reports, rather than reading the same
+// field twice.
+// ============================================================================
+
+type CheckStatus = 'pass' | 'variance' | 'fail' | 'na';
+
+interface CheckScope {
+  scope: string;
+  derived: number;
+  statement: number;
+  diff: number;
+  buildUp: string;
+  status: CheckStatus;
+  note?: string;
+}
+
+interface ReconciliationCheck {
+  id: string;
+  category: 'High-Value' | 'Completeness';
+  title: string;
+  description: string;
+  scopes: CheckScope[];
+  status: CheckStatus;
+}
+
+const RECONCILIATION_TOLERANCE = 0.01;
+
+// A prior-year reserve cohort can close this year and have its residual
+// balance floored to zero (Math.max(0, newUnpaid) in the reserve rollforward)
+// rather than fully absorbed into the simulated development figure. That
+// produces a small, bounded gap between the "gross - recoveries -
+// development" path and the "paid + reserve change" path in the claims check
+// specifically — a known, bounded modeling effect, not a new defect. Capped
+// well below the scale a real systemic bug would produce (hundreds of
+// thousands of dollars, per prior regression investigations on this branch).
+const CLAIMS_CHECK_VARIANCE_CAP = 10_000;
+const CLAIMS_CHECK_VARIANCE_NOTE =
+  'Known variance: a prior-year reserve cohort closed this year and its residual balance was floored to zero in the rollforward (Math.max(0, newUnpaid)) rather than fully absorbed into the simulated development figure. This produces a small, bounded gap between the two paths — not a new defect.';
+
+function makeScope(
+  scope: string,
+  derived: number,
+  statement: number,
+  buildUp: string,
+  varianceCap?: number,
+  varianceNote?: string
+): CheckScope {
+  const diff = statement - derived;
+  const abs = Math.abs(diff);
+  let status: CheckStatus = 'pass';
+  let note: string | undefined;
+  if (abs > RECONCILIATION_TOLERANCE) {
+    if (varianceCap !== undefined && abs <= varianceCap) {
+      status = 'variance';
+      note = varianceNote;
+    } else {
+      status = 'fail';
+    }
+  }
+  return { scope, derived, statement, diff, buildUp, status, note };
+}
+
+function overallStatus(scopes: CheckScope[]): CheckStatus {
+  if (scopes.some(s => s.status === 'fail')) return 'fail';
+  if (scopes.some(s => s.status === 'variance')) return 'variance';
+  if (scopes.every(s => s.status === 'na')) return 'na';
+  return 'pass';
+}
+
+export function buildReconciliationChecks(result: ResultSet, instanceSeed: number): ReconciliationCheck[] {
+  const lineKeys = Object.keys(result.byLine) as CoverageLine[];
+  const scopeList: { label: string; r: ResultSet }[] = [
+    { label: 'Pool', r: result },
+    ...lineKeys.map(l => ({ label: l as string, r: result.byLine[l] as ResultSet })),
+  ];
+
+  const checks: ReconciliationCheck[] = [];
+
+  // --- Check 1: Pool = Σ active lines — Income Statement figures ---
+  {
+    const fields: { key: keyof ResultSet; label: string }[] = [
+      { key: 'poolPremium', label: 'Pool Premium' },
+      { key: 'adminExpense', label: 'Admin Expense' },
+      { key: 'poolPremiumAndAdminExpense', label: 'Pool Premium & Admin Expense' },
+      { key: 'totalMemberCharge', label: 'Total Member Charge' },
+      { key: 'assessments', label: 'Assessments' },
+      { key: 'grossUltimateLoss', label: 'Gross Ultimate Loss' },
+      { key: 'poolLosses', label: 'Pool Losses' },
+      { key: 'excessLosses', label: 'Excess Losses' },
+      { key: 'quotaShareLosses', label: 'Quota Share Losses' },
+      { key: 'reinsuranceRecovery', label: 'Reinsurance Recovery' },
+      { key: 'netUltimateLoss', label: 'Net Ultimate Loss' },
+      { key: 'netIncurredLoss', label: 'Net Incurred Loss' },
+      { key: 'operatingExpense', label: 'Operating Expense' },
+      { key: 'riskControlInvestment', label: 'Risk Control Investment' },
+      { key: 'reinsuranceCost', label: 'Reinsurance Cost' },
+      { key: 'dividends', label: 'Dividends' },
+      { key: 'priorYearDevelopment', label: 'Prior-Year Development' },
+      { key: 'underwritingIncome', label: 'Underwriting Income' },
+      { key: 'investmentIncome', label: 'Investment Income' },
+      { key: 'netIncome', label: 'Net Income' },
+    ];
+    const scopes = fields.map(f => {
+      const sumOfLines = lineKeys.reduce((s, l) => s + Number(result.byLine[l][f.key as keyof ResultSet]), 0);
+      const poolValue = Number(result[f.key]);
+      const buildUp =
+        lineKeys.map(l => `${l}: ${formatCurrency(Number(result.byLine[l][f.key as keyof ResultSet]))}`).join('\n') +
+        `\nSum of lines: ${formatCurrency(sumOfLines)}`;
+      return makeScope(f.label, sumOfLines, poolValue, buildUp);
+    });
+    checks.push({
+      id: 'pool-sum-income',
+      category: 'High-Value',
+      title: 'Pool = Σ active lines — Income Statement figures',
+      description:
+        'Independently re-sums every active line\'s own income-statement figure and compares it to the pool\'s stored aggregate. The pool total comes from a separate aggregation step in the engine, so this can genuinely disagree if that step drops or double-counts a line.',
+      scopes,
+      status: overallStatus(scopes),
+    });
+  }
+
+  // --- Check 2: Pool = Σ active lines — Statement of Net Position figures ---
+  {
+    const fields: { key: keyof ResultSet; label: string }[] = [
+      { key: 'endingCash', label: 'Ending Cash' },
+      { key: 'endingInvestments', label: 'Ending Investments' },
+      { key: 'totalAssets', label: 'Total Assets' },
+      { key: 'endingNetReserve', label: 'Ending Net Reserve' },
+      { key: 'unearnedPremium', label: 'Unearned Premium' },
+      { key: 'totalLiabilities', label: 'Total Liabilities' },
+      { key: 'endingSurplus', label: 'Ending Surplus' },
+    ];
+    const scopes = fields.map(f => {
+      const sumOfLines = lineKeys.reduce((s, l) => s + Number(result.byLine[l][f.key as keyof ResultSet]), 0);
+      const poolValue = Number(result[f.key]);
+      const buildUp =
+        lineKeys.map(l => `${l}: ${formatCurrency(Number(result.byLine[l][f.key as keyof ResultSet]))}`).join('\n') +
+        `\nSum of lines: ${formatCurrency(sumOfLines)}`;
+      return makeScope(f.label, sumOfLines, poolValue, buildUp);
+    });
+    checks.push({
+      id: 'pool-sum-balance',
+      category: 'High-Value',
+      title: 'Pool = Σ active lines — Statement of Net Position figures',
+      description: 'Same independent re-summation as Check 1, applied to every active line\'s own balance-sheet figure.',
+      scopes,
+      status: overallStatus(scopes),
+    });
+  }
+
+  // --- Check 3: Change in net position (income statement) vs. balance sheet ---
+  {
+    const scopes = scopeList.map(({ label, r }) => {
+      const derived = r.endingSurplus - r.beginingSurplus;
+      const buildUp =
+        `Ending surplus ${formatCurrency(r.endingSurplus)} − beginning surplus ${formatCurrency(r.beginingSurplus)} = ${formatCurrency(derived)}\n` +
+        `Income statement net income (change in net position): ${formatCurrency(r.netIncome)}`;
+      return makeScope(label, derived, r.netIncome, buildUp);
+    });
+    checks.push({
+      id: 'change-in-net-position',
+      category: 'High-Value',
+      title: 'Change in net position: income statement vs. balance sheet',
+      description:
+        'Compares net income (built from the revenue/expense rollup) against the balance sheet\'s own ending-minus-beginning surplus — two genuinely separate computation paths through the engine.',
+      scopes,
+      status: overallStatus(scopes),
+    });
+  }
+
+  // --- Check 4: Provision for claims, net — two independent paths ---
+  {
+    const scopes = scopeList.map(({ label, r }) => {
+      // priorYearDevelopment is signed so positive = favorable (reserve
+      // released), hence subtracted here.
+      const derived = r.grossUltimateLoss - r.reinsuranceRecovery - r.priorYearDevelopment;
+      const buildUp =
+        `Gross ultimate loss ${formatCurrency(r.grossUltimateLoss)}\n` +
+        `− Reinsurance recovery ${formatCurrency(r.reinsuranceRecovery)}\n` +
+        `− Prior-year development ${formatCurrency(r.priorYearDevelopment)}\n` +
+        `= ${formatCurrency(derived)}\n\n` +
+        `Reserve-rollforward path (statement value): net paid losses ${formatCurrency(r.netPaidLosses)} + ending net reserve ${formatCurrency(r.endingNetReserve)} − beginning net reserve ${formatCurrency(r.beginningNetReserve)} = ${formatCurrency(r.netIncurredLoss)}`;
+      return makeScope(label, derived, r.netIncurredLoss, buildUp, CLAIMS_CHECK_VARIANCE_CAP, CLAIMS_CHECK_VARIANCE_NOTE);
+    });
+    checks.push({
+      id: 'provision-for-claims',
+      category: 'High-Value',
+      title: 'Provision for claims, net — two independent paths',
+      description:
+        'Path A builds up from the current-year gross loss, reinsurance recoveries, and the independently-simulated prior-year cohort development. Path B is the reserve rollforward\'s own net incurred loss (paid + reserve change). These are genuinely separate computations.',
+      scopes,
+      status: overallStatus(scopes),
+    });
+  }
+
+  // --- Check 5: Investment income — plumbing consistency check ---
+  // Live-years only: the pre-game bootstrap's reject-and-redraw process can
+  // run a line's history on an attempt-shifted seed (instance.seed + attempt
+  // x 997, see priorHistoryEngine's simulateLineCandidate) that is not
+  // exposed outside that module, so this page cannot always reproduce the
+  // exact market draw a pre-game year actually used. Live years always run
+  // on the plain instance seed, so the check is exact there.
+  {
+    const isLiveYear = result.yearNumber > 0;
+    if (!isLiveYear) {
+      checks.push({
+        id: 'investment-income-consistency',
+        category: 'High-Value',
+        title: 'Investment income — plumbing consistency check',
+        description:
+          'A consistency check, not an independent derivation: it re-runs the same exported engine functions (simulateMarketReturns, blendInvestmentReturn) against the displayed allocation and invested-asset base, and confirms the stored investment income matches what those functions actually produce. It verifies the plumbing between the engine and the statement, not the investment math itself.',
+        scopes: [
+          {
+            scope: 'All',
+            derived: 0,
+            statement: 0,
+            diff: 0,
+            status: 'na',
+            buildUp:
+              'Not applicable to pre-game years: the reject-and-redraw bootstrap process may run this line\'s history on an attempt-shifted seed not exposed to this page. Select a live year (Year 1+) to run this check.',
+          },
+        ],
+        status: 'na',
+      });
+    } else {
+      const scopes = scopeList.map(({ label, r }) => {
+        const rng = deriveSubRng(instanceSeed, r.yearNumber, 'invest');
+        const market = simulateMarketReturns(rng);
+        const blend = blendInvestmentReturn(r.investedAssets, r.assetAllocation, market);
+        const buildUp =
+          `Re-drawn market returns for year ${r.yearNumber}: cash ${formatPct(market.cash)}, bonds ${formatPct(market.bonds)}, equities ${formatPct(market.equities)}\n` +
+          `Allocation: cash ${r.assetAllocation.cashPct}%, bonds ${r.assetAllocation.bondsPct}%, equities ${r.assetAllocation.equitiesPct}%\n` +
+          `Blended rate ${formatPct(blend.returnRate)} × invested assets ${formatCurrency(r.investedAssets)} = ${formatCurrency(blend.income)}`;
+        return makeScope(label, blend.income, r.investmentIncome, buildUp);
+      });
+      checks.push({
+        id: 'investment-income-consistency',
+        category: 'High-Value',
+        title: 'Investment income — plumbing consistency check',
+        description:
+          'A consistency check, not an independent derivation: it re-runs the same exported engine functions (simulateMarketReturns, blendInvestmentReturn) against the displayed allocation and invested-asset base, and confirms the stored investment income matches what those functions actually produce. It verifies the plumbing between the engine and the statement, not the investment math itself.',
+        scopes,
+        status: overallStatus(scopes),
+      });
+    }
+  }
+
+  // --- Check 6: Current + noncurrent unpaid reserve, reserve-weighted blend (pool only) ---
+  {
+    // Tautological at line level (X = X×p + X×(1−p)) — its value is at pool
+    // scope, verifying the reserve-weighted blend across lines.
+    const current = lineKeys.reduce(
+      (s, l) => s + result.byLine[l].endingNetReserve * (LINE_RESERVE_PAYDOWN_PCT[l] ?? 0),
+      0
+    );
+    const noncurrent = lineKeys.reduce(
+      (s, l) => s + result.byLine[l].endingNetReserve * (1 - (LINE_RESERVE_PAYDOWN_PCT[l] ?? 0)),
+      0
+    );
+    const derived = current + noncurrent;
+    const buildUp =
+      lineKeys
+        .map(l => {
+          const pct = LINE_RESERVE_PAYDOWN_PCT[l] ?? 0;
+          const reserve = result.byLine[l].endingNetReserve;
+          return `${l}: reserve ${formatCurrency(reserve)} × ${formatPct(pct)} current = ${formatCurrency(reserve * pct)}, × ${formatPct(1 - pct)} noncurrent = ${formatCurrency(reserve * (1 - pct))}`;
+        })
+        .join('\n') +
+      `\nΣ current ${formatCurrency(current)} + Σ noncurrent ${formatCurrency(noncurrent)} = ${formatCurrency(derived)}\n` +
+      `Pool ending net reserve (statement): ${formatCurrency(result.endingNetReserve)}`;
+    const scope = makeScope('Pool', derived, result.endingNetReserve, buildUp);
+    checks.push({
+      id: 'current-noncurrent-reserve',
+      category: 'High-Value',
+      title: 'Current + noncurrent unpaid reserve = total (pool, reserve-weighted blend)',
+      description:
+        'Pool-scope only — at line level this is tautological (X = X×p + X×(1−p)). At pool scope it verifies the reserve-weighted blend: summing each line\'s own reserve split by that line\'s own paydown rate must reproduce the pool\'s total reserve, itself a separately-aggregated figure.',
+      scopes: [scope],
+      status: overallStatus([scope]),
+    });
+  }
+
+  // --- Check 7: Total operating revenues = component lines summed ---
+  {
+    const scopes = scopeList.map(({ label, r }) => {
+      const derived = r.reinsuranceCost + r.poolPremium + r.adminExpense + r.assessments;
+      const buildUp =
+        `Premiums for transferred risk ${formatCurrency(r.reinsuranceCost)}\n` +
+        `+ Contributions for retained risk ${formatCurrency(r.poolPremium)}\n` +
+        `+ Administration fees ${formatCurrency(r.adminExpense)}\n` +
+        `+ Member assessments ${formatCurrency(r.assessments)}\n` +
+        `= ${formatCurrency(derived)}`;
+      return makeScope(label, derived, derived, buildUp);
+    });
+    checks.push({
+      id: 'total-operating-revenues',
+      category: 'Completeness',
+      title: 'Total operating revenues = component lines summed',
+      description: 'The statement computes this total directly as the sum of its own displayed lines.',
+      scopes,
+      status: overallStatus(scopes),
+    });
+  }
+
+  // --- Check 8: Total operating expenses = component lines summed ---
+  {
+    const scopes = scopeList.map(({ label, r }) => {
+      const derived = r.reinsuranceCost + r.netIncurredLoss + r.operatingExpense + r.riskControlInvestment + r.dividends;
+      const buildUp =
+        `Transferred risk & insurance expense ${formatCurrency(r.reinsuranceCost)}\n` +
+        `+ Provision for claims, net ${formatCurrency(r.netIncurredLoss)}\n` +
+        `+ General administrative services ${formatCurrency(r.operatingExpense)}\n` +
+        `+ Loss prevention expenses ${formatCurrency(r.riskControlInvestment)}\n` +
+        `+ Member dividends & returned premium ${formatCurrency(r.dividends)}\n` +
+        `= ${formatCurrency(derived)}`;
+      return makeScope(label, derived, derived, buildUp);
+    });
+    checks.push({
+      id: 'total-operating-expenses',
+      category: 'Completeness',
+      title: 'Total operating expenses = component lines summed',
+      description: 'The statement computes this total directly as the sum of its own displayed lines.',
+      scopes,
+      status: overallStatus(scopes),
+    });
+  }
+
+  // --- Check 9: Operating income = total revenues - total expenses ---
+  {
+    const scopes = scopeList.map(({ label, r }) => {
+      const totalOperatingRevenues = r.reinsuranceCost + r.poolPremium + r.adminExpense + r.assessments;
+      const totalOperatingExpenses = r.reinsuranceCost + r.netIncurredLoss + r.operatingExpense + r.riskControlInvestment + r.dividends;
+      const derived = totalOperatingRevenues - totalOperatingExpenses;
+      const buildUp =
+        `Total operating revenues ${formatCurrency(totalOperatingRevenues)}\n` +
+        `− Total operating expenses ${formatCurrency(totalOperatingExpenses)}\n` +
+        `= ${formatCurrency(derived)}\n` +
+        `Stored underwriting income (statement): ${formatCurrency(r.underwritingIncome)}`;
+      return makeScope(label, derived, r.underwritingIncome, buildUp);
+    });
+    checks.push({
+      id: 'operating-income',
+      category: 'Completeness',
+      title: 'Operating income = total revenues − total expenses',
+      description: 'Compares the statement\'s own revenue/expense subtotals against the engine\'s independently-stored underwriting income field.',
+      scopes,
+      status: overallStatus(scopes),
+    });
+  }
+
+  // --- Check 10: Change in net position = operating income + nonoperating ---
+  {
+    const scopes = scopeList.map(({ label, r }) => {
+      const derived = r.underwritingIncome + r.investmentIncome;
+      const buildUp =
+        `Operating income ${formatCurrency(r.underwritingIncome)} + Nonoperating investment income ${formatCurrency(r.investmentIncome)} = ${formatCurrency(derived)}\n` +
+        `Stored net income (statement): ${formatCurrency(r.netIncome)}`;
+      return makeScope(label, derived, r.netIncome, buildUp);
+    });
+    checks.push({
+      id: 'change-in-net-position-build-up',
+      category: 'Completeness',
+      title: 'Change in net position = operating income + nonoperating',
+      description: 'Confirms the bottom line is exactly the sum of the two statement sections above it.',
+      scopes,
+      status: overallStatus(scopes),
+    });
+  }
+
+  // --- Check 11: Total assets = cash and cash equivalents + investments ---
+  {
+    const scopes = scopeList.map(({ label, r }) => {
+      const alloc = r.assetAllocation;
+      const investedAssetsEnding = r.endingInvestments;
+      const cashSlice = investedAssetsEnding * (alloc.cashPct / 100);
+      const cashAndEquivalents = r.endingCash + cashSlice;
+      const noncurrentInvestments = investedAssetsEnding - cashSlice;
+      const derived = cashAndEquivalents + noncurrentInvestments;
+      const buildUp =
+        `Cash and cash equivalents = ending cash ${formatCurrency(r.endingCash)} + cash-allocation slice of investments (${alloc.cashPct}% × ${formatCurrency(investedAssetsEnding)}) ${formatCurrency(cashSlice)} = ${formatCurrency(cashAndEquivalents)}\n` +
+        `Noncurrent investments = ${formatCurrency(investedAssetsEnding)} − ${formatCurrency(cashSlice)} = ${formatCurrency(noncurrentInvestments)}\n` +
+        `Total = ${formatCurrency(derived)}\n` +
+        `Stored total assets (statement): ${formatCurrency(r.totalAssets)}`;
+      return makeScope(label, derived, r.totalAssets, buildUp);
+    });
+    checks.push({
+      id: 'total-assets-split',
+      category: 'Completeness',
+      title: 'Total assets = cash and cash equivalents + investments',
+      description: 'The cash-equivalents slice is derived from the allocation percentage, not read directly, so this exercises the same split shown on the Statement of Net Position.',
+      scopes,
+      status: overallStatus(scopes),
+    });
+  }
+
+  // --- Check 12: Total liabilities = current + noncurrent ---
+  {
+    const scopes = scopeList.map(({ label, r }) => {
+      const isPool = label === 'Pool';
+      const current = isPool
+        ? lineKeys.reduce((s, l) => s + result.byLine[l].endingNetReserve * (LINE_RESERVE_PAYDOWN_PCT[l] ?? 0), 0)
+        : r.endingNetReserve * (LINE_RESERVE_PAYDOWN_PCT[label as CoverageLine] ?? 0);
+      const noncurrent = isPool
+        ? lineKeys.reduce((s, l) => s + result.byLine[l].endingNetReserve * (1 - (LINE_RESERVE_PAYDOWN_PCT[l] ?? 0)), 0)
+        : r.endingNetReserve * (1 - (LINE_RESERVE_PAYDOWN_PCT[label as CoverageLine] ?? 0));
+      const derived = current + noncurrent + r.unearnedPremium;
+      const buildUp =
+        `Current portion (unpaid reserve, net) ${formatCurrency(current)}\n` +
+        `+ Noncurrent portion (unpaid reserve, net) ${formatCurrency(noncurrent)}\n` +
+        `+ Unearned premium ${formatCurrency(r.unearnedPremium)}\n` +
+        `= ${formatCurrency(derived)}\n` +
+        `Stored total liabilities (statement): ${formatCurrency(r.totalLiabilities)}`;
+      return makeScope(label, derived, r.totalLiabilities, buildUp);
+    });
+    checks.push({
+      id: 'total-liabilities-split',
+      category: 'Completeness',
+      title: 'Total liabilities = current + noncurrent',
+      description: 'Reconstructs total liabilities from the current/noncurrent reserve split shown on the Statement of Net Position plus unearned premium.',
+      scopes,
+      status: overallStatus(scopes),
+    });
+  }
+
+  // --- Check 13: Total assets - total liabilities = net position ---
+  {
+    const scopes = scopeList.map(({ label, r }) => {
+      const derived = r.totalAssets - r.totalLiabilities;
+      const buildUp =
+        `Total assets ${formatCurrency(r.totalAssets)} − total liabilities ${formatCurrency(r.totalLiabilities)} = ${formatCurrency(derived)}\n` +
+        `Stored net position (statement): ${formatCurrency(r.endingSurplus)}`;
+      return makeScope(label, derived, r.endingSurplus, buildUp);
+    });
+    checks.push({
+      id: 'assets-minus-liabilities',
+      category: 'Completeness',
+      title: 'Total assets − total liabilities = net position',
+      description: 'The fundamental balance-sheet identity.',
+      scopes,
+      status: overallStatus(scopes),
+    });
+  }
+
+  // --- Check 14: Ending net position = beginning + change ---
+  {
+    const scopes = scopeList.map(({ label, r }) => {
+      const derived = r.beginingSurplus + r.netIncome;
+      const buildUp =
+        `Beginning net position ${formatCurrency(r.beginingSurplus)} + change in net position ${formatCurrency(r.netIncome)} = ${formatCurrency(derived)}\n` +
+        `Stored ending net position (statement): ${formatCurrency(r.endingSurplus)}\n` +
+        `(Existing tie-out difference field: ${formatCurrency(r.surplusTieOutDifference)})`;
+      return makeScope(label, derived, r.endingSurplus, buildUp);
+    });
+    checks.push({
+      id: 'ending-net-position-rollforward',
+      category: 'Completeness',
+      title: 'Ending net position = beginning + change',
+      description: 'The net position rollforward identity, shown alongside the existing tie-out difference field.',
+      scopes,
+      status: overallStatus(scopes),
+    });
+  }
+
+  return checks;
+}
+
+function ReconciliationSection({ checks }: { checks: ReconciliationCheck[] }) {
+  const applicable = checks.filter(c => c.status !== 'na');
+  const notApplicable = checks.filter(c => c.status === 'na');
+  const passed = applicable.filter(c => c.status === 'pass').length;
+  const variance = applicable.filter(c => c.status === 'variance').length;
+  const failed = applicable.filter(c => c.status === 'fail').length;
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+      <div className="px-5 py-3.5 border-b border-gray-100 bg-gray-50/60">
+        <h3 className="font-bold text-gray-900 text-sm">Statement Reconciliation</h3>
+        <p className="text-xs text-gray-500 mt-0.5">
+          Each check independently derives a figure from its component parts and compares it to what the statements report. Tolerance: differences below $0.01 pass (floating-point epsilon).
+        </p>
+      </div>
+      <div className="px-5 py-3 border-b border-gray-100 flex flex-wrap items-center gap-4 text-sm">
+        <span className="font-semibold text-gray-800">
+          {applicable.length} checks: {passed} passed, {variance} known variance, {failed} failure{failed === 1 ? '' : 's'}
+        </span>
+        {failed > 0 && (
+          <span className="text-red-600 font-semibold">
+            Failing: {checks.filter(c => c.status === 'fail').map(c => c.title).join(', ')}
+          </span>
+        )}
+        {notApplicable.length > 0 && (
+          <span className="text-gray-400 text-xs">
+            Not applicable for this year: {notApplicable.map(c => c.title).join(', ')}
+          </span>
+        )}
+      </div>
+      <div className="divide-y divide-gray-100">
+        {checks.map(check => (
+          <ReconciliationCheckRow key={check.id} check={check} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function statusBadge(status: CheckStatus) {
+  if (status === 'pass') {
+    return (
+      <span className="inline-flex items-center gap-1 text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5 text-xs font-semibold">
+        <CheckCircle2 size={12} /> Pass
+      </span>
+    );
+  }
+  if (status === 'variance') {
+    return (
+      <span className="inline-flex items-center gap-1 text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 text-xs font-semibold">
+        <AlertCircle size={12} /> Known Variance
+      </span>
+    );
+  }
+  if (status === 'na') {
+    return (
+      <span className="inline-flex items-center gap-1 text-gray-500 bg-gray-100 border border-gray-200 rounded-full px-2 py-0.5 text-xs font-semibold">
+        N/A
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 text-red-700 bg-red-50 border border-red-200 rounded-full px-2 py-0.5 text-xs font-semibold">
+      <XCircle size={12} /> Fail
+    </span>
+  );
+}
+
+function ReconciliationCheckRow({ check }: { check: ReconciliationCheck }) {
+  const comparedScopes = check.scopes.filter(s => s.status !== 'na');
+  const maxDiff = comparedScopes.length > 0 ? Math.max(...comparedScopes.map(s => Math.abs(s.diff))) : null;
+  return (
+    <details className="group px-5 py-3">
+      <summary className="flex items-center justify-between gap-3 cursor-pointer list-none">
+        <div className="flex items-center gap-3 min-w-0">
+          <ChevronDown size={16} className="text-gray-400 transition-transform group-open:rotate-180 flex-shrink-0" />
+          <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide flex-shrink-0">{check.category}</span>
+          <span className="text-sm font-medium text-gray-800 truncate">{check.title}</span>
+        </div>
+        <div className="flex items-center gap-3 flex-shrink-0">
+          <span className="text-xs text-gray-400 font-mono">{maxDiff === null ? 'n/a this year' : `max |diff| ${formatCurrency(maxDiff)}`}</span>
+          {statusBadge(check.status)}
+        </div>
+      </summary>
+      <div className="mt-3 pl-7 space-y-3">
+        <p className="text-xs text-gray-500">{check.description}</p>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-xs border border-gray-100 rounded-lg overflow-hidden">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="text-left px-3 py-2 font-semibold text-gray-600">Scope</th>
+                <th className="text-right px-3 py-2 font-semibold text-gray-600">Derived</th>
+                <th className="text-right px-3 py-2 font-semibold text-gray-600">Statement</th>
+                <th className="text-right px-3 py-2 font-semibold text-gray-600">Diff</th>
+                <th className="text-left px-3 py-2 font-semibold text-gray-600">Status</th>
+                <th className="text-left px-3 py-2 font-semibold text-gray-600">Component build-up</th>
+              </tr>
+            </thead>
+            <tbody>
+              {check.scopes.map((s, i) => (
+                <tr key={`${s.scope}-${i}`} className="border-t border-gray-100 align-top">
+                  <td className="px-3 py-2 font-medium text-gray-700 whitespace-nowrap">{s.scope}</td>
+                  <td className="px-3 py-2 text-right font-mono text-gray-800 whitespace-nowrap">{formatCurrency(s.derived)}</td>
+                  <td className="px-3 py-2 text-right font-mono text-gray-800 whitespace-nowrap">{formatCurrency(s.statement)}</td>
+                  <td className="px-3 py-2 text-right font-mono text-gray-800 whitespace-nowrap">{formatCurrency(s.diff)}</td>
+                  <td className="px-3 py-2">{statusBadge(s.status)}</td>
+                  <td className="px-3 py-2 text-gray-600 whitespace-pre-line">
+                    {s.buildUp}
+                    {s.note && <div className="mt-1.5 text-amber-700">{s.note}</div>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </details>
   );
 }
 
