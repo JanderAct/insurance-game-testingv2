@@ -54,7 +54,7 @@ function seedFromInstanceId(id: string): number {
 
 // Pages that support the Pool / per-line view toggle (Stage 2.1; 'history'
 // added in Stage 2.10 — each line now has its own real pre-game history).
-const LINE_VIEW_PAGES: TabId[] = ['history', 'dashboard', 'decisions', 'decisionHistory', 'financials', 'results'];
+const LINE_VIEW_PAGES: TabId[] = ['history', 'dashboard', 'decisions', 'decisionHistory', 'financials', 'results', 'audit'];
 
 
 const LINE_VIEW_ICONS: Record<LineView, React.ReactNode> = {
@@ -403,6 +403,7 @@ export default function App() {
             lockedResults={gameState.lockedResults}
             priorHistory={gameState.priorHistory}
             instanceSeed={gameState.instance.seed}
+            lineView={effectiveLineView}
           />
         )}
 
