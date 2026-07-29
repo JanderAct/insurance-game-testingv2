@@ -69,6 +69,13 @@ interface AuditRow {
   // Present only on rows that actually verify something. The page-level status
   // line counts these; descriptive rows carry no status and are not counted.
   status?: CheckStatus;
+  // Presentation, so the statement-mirroring cards can reproduce the
+  // statements' own visual hierarchy: 'section' is a full-width subheading,
+  // emphasis bolds a subtotal (a rule above it for a statement total), and
+  // indent nests a line under its group the way the statement indents it.
+  kind?: 'section';
+  emphasis?: 'subtotal' | 'total';
+  indent?: 1 | 2;
 }
 
 interface AuditSectionProps {
@@ -204,51 +211,11 @@ export default function CalculationAuditPage({ lockedResults, priorHistory, inst
     result.dividends -
     result.netIncome;
 
-  const netIncomeCheck =
-    result.grossPremium +
-    result.assessments +
-    result.investmentIncome -
-    netIncurredLossFromIncome -
-    result.operatingExpense -
-    result.riskControlInvestment -
-    result.reinsuranceCost -
-    result.dividends;
-
-  const netIncomeDifference = result.netIncome - netIncomeCheck;
-
-  const endingInvestmentsCheck =
-    result.beginningInvestments + result.investmentIncome;
-
-  const totalAssetsCheck =
-    result.endingCash +
-    result.endingInvestments;
-
-  const totalAssetsDifference = result.totalAssets - totalAssetsCheck;
-
-  const totalLiabilitiesCheck =
-    result.endingNetReserve +
-    result.unearnedPremium;
-
-  const totalLiabilitiesDifference =
-    result.totalLiabilities - totalLiabilitiesCheck;
-
-  const endingSurplusCheck =
-    result.totalAssets - result.totalLiabilities;
-
-  const endingSurplusDifference =
-    result.endingSurplus - endingSurplusCheck;
-
-  const surplusFromIncomeCheck =
-    result.beginingSurplus + result.netIncome;
-
-  const surplusFromIncomeDifference =
-    result.surplusFromIncome - surplusFromIncomeCheck;
-
-  const tieOutDifferenceCheck =
-    result.endingSurplus - result.surplusFromIncome;
-
-  const tieOutDifferenceDifference =
-    result.surplusTieOutDifference - tieOutDifferenceCheck;
+  // The former net-income, ending-investments, total-assets, total-liabilities
+  // and ending-surplus recalculation checks lived here. They are now covered by
+  // the two statement-mirroring cards (change in net position, the ending
+  // investments sweep, and the asset / liability / net position identities), so
+  // the duplicates are gone rather than stated twice with different wording.
 
   const combinedRatioCheck =
     (netIncurredLossFromIncome + result.adminExpense + result.reinsuranceCost) /
@@ -394,14 +361,6 @@ export default function CalculationAuditPage({ lockedResults, priorHistory, inst
       value: formatCurrency(result.reinsuranceCost),
       formula: 'Cost of selected reinsurance program.',
     },
-    {
-      metric: 'Investment Income Consistency',
-      value: formatCurrency(result.investmentIncome),
-      formula:
-        'Re-runs the engine\'s own market draw and blend for this year (from the instance seed, or for a pre-game year from that line\'s recorded bootstrap attempt) against the displayed allocation and invested-asset base, and compares the result to the stored investment income. This confirms the plumbing between the engine and the statement — it does not independently verify the investment maths.',
-      note: checks.investmentIncome.note,
-      status: checks.investmentIncome.status,
-    },
   ];
 
   const reserveRows: AuditRow[] = [
@@ -448,229 +407,11 @@ export default function CalculationAuditPage({ lockedResults, priorHistory, inst
     },
   ];
 
-  const incomeRows: AuditRow[] = [
-    {
-      metric: 'Gross Premium & Admin Expense',
-      value: formatCurrency(result.totalMemberCharge),
-      formula: 'Pool premium + admin charge + reinsurance charge.',
-    },
-    {
-      metric: 'Assessments',
-      value: formatCurrency(result.assessments),
-      formula: 'Gross premium × selected assessment percentage.',
-    },
-    {
-      metric: 'Investment Income',
-      value: formatCurrency(result.investmentIncome),
-      formula: `${formatCurrency(result.investedAssets)} × ${formatPct(result.investmentReturnRate)}`,
-    },
-    {
-      metric: 'Net Incurred Loss',
-      value: formatCurrency(netIncurredLossFromIncome),
-      formula: 'Gross incurred loss - ceded incurred recovery.',
-    },
-    {
-      metric: 'Admin Expense',
-      value: formatCurrency(result.adminExpense),
-      formula: 'Pure Premium × 15%.',
-    },
-    {
-      metric: 'Risk Control Investment',
-      value: formatCurrency(result.riskControlInvestment),
-      formula: 'Gross premium × selected risk-control percentage.',
-    },
-    {
-      metric: 'Reinsurance Cost',
-      value: formatCurrency(result.reinsuranceCost),
-      formula: 'Selected reinsurance program cost.',
-    },
-    {
-      metric: 'Dividends / Returned Pool Premium',
-      value: formatCurrency(result.dividends),
-      formula: 'Gross premium × selected dividend percentage.',
-    },
-    {
-      metric: 'Net Income',
-      value: formatCurrency(result.netIncome),
-      formula:
-        'Premium + assessments + investment income - net incurred loss - operating expense - risk control - reinsurance cost - dividends.',
-    },
-    {
-      metric: 'Net Income Check Difference',
-      value: formatCurrency(netIncomeDifference),
-      formula: 'Stored net income - recalculated net income.',
-      ...legacyCheck(netIncomeDifference),
-    },
-    {
-      metric: 'Total Operating Revenues',
-      value: formatCurrency(checks.totalOperatingRevenuesValue),
-      formula:
-        'Premiums for transferred risk (reinsurance cost, collected from members) + contributions for retained risk (pool premium) + administration fees + member assessments. Reinsurance and admin are shown gross — collected as revenue and paid out as expense.',
-      note: checks.totalOperatingRevenues.note,
-      status: checks.totalOperatingRevenues.status,
-    },
-    {
-      metric: 'Total Operating Expenses',
-      value: formatCurrency(checks.totalOperatingExpensesValue),
-      formula:
-        'Transferred risk & insurance expense (reinsurance cost) + provision for claims net + general administrative services + loss prevention expenses + member dividends & returned premium.',
-      note: checks.totalOperatingExpenses.note,
-      status: checks.totalOperatingExpenses.status,
-    },
-    {
-      metric: 'Operating Income Check',
-      value: formatCurrency(result.underwritingIncome),
-      formula:
-        'Total operating revenues less total operating expenses, compared against the separately stored underwriting income.',
-      note: checks.operatingIncome.note,
-      status: checks.operatingIncome.status,
-    },
-    {
-      metric: 'Change in Net Position Check',
-      value: formatCurrency(result.netIncome),
-      formula:
-        'Operating income plus nonoperating investment income, compared against the stored net income — confirms the bottom line is exactly the sum of the two statement sections above it.',
-      note: checks.changeInNetPosition.note,
-      status: checks.changeInNetPosition.status,
-    },
-    {
-      metric: 'Provision for Claims — Two Independent Paths',
-      value: formatCurrency(result.netIncurredLoss),
-      formula:
-        'Path A: current-year gross ultimate loss less reinsurance recoveries less prior-year cohort development (simulated separately). Path B: the reserve rollforward\'s own net incurred loss (net paid + ending reserve - beginning reserve). Two genuinely separate computations that must meet.',
-      note: checks.provisionForClaims.note,
-      status: checks.provisionForClaims.status,
-    },
-  ];
-
-  const balanceRows: AuditRow[] = [
-    {
-      metric: 'Beginning Cash',
-      value: formatCurrency(result.beginningCash),
-      formula: 'Cash carried into the year.',
-    },
-    {
-      metric: 'Ending Cash',
-      value: formatCurrency(result.endingCash),
-      formula:
-        'Beginning cash + premium + assessments - paid losses - expenses - reinsurance cost - dividends, then swept toward the operating-cash target (surplus above target moves to investments; a shortfall draws investments down). See "Ending Cash / Operating Cash Sweep" in Statement Reconciliation below for the exact check.',
-    },
-    {
-      metric: 'Beginning Investments',
-      value: formatCurrency(result.beginningInvestments),
-      formula: 'Investments carried into the year.',
-    },
-    {
-      metric: 'Ending Investments',
-      value: formatCurrency(result.endingInvestments),
-      formula: 'Beginning investments + investment income.',
-    },
-    {
-      metric: 'Ending Investments Check Difference',
-      value: formatCurrency(result.endingInvestments - endingInvestmentsCheck),
-      formula: 'Stored ending investments - recalculated ending investments.',
-      ...legacyCheck(result.endingInvestments - endingInvestmentsCheck),
-    },
-    {
-      metric: 'Total Assets',
-      value: formatCurrency(result.totalAssets),
-      formula: 'Ending cash + ending investments.',
-    },
-    {
-      metric: 'Total Assets Check Difference',
-      value: formatCurrency(totalAssetsDifference),
-      formula: 'Stored total assets - recalculated total assets.',
-      ...legacyCheck(totalAssetsDifference),
-    },
-    {
-      metric: 'Unearned Premium',
-      value: formatCurrency(result.unearnedPremium),
-      formula: 'Current simplified model sets unearned premium to zero.',
-    },
-    {
-      metric: 'Total Liabilities',
-      value: formatCurrency(result.totalLiabilities),
-      formula: 'Ending net unpaid loss reserve + unearned premium.',
-    },
-    {
-      metric: 'Total Liabilities Check Difference',
-      value: formatCurrency(totalLiabilitiesDifference),
-      formula: 'Stored total liabilities - recalculated total liabilities.',
-      ...legacyCheck(totalLiabilitiesDifference),
-    },
-    {
-      metric: 'Ending Surplus',
-      value: formatCurrency(result.endingSurplus),
-      formula: 'Total assets - total liabilities.',
-    },
-    {
-      metric: 'Ending Surplus Check Difference',
-      value: formatCurrency(endingSurplusDifference),
-      formula: 'Stored ending surplus - recalculated ending surplus.',
-      ...legacyCheck(endingSurplusDifference),
-    },
-    {
-      metric: 'Surplus from Income',
-      value: formatCurrency(result.surplusFromIncome),
-      formula: 'Beginning surplus + net income.',
-    },
-    {
-      metric: 'Surplus from Income Check Difference',
-      value: formatCurrency(surplusFromIncomeDifference),
-      formula: 'Stored surplus from income - recalculated value.',
-      ...legacyCheck(surplusFromIncomeDifference),
-    },
-    {
-      metric: 'Tie-Out Difference',
-      value: formatCurrency(result.surplusTieOutDifference),
-      formula: 'Ending surplus - surplus from income.',
-    },
-    {
-      metric: 'Tie-Out Difference Check Difference',
-      value: formatCurrency(tieOutDifferenceDifference),
-      formula: 'Stored tie-out difference - recalculated tie-out difference.',
-      ...legacyCheck(tieOutDifferenceDifference),
-    },
-    {
-      metric: 'Total Assets — Current / Noncurrent Split',
-      value: formatCurrency(result.totalAssets),
-      formula:
-        `Cash and cash equivalents (ending cash ${formatCurrency(result.endingCash)} plus the cash-allocation slice of investments, ${result.assetAllocation.cashPct}% × ${formatCurrency(result.endingInvestments)} = ${formatCurrency(checks.cashAndEquivalents)}) plus noncurrent investments ${formatCurrency(checks.noncurrentInvestments)}. The cash slice is derived from the allocation percentage, not read directly, so this exercises the same split shown on the Statement of Net Position.`,
-      note: checks.totalAssetsSplit.note,
-      status: checks.totalAssetsSplit.status,
-    },
-    {
-      metric: 'Total Liabilities — Current / Noncurrent Split',
-      value: formatCurrency(result.totalLiabilities),
-      formula:
-        `Current portion of the net unpaid loss reserve ${formatCurrency(checks.currentUnpaidPortion)} plus noncurrent portion ${formatCurrency(checks.noncurrentUnpaidPortion)} plus unearned premium ${formatCurrency(result.unearnedPremium)}${isPoolView ? ' (pool view splits each line\'s own reserve at its own paydown rate, then sums)' : ''}.`,
-      note: checks.totalLiabilitiesSplit.note,
-      status: checks.totalLiabilitiesSplit.status,
-    },
-    {
-      metric: 'Total Assets − Total Liabilities = Net Position',
-      value: formatCurrency(result.endingSurplus),
-      formula: 'The fundamental balance-sheet identity.',
-      note: checks.assetsMinusLiabilities.note,
-      status: checks.assetsMinusLiabilities.status,
-    },
-    {
-      metric: 'Net Position Rollforward',
-      value: formatCurrency(result.endingSurplus),
-      formula:
-        `Beginning net position ${formatCurrency(result.beginingSurplus)} plus the change in net position ${formatCurrency(result.netIncome)} must equal the ending net position — equivalently, the change must equal ending less beginning. Existing tie-out difference field: ${formatCurrency(result.surplusTieOutDifference)}.`,
-      note: checks.netPositionRollforward.note,
-      status: checks.netPositionRollforward.status,
-    },
-    {
-      metric: 'Ending Cash / Operating Cash Sweep',
-      value: formatCurrency(result.endingCash),
-      formula:
-        `Reconstructs the sweep exactly: the year's cash flows accumulate to a pre-sweep total, then cash is either capped at the operating-cash target (${formatPct(OPERATING_CASH_PCT_OF_PREMIUM)} of the member charge, ${formatCurrency(result.totalMemberCharge * OPERATING_CASH_PCT_OF_PREMIUM)}) with the surplus swept into investments, or topped up from investments to reach it. Flags a known variance if investments run out before the target is met — a genuine liquidity shortfall rather than a modelling gap.`,
-      note: checks.endingCashSweep.note,
-      status: checks.endingCashSweep.status,
-    },
-  ];
+  // The two statement-mirroring cards, built from exported pure functions so a
+  // regression script can assert their correspondence to the statements.
+  const revExpRows = buildRevExpRows(poolResult, lineView, checks);
+  const netPositionRows = buildNetPositionRows(poolResult, lineView, checks);
+  const cashInvestmentRows = buildCashInvestmentRows(poolResult, lineView, checks);
 
   // Pool = sum of active lines, plus the reserve-weighted current/noncurrent
   // blend. Pool scope only — at line scope the sum is a single term and the
@@ -816,8 +557,9 @@ export default function CalculationAuditPage({ lockedResults, priorHistory, inst
   const assumptionRows: AuditRow[] = buildAssumptionRows();
 
   const allCheckRows = [
+    ...revExpRows, ...netPositionRows, ...cashInvestmentRows, ...poolSumRows,
     ...exposureRows, ...rateRows, ...lossRows, ...reserveRows,
-    ...incomeRows, ...balanceRows, ...poolSumRows, ...ratioRows, ...capitalRows,
+    ...ratioRows, ...capitalRows,
   ];
   const status = statusLine(allCheckRows);
 
@@ -861,15 +603,21 @@ export default function CalculationAuditPage({ lockedResults, priorHistory, inst
         </div>
       </div>
 
+      {/* The two statement-mirroring cards first: same line items, names, order
+          and subtotals as the Financial Statements tab, each line showing its
+          derivation and its check. */}
+      <AuditSection title="Statement of Revenues, Expenses & Changes in Net Position" icon={<DollarSign size={16} />} rows={revExpRows} />
+      <AuditSection title="Statement of Net Position" icon={<DollarSign size={16} />} rows={netPositionRows} />
+      {isPoolView && (
+        <AuditSection title="Pool = Sum of Active Lines" icon={<Layers size={16} />} rows={poolSumRows} />
+      )}
+
+      {/* Supporting detail behind the statement lines. */}
+      <AuditSection title="Cash & Investments Rollforward" icon={<DollarSign size={16} />} rows={cashInvestmentRows} />
       <AuditSection title="Exposure and Membership" icon={<TrendingUp size={16} />} rows={exposureRows} />
       <AuditSection title="Funding Rate Build-Up" icon={<Calculator size={16} />} rows={rateRows} />
       <AuditSection title="Losses and Reinsurance" icon={<Shield size={16} />} rows={lossRows} />
       <AuditSection title="Reserve Rollforward" icon={<ClipboardList size={16} />} rows={reserveRows} />
-      <AuditSection title="Income Statement Calculation" icon={<DollarSign size={16} />} rows={incomeRows} />
-      <AuditSection title="Balance Sheet and Surplus Tie-Out" icon={<DollarSign size={16} />} rows={balanceRows} />
-      {isPoolView && (
-        <AuditSection title="Pool = Sum of Active Lines" icon={<Layers size={16} />} rows={poolSumRows} />
-      )}
       <AuditSection title="Ratios" icon={<Calculator size={16} />} rows={ratioRows} />
       <AuditSection title="Capital and Reserve Confidence" icon={<Shield size={16} />} rows={capitalRows} />
       <AuditSection title="Default Assumptions / Parameters" icon={<Settings size={16} />} rows={assumptionRows} />
@@ -896,14 +644,31 @@ function AuditSection({ title, icon, rows }: AuditSectionProps) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, index) => (
-              <tr key={`${row.metric}-${index}`} className="border-b border-gray-50 hover:bg-gray-50/50">
-                <td className="px-5 py-3 font-medium text-gray-700 align-top">{row.metric}</td>
-                <td className="px-5 py-3 font-mono text-right text-gray-900 align-top whitespace-pre-line">{row.value}</td>
-                <td className="px-5 py-3 text-gray-600 align-top whitespace-pre-line">{row.formula}</td>
-                <td className="px-5 py-3 text-gray-500 align-top whitespace-pre-line">{row.note ?? ''}</td>
-              </tr>
-            ))}
+            {rows.map((row, index) => {
+              if (row.kind === 'section') {
+                return (
+                  <tr key={`${row.metric}-${index}`} className="bg-gray-50/70 border-y border-gray-100">
+                    <td colSpan={4} className="px-5 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                      {row.metric}
+                    </td>
+                  </tr>
+                );
+              }
+              const bold = row.emphasis !== undefined;
+              return (
+                <tr
+                  key={`${row.metric}-${index}`}
+                  className={`border-b border-gray-50 hover:bg-gray-50/50 ${row.emphasis === 'total' ? 'border-t-2 border-t-gray-300 bg-blue-50/40' : ''}`}
+                >
+                  <td className={`px-5 py-3 align-top ${bold ? 'font-bold text-gray-900' : 'font-medium text-gray-700'} ${row.indent === 2 ? 'pl-14' : row.indent === 1 ? 'pl-9' : ''}`}>
+                    {row.metric}
+                  </td>
+                  <td className={`px-5 py-3 font-mono text-right align-top whitespace-pre-line ${bold ? 'font-bold text-gray-900' : 'text-gray-900'}`}>{row.value}</td>
+                  <td className="px-5 py-3 text-gray-600 align-top whitespace-pre-line">{row.formula}</td>
+                  <td className="px-5 py-3 text-gray-500 align-top whitespace-pre-line">{row.note ?? ''}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -935,30 +700,39 @@ export interface AuditCheck {
 }
 
 export interface AuditCheckSet {
-  // Income statement
+  // Statement of Revenues, Expenses & Changes in Net Position
   totalOperatingRevenues: AuditCheck;
   totalOperatingExpenses: AuditCheck;
   operatingIncome: AuditCheck;
   changeInNetPosition: AuditCheck;
+  priorYearClaims: AuditCheck;
   provisionForClaims: AuditCheck;
-  // Balance sheet / statement of net position
+  investmentIncome: AuditCheck;
+  netPositionRollforward: AuditCheck;
+  // Statement of Net Position
   totalAssetsSplit: AuditCheck;
   totalLiabilitiesSplit: AuditCheck;
   assetsMinusLiabilities: AuditCheck;
-  netPositionRollforward: AuditCheck;
+  // Cash & investments rollforward (no statement line of their own)
   endingCashSweep: AuditCheck;
-  // Losses and reinsurance
-  investmentIncome: AuditCheck;
+  endingInvestmentsSweep: AuditCheck;
   // Pool-only: one entry per summable metric, plus the reserve-weighted split.
   poolSum: { metric: string; check: AuditCheck }[];
   reserveCurrentNoncurrent: AuditCheck | null;
   // Derived display values the cards also need.
   totalOperatingRevenuesValue: number;
   totalOperatingExpensesValue: number;
+  priorYearClaimsValue: number;
   currentUnpaidPortion: number;
   noncurrentUnpaidPortion: number;
   cashAndEquivalents: number;
+  cashSliceOfInvestments: number;
   noncurrentInvestments: number;
+  operatingCashTarget: number;
+  investmentsBeforeSweep: number;
+  sweepTransfer: number;
+  investmentsFloorBound: boolean;
+  liquidityFloorBound: boolean;
 }
 
 function mkCheck(
@@ -1010,6 +784,46 @@ const POOL_SUM_METRICS: { key: keyof LineResultSet; label: string }[] = [
   { key: 'endingSurplus', label: 'Ending Surplus' },
 ];
 
+// Reconstructs one line's year-end cash/investment sweep exactly as the engine
+// performs it: the year's flows accumulate to a pre-sweep cash total, then cash
+// above the operating-cash target is swept into investments, or a shortfall is
+// drawn back out of investments (limited to what is actually there). Both
+// floors are reported so a genuine liquidity or wipe-out event is
+// distinguishable from a reconciliation gap.
+function reconstructSweep(x: LineResultSet) {
+  const preSweepCash =
+    x.beginningCash + x.totalMemberCharge + x.assessments - x.netPaidLosses -
+    x.operatingExpense - x.riskControlInvestment - x.reinsuranceCost - x.dividends;
+  const rawInvestments = x.beginningInvestments + x.investmentIncome;
+  const investmentsBeforeSweep = Math.max(0, rawInvestments);
+  const investmentsFloorBound = rawInvestments < -CHECK_TOLERANCE;
+  const operatingCashTarget = x.totalMemberCharge * OPERATING_CASH_PCT_OF_PREMIUM;
+
+  let cash: number;
+  let investments: number;
+  let liquidityFloorBound = false;
+  if (preSweepCash >= operatingCashTarget) {
+    cash = operatingCashTarget;
+    investments = investmentsBeforeSweep + (preSweepCash - operatingCashTarget);
+  } else {
+    const shortfall = operatingCashTarget - preSweepCash;
+    const drawn = Math.min(shortfall, investmentsBeforeSweep);
+    cash = preSweepCash + drawn;
+    investments = investmentsBeforeSweep - drawn;
+    liquidityFloorBound = drawn < shortfall - CHECK_TOLERANCE;
+  }
+  return {
+    cash,
+    investments,
+    preSweepCash,
+    operatingCashTarget,
+    investmentsBeforeSweep,
+    sweepTransfer: investments - investmentsBeforeSweep,
+    liquidityFloorBound,
+    investmentsFloorBound,
+  };
+}
+
 export function computeAuditChecks(
   poolResult: ResultSet,
   lineView: LineView,
@@ -1036,14 +850,23 @@ export function computeAuditChecks(
   );
   const changeInNetPosition = mkCheck(r.underwritingIncome + r.investmentIncome, r.netIncome);
 
-  // Path A builds up from the current-year gross loss, ceded recoveries, and
-  // the independently-simulated prior-year cohort development (signed so
-  // positive = favourable, hence subtracted). Path B is the reserve
-  // rollforward's own net incurred loss. Genuinely separate computations.
+  // Prior accident years' NET incurred, as the statement presents it: net paid
+  // plus the change in net unpaid on prior cohorts. The two INDEPENDENT paths
+  // meet on this line — the statement's presentation figure (net incurred less
+  // this year's net ultimate) against the reserve rollforward's own separately
+  // simulated cohort development (signed so positive = favourable, hence
+  // negated). A failure here points at the reserve development, not a subtotal.
+  const priorYearClaimsValue = r.netIncurredLoss - r.netUltimateLoss;
+  const priorYearClaims = mkCheck(-r.priorYearDevelopment, priorYearClaimsValue, {
+    varianceCap: CLAIMS_VARIANCE_CAP,
+    varianceReason: CLAIMS_VARIANCE_REASON,
+  });
+
+  // The subtotal's own identity: current year claims less ceded recoveries plus
+  // prior year claims must equal the net provision. Exact by construction.
   const provisionForClaims = mkCheck(
-    r.grossUltimateLoss - r.reinsuranceRecovery - r.priorYearDevelopment,
-    r.netIncurredLoss,
-    { varianceCap: CLAIMS_VARIANCE_CAP, varianceReason: CLAIMS_VARIANCE_REASON }
+    r.grossUltimateLoss - r.reinsuranceRecovery + priorYearClaimsValue,
+    r.netIncurredLoss
   );
 
   // --- Statement of net position ---
@@ -1071,37 +894,48 @@ export function computeAuditChecks(
   // change = ending - beginning. (These were previously two separate rows.)
   const netPositionRollforward = mkCheck(r.beginingSurplus + r.netIncome, r.endingSurplus);
 
-  // Reconstructs the engine's cash/investment sweep exactly: cash flows to a
-  // pre-sweep total, then the sweep caps it at the operating-cash target
-  // (surplus swept to investments) or tops it up from investments (shortfall
-  // drawn down, floored at what's available).
-  const preSweepCash =
-    r.beginningCash + r.totalMemberCharge + r.assessments - r.netPaidLosses -
-    r.operatingExpense - r.riskControlInvestment - r.reinsuranceCost - r.dividends;
-  const investmentsBeforeSweep = Math.max(0, r.beginningInvestments + r.investmentIncome);
-  const operatingCashTarget = r.totalMemberCharge * OPERATING_CASH_PCT_OF_PREMIUM;
-  let sweptCash: number;
-  let liquidityFloorBound = false;
-  if (preSweepCash >= operatingCashTarget) {
-    sweptCash = operatingCashTarget;
-  } else {
-    const shortfall = operatingCashTarget - preSweepCash;
-    const drawn = Math.min(shortfall, investmentsBeforeSweep);
-    sweptCash = preSweepCash + drawn;
-    liquidityFloorBound = drawn < shortfall - CHECK_TOLERANCE;
-  }
-  const endingCashSweep: AuditCheck = liquidityFloorBound
+  // The sweep runs PER LINE inside the engine, so at pool scope the correct
+  // reconstruction is the sum of each line's own reconstruction — applying the
+  // formula to pool aggregates only coincides when no line hits either floor.
+  const sweepParts = (isPoolView ? lineKeys.map(l => poolResult.byLine[l]) : [r]).map(reconstructSweep);
+  const sweep = sweepParts.reduce(
+    (a, b) => ({
+      cash: a.cash + b.cash,
+      investments: a.investments + b.investments,
+      operatingCashTarget: a.operatingCashTarget + b.operatingCashTarget,
+      investmentsBeforeSweep: a.investmentsBeforeSweep + b.investmentsBeforeSweep,
+      sweepTransfer: a.sweepTransfer + b.sweepTransfer,
+      liquidityFloorBound: a.liquidityFloorBound || b.liquidityFloorBound,
+      investmentsFloorBound: a.investmentsFloorBound || b.investmentsFloorBound,
+    }),
+    { cash: 0, investments: 0, operatingCashTarget: 0, investmentsBeforeSweep: 0, sweepTransfer: 0, liquidityFloorBound: false, investmentsFloorBound: false }
+  );
+
+  const endingCashSweep: AuditCheck = sweep.liquidityFloorBound
     ? {
-        derived: sweptCash,
+        derived: sweep.cash,
         statement: r.endingCash,
-        diff: r.endingCash - sweptCash,
+        diff: r.endingCash - sweep.cash,
         status: 'variance',
         note:
-          `Known variance — LIQUIDITY FLOOR BOUND: available investments (${formatCurrency(investmentsBeforeSweep)}) ` +
-          `could not fully cover the cash shortfall, so the operating-cash target was not met. A real balance-sheet ` +
-          `event, not a reconciliation gap.`,
+          `Known variance — LIQUIDITY FLOOR BOUND: available investments could not fully cover the cash ` +
+          `shortfall, so the operating-cash target was not met. A real balance-sheet event, not a ` +
+          `reconciliation gap.`,
       }
-    : mkCheck(sweptCash, r.endingCash);
+    : mkCheck(sweep.cash, r.endingCash);
+
+  const endingInvestmentsSweep: AuditCheck = sweep.investmentsFloorBound
+    ? {
+        derived: sweep.investments,
+        statement: r.endingInvestments,
+        diff: r.endingInvestments - sweep.investments,
+        status: 'variance',
+        note:
+          `Known variance — INVESTMENTS FLOOR BOUND: an investment loss exceeded the opening portfolio, ` +
+          `so the balance was clamped at zero before the sweep. A real balance-sheet event, not a ` +
+          `reconciliation gap.`,
+      }
+    : mkCheck(sweep.investments, r.endingInvestments);
 
   // --- Investment income: plumbing consistency, not an independent derivation ---
   // Live years draw one shared market from the plain instance seed. Pre-game
@@ -1160,21 +994,30 @@ export function computeAuditChecks(
     totalOperatingExpenses,
     operatingIncome,
     changeInNetPosition,
+    priorYearClaims,
     provisionForClaims,
+    investmentIncome,
+    netPositionRollforward,
     totalAssetsSplit,
     totalLiabilitiesSplit,
     assetsMinusLiabilities,
-    netPositionRollforward,
     endingCashSweep,
-    investmentIncome,
+    endingInvestmentsSweep,
     poolSum,
     reserveCurrentNoncurrent,
     totalOperatingRevenuesValue,
     totalOperatingExpensesValue,
+    priorYearClaimsValue,
     currentUnpaidPortion,
     noncurrentUnpaidPortion,
     cashAndEquivalents,
+    cashSliceOfInvestments: cashSlice,
     noncurrentInvestments,
+    operatingCashTarget: sweep.operatingCashTarget,
+    investmentsBeforeSweep: sweep.investmentsBeforeSweep,
+    sweepTransfer: sweep.sweepTransfer,
+    investmentsFloorBound: sweep.investmentsFloorBound,
+    liquidityFloorBound: sweep.liquidityFloorBound,
   };
 }
 
@@ -1461,4 +1304,381 @@ function formatSliderPct(range: { min: number; max: number; step: number; defaul
 
 function formatSliderNumber(range: { min: number; max: number; step: number; default: number }): string {
   return `Min ${range.min}, Max ${range.max}, Step ${range.step}, Default ${range.default}`;
+}
+
+// ============================================================================
+// Statement-mirroring row builders.
+//
+// Each returns the audit rows for one card, in the SAME order, with the SAME
+// labels and values as the corresponding statement on the Financial Statements
+// tab — every line additionally carrying its derivation and its check. Exported
+// as pure functions so a regression script can assert that correspondence
+// directly.
+// ============================================================================
+
+export function buildRevExpRows(
+  poolResult: ResultSet,
+  lineView: LineView,
+  checks: AuditCheckSet
+): AuditRow[] {
+  const result: LineResultSet = lineView === 'pool' ? poolResult : poolResult.byLine[lineView];
+  // Mirrors the statement: neither is modelled yet, so both are zero and the
+  // rows they gate stay hidden.
+  const additionalPaidInCapital = 0;
+  const restatements = 0;
+  return [
+
+    { kind: 'section', metric: 'Operating revenues', value: '', formula: '' },
+    {
+      metric: 'Premiums for transferred risk',
+      value: formatCurrency(result.reinsuranceCost),
+      formula: 'Cost of the selected reinsurance program, billed through to members. Shown gross: it appears again below as an operating expense when paid to the reinsurer.',
+      indent: 1,
+    },
+    {
+      metric: 'Contributions for retained risk',
+      value: formatCurrency(result.poolPremium),
+      formula: 'Pool premium — expected loss at the selected confidence level factor, after the rate-level adjustment.',
+      indent: 1,
+    },
+    {
+      metric: 'Administration fees',
+      value: formatCurrency(result.adminExpense),
+      formula: `Pure premium × ${formatPct(ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM)}, added after the CLF and not multiplied by it. Shown gross: it appears again below as general administrative services.`,
+      indent: 1,
+    },
+    {
+      metric: 'Member assessments',
+      value: formatCurrency(result.assessments),
+      formula: 'Pool premium × the selected assessment percentage — additional calls on members beyond premium.',
+      indent: 1,
+    },
+    {
+      metric: 'Total operating revenues',
+      value: formatCurrency(checks.totalOperatingRevenuesValue),
+      formula: 'Premiums for transferred risk + contributions for retained risk + administration fees + member assessments.',
+      emphasis: 'subtotal',
+      note: checks.totalOperatingRevenues.note,
+      status: checks.totalOperatingRevenues.status,
+    },
+
+    { kind: 'section', metric: 'Operating expenses', value: '', formula: '' },
+    {
+      metric: 'Transferred risk & insurance expense',
+      value: formatCurrency(result.reinsuranceCost),
+      formula: 'The reinsurance premium paid out — the same figure collected above, passed straight through.',
+      indent: 1,
+    },
+    {
+      metric: 'Provision for claims:',
+      value: '',
+      formula: 'Grouping header for the three claim components below.',
+      indent: 1,
+    },
+    {
+      metric: 'Current year claims',
+      value: formatCurrency(result.grossUltimateLoss),
+      formula: 'This accident year\'s simulated gross ultimate loss including LAE, before any reinsurance.',
+      indent: 2,
+    },
+    ...(result.reinsuranceRecovery !== 0
+      ? [{
+          metric: 'Less: reinsurance recoveries',
+          value: `(${formatCurrency(result.reinsuranceRecovery)})`,
+          formula: 'The reinsurer\'s quota share of losses above the attachment point. Shown only when non-zero, as on the statement.',
+          indent: 2 as const,
+        }]
+      : []),
+    {
+      metric: 'Prior year claims',
+      value: formatCurrency(checks.priorYearClaimsValue),
+      formula: 'Prior accident years\' net incurred: net incurred loss less this year\'s net ultimate loss — i.e. paid plus the change in unpaid on prior cohorts, including closed-cohort runoff. Independently derived by negating the separately simulated prior-year cohort development, and the two must meet.',
+      indent: 2,
+      note: checks.priorYearClaims.note,
+      status: checks.priorYearClaims.status,
+    },
+    {
+      metric: 'Provision for claims, net',
+      value: formatCurrency(result.netIncurredLoss),
+      formula: 'Current year claims less reinsurance recoveries plus prior year claims.',
+      indent: 2,
+      emphasis: 'subtotal',
+      note: checks.provisionForClaims.note,
+      status: checks.provisionForClaims.status,
+    },
+    {
+      metric: 'General administrative services',
+      value: formatCurrency(result.operatingExpense),
+      formula: 'The administration fees collected above, paid out as operating expense.',
+      indent: 1,
+    },
+    {
+      metric: 'Loss prevention expenses',
+      value: formatCurrency(result.riskControlInvestment),
+      formula: 'Pool premium × the selected risk-control percentage.',
+      indent: 1,
+    },
+    {
+      metric: 'Member dividends & returned premium',
+      value: formatCurrency(result.dividends),
+      formula: 'Pool premium × the selected dividend percentage. Blocked when the line carried a negative surplus into the year.',
+      indent: 1,
+    },
+    {
+      metric: 'Total operating expenses',
+      value: formatCurrency(checks.totalOperatingExpensesValue),
+      formula: 'Transferred risk & insurance expense + provision for claims net + general administrative services + loss prevention expenses + member dividends & returned premium.',
+      emphasis: 'subtotal',
+      note: checks.totalOperatingExpenses.note,
+      status: checks.totalOperatingExpenses.status,
+    },
+
+    {
+      metric: 'Operating income (loss)',
+      value: formatCurrency(result.underwritingIncome),
+      formula: 'Total operating revenues less total operating expenses, compared against the separately stored underwriting income.',
+      emphasis: 'total',
+      note: checks.operatingIncome.note,
+      status: checks.operatingIncome.status,
+    },
+
+    { kind: 'section', metric: 'Nonoperating revenues (expenses)', value: '', formula: '' },
+    {
+      metric: 'Investment income, net of investment expense',
+      value: formatCurrency(result.investmentIncome),
+      formula: `Invested assets ${formatCurrency(result.investedAssets)} × the blended return rate from this year's cash / bond / equity draws, net of fees. Re-running the engine's own market draw and blend for this year confirms the stored figure — this verifies the plumbing between engine and statement, not the investment maths itself.`,
+      indent: 1,
+      note: checks.investmentIncome.note,
+      status: checks.investmentIncome.status,
+    },
+    {
+      metric: 'Total nonoperating revenues (expenses)',
+      value: formatCurrency(result.investmentIncome),
+      formula: 'Investment income is currently the only nonoperating item.',
+      emphasis: 'subtotal',
+    },
+
+    {
+      metric: 'Change in net position',
+      value: formatCurrency(result.netIncome),
+      formula: 'Operating income plus total nonoperating revenues — confirms the bottom line is exactly the sum of the two sections above it.',
+      emphasis: 'total',
+      note: checks.changeInNetPosition.note,
+      status: checks.changeInNetPosition.status,
+    },
+
+    { kind: 'section', metric: 'Net position', value: '', formula: '' },
+    {
+      metric: 'Beginning of year',
+      value: formatCurrency(result.beginingSurplus),
+      formula: 'Prior year\'s ending net position, carried in.',
+      indent: 1,
+    },
+    // Mirrors the statement's conditional block: rendered only when non-zero,
+    // so hidden today because neither is modelled yet.
+    ...(additionalPaidInCapital !== 0 || restatements !== 0
+      ? [
+          {
+            metric: 'Additional paid in capital',
+            value: formatCurrency(additionalPaidInCapital),
+            formula: 'Capital contributed by members beyond premium. Not modelled yet.',
+            indent: 1 as const,
+          },
+          {
+            metric: 'Restatements',
+            value: formatCurrency(restatements),
+            formula: 'Prior-period restatements. Not modelled yet.',
+            indent: 1 as const,
+          },
+          {
+            metric: 'Beginning of year, as restated',
+            value: formatCurrency(result.beginingSurplus + additionalPaidInCapital + restatements),
+            formula: 'Beginning of year plus additional paid in capital plus restatements.',
+            indent: 1 as const,
+          },
+        ]
+      : []),
+    {
+      metric: 'Net position, end of year',
+      value: formatCurrency(result.endingSurplus),
+      formula: `Beginning of year plus the change in net position. Stored tie-out difference: ${formatCurrency(result.surplusTieOutDifference)}.`,
+      emphasis: 'total',
+      note: checks.netPositionRollforward.note,
+      status: checks.netPositionRollforward.status,
+    },
+  ];
+}
+
+export function buildNetPositionRows(
+  poolResult: ResultSet,
+  lineView: LineView,
+  checks: AuditCheckSet
+): AuditRow[] {
+  const isPoolView = lineView === 'pool';
+  const result: LineResultSet = isPoolView ? poolResult : poolResult.byLine[lineView];
+  const lineKeysForDisplay = Object.keys(poolResult.byLine) as CoverageLine[];
+  return [
+
+    { kind: 'section', metric: 'Current assets', value: '', formula: '' },
+    {
+      metric: 'Cash and cash equivalents',
+      value: formatCurrency(checks.cashAndEquivalents),
+      formula: `Ending operating cash ${formatCurrency(result.endingCash)} plus the cash-allocation slice of the investment portfolio (${result.assetAllocation.cashPct}% × ${formatCurrency(result.endingInvestments)} = ${formatCurrency(checks.cashSliceOfInvestments)}). The slice is derived from the allocation percentage rather than read directly.`,
+      indent: 1,
+    },
+    {
+      metric: 'Total current assets',
+      value: formatCurrency(checks.cashAndEquivalents),
+      formula: 'Cash and cash equivalents is currently the only current asset.',
+      emphasis: 'subtotal',
+    },
+
+    { kind: 'section', metric: 'Noncurrent assets', value: '', formula: '' },
+    {
+      metric: 'Investments',
+      value: formatCurrency(checks.noncurrentInvestments),
+      formula: `The portfolio less its cash-equivalent slice: ${formatCurrency(result.endingInvestments)} − ${formatCurrency(checks.cashSliceOfInvestments)} — the bond and equity allocations.`,
+      indent: 1,
+    },
+    {
+      metric: 'Total noncurrent assets',
+      value: formatCurrency(checks.noncurrentInvestments),
+      formula: 'Investments are currently the only noncurrent asset.',
+      emphasis: 'subtotal',
+    },
+
+    {
+      metric: 'Total assets',
+      value: formatCurrency(result.totalAssets),
+      formula: 'Total current assets plus total noncurrent assets, compared against the stored total. The current/noncurrent split reallocates the portfolio but must conserve the total.',
+      emphasis: 'total',
+      note: checks.totalAssetsSplit.note,
+      status: checks.totalAssetsSplit.status,
+    },
+
+    { kind: 'section', metric: 'Current liabilities', value: '', formula: '' },
+    {
+      metric: 'Unpaid loss and LAE reserve, net of reinsurance — current portion',
+      value: formatCurrency(checks.currentUnpaidPortion),
+      formula: isPoolView
+        ? `The share of each line's own net unpaid reserve expected to pay within twelve months, at that line's own paydown rate, summed: ${lineKeysForDisplay.map(l => `${l} ${formatCurrency(poolResult.byLine[l].endingNetReserve)} × ${formatPct(LINE_RESERVE_PAYDOWN_PCT[l] ?? 0)}`).join(' + ')}.`
+        : `Net unpaid reserve ${formatCurrency(result.endingNetReserve)} × this line's own reserve paydown rate ${formatPct(LINE_RESERVE_PAYDOWN_PCT[lineView as CoverageLine] ?? 0)} — the same rate the engine applies to every cohort each year.`,
+      indent: 1,
+    },
+    {
+      metric: 'Total current liabilities',
+      value: formatCurrency(checks.currentUnpaidPortion),
+      formula: 'The current portion of the unpaid loss reserve is currently the only current liability.',
+      emphasis: 'subtotal',
+    },
+
+    { kind: 'section', metric: 'Noncurrent liabilities', value: '', formula: '' },
+    {
+      metric: 'Unpaid loss and LAE reserve, net of reinsurance — noncurrent portion',
+      value: formatCurrency(checks.noncurrentUnpaidPortion),
+      formula: `The remainder of the net unpaid reserve: ${formatCurrency(result.endingNetReserve)} − ${formatCurrency(checks.currentUnpaidPortion)} — expected to pay beyond twelve months.`,
+      indent: 1,
+    },
+    {
+      metric: 'Total noncurrent liabilities',
+      value: formatCurrency(checks.noncurrentUnpaidPortion),
+      formula: 'The noncurrent portion of the unpaid loss reserve is currently the only noncurrent liability.',
+      emphasis: 'subtotal',
+    },
+
+    {
+      metric: 'Total liabilities',
+      value: formatCurrency(result.totalLiabilities),
+      formula: `Total current plus total noncurrent liabilities, compared against the stored total. Unearned premium (${formatCurrency(result.unearnedPremium)}) is held at zero because written premium is treated as earned in the year written, so the statement does not present it as a line.`,
+      emphasis: 'total',
+      note: checks.totalLiabilitiesSplit.note,
+      status: checks.totalLiabilitiesSplit.status,
+    },
+
+    {
+      metric: 'Net position — unrestricted',
+      value: formatCurrency(result.endingSurplus),
+      formula: 'Total assets less total liabilities — the fundamental balance-sheet identity, compared against the stored ending net position.',
+      emphasis: 'total',
+      note: checks.assetsMinusLiabilities.note,
+      status: checks.assetsMinusLiabilities.status,
+    },
+  ];
+}
+
+export function buildCashInvestmentRows(
+  poolResult: ResultSet,
+  lineView: LineView,
+  checks: AuditCheckSet
+): AuditRow[] {
+  const isPoolView = lineView === 'pool';
+  const result: LineResultSet = isPoolView ? poolResult : poolResult.byLine[lineView];
+  const surplusFromIncomeDifference =
+    result.surplusFromIncome - (result.beginingSurplus + result.netIncome);
+  const tieOutDifferenceDifference =
+    result.surplusTieOutDifference - (result.endingSurplus - result.surplusFromIncome);
+  return [
+
+    {
+      metric: 'Beginning Cash',
+      value: formatCurrency(result.beginningCash),
+      formula: 'Operating cash carried into the year.',
+    },
+    {
+      metric: 'Beginning Investments',
+      value: formatCurrency(result.beginningInvestments),
+      formula: 'Investment portfolio carried into the year.',
+    },
+    {
+      metric: 'Investment Income',
+      value: formatCurrency(result.investmentIncome),
+      formula: 'Applied to the portfolio before the sweep. Can be negative in a down market.',
+    },
+    {
+      metric: 'Investments Before Sweep',
+      value: formatCurrency(checks.investmentsBeforeSweep),
+      formula: 'Beginning investments plus investment income, floored at zero (a loss cannot drive the portfolio negative).',
+    },
+    {
+      metric: 'Operating Cash Target',
+      value: formatCurrency(checks.operatingCashTarget),
+      formula: `Gross premium & admin expense × ${formatPct(OPERATING_CASH_PCT_OF_PREMIUM)}${isPoolView ? ', summed across lines (the sweep runs per line)' : ''}. Cash is swept toward this level each year end.`,
+    },
+    {
+      metric: 'Sweep Transfer',
+      value: formatCurrency(checks.sweepTransfer),
+      formula: 'Net movement into the portfolio from the sweep: positive when cash above target was swept in, negative when investments were drawn down to cover a cash shortfall.',
+    },
+    {
+      metric: 'Ending Cash / Operating Cash Sweep',
+      value: formatCurrency(result.endingCash),
+      formula: 'Reconstructs the sweep: the year\'s flows accumulate to a pre-sweep cash total, then cash is either capped at the operating-cash target with the surplus swept into investments, or topped up from investments to reach it. Flags a known variance if investments run out first — a genuine liquidity shortfall rather than a modelling gap.',
+      note: checks.endingCashSweep.note,
+      status: checks.endingCashSweep.status,
+    },
+    {
+      metric: 'Ending Investments / Sweep',
+      value: formatCurrency(result.endingInvestments),
+      formula: 'Investments before sweep plus the sweep transfer. The mirror image of the cash reconstruction above — the sweep conserves total assets, moving money between the two accounts.',
+      note: checks.endingInvestmentsSweep.note,
+      status: checks.endingInvestmentsSweep.status,
+    },
+    {
+      metric: 'Unearned Premium',
+      value: formatCurrency(result.unearnedPremium),
+      formula: 'Held at zero: written premium is treated as collected and earned in the year it is written, with no separate timing layer.',
+    },
+    {
+      metric: 'Surplus from Income',
+      value: formatCurrency(result.surplusFromIncome),
+      formula: 'Beginning surplus plus net income — the stored rollforward figure.',
+      ...legacyCheck(surplusFromIncomeDifference),
+    },
+    {
+      metric: 'Tie-Out Difference',
+      value: formatCurrency(result.surplusTieOutDifference),
+      formula: 'Ending surplus less surplus from income. Zero when the balance sheet and income statement agree.',
+      ...legacyCheck(tieOutDifferenceDifference),
+    },
+  ];
 }
