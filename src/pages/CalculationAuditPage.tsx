@@ -944,55 +944,49 @@ export function buildReconciliationChecks(result: ResultSet, instanceSeed: numbe
   }
 
   // --- Check 5: Investment income — plumbing consistency check ---
-  // Live-years only: the pre-game bootstrap's reject-and-redraw process can
+  // Live years always run on the plain instance seed, so every scope (Pool +
+  // lines) shares one market draw. Pre-game years are simulated per line in
+  // ISOLATION by priorHistoryEngine's reject-and-redraw bootstrap, which can
   // run a line's history on an attempt-shifted seed (instance.seed + attempt
-  // x 997, see priorHistoryEngine's simulateLineCandidate) that is not
-  // exposed outside that module, so this page cannot always reproduce the
-  // exact market draw a pre-game year actually used. Live years always run
-  // on the plain instance seed, so the check is exact there.
+  // x 997) — recorded per line as pregameAttempt — so there is no single
+  // shared pre-game market draw to check at pool scope; only lines are
+  // checked, each against its own effective seed.
   {
     const isLiveYear = result.yearNumber > 0;
-    if (!isLiveYear) {
-      checks.push({
-        id: 'investment-income-consistency',
-        category: 'High-Value',
-        title: 'Investment income — plumbing consistency check',
-        description:
-          'A consistency check, not an independent derivation: it re-runs the same exported engine functions (simulateMarketReturns, blendInvestmentReturn) against the displayed allocation and invested-asset base, and confirms the stored investment income matches what those functions actually produce. It verifies the plumbing between the engine and the statement, not the investment math itself.',
-        scopes: [
-          {
-            scope: 'All',
-            derived: 0,
-            statement: 0,
-            diff: 0,
-            status: 'na',
-            buildUp:
-              'Not applicable to pre-game years: the reject-and-redraw bootstrap process may run this line\'s history on an attempt-shifted seed not exposed to this page. Select a live year (Year 1+) to run this check.',
-          },
-        ],
-        status: 'na',
-      });
-    } else {
-      const scopes = scopeList.map(({ label, r }) => {
-        const rng = deriveSubRng(instanceSeed, r.yearNumber, 'invest');
-        const market = simulateMarketReturns(rng);
-        const blend = blendInvestmentReturn(r.investedAssets, r.assetAllocation, market);
-        const buildUp =
-          `Re-drawn market returns for year ${r.yearNumber}: cash ${formatPct(market.cash)}, bonds ${formatPct(market.bonds)}, equities ${formatPct(market.equities)}\n` +
-          `Allocation: cash ${r.assetAllocation.cashPct}%, bonds ${r.assetAllocation.bondsPct}%, equities ${r.assetAllocation.equitiesPct}%\n` +
-          `Blended rate ${formatPct(blend.returnRate)} × invested assets ${formatCurrency(r.investedAssets)} = ${formatCurrency(blend.income)}`;
-        return makeScope(label, blend.income, r.investmentIncome, buildUp);
-      });
-      checks.push({
-        id: 'investment-income-consistency',
-        category: 'High-Value',
-        title: 'Investment income — plumbing consistency check',
-        description:
-          'A consistency check, not an independent derivation: it re-runs the same exported engine functions (simulateMarketReturns, blendInvestmentReturn) against the displayed allocation and invested-asset base, and confirms the stored investment income matches what those functions actually produce. It verifies the plumbing between the engine and the statement, not the investment math itself.',
-        scopes,
-        status: overallStatus(scopes),
-      });
-    }
+    const scopes = isLiveYear
+      ? scopeList.map(({ label, r }) => {
+          const rng = deriveSubRng(instanceSeed, r.yearNumber, 'invest');
+          const market = simulateMarketReturns(rng);
+          const blend = blendInvestmentReturn(r.investedAssets, r.assetAllocation, market);
+          const buildUp =
+            `Re-drawn market returns for year ${r.yearNumber} (instance seed): cash ${formatPct(market.cash)}, bonds ${formatPct(market.bonds)}, equities ${formatPct(market.equities)}\n` +
+            `Allocation: cash ${r.assetAllocation.cashPct}%, bonds ${r.assetAllocation.bondsPct}%, equities ${r.assetAllocation.equitiesPct}%\n` +
+            `Blended rate ${formatPct(blend.returnRate)} × invested assets ${formatCurrency(r.investedAssets)} = ${formatCurrency(blend.income)}`;
+          return makeScope(label, blend.income, r.investmentIncome, buildUp);
+        })
+      : lineKeys.map(line => {
+          const r = result.byLine[line];
+          const attempt = r.pregameAttempt ?? 0;
+          const effectiveSeed = attempt === 0 ? instanceSeed : (instanceSeed + attempt * 997) >>> 0;
+          const rng = deriveSubRng(effectiveSeed, r.yearNumber, 'invest');
+          const market = simulateMarketReturns(rng);
+          const blend = blendInvestmentReturn(r.investedAssets, r.assetAllocation, market);
+          const buildUp =
+            `Accepted pre-game attempt ${attempt} → effective seed ${effectiveSeed} (instance seed ${instanceSeed}${attempt === 0 ? ', unshifted' : ` + ${attempt} × 997`})\n` +
+            `Re-drawn market returns for year ${r.yearNumber}: cash ${formatPct(market.cash)}, bonds ${formatPct(market.bonds)}, equities ${formatPct(market.equities)}\n` +
+            `Allocation: cash ${r.assetAllocation.cashPct}%, bonds ${r.assetAllocation.bondsPct}%, equities ${r.assetAllocation.equitiesPct}%\n` +
+            `Blended rate ${formatPct(blend.returnRate)} × invested assets ${formatCurrency(r.investedAssets)} = ${formatCurrency(blend.income)}`;
+          return makeScope(line, blend.income, r.investmentIncome, buildUp);
+        });
+    checks.push({
+      id: 'investment-income-consistency',
+      category: 'High-Value',
+      title: 'Investment income — plumbing consistency check',
+      description:
+        'A consistency check, not an independent derivation: it re-runs the same exported engine functions (simulateMarketReturns, blendInvestmentReturn) against the displayed allocation and invested-asset base, and confirms the stored investment income matches what those functions actually produce. It verifies the plumbing between the engine and the statement, not the investment math itself. Pre-game years use each line\'s recorded pregameAttempt to derive its effective bootstrap seed; pool scope is skipped for pre-game years since lines may have used different attempts (no single shared market draw to check).',
+      scopes,
+      status: overallStatus(scopes),
+    });
   }
 
   // --- Check 6: Current + noncurrent unpaid reserve, reserve-weighted blend (pool only) ---

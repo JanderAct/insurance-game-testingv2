@@ -152,9 +152,13 @@ function finalizeLine(
   line: CoverageLine,
   attempt: number
 ): LinePreGame {
+  // Stamp the accepted attempt onto each pre-game year's result so the
+  // effective seed (instance.seed + attempt x 997) that produced it is
+  // recoverable later from saved state, not just during this simulation run.
+  const lineResults = c.lineResults.map(r => ({ ...r, pregameAttempt: attempt }));
   return {
     line,
-    lineResults: c.lineResults,
+    lineResults,
     lineState: c.poolState.lines[line],
     cash: c.poolState.cash,
     unearnedPremium: c.poolState.unearnedPremium,

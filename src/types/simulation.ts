@@ -363,6 +363,14 @@ export interface ResultSet {
   // Narrative
   narrativeExplanation: string;
 
+  // Provenance of the pre-game reject-and-redraw bootstrap (priorHistoryEngine).
+  // Set only on pre-game years (yearNumber <= 0), per line, so the exact
+  // effective seed that produced that line's history — instance.seed +
+  // pregameAttempt x 997 — is derivable from saved state. Undefined for live
+  // years and for the pool-level aggregate (each line can carry a different
+  // attempt, so there is no single pool-level value).
+  pregameAttempt?: number;
+
   // Per-line breakdown. Pool-level fields above are aggregates across active
   // lines (dollar/count fields summed, ratios recomputed from the summed
   // components); this map retains each line's own unaggregated result.
