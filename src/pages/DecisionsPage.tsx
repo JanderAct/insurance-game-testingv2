@@ -3,7 +3,7 @@ import { DollarSign, TrendingUp, BarChart2, Shield, RotateCcw } from 'lucide-rea
 import type { DecisionSet, LineDecisionSet, CoverageLine, LineView } from '../types/simulation';
 import SliderInput from '../components/SliderInput';
 import AllocationBar from '../components/AllocationBar';
-import { SLIDER_RANGES, REINSURANCE_PROGRAMS, FULL_TRANSFER_COST_PCT_OF_PREMIUM, SELF_FUNDED_DISCOUNT_PCT, ASSET_ALLOCATION_DEFAULT } from '../data/defaultAssumptions';
+import { SLIDER_RANGES, REINSURANCE_PROGRAMS, ASSET_ALLOCATION_DEFAULT } from '../data/defaultAssumptions';
 import { formatCurrency } from '../utils/formatters';
 import { getReinsuranceStructure } from '../utils/reinsuranceEngine';
 import { defaultLineDecisionSet } from '../utils/decisionDefaults';
@@ -71,8 +71,6 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
   const prog = REINSURANCE_PROGRAMS[d.reinsuranceLevel];
   const reinsCostPct = prog ? (prog.costPctOfPremiumMin + prog.costPctOfPremiumMax) / 2 : 0;
   const reinsCost = estimatedPremium * reinsCostPct;
-  const retainedSharePct = 1 - reinsStructure.recoveryPct;
-  const selfFundedDiscount = retainedSharePct * FULL_TRANSFER_COST_PCT_OF_PREMIUM * estimatedPremium * SELF_FUNDED_DISCOUNT_PCT;
 
   const rateDisplay = (v: number) => v >= 0 ? `+${(v * 100).toFixed(0)}%` : `${(v * 100).toFixed(0)}%`;
   const pctDisplay = (v: number) => `${(v * 100).toFixed(1)}%`;
@@ -128,16 +126,13 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
                 <DataRow label="Quota Share % (Pool Retains)" value={`${((1 - reinsStructure.recoveryPct) * 100).toFixed(0)}%`} />
                 <DataRow label="Coverage" value="Uncapped above attachment" />
                 <DataRow label="Est. Annual Cost" value={`${formatCurrency(reinsCost)}/yr (${(reinsCostPct * 100).toFixed(0)}% of prem.)`} />
-                <DataRow label="Self-Funded Discount" value={`(${formatCurrency(selfFundedDiscount)})/yr`} />
-                <DataRow label="Net Cost to Members" value={`${formatCurrency(reinsCost - selfFundedDiscount)}/yr`} />
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
                 <DataRow label="Attachment Point" value={formatCurrency(reinsStructure.attachment)} />
                 <DataRow label="Attachment (% of Exp. Loss)" value={`${(REINSURANCE_PROGRAMS[0].attachmentMultiplierOfExpectedLoss * 100).toFixed(0)}%`} />
                 <DataRow label="Self-Funded Amount" value={`${formatCurrency(estimatedPremium * REINSURANCE_PROGRAMS[4].costPctOfPremiumMax)}/yr`} />
-                <DataRow label="Self-Funded Discount" value={`(${formatCurrency(selfFundedDiscount)})/yr`} />
-                <p className="col-span-2 text-gray-500 italic mt-1">No external reinsurance — the pool retains all losses up to 125% of expected loss. Instead of paying the self-funded amount to a reinsurer, it (net of the discount) stays in the pool's cash and earns investment income for the pool's own account.</p>
+                <p className="col-span-2 text-gray-500 italic mt-1">No external reinsurance — the pool retains all losses up to 125% of expected loss. Instead of paying the self-funded amount to a reinsurer, it stays in the pool's cash and earns investment income for the pool's own account.</p>
               </div>
             )}
             <p className="text-blue-700 mt-2 text-xs leading-relaxed border-t border-blue-100 pt-2">Reinsurance does not reduce gross losses. Above the attachment point, the reinsurer pays its quota share of the excess; the pool retains the rest.</p>

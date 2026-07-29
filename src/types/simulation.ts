@@ -61,7 +61,6 @@ export interface HistoricalYear {
   poolPremium: number;
   adminExpense: number;
   poolPremiumAndAdminExpense: number;
-  selfFundedDiscount: number;   // discount on the retained (non-ceded) share, taken immediately
   reinsuranceCost: number;
   totalMemberCharge: number;
   grossUltimateLoss: number;
@@ -235,8 +234,7 @@ export interface ResultSet {
   poolPremium: number;                     // expected loss at selected CLF
   adminExpense: number;                    // payroll-based administrative charge
   poolPremiumAndAdminExpense: number;      // expected-ratio denominator
-  selfFundedDiscount: number;               // discount on the retained (non-ceded) share, taken immediately
-  totalMemberCharge: number;               // includes separately stated reinsurance cost, net of selfFundedDiscount
+  totalMemberCharge: number;               // includes separately stated reinsurance cost
   grossPremium: number;
   assessments: number;
   dividends: number;

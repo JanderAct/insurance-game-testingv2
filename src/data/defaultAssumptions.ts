@@ -127,12 +127,6 @@ export const ASSET_ALLOCATION_DEFAULT = { cashPct: 10, bondsPct: 80, equitiesPct
 // where it earns a return, rather than paying it away with nothing in exchange.
 export const FULL_TRANSFER_COST_PCT_OF_PREMIUM = 0.50;
 
-// The pool's retained (non-ceded) share of the excess layer is billed to members
-// at a discount off its full-transfer-equivalent notional cost, taken immediately
-// in the current year's charge — self-funding avoids a commercial reinsurer's
-// margin, so pools can pass that savings straight through to members.
-export const SELF_FUNDED_DISCOUNT_PCT = 0.08;
-
 export const REINSURANCE_PROGRAMS = [
   {
     level: 0,

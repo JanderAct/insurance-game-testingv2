@@ -276,7 +276,6 @@ export function toHistoricalYear(r: LineResultSet): HistoricalYear {
     poolPremium: r.poolPremium,
     adminExpense: r.adminExpense,
     poolPremiumAndAdminExpense: r.poolPremiumAndAdminExpense,
-    selfFundedDiscount: r.selfFundedDiscount,
     reinsuranceCost: r.reinsuranceCost,
     totalMemberCharge: r.totalMemberCharge,
     grossUltimateLoss: r.grossUltimateLoss,

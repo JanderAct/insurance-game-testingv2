@@ -3,7 +3,7 @@
 
 import type { GameState, PoolState, DecisionSet, LinePoolState, LineDecisionSet, ResultSet, LineResultSet, ReserveCohort, Member, MemberLossResult, CoverageLine, GameInstance, AssetAllocation } from '../types/simulation';
 import { SeededRandom, deriveSubRng } from './random';
-import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, MEMBER_LOSS_VOLATILITY, RISK_CONTROL_PARAMS, LINE_RESERVE_PAYDOWN_PCT, OPERATING_CASH_PCT_OF_PREMIUM, FULL_TRANSFER_COST_PCT_OF_PREMIUM, SELF_FUNDED_DISCOUNT_PCT } from '../data/defaultAssumptions';
+import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, MEMBER_LOSS_VOLATILITY, RISK_CONTROL_PARAMS, LINE_RESERVE_PAYDOWN_PCT, OPERATING_CASH_PCT_OF_PREMIUM } from '../data/defaultAssumptions';
 import { getReinsuranceStructure, calculateReinsuranceCost, calculateReinsuranceRecovery } from './reinsuranceEngine';
 import { simulateMarketReturns, blendInvestmentReturn } from './investmentEngine';
 import { simulateMemberMovement } from './membershipEngine';
@@ -184,13 +184,7 @@ export function processLineYear(
     instance.marketEnvironment.competitivePressure
   );
 
-  // The pool's retained (non-ceded) share of the excess layer is billed to members
-  // at a discount off its full-transfer-equivalent notional cost, taken immediately.
-  const retainedSharePct = 1 - reinsStructure.recoveryPct;
-  const selfFundedNotional = retainedSharePct * FULL_TRANSFER_COST_PCT_OF_PREMIUM * poolPremium;
-  const selfFundedDiscount = selfFundedNotional * SELF_FUNDED_DISCOUNT_PCT;
-
-  const totalMemberCharge = poolPremiumAndAdminExpense + reinsuranceCost - selfFundedDiscount;
+  const totalMemberCharge = poolPremiumAndAdminExpense + reinsuranceCost;
   const totalMemberRatePer100 = totalMemberCharge / Math.max(activeExposure * 10_000, 1);
 
   // Legacy names remain populated for compatibility with older screens and exports.
@@ -522,7 +516,6 @@ export function processLineYear(
     poolPremium,
     adminExpense,
     poolPremiumAndAdminExpense,
-    selfFundedDiscount,
     totalMemberCharge,
     grossPremium,
     assessments,
@@ -1154,7 +1147,6 @@ export function aggregateLineResults(
     poolPremium: sum('poolPremium'),
     adminExpense: adminExpenseSum,
     poolPremiumAndAdminExpense: poolPremiumAndAdminExpenseSum,
-    selfFundedDiscount: sum('selfFundedDiscount'),
     totalMemberCharge: totalMemberChargeSum,
     grossPremium: sum('grossPremium'),
     assessments: sum('assessments'),

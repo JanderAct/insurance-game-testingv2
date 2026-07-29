@@ -65,7 +65,7 @@ export default function FinancialsPage({ lockedResults, priorResults, lineView }
                 const is = statement.incomeStatement;
                 // Pass-throughs shown GROSS: reinsurance and admin appear as
                 // both revenue (collected from members) and expense (paid out).
-                const totalOperatingRevenues = is.reinsuranceCost + is.poolPremium + is.adminExpense - is.selfFundedDiscount + is.assessments;
+                const totalOperatingRevenues = is.reinsuranceCost + is.poolPremium + is.adminExpense + is.assessments;
                 // Prior accident years' NET incurred: net paid + change in net
                 // unpaid on prior cohorts (development net of ceded, including
                 // closed-cohort runoff). Current + recoveries + prior ties to
@@ -82,7 +82,6 @@ export default function FinancialsPage({ lockedResults, priorResults, lineView }
                     <ISLine label="Premiums for transferred risk" value={formatCurrency(is.reinsuranceCost)} indent />
                     <ISLine label="Contributions for retained risk" value={formatCurrency(is.poolPremium)} indent />
                     <ISLine label="Administration fees" value={formatCurrency(is.adminExpense)} indent />
-                    <ISLine label="Less: self-funded discount" value={`(${formatCurrency(is.selfFundedDiscount)})`} indent />
                     <ISLine label="Member assessments" value={formatCurrency(is.assessments)} indent />
                     <ISLine label="Total operating revenues" value={formatCurrency(totalOperatingRevenues)} bold />
 
