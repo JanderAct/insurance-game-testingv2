@@ -86,12 +86,17 @@ type FormulaTerm =
 type FormulaSpec =
   | { kind: 'product'; factors: FormulaTerm[] }
   | { kind: 'sum'; terms: FormulaTerm[] }
+  // A division — most of the Ratios card and Market Share. Rendered as
+  // "numerator / denominator"; the Value column already shows the result, so
+  // this doesn't repeat it.
+  | { kind: 'ratio'; numerator: FormulaTerm; denominator: FormulaTerm }
   // A simulated draw has no closed form. It states what the draw was centred
   // on and where the detail lives, rather than inventing a formula.
   | { kind: 'simulated'; expected: number; expectedLabel: string; where: string }
   // The same figure as another line (a gross pass-through shown twice).
   | { kind: 'echo'; value: number; text: string }
-  // Prose only — used by the supporting cards, which keep their existing text.
+  // Prose only — used for the handful of rows with no numeric expression
+  // (atomic counts, categorical thresholds, or a genuinely missing operand).
   | { kind: 'text'; text: string };
 
 // Enough significant digits that multiplying the DISPLAYED operands by hand
@@ -110,7 +115,10 @@ function fmtTermValue(value: number, format: TermFormat): string {
     case 'pct': return `${trimNumber((value * 100).toFixed(4))}%`;
     case 'factor': return trimNumber(value.toFixed(6));
     case 'exposure': return `${value.toFixed(2)}M`;
-    case 'plain': return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+    // 4 decimals: enough that hand-multiplying the DISPLAYED per-$100 rates
+    // (stored rounded to 4 decimals in the engine) reproduces the row's
+    // value — 2 decimals silently dropped precision a $20.0142 rate needs.
+    case 'plain': return value.toLocaleString(undefined, { maximumFractionDigits: 4 });
   }
 }
 
@@ -136,6 +144,7 @@ export function evaluateFormula(spec: FormulaSpec): number | null {
   switch (spec.kind) {
     case 'product': return spec.factors.reduce((a, t) => a * evalTerm(t), 1);
     case 'sum': return spec.terms.reduce((a, t) => a + evalTerm(t), 0);
+    case 'ratio': return evalTerm(spec.numerator) / evalTerm(spec.denominator);
     case 'echo': return spec.value;
     case 'simulated':
     case 'text': return null;
@@ -157,6 +166,8 @@ export function renderFormula(spec: FormulaSpec): string {
           return `${negative ? '−' : '+'} ${shown}`;
         })
         .join(' ');
+    case 'ratio':
+      return `${renderTerm(spec.numerator)} / ${renderTerm(spec.denominator)}`;
     case 'simulated':
       return `Simulated draw; ${spec.expectedLabel} ${formatCurrency(spec.expected)} (see ${spec.where})`;
     case 'echo':
@@ -164,6 +175,48 @@ export function renderFormula(spec: FormulaSpec): string {
     case 'text':
       return spec.text;
   }
+}
+
+// Module-level term builders, shared by every card (the statement-card
+// builders keep their own local `cur` for now; these serve the six supporting
+// cards converted in this pass).
+function curTerm(value: number, label?: string): FormulaTerm {
+  return { value, format: 'currency', label };
+}
+function pctTerm(value: number, label?: string): FormulaTerm {
+  return { value, format: 'pct', label };
+}
+function factorTerm(value: number, label?: string): FormulaTerm {
+  return { value, format: 'factor', label };
+}
+
+// The engine's own reinsurance rate: max − pressure × (max − min). Shared by
+// the statement card's "Premiums for transferred risk" and the supporting
+// Losses and Reinsurance card's "Reinsurance Cost", so both rows can never
+// silently drift apart on how the rate is computed.
+function computeReinsRate(x: LineResultSet, competitivePressure: number) {
+  const prog = REINSURANCE_PROGRAMS[x.decisions.reinsuranceLevel];
+  if (x.decisions.reinsuranceLevel === 0) return { pct: 0, prog, spread: 0 };
+  const spread = prog.costPctOfPremiumMax - prog.costPctOfPremiumMin;
+  return { pct: prog.costPctOfPremiumMax - competitivePressure * spread, prog, spread };
+}
+
+// Sub-formula spec for the rate itself — shared by both rows above.
+function reinsRateSubFormula(ownRate: ReturnType<typeof computeReinsRate>, competitivePressure: number) {
+  return {
+    label: `${ownRate.prog.label} rate`,
+    value: ownRate.pct,
+    spec: {
+      kind: 'sum' as const,
+      terms: [
+        pctTerm(ownRate.prog.costPctOfPremiumMax, 'program max'),
+        {
+          product: [factorTerm(competitivePressure, 'competitive pressure'), pctTerm(ownRate.spread, 'max − min spread')],
+          negate: true,
+        },
+      ],
+    },
+  };
 }
 
 interface AuditRow {
@@ -284,269 +337,11 @@ export default function CalculationAuditPage({ lockedResults, priorHistory, inst
   const result: LineResultSet = isPoolView ? poolResult : poolResult.byLine[lineView];
   const checks = computeAuditChecks(poolResult, lineView, instanceSeed);
 
-  const payrollUnits = Math.max(result.activeExposure * 10_000, 1);
-  const rateAtConfidenceLevel = result.poolPremium / payrollUnits;
-  const grossPremiumCheck = result.activeExposure * result.ratePer100 * 10_000;
-  const grossPremiumDifference = result.grossPremium - grossPremiumCheck;
-
-  const expectedLossCheck = result.activeExposure * result.purePremiumPer100 * 10_000;
-  const expectedLossDifference = result.expectedLoss - expectedLossCheck;
-
-  // Both rate-times-exposure checks above are only meaningful PER LINE, and even
-  // there only to the precision of the stored rate.
-  //
-  // At pool scope they are meaningless, not merely imprecise: ratePer100,
-  // purePremiumPer100 and rateLevel are aggregated as `first.<field>` — one
-  // line's rate kept as a placeholder — while activeExposure is the sum across
-  // lines, so the product multiplies summed exposure by a single line's rate.
-  //
-  // At line scope the rates are stored rounded to four decimals, so the error
-  // is bounded by half a rounding unit times the payroll units, which is the
-  // tolerance used here rather than a flat dollar.
-  const rateRoundingTolerance = Math.max(1, result.activeExposure * 10_000 * 0.00005);
-  const rateCheck = (diff: number) =>
-    isPoolView
-      ? naNote(
-          'pool-level rates are one line\'s rate kept as a placeholder, while exposure is summed across ' +
-          'lines — the product is not a meaningful quantity. Select a line tab to check it.'
-        )
-      : legacyCheck(diff, rateRoundingTolerance);
-
-  const clfAdjustedExpectedLossCheck = result.expectedLoss * result.selectedFundingCLF;
-  const clfAdjustedExpectedLossDifference =
-    result.clfAdjustedExpectedLoss - clfAdjustedExpectedLossCheck;
-
-  const netUltimateLossCheck = result.grossUltimateLoss - result.reinsuranceRecovery;
-  const netUltimateLossDifference = result.netUltimateLoss - netUltimateLossCheck;
-
-  const indicatedNetReserveCheck =
-    result.expectedNetUnpaidLoss * result.selectedFundingCLF;
-
-  const indicatedNetReserveDifference =
-    result.indicatedNetReserveAtConfidenceLevel - indicatedNetReserveCheck;
-
-  const reserveRiskMarginCheck =
-    result.expectedNetUnpaidLoss * (FUNDING_CLF_TABLE[0.90] - 1);
-
-  const reserveRiskMarginDifference =
-    result.reserveRiskMarginNeeded - reserveRiskMarginCheck;
-
-  const netIncurredLossCheck =
-    result.netPaidLosses +
-    result.endingNetReserve -
-    result.beginningNetReserve;
-
-  const netIncurredLossDifference = result.netIncurredLoss - netIncurredLossCheck;
-
-  const netIncurredLossFromIncome =
-    result.grossPremium +
-    result.assessments +
-    result.investmentIncome -
-    result.operatingExpense -
-    result.riskControlInvestment -
-    result.reinsuranceCost -
-    result.dividends -
-    result.netIncome;
-
-  // The former net-income, ending-investments, total-assets, total-liabilities
-  // and ending-surplus recalculation checks lived here. They are now covered by
-  // the two statement-mirroring cards (change in net position, the ending
-  // investments sweep, and the asset / liability / net position identities), so
-  // the duplicates are gone rather than stated twice with different wording.
-
-  const combinedRatioCheck =
-    (netIncurredLossFromIncome + result.adminExpense + result.reinsuranceCost) /
-    Math.max(result.totalMemberCharge, 1);
-
-  const lossRatioCheck =
-    netIncurredLossFromIncome / Math.max(result.totalMemberCharge, 1);
-
-  const expenseRatioCheck =
-    (result.adminExpense + result.reinsuranceCost) /
-    Math.max(result.totalMemberCharge, 1);
-
-  const capitalFundingGapCheck =
-    result.availableSurplus - result.reserveRiskMarginNeeded;
-
-  const capitalAdequacyRatioCheck = result.reserveRiskMarginNeeded > 0
-    ? capitalFundingGapCheck / result.reserveRiskMarginNeeded
-    : null;
-
-  const exposureRows: AuditRow[] = [
-    {
-      metric: 'Active Members',
-      value: String(result.activeMembers),
-      formula: 'Count of members active at the end of the year.',
-    },
-    {
-      metric: 'New Members',
-      value: String(result.newMembers),
-      formula: 'Count of members added during the year.',
-    },
-    {
-      metric: 'Withdrawn Members',
-      value: String(result.withdrawnMembers),
-      formula: 'Count of members that left during the year.',
-    },
-    {
-      metric: 'Written Payroll Exposure',
-      value: `${result.writtenExposure.toFixed(2)}M`,
-      formula: 'Active payroll exposure after member movement.',
-    },
-    {
-      metric: 'Total Market Payroll Exposure',
-      value: `${result.totalMarketExposure.toFixed(2)}M`,
-      formula: 'Total payroll exposure in the full market.',
-    },
-    {
-      metric: 'Market Share',
-      value: formatPct(result.marketShare),
-      formula: `${result.activeExposure.toFixed(2)}M / ${result.totalMarketExposure.toFixed(2)}M`,
-    },
-  ];
-
-  const rateRows: AuditRow[] = [
-    {
-      metric: 'Pure Premium Rate per $100 Payroll',
-      value: dollars(result.purePremiumPer100),
-      formula: 'Prior expected loss rate adjusted by selected rate change, underwriting quality, and risk-control effect.',
-    },
-    {
-      metric: 'Selected Funding Confidence',
-      value: formatPct(result.selectedFundingConfidenceLevel, 0),
-      formula: 'Player-selected confidence level.',
-    },
-    {
-      metric: 'Selected CLF',
-      value: result.selectedFundingCLF.toFixed(3),
-      formula: 'CLF lookup from selected funding confidence level.',
-    },
-    {
-      metric: `Pool Premium Rate at ${(result.selectedFundingConfidenceLevel * 100).toFixed(0)}% CLF`,
-      value: dollars(rateAtConfidenceLevel),
-      formula: `${dollars(result.purePremiumPer100)} × ${result.selectedFundingCLF.toFixed(3)} × rate level adjustment`,
-    },
-    {
-      metric: 'Gross Premium & Admin Expense Rate per $100',
-      value: dollars(result.ratePer100),
-      formula: 'Pool premium rate + admin rate + separately stated reinsurance rate.',
-    },
-    {
-      metric: 'Payroll Units',
-      value: payrollUnits.toLocaleString(undefined, { maximumFractionDigits: 0 }),
-      formula: `${result.activeExposure.toFixed(2)}M payroll × 10,000`,
-    },
-    {
-      metric: 'Gross Premium & Admin Expense',
-      value: formatCurrency(result.totalMemberCharge),
-      formula: `${result.activeExposure.toFixed(2)}M × ${dollars(result.ratePer100)} × 10,000`,
-    },
-    {
-      metric: 'Gross Premium & Admin Expense Check Difference',
-      value: isPoolView ? 'n/a' : formatCurrency(grossPremiumDifference),
-      formula: isPoolView
-        ? 'Not computed at pool scope — see the note.'
-        : `Stored gross premium less exposure × stored rate × 10,000. Tolerance ${formatCurrency(rateRoundingTolerance)}: the rate is stored rounded to four decimals, so this is half a rounding unit × payroll units.`,
-      ...rateCheck(grossPremiumDifference),
-    },
-  ];
-
-  const lossRows: AuditRow[] = [
-    {
-      metric: 'Pure Premium',
-      value: formatCurrency(result.expectedLoss),
-      formula: `${result.activeExposure.toFixed(2)}M × ${dollars(result.purePremiumPer100)} × 10,000`,
-    },
-    {
-      metric: 'Expected Loss Check Difference',
-      value: isPoolView ? 'n/a' : formatCurrency(expectedLossDifference),
-      formula: isPoolView
-        ? 'Not computed at pool scope — see the note.'
-        : `Stored expected loss less exposure × stored pure premium rate × 10,000. Tolerance ${formatCurrency(rateRoundingTolerance)}: the rate is stored rounded to four decimals, so this is half a rounding unit × payroll units.`,
-      ...rateCheck(expectedLossDifference),
-    },
-    {
-      metric: `Pool Premium at ${(result.selectedFundingConfidenceLevel * 100).toFixed(0)}% CLF`,
-      value: formatCurrency(result.clfAdjustedExpectedLoss),
-      formula: `${formatCurrency(result.expectedLoss)} × ${result.selectedFundingCLF.toFixed(3)}`,
-    },
-    {
-      metric: `Pool Premium at ${(result.selectedFundingConfidenceLevel * 100).toFixed(0)}% CLF Check Difference`,
-      value: formatCurrency(clfAdjustedExpectedLossDifference),
-      formula: 'Stored CLF-adjusted expected loss - recalculated value.',
-      ...legacyCheck(clfAdjustedExpectedLossDifference),
-    },
-    {
-      metric: 'Gross Ultimate Loss + LAE',
-      value: formatCurrency(result.grossUltimateLoss),
-      formula: 'Simulated annual gross ultimate loss including LAE.',
-    },
-    {
-      metric: 'Reinsurance Recovery',
-      value: formatCurrency(result.reinsuranceRecovery),
-      formula: 'Recovery from selected reinsurance structure.',
-    },
-    {
-      metric: 'Net Ultimate Loss + LAE',
-      value: formatCurrency(result.netUltimateLoss),
-      formula: 'Gross ultimate loss - reinsurance recovery.',
-    },
-    {
-      metric: 'Net Ultimate Loss Check Difference',
-      value: formatCurrency(netUltimateLossDifference),
-      formula: 'Stored net ultimate loss - recalculated value.',
-      ...legacyCheck(netUltimateLossDifference),
-    },
-    {
-      metric: 'Reinsurance Cost',
-      value: formatCurrency(result.reinsuranceCost),
-      formula: 'Cost of selected reinsurance program.',
-    },
-  ];
-
-  const reserveRows: AuditRow[] = [
-    {
-      metric: 'Beginning Net Reserve',
-      value: formatCurrency(result.beginningNetReserve),
-      formula: 'Prior unpaid reserve (net of reinsurance) carried into the year.',
-    },
-    {
-      metric: 'Current-Year Net Reserve',
-      value: formatCurrency(result.currentYearNetReserve),
-      formula: 'Current-year net ultimate loss × unpaid percentage assumption.',
-    },
-    {
-      metric: 'Net Paid Losses',
-      value: formatCurrency(result.netPaidLosses),
-      formula: 'Current-year net paid losses + prior-year reserve cohort paydowns.',
-    },
-    {
-      metric: 'Ending Net Accounting Reserve',
-      value: formatCurrency(result.endingNetReserve),
-      formula: 'Remaining unpaid reserve (net of reinsurance) across all open cohorts.',
-    },
-    {
-      metric: 'Net Incurred Loss Check',
-      value: formatCurrency(netIncurredLossDifference),
-      formula: 'netIncurredLoss − (net paid + ending net reserve − beginning net reserve)',
-      ...legacyCheck(netIncurredLossDifference),
-    },
-    {
-      metric: 'Expected Net Unpaid Loss',
-      value: formatCurrency(result.expectedNetUnpaidLoss),
-      formula: 'Same as ending net accounting reserve.',
-    },
-    {
-      metric: 'Net Incurred Loss (from income statement)',
-      value: formatCurrency(netIncurredLossFromIncome),
-      formula: 'Back-solved from the income statement as a cross-check on the reserve rollforward.',
-    },
-    {
-      metric: 'Prior-Year Development',
-      value: formatCurrency(result.priorYearDevelopment),
-      formula: 'Reserve development display metric. Not added separately to net income because it is captured through incurred loss.',
-    },
-  ];
+  // Six supporting cards, built from one exported pure function (mirroring the
+  // buildRevExpRows / buildNetPositionRows pattern below) so a regression
+  // script can evaluate every formula without rendering the page.
+  const { exposureRows, rateRows, lossRows, reserveRows, ratioRows, capitalRows } =
+    buildSupportingRows(result, isPoolView, competitivePressure);
 
   // The two statement-mirroring cards, built from exported pure functions so a
   // regression script can assert their correspondence to the statements.
@@ -577,123 +372,6 @@ export default function CalculationAuditPage({ lockedResults, priorHistory, inst
           : []),
       ]
     : [];
-
-  const ratioRows: AuditRow[] = [
-    {
-      metric: 'Expected Loss Ratio',
-      value: formatPct(result.expectedLossRatio),
-      formula: 'Expected pool loss / collected pool premium and admin expense.',
-    },
-    {
-      metric: 'Expected Expense Ratio',
-      value: formatPct(result.expectedExpenseRatio),
-      formula: '1.0 - expected loss ratio.',
-    },
-    {
-      metric: 'Expected Combined Ratio',
-      value: formatPct(result.expectedCombinedRatio),
-      formula: 'Expected loss ratio + expected expense ratio; designed to equal 100%.',
-    },
-    {
-      metric: 'Actual Loss Ratio',
-      value: formatPct(result.lossRatio),
-      formula: 'Net incurred loss / gross premium.',
-    },
-    {
-      metric: 'Loss Ratio Check Difference',
-      value: formatPct(result.lossRatio - lossRatioCheck),
-      formula: 'Stored loss ratio - recalculated loss ratio.',
-      ...legacyCheck(result.lossRatio - lossRatioCheck, 0.0001),
-    },
-    {
-      metric: 'Actual Expense Ratio',
-      value: formatPct(result.expenseRatio),
-      formula: '(Actual admin expense + reinsurance cost) / collected gross premium and admin expense.',
-    },
-    {
-      metric: 'Expense Ratio Check Difference',
-      value: formatPct(result.expenseRatio - expenseRatioCheck),
-      formula: 'Stored expense ratio - recalculated expense ratio.',
-      ...legacyCheck(result.expenseRatio - expenseRatioCheck, 0.0001),
-    },
-    {
-      metric: 'Actual Combined Ratio',
-      value: formatPct(result.combinedRatio),
-      formula: 'Actual loss ratio + actual expense ratio.',
-    },
-    {
-      metric: 'Combined Ratio Check Difference',
-      value: formatPct(result.combinedRatio - combinedRatioCheck),
-      formula: 'Stored combined ratio - recalculated combined ratio.',
-      ...legacyCheck(result.combinedRatio - combinedRatioCheck, 0.0001),
-    },
-  ];
-
-  const capitalRows: AuditRow[] = [
-    {
-      metric: 'Expected Net Unpaid Loss',
-      value: formatCurrency(result.expectedNetUnpaidLoss),
-      formula: 'Expected gross unpaid loss - expected reinsurance recoverable.',
-    },
-    {
-      metric: 'Indicated Net Reserve at Confidence Level',
-      value: formatCurrency(result.indicatedNetReserveAtConfidenceLevel),
-      formula: `${formatCurrency(result.expectedNetUnpaidLoss)} × ${result.selectedFundingCLF.toFixed(3)}`,
-    },
-    {
-      metric: 'Indicated Net Reserve Check Difference',
-      value: formatCurrency(indicatedNetReserveDifference),
-      formula: 'Stored indicated reserve - recalculated indicated reserve.',
-      ...legacyCheck(indicatedNetReserveDifference),
-    },
-    {
-      metric: 'Reserve Risk Margin Needed',
-      value: formatCurrency(result.reserveRiskMarginNeeded),
-      formula: 'Expected net unpaid loss × required reserve margin factor.',
-    },
-    {
-      metric: 'Reserve Risk Margin Check Difference',
-      value: formatCurrency(reserveRiskMarginDifference),
-      formula: 'Stored reserve risk margin - recalculated reserve risk margin.',
-      ...legacyCheck(reserveRiskMarginDifference),
-    },
-    {
-      metric: 'Surplus',
-      value: formatCurrency(result.availableSurplus),
-      formula: 'Ending surplus.',
-    },
-    {
-      metric: 'Excess Available Surplus',
-      value: formatCurrency(result.capitalFundingGap),
-      formula: 'Available surplus - reserve risk margin needed.',
-    },
-    {
-      metric: 'Excess Available Surplus Check Difference',
-      value: formatCurrency(result.capitalFundingGap - capitalFundingGapCheck),
-      formula: 'Stored capital funding gap - recalculated capital funding gap.',
-      ...legacyCheck(result.capitalFundingGap - capitalFundingGapCheck),
-    },
-    {
-      metric: 'Excess Capital Ratio',
-      value: result.excessCapitalRatio === null ? 'N/A' : formatPct(result.excessCapitalRatio),
-      formula: 'Excess available surplus / required reserve margin.',
-    },
-    {
-      metric: 'Excess Capital Ratio Check Difference',
-      value: result.excessCapitalRatio === null || capitalAdequacyRatioCheck === null
-        ? 'N/A'
-        : (result.excessCapitalRatio - capitalAdequacyRatioCheck).toFixed(4),
-      formula: 'Stored excess capital ratio - recalculated ratio.',
-      ...(result.excessCapitalRatio === null || capitalAdequacyRatioCheck === null
-        ? naNote('no required reserve margin, so the ratio is undefined')
-        : legacyCheck(result.excessCapitalRatio - capitalAdequacyRatioCheck, 0.0001)),
-    },
-    {
-      metric: 'Excess Capital Status',
-      value: result.capitalAdequacyStatus,
-      formula: 'Status based on excess capital ratio thresholds.',
-    },
-  ];
 
   const assumptionRows: AuditRow[] = buildAssumptionRows();
 
@@ -1472,6 +1150,598 @@ function formatSliderNumber(range: { min: number; max: number; step: number; def
 }
 
 // ============================================================================
+// Supporting-card row builders (Exposure and Membership, Funding Rate
+// Build-Up, Losses and Reinsurance, Reserve Rollforward, Ratios, Capital and
+// Reserve Confidence). One function, exported as a pure function so a
+// regression script can evaluate every formula the same way it does for the
+// two statement-mirroring cards below.
+// ============================================================================
+
+export function buildSupportingRows(
+  result: LineResultSet,
+  isPoolView: boolean,
+  competitivePressure: number,
+): { exposureRows: AuditRow[]; rateRows: AuditRow[]; lossRows: AuditRow[]; reserveRows: AuditRow[]; ratioRows: AuditRow[]; capitalRows: AuditRow[] } {
+  const payrollUnits = Math.max(result.activeExposure * 10_000, 1);
+  const rateAtConfidenceLevel = result.poolPremium / payrollUnits;
+  // result.ratePer100 is a real per-line stored rate, but at pool scope it is
+  // aggregated as one line's rate kept as a placeholder — not a genuine pool
+  // figure. Recomputing from the three real pool-summed dollar figures gives
+  // the true blended rate at every scope (and is numerically identical to
+  // result.ratePer100 at line scope, since that's how it's defined there).
+  const grossRatePer100 = (result.poolPremium + result.adminExpense + result.reinsuranceCost) / payrollUnits;
+  const grossPremiumCheck = result.activeExposure * result.ratePer100 * 10_000;
+  const grossPremiumDifference = result.grossPremium - grossPremiumCheck;
+
+  const expectedLossCheck = result.activeExposure * result.purePremiumPer100 * 10_000;
+  const expectedLossDifference = result.expectedLoss - expectedLossCheck;
+
+  // Both rate-times-exposure checks above are only meaningful PER LINE, and even
+  // there only to the precision of the stored rate.
+  //
+  // At pool scope they are meaningless, not merely imprecise: ratePer100,
+  // purePremiumPer100 and rateLevel are aggregated as `first.<field>` — one
+  // line's rate kept as a placeholder — while activeExposure is the sum across
+  // lines, so the product multiplies summed exposure by a single line's rate.
+  //
+  // At line scope the rates are stored rounded to four decimals, so the error
+  // is bounded by half a rounding unit times the payroll units, which is the
+  // tolerance used here rather than a flat dollar.
+  const rateRoundingTolerance = Math.max(1, result.activeExposure * 10_000 * 0.00005);
+  const rateCheck = (diff: number) =>
+    isPoolView
+      ? naNote(
+          'pool-level rates are one line\'s rate kept as a placeholder, while exposure is summed across ' +
+          'lines — the product is not a meaningful quantity. Select a line tab to check it.'
+        )
+      : legacyCheck(diff, rateRoundingTolerance);
+
+  const clfAdjustedExpectedLossCheck = result.expectedLoss * result.selectedFundingCLF;
+  const clfAdjustedExpectedLossDifference =
+    result.clfAdjustedExpectedLoss - clfAdjustedExpectedLossCheck;
+
+  const netUltimateLossCheck = result.grossUltimateLoss - result.reinsuranceRecovery;
+  const netUltimateLossDifference = result.netUltimateLoss - netUltimateLossCheck;
+
+  const indicatedNetReserveCheck =
+    result.expectedNetUnpaidLoss * result.selectedFundingCLF;
+
+  const indicatedNetReserveDifference =
+    result.indicatedNetReserveAtConfidenceLevel - indicatedNetReserveCheck;
+
+  const reserveRiskMarginCheck =
+    result.expectedNetUnpaidLoss * (FUNDING_CLF_TABLE[0.90] - 1);
+
+  const reserveRiskMarginDifference =
+    result.reserveRiskMarginNeeded - reserveRiskMarginCheck;
+
+  const netIncurredLossCheck =
+    result.netPaidLosses +
+    result.endingNetReserve -
+    result.beginningNetReserve;
+
+  const netIncurredLossDifference = result.netIncurredLoss - netIncurredLossCheck;
+
+  // Same identity as the priorYearClaims check on the statement card: net
+  // incurred = paid + reserve change, and separately net incurred = net
+  // ultimate - development. The two paths meet exactly UNLESS a reserve
+  // cohort closed last year with its residual balance floored to zero rather
+  // than absorbed into the development figure (see CLAIMS_VARIANCE_CAP) — so
+  // this reuses the same documented, bounded variance rather than asserting
+  // an unconditional identity.
+  const endingNetReserveCheck =
+    result.beginningNetReserve + result.netUltimateLoss - result.priorYearDevelopment - result.netPaidLosses;
+  const endingNetReserveDifference = result.endingNetReserve - endingNetReserveCheck;
+
+  const netIncurredLossFromIncome =
+    result.grossPremium +
+    result.assessments +
+    result.investmentIncome -
+    result.operatingExpense -
+    result.riskControlInvestment -
+    result.reinsuranceCost -
+    result.dividends -
+    result.netIncome;
+
+  // The former net-income, ending-investments, total-assets, total-liabilities
+  // and ending-surplus recalculation checks lived here. They are now covered by
+  // the two statement-mirroring cards (change in net position, the ending
+  // investments sweep, and the asset / liability / net position identities), so
+  // the duplicates are gone rather than stated twice with different wording.
+
+  const combinedRatioCheck =
+    (netIncurredLossFromIncome + result.adminExpense + result.reinsuranceCost) /
+    Math.max(result.totalMemberCharge, 1);
+
+  const lossRatioCheck =
+    netIncurredLossFromIncome / Math.max(result.totalMemberCharge, 1);
+
+  const expenseRatioCheck =
+    (result.adminExpense + result.reinsuranceCost) /
+    Math.max(result.totalMemberCharge, 1);
+
+  const capitalFundingGapCheck =
+    result.availableSurplus - result.reserveRiskMarginNeeded;
+
+  const capitalAdequacyRatioCheck = result.reserveRiskMarginNeeded > 0
+    ? capitalFundingGapCheck / result.reserveRiskMarginNeeded
+    : null;
+
+  // Real engine constants behind the reserve rollforward below: the CURRENT
+  // accident year splits 60% reserved / 40% paid immediately. This is a
+  // hardcoded literal in simulationEngine.ts (currentYearNetReserve =
+  // netUltimateLoss * 0.60), NOT sourced from RESERVE_PAYDOWN_PCT (35%) —
+  // that constant governs how much of the OPENING/PRIOR reserve balance runs
+  // off each subsequent year, a different rate for a different cohort age.
+  // Verified against the engine (not invented); not a named/displayed
+  // assumption anywhere, so shown as a literal with an explain note rather
+  // than a cross-reference.
+  const currentYearUnpaidPct = 0.60;
+  const currentYearPaidPct = 1 - currentYearUnpaidPct;
+  const netPaidCurrentYear = result.netUltimateLoss * currentYearPaidPct;
+  const priorCohortPaydown = result.netPaidLosses - netPaidCurrentYear;
+
+  const exposureRows: AuditRow[] = [
+    {
+      metric: 'Active Members',
+      value: String(result.activeMembers),
+      formula: { kind: 'text', text: 'A headcount, not a calculation — no simpler components are shown on this page.' },
+    },
+    {
+      metric: 'New Members',
+      value: String(result.newMembers),
+      formula: { kind: 'text', text: 'A headcount, not a calculation — no simpler components are shown on this page.' },
+    },
+    {
+      metric: 'Withdrawn Members',
+      value: String(result.withdrawnMembers),
+      formula: { kind: 'text', text: 'A headcount, not a calculation — no simpler components are shown on this page.' },
+    },
+    {
+      metric: 'Written Payroll Exposure',
+      value: `${result.writtenExposure.toFixed(2)}M`,
+      numericValue: result.writtenExposure,
+      formula: { kind: 'echo', value: result.writtenExposure, text: 'active payroll exposure after member movement — the same figure' },
+    },
+    {
+      metric: 'Total Market Payroll Exposure',
+      value: `${result.totalMarketExposure.toFixed(2)}M`,
+      formula: { kind: 'text', text: 'The full simulated market total — no on-page breakdown by member exists.' },
+    },
+    {
+      metric: 'Market Share',
+      value: formatPct(result.marketShare),
+      numericValue: result.marketShare,
+      formula: { kind: 'ratio', numerator: { value: result.activeExposure, format: 'exposure' }, denominator: { value: result.totalMarketExposure, format: 'exposure' } },
+    },
+  ];
+
+  const rateRows: AuditRow[] = [
+    {
+      metric: 'Pure Premium Rate per $100 Payroll',
+      value: dollars(result.purePremiumPer100),
+      formula: {
+        kind: 'text',
+        text:
+          'Cannot be expressed on this page: it depends on (1) last year\'s own rate — a different row, not simultaneously visible here — ' +
+          '(2) the actual loss trend applied this game (instance.lossEnvironment.lossTrend), which is drawn per instance and is NOT the ' +
+          'Loss Trend value shown on Default Assumptions — verified to differ by up to 1.9 percentage points on real seeds, so that card is ' +
+          'currently showing the wrong number for this game, not just an unrelated default — and (3) the rolling risk-control effectiveness ' +
+          'score, which the engine computes every year but does not store on this result at all.',
+      },
+      note: 'Not evaluated — see formula for the confirmed Loss Trend display defect.',
+    },
+    {
+      metric: 'Selected Funding Confidence',
+      value: formatPct(result.selectedFundingConfidenceLevel, 0),
+      formula: { kind: 'text', text: 'A player selection, not a calculation.' },
+    },
+    {
+      metric: 'Selected CLF',
+      value: result.selectedFundingCLF.toFixed(3),
+      numericValue: result.selectedFundingCLF,
+      formula: { kind: 'echo', value: result.selectedFundingCLF, text: `FUNDING_CLF_TABLE[${formatPct(result.selectedFundingConfidenceLevel, 0)}] — see Default Assumptions` },
+    },
+    {
+      metric: `Pool Premium Rate at ${(result.selectedFundingConfidenceLevel * 100).toFixed(0)}% CLF`,
+      value: dollars(rateAtConfidenceLevel),
+      numericValue: rateAtConfidenceLevel,
+      formula: isPoolView
+        ? { kind: 'ratio', numerator: curTerm(result.poolPremium, 'pool premium'), denominator: { value: payrollUnits, format: 'plain', label: 'payroll units' } }
+        : {
+            kind: 'product',
+            factors: [
+              { value: result.purePremiumPer100, format: 'plain', label: 'pure premium rate' },
+              factorTerm(result.selectedFundingCLF, `CLF at ${(result.selectedFundingConfidenceLevel * 100).toFixed(0)}%`),
+              factorTerm(result.rateLevel / 100, `rate level ${result.rateLevel}`),
+            ],
+          },
+      explain: isPoolView
+        ? 'The line-level build-up (pure premium rate × CLF × rate level) is not shown at pool scope: purePremiumPer100 and rateLevel are aggregated as one line\'s value kept as a placeholder, not a real pool figure. Select a line tab to see the build-up.'
+        : undefined,
+    },
+    {
+      metric: 'Gross Premium & Admin Expense Rate per $100',
+      value: dollars(grossRatePer100),
+      numericValue: grossRatePer100,
+      formula: {
+        kind: 'sum',
+        terms: [
+          { value: result.poolPremium / payrollUnits, format: 'plain', label: 'pool premium rate' },
+          { value: result.adminExpense / payrollUnits, format: 'plain', label: 'admin rate' },
+          { value: result.reinsuranceCost / payrollUnits, format: 'plain', label: 'reinsurance rate' },
+        ],
+      },
+      explain: isPoolView
+        ? 'Recomputed from the three real pool-summed dollar figures divided by Payroll Units below — result.ratePer100 itself is aggregated at pool scope as one line\'s rate kept as a placeholder, not a real pool figure, so it is not used here.'
+        : 'Each component rate is its dollar figure (Income Statement / Losses and Reinsurance) divided by Payroll Units below.',
+    },
+    {
+      metric: 'Payroll Units',
+      value: payrollUnits.toLocaleString(undefined, { maximumFractionDigits: 0 }),
+      numericValue: payrollUnits,
+      formula: { kind: 'product', factors: [{ value: result.activeExposure, format: 'exposure', label: 'payroll' }, { value: 10_000, format: 'plain' }] },
+    },
+    {
+      metric: 'Gross Premium & Admin Expense',
+      value: formatCurrency(result.totalMemberCharge),
+      numericValue: result.totalMemberCharge,
+      formula: isPoolView
+        ? { kind: 'text', text: 'Not a meaningful product at pool scope — see the note on the Check Difference row below.' }
+        : {
+            kind: 'product',
+            factors: [{ value: result.activeExposure, format: 'exposure' }, { value: result.ratePer100, format: 'plain', label: 'rate per $100' }, { value: 10_000, format: 'plain' }],
+          },
+    },
+    {
+      metric: 'Gross Premium & Admin Expense Check Difference',
+      value: isPoolView ? 'n/a' : formatCurrency(grossPremiumDifference),
+      numericValue: isPoolView ? undefined : grossPremiumDifference,
+      formula: isPoolView
+        ? { kind: 'text', text: 'Not computed at pool scope — see the note.' }
+        : { kind: 'sum', terms: [curTerm(result.grossPremium, 'stored'), curTerm(-grossPremiumCheck, 'exposure × stored rate × 10,000')] },
+      explain: `Tolerance ${formatCurrency(rateRoundingTolerance)}: the rate is stored rounded to four decimals, so this is half a rounding unit × payroll units.`,
+      ...rateCheck(grossPremiumDifference),
+    },
+  ];
+
+  const lossRows: AuditRow[] = [
+    {
+      metric: 'Pure Premium',
+      value: formatCurrency(result.expectedLoss),
+      numericValue: result.expectedLoss,
+      formula: isPoolView
+        ? { kind: 'text', text: 'Not a meaningful product at pool scope — see the note on the Check Difference row below.' }
+        : {
+            kind: 'product',
+            factors: [{ value: result.activeExposure, format: 'exposure' }, { value: result.purePremiumPer100, format: 'plain', label: 'pure premium rate' }, { value: 10_000, format: 'plain' }],
+          },
+    },
+    {
+      metric: 'Expected Loss Check Difference',
+      value: isPoolView ? 'n/a' : formatCurrency(expectedLossDifference),
+      numericValue: isPoolView ? undefined : expectedLossDifference,
+      formula: isPoolView
+        ? { kind: 'text', text: 'Not computed at pool scope — see the note.' }
+        : { kind: 'sum', terms: [curTerm(result.expectedLoss, 'stored'), curTerm(-expectedLossCheck, 'exposure × stored rate × 10,000')] },
+      explain: `Tolerance ${formatCurrency(rateRoundingTolerance)}: the rate is stored rounded to four decimals, so this is half a rounding unit × payroll units.`,
+      ...rateCheck(expectedLossDifference),
+    },
+    {
+      metric: `Pool Premium at ${(result.selectedFundingConfidenceLevel * 100).toFixed(0)}% CLF`,
+      value: formatCurrency(result.clfAdjustedExpectedLoss),
+      numericValue: result.clfAdjustedExpectedLoss,
+      formula: { kind: 'product', factors: [curTerm(result.expectedLoss), factorTerm(result.selectedFundingCLF)] },
+    },
+    {
+      metric: `Pool Premium at ${(result.selectedFundingConfidenceLevel * 100).toFixed(0)}% CLF Check Difference`,
+      value: formatCurrency(clfAdjustedExpectedLossDifference),
+      numericValue: clfAdjustedExpectedLossDifference,
+      formula: { kind: 'sum', terms: [curTerm(result.clfAdjustedExpectedLoss, 'stored'), curTerm(-clfAdjustedExpectedLossCheck, 'recalculated')] },
+      ...legacyCheck(clfAdjustedExpectedLossDifference),
+    },
+    {
+      metric: 'Gross Ultimate Loss + LAE',
+      value: formatCurrency(result.grossUltimateLoss),
+      formula: { kind: 'simulated', expected: result.expectedLoss, expectedLabel: 'expected (Pure Premium above)', where: 'this card' },
+    },
+    {
+      metric: 'Reinsurance Recovery',
+      value: formatCurrency(result.reinsuranceRecovery),
+      numericValue: result.reinsuranceRecovery,
+      formula: result.decisions.reinsuranceLevel === 0
+        ? { kind: 'echo', value: 0, text: 'Self Fund — no external reinsurance, nothing to recover' }
+        : { kind: 'product', factors: [curTerm(result.excessLosses, 'losses above attachment'), pctTerm(REINSURANCE_PROGRAMS[result.decisions.reinsuranceLevel].recoveryPct, 'quota share')] },
+    },
+    {
+      metric: 'Net Ultimate Loss + LAE',
+      value: formatCurrency(result.netUltimateLoss),
+      numericValue: result.netUltimateLoss,
+      formula: { kind: 'sum', terms: [curTerm(result.grossUltimateLoss), curTerm(-result.reinsuranceRecovery)] },
+    },
+    {
+      metric: 'Net Ultimate Loss Check Difference',
+      value: formatCurrency(netUltimateLossDifference),
+      numericValue: netUltimateLossDifference,
+      formula: { kind: 'sum', terms: [curTerm(result.netUltimateLoss, 'stored'), curTerm(-netUltimateLossCheck, 'recalculated')] },
+      ...legacyCheck(netUltimateLossDifference),
+    },
+    {
+      metric: 'Reinsurance Cost',
+      value: formatCurrency(result.reinsuranceCost),
+      numericValue: result.reinsuranceCost,
+      formula: { kind: 'product', factors: [curTerm(result.poolPremium), { value: computeReinsRate(result, competitivePressure).pct, format: 'pct', label: `${computeReinsRate(result, competitivePressure).prog.label} rate` }] },
+      subFormula: reinsRateSubFormula(computeReinsRate(result, competitivePressure), competitivePressure),
+      explain: 'Same figure and rate as "Premiums for transferred risk" on the Statement of Revenues, Expenses & Changes in Net Position.',
+    },
+  ];
+
+  const reserveRows: AuditRow[] = [
+    {
+      metric: 'Beginning Net Reserve',
+      value: formatCurrency(result.beginningNetReserve),
+      numericValue: result.beginningNetReserve,
+      formula: { kind: 'echo', value: result.beginningNetReserve, text: "prior year's ending net accounting reserve, carried in" },
+    },
+    {
+      metric: 'Current-Year Net Reserve',
+      value: formatCurrency(result.currentYearNetReserve),
+      numericValue: result.currentYearNetReserve,
+      formula: { kind: 'product', factors: [curTerm(result.netUltimateLoss, 'this year\'s net ultimate'), pctTerm(currentYearUnpaidPct, 'current-year unpaid portion')] },
+      explain: 'A fixed 60% reserved / 40% paid split for the current accident year, hardcoded in the engine — not RESERVE_PAYDOWN_PCT (35%, which governs runoff of OLDER cohorts) and not shown as a named assumption anywhere.',
+    },
+    {
+      metric: 'Net Paid Losses',
+      value: formatCurrency(result.netPaidLosses),
+      numericValue: result.netPaidLosses,
+      formula: {
+        kind: 'sum',
+        terms: [
+          curTerm(netPaidCurrentYear, 'current-year paid, 40%'),
+          curTerm(priorCohortPaydown, 'prior-year cohort paydowns'),
+        ],
+      },
+      explain: 'The second term is a residual (total less current-year paid) — no field isolates prior-cohort paydowns on their own.',
+    },
+    {
+      metric: 'Ending Net Accounting Reserve',
+      value: formatCurrency(result.endingNetReserve),
+      numericValue: result.endingNetReserve,
+      formula: {
+        kind: 'sum',
+        terms: [
+          curTerm(result.beginningNetReserve, 'beginning'),
+          curTerm(result.netUltimateLoss, 'net ultimate'),
+          curTerm(-result.priorYearDevelopment, 'prior-year development'),
+          curTerm(-result.netPaidLosses, 'net paid'),
+        ],
+      },
+      explain: 'Reuses the same identity as the Net Incurred Loss Check below (net incurred = paid + reserve change, and net incurred = net ultimate − development).',
+      ...checkNote(endingNetReserveDifference, {
+        varianceCap: CLAIMS_VARIANCE_CAP,
+        varianceReason: CLAIMS_VARIANCE_REASON,
+      }),
+    },
+    {
+      metric: 'Net Incurred Loss Check',
+      value: formatCurrency(netIncurredLossDifference),
+      numericValue: netIncurredLossDifference,
+      formula: {
+        kind: 'sum',
+        terms: [curTerm(result.netIncurredLoss, 'stored'), curTerm(-result.netPaidLosses), curTerm(-result.endingNetReserve), curTerm(result.beginningNetReserve)],
+      },
+      ...legacyCheck(netIncurredLossDifference),
+    },
+    {
+      metric: 'Expected Net Unpaid Loss',
+      value: formatCurrency(result.expectedNetUnpaidLoss),
+      numericValue: result.expectedNetUnpaidLoss,
+      formula: { kind: 'echo', value: result.expectedNetUnpaidLoss, text: 'same as Ending Net Accounting Reserve above' },
+    },
+    {
+      metric: 'Net Incurred Loss (from income statement)',
+      value: formatCurrency(netIncurredLossFromIncome),
+      numericValue: netIncurredLossFromIncome,
+      formula: {
+        kind: 'sum',
+        terms: [
+          curTerm(result.grossPremium, 'gross premium'), curTerm(result.assessments), curTerm(result.investmentIncome),
+          curTerm(-result.operatingExpense), curTerm(-result.riskControlInvestment), curTerm(-result.reinsuranceCost),
+          curTerm(-result.dividends), curTerm(-result.netIncome),
+        ],
+      },
+      explain: 'Back-solved from Statement of Revenues, Expenses & Changes in Net Position figures as a cross-check on the reserve rollforward above.',
+    },
+    {
+      metric: 'Prior-Year Development',
+      value: formatCurrency(result.priorYearDevelopment),
+      formula: {
+        kind: 'simulated',
+        expected: 0,
+        expectedLabel: 'expected ≈ $0 by design (no systematic drift), though the true center also depends on prior funding adequacy, which is not displayed;',
+        where: 'the reserve cohort re-estimate is simulated per cohort',
+      },
+      explain: 'Signed so positive = favourable (reserve released). Not added separately to net income — already captured in Ending Net Accounting Reserve above.',
+    },
+  ];
+
+  const ratioRows: AuditRow[] = [
+    {
+      metric: 'Expected Loss Ratio',
+      value: formatPct(result.expectedLossRatio),
+      numericValue: result.expectedLossRatio,
+      formula: { kind: 'ratio', numerator: curTerm(result.expectedLoss, 'expected pool loss'), denominator: curTerm(result.poolPremium + result.adminExpense, 'pool premium + admin expense') },
+      subFormula: {
+        label: 'pool premium + admin expense',
+        value: result.poolPremium + result.adminExpense,
+        spec: { kind: 'sum', terms: [curTerm(result.poolPremium, 'pool premium'), curTerm(result.adminExpense, 'admin expense')] },
+      },
+    },
+    {
+      metric: 'Expected Expense Ratio',
+      value: formatPct(result.expectedExpenseRatio),
+      numericValue: result.expectedExpenseRatio,
+      formula: { kind: 'sum', terms: [pctTerm(1, '1.0'), pctTerm(-result.expectedLossRatio, 'expected loss ratio')] },
+    },
+    {
+      metric: 'Expected Combined Ratio',
+      value: formatPct(result.expectedCombinedRatio),
+      numericValue: result.expectedCombinedRatio,
+      formula: { kind: 'sum', terms: [pctTerm(result.expectedLossRatio, 'expected loss ratio'), pctTerm(result.expectedExpenseRatio, 'expected expense ratio')] },
+      explain: 'Designed to equal 100% by construction (expense ratio is defined as 1.0 − loss ratio).',
+    },
+    {
+      metric: 'Actual Loss Ratio',
+      value: formatPct(result.lossRatio),
+      numericValue: result.lossRatio,
+      formula: { kind: 'ratio', numerator: curTerm(result.netIncurredLoss, 'net incurred loss'), denominator: curTerm(result.grossPremium, 'gross premium') },
+    },
+    {
+      metric: 'Loss Ratio Check Difference',
+      value: formatPct(result.lossRatio - lossRatioCheck),
+      numericValue: result.lossRatio - lossRatioCheck,
+      formula: { kind: 'sum', terms: [pctTerm(result.lossRatio, 'stored'), pctTerm(-lossRatioCheck, 'recalculated')] },
+      ...legacyCheck(result.lossRatio - lossRatioCheck, 0.0001),
+    },
+    {
+      metric: 'Actual Expense Ratio',
+      value: formatPct(result.expenseRatio),
+      numericValue: result.expenseRatio,
+      formula: { kind: 'ratio', numerator: curTerm(result.adminExpense + result.reinsuranceCost, 'admin expense + reinsurance cost'), denominator: curTerm(result.totalMemberCharge, 'collected gross premium and admin expense') },
+      subFormula: {
+        label: 'admin expense + reinsurance cost',
+        value: result.adminExpense + result.reinsuranceCost,
+        spec: { kind: 'sum', terms: [curTerm(result.adminExpense, 'admin expense'), curTerm(result.reinsuranceCost, 'reinsurance cost')] },
+      },
+    },
+    {
+      metric: 'Expense Ratio Check Difference',
+      value: formatPct(result.expenseRatio - expenseRatioCheck),
+      numericValue: result.expenseRatio - expenseRatioCheck,
+      formula: { kind: 'sum', terms: [pctTerm(result.expenseRatio, 'stored'), pctTerm(-expenseRatioCheck, 'recalculated')] },
+      ...legacyCheck(result.expenseRatio - expenseRatioCheck, 0.0001),
+    },
+    {
+      metric: 'Actual Combined Ratio',
+      value: formatPct(result.combinedRatio),
+      numericValue: result.combinedRatio,
+      formula: { kind: 'sum', terms: [pctTerm(result.lossRatio, 'actual loss ratio'), pctTerm(result.expenseRatio, 'actual expense ratio')] },
+    },
+    {
+      metric: 'Combined Ratio Check Difference',
+      value: formatPct(result.combinedRatio - combinedRatioCheck),
+      numericValue: result.combinedRatio - combinedRatioCheck,
+      formula: { kind: 'sum', terms: [pctTerm(result.combinedRatio, 'stored'), pctTerm(-combinedRatioCheck, 'recalculated')] },
+      ...legacyCheck(result.combinedRatio - combinedRatioCheck, 0.0001),
+    },
+  ];
+
+  const fundingMarginCLF = FUNDING_CLF_TABLE[0.90];
+
+  const capitalRows: AuditRow[] = [
+    {
+      metric: 'Expected Net Unpaid Loss',
+      value: formatCurrency(result.expectedNetUnpaidLoss),
+      numericValue: result.expectedNetUnpaidLoss,
+      formula: { kind: 'echo', value: result.expectedNetUnpaidLoss, text: 'same as Ending Net Accounting Reserve on the Reserve Rollforward card above' },
+    },
+    {
+      metric: 'Indicated Net Reserve at Confidence Level',
+      value: formatCurrency(result.indicatedNetReserveAtConfidenceLevel),
+      numericValue: result.indicatedNetReserveAtConfidenceLevel,
+      formula: { kind: 'product', factors: [curTerm(result.expectedNetUnpaidLoss, 'expected net unpaid loss'), factorTerm(result.selectedFundingCLF, `selected CLF at ${(result.selectedFundingConfidenceLevel * 100).toFixed(0)}%`)] },
+    },
+    {
+      metric: 'Indicated Net Reserve Check Difference',
+      value: formatCurrency(indicatedNetReserveDifference),
+      numericValue: indicatedNetReserveDifference,
+      formula: { kind: 'sum', terms: [curTerm(result.indicatedNetReserveAtConfidenceLevel, 'stored'), curTerm(-indicatedNetReserveCheck, 'recalculated')] },
+      ...legacyCheck(indicatedNetReserveDifference),
+    },
+    {
+      metric: 'Reserve Risk Margin Needed',
+      value: formatCurrency(result.reserveRiskMarginNeeded),
+      numericValue: result.reserveRiskMarginNeeded,
+      formula: {
+        kind: 'product',
+        factors: [
+          curTerm(result.expectedNetUnpaidLoss, 'expected net unpaid loss'),
+          factorTerm(fundingMarginCLF - 1, 'required margin factor'),
+        ],
+      },
+      subFormula: {
+        label: 'required margin factor',
+        value: fundingMarginCLF - 1,
+        spec: { kind: 'sum', terms: [factorTerm(fundingMarginCLF, 'FUNDING_CLF_TABLE[90%]'), factorTerm(-1, '1.0')] },
+      },
+      explain: 'FUNDING_CLF_TABLE[90%] is a fixed pool-funding-confidence factor from Default Assumptions, independent of the player\'s own selected funding confidence level above.',
+    },
+    {
+      metric: 'Reserve Risk Margin Check Difference',
+      value: formatCurrency(reserveRiskMarginDifference),
+      numericValue: reserveRiskMarginDifference,
+      formula: { kind: 'sum', terms: [curTerm(result.reserveRiskMarginNeeded, 'stored'), curTerm(-reserveRiskMarginCheck, 'recalculated')] },
+      ...legacyCheck(reserveRiskMarginDifference),
+    },
+    {
+      metric: 'Surplus',
+      value: formatCurrency(result.availableSurplus),
+      numericValue: result.availableSurplus,
+      formula: { kind: 'echo', value: result.availableSurplus, text: 'ending net position, from the Statement of Net Position above' },
+    },
+    {
+      metric: 'Excess Available Surplus',
+      value: formatCurrency(result.capitalFundingGap),
+      numericValue: result.capitalFundingGap,
+      formula: { kind: 'sum', terms: [curTerm(result.availableSurplus, 'available surplus'), curTerm(-result.reserveRiskMarginNeeded, 'reserve risk margin needed')] },
+    },
+    {
+      metric: 'Excess Available Surplus Check Difference',
+      value: formatCurrency(result.capitalFundingGap - capitalFundingGapCheck),
+      numericValue: result.capitalFundingGap - capitalFundingGapCheck,
+      formula: { kind: 'sum', terms: [curTerm(result.capitalFundingGap, 'stored'), curTerm(-capitalFundingGapCheck, 'recalculated')] },
+      ...legacyCheck(result.capitalFundingGap - capitalFundingGapCheck),
+    },
+    {
+      metric: 'Excess Capital Ratio',
+      value: result.excessCapitalRatio === null ? 'N/A' : formatPct(result.excessCapitalRatio),
+      numericValue: result.excessCapitalRatio ?? undefined,
+      formula: result.excessCapitalRatio === null
+        ? { kind: 'text', text: 'Undefined — reserve risk margin needed is $0, so the ratio has no denominator.' }
+        : { kind: 'ratio', numerator: curTerm(result.capitalFundingGap, 'excess available surplus'), denominator: curTerm(result.reserveRiskMarginNeeded, 'reserve risk margin needed') },
+    },
+    {
+      metric: 'Excess Capital Ratio Check Difference',
+      value: result.excessCapitalRatio === null || capitalAdequacyRatioCheck === null
+        ? 'N/A'
+        : (result.excessCapitalRatio - capitalAdequacyRatioCheck).toFixed(4),
+      numericValue: (result.excessCapitalRatio !== null && capitalAdequacyRatioCheck !== null)
+        ? result.excessCapitalRatio - capitalAdequacyRatioCheck
+        : undefined,
+      formula: (result.excessCapitalRatio === null || capitalAdequacyRatioCheck === null)
+        ? { kind: 'text', text: 'Undefined on both sides — no required reserve margin to divide by.' }
+        : { kind: 'sum', terms: [pctTerm(result.excessCapitalRatio, 'stored'), pctTerm(-capitalAdequacyRatioCheck, 'recalculated')] },
+      ...(result.excessCapitalRatio === null || capitalAdequacyRatioCheck === null
+        ? naNote('no required reserve margin, so the ratio is undefined')
+        : legacyCheck(result.excessCapitalRatio - capitalAdequacyRatioCheck, 0.0001)),
+    },
+    {
+      metric: 'Excess Capital Status',
+      value: result.capitalAdequacyStatus,
+      formula: {
+        kind: 'text',
+        text: result.excessCapitalRatio === null
+          ? 'No required reserve margin, so status defaults on the same thresholds applied to $0.'
+          : `Excess Capital Ratio ${formatPct(result.excessCapitalRatio)} against fixed thresholds: ≥25% Strong, ≥0% Adequate, ≥−10% Thin, else Deficient.`,
+      },
+      explain: 'A categorical read of the ratio above, not a further calculation.',
+    },
+  ];
+
+  return { exposureRows, rateRows, lossRows, reserveRows, ratioRows, capitalRows };
+}
+
+// ============================================================================
 // Statement-mirroring row builders.
 //
 // Each returns the audit rows for one card, in the SAME order, with the SAME
@@ -1507,15 +1777,7 @@ export function buildRevExpRows(
     isPoolView ? perLineSum(pick) : lineSpec();
 
   const cur = (value: number, label?: string): FormulaTerm => ({ value, format: 'currency', label });
-
-  // The engine's own reinsurance rate: max − pressure × (max − min).
-  const reinsRate = (x: LineResultSet) => {
-    const prog = REINSURANCE_PROGRAMS[x.decisions.reinsuranceLevel];
-    if (x.decisions.reinsuranceLevel === 0) return { pct: 0, prog, spread: 0 };
-    const spread = prog.costPctOfPremiumMax - prog.costPctOfPremiumMin;
-    return { pct: prog.costPctOfPremiumMax - competitivePressure * spread, prog, spread };
-  };
-  const ownRate = reinsRate(result);
+  const ownRate = computeReinsRate(result, competitivePressure);
 
   return [
     { kind: 'section', metric: 'Operating revenues', value: '', formula: '' },
@@ -1530,20 +1792,7 @@ export function buildRevExpRows(
         }),
         x => x.reinsuranceCost
       ),
-      subFormula: isPoolView ? undefined : {
-        label: `${ownRate.prog.label} rate`,
-        value: ownRate.pct,
-        spec: {
-          kind: 'sum',
-          terms: [
-            { value: ownRate.prog.costPctOfPremiumMax, format: 'pct', label: 'program max' },
-            { product: [
-                { value: competitivePressure, format: 'factor', label: 'competitive pressure' },
-                { value: ownRate.spread, format: 'pct', label: 'max − min spread' },
-              ], negate: true },
-          ],
-        },
-      },
+      subFormula: isPoolView ? undefined : reinsRateSubFormula(ownRate, competitivePressure),
       explain: 'Collected from members, then paid to the reinsurer — appears again below as an operating expense.',
       indent: 1,
     },
