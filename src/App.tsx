@@ -403,6 +403,7 @@ export default function App() {
             lockedResults={gameState.lockedResults}
             priorHistory={gameState.priorHistory}
             instanceSeed={gameState.instance.seed}
+            competitivePressure={gameState.instance.marketEnvironment.competitivePressure}
             lineView={effectiveLineView}
           />
         )}
