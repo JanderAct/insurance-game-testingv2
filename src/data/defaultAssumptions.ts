@@ -252,8 +252,45 @@ export const OPENING_MULTIPLE_BAND: Record<string, { min: number; max: number }>
 // TIV). The exposure target drives the member count, not the other way around.
 export const STARTING_EXPOSURE_SHARE = { min: 0.25, max: 0.35 };
 
-// Total market payroll exposure targets ($M)
-export const TOTAL_MARKET_EXPOSURE = { min: 180, max: 300 };
+// The actual market totals (member count, per-line exposure) are derived from
+// the canonical roster itself — see MARKET_MEMBER_COUNT and
+// MARKET_TOTAL_EXPOSURE in memberCatalog.ts. The old hand-maintained
+// TOTAL_MARKET_MEMBERS / TOTAL_MARKET_EXPOSURE constants displayed stale
+// values and had no engine consumer; they were removed with the canonical
+// roster ingestion.
+
+// Each member's WC payroll splits across four rating classes as an exact,
+// permanent function of its entity Type (fractions sum to 1.0 per type). The
+// canonical roster's WC_* dollar columns are round(fraction x payroll, 4) —
+// verified at generation time by scripts/tools/generate-member-catalog.ts to
+// reproduce every CSV cell within $100. Intentionally NOT stored per member.
+export const WC_CLASS_MIX: Record<string, { clerical: number; publicWorks: number; police: number; fire: number }> = {
+  City:                  { clerical: 0.35, publicWorks: 0.30, police: 0.22, fire: 0.13 },
+  County:                { clerical: 0.45, publicWorks: 0.25, police: 0.20, fire: 0.10 },
+  'Fire District':       { clerical: 0.08, publicWorks: 0.04, police: 0.00, fire: 0.88 },
+  'Park District':       { clerical: 0.30, publicWorks: 0.70, police: 0.00, fire: 0.00 },
+  'Recreation District': { clerical: 0.45, publicWorks: 0.55, police: 0.00, fire: 0.00 },
+  'School District':     { clerical: 0.70, publicWorks: 0.28, police: 0.02, fire: 0.00 },
+  'Special District':    { clerical: 0.50, publicWorks: 0.50, police: 0.00, fire: 0.00 },
+  'Transit Authority':   { clerical: 0.25, publicWorks: 0.75, police: 0.00, fire: 0.00 },
+  'Water District':      { clerical: 0.30, publicWorks: 0.70, police: 0.00, fire: 0.00 },
+};
+
+// GL sub-line loss relativities, likewise an exact, permanent function of
+// entity Type (matches the canonical roster's GL_* columns cell-for-cell —
+// verified at generation time). Relativities, not dollars: the future claim
+// generator applies them against the member's payroll exposure.
+export const GL_RELATIVITIES: Record<string, { general: number; epl: number; lawEnforcement: number; abuse: number }> = {
+  City:                  { general: 1.1, epl: 1.0, lawEnforcement: 1.00, abuse: 0.6 },
+  County:                { general: 1.0, epl: 1.1, lawEnforcement: 1.00, abuse: 0.8 },
+  'Fire District':       { general: 0.9, epl: 0.9, lawEnforcement: 0.05, abuse: 0.2 },
+  'Park District':       { general: 1.0, epl: 0.8, lawEnforcement: 0.05, abuse: 1.6 },
+  'Recreation District': { general: 1.0, epl: 0.8, lawEnforcement: 0.05, abuse: 1.9 },
+  'School District':     { general: 0.9, epl: 1.1, lawEnforcement: 0.10, abuse: 1.8 },
+  'Special District':    { general: 0.9, epl: 1.0, lawEnforcement: 0.05, abuse: 0.4 },
+  'Transit Authority':   { general: 1.6, epl: 1.0, lawEnforcement: 0.10, abuse: 0.3 },
+  'Water District':      { general: 0.8, epl: 1.2, lawEnforcement: 0.00, abuse: 0.1 },
+};
 
 // Starting rate per $100 payroll range
 export const STARTING_RATE_PER_100 = { min: 5.00, max: 10.00 };
@@ -299,11 +336,14 @@ export const TIV_TYPE_MULTIPLIER: Record<string, number> = {
 };
 
 // Calibration: scale every member's Property TIV up by this factor so the
-// Property book is a substantial third line (~$5-10M premium) rather than a
-// rounding error. Applied in memberCatalog's tivFor(). Rate and loss ratio are
-// unchanged, and losses are exposure-proportional (mean loss = TIV ×
+// Property book is a substantial third line rather than a rounding error.
+// Applied at module load in memberCatalog.ts (each member's baked unscaledTiv
+// × this constant), so it remains a live knob — changing it rescales every
+// member's TIV proportionally without regenerating the catalog. Rate and loss
+// ratio are unchanged, and losses are exposure-proportional (mean loss = TIV ×
 // purePremiumPer100 × 10,000), so scaling TIV scales premium and losses
-// together — the loss ratio is invariant.
+// together — the loss ratio is invariant, and so is the enrolled roster (the
+// exposure-targeted enrollment boundary scales identically).
 export const PROPERTY_TIV_SCALE = 7;
 
 export const PROPERTY_STARTING_RATE_PER_100 = { min: 0.10, max: 0.30 };
@@ -339,8 +379,6 @@ export const SLIDER_RANGES = {
   riskControlPct: { min: 0, max: 0.08, step: 0.01, default: 0 },
   reinsuranceLevel: { min: 0, max: 4, step: 1, default: 2 },
 };
-
-export const TOTAL_MARKET_MEMBERS = 100;
 
 // Reserve paydown percentage per year
 export const RESERVE_PAYDOWN_PCT = 0.35;

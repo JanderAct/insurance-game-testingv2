@@ -32,15 +32,14 @@ import {
   EXPOSURE_RANGES,
   SIZE_WEIGHTS,
   STARTING_EXPOSURE_SHARE,
-  TOTAL_MARKET_EXPOSURE,
   STARTING_RATE_PER_100,
   STARTING_FINANCIALS,
   SLIDER_RANGES,
-  TOTAL_MARKET_MEMBERS,
   RESERVE_PAYDOWN_PCT,
   LINE_RESERVE_PAYDOWN_PCT,
   OPERATING_CASH_PCT_OF_PREMIUM,
 } from '../data/defaultAssumptions';
+import { MARKET_MEMBER_COUNT, MARKET_TOTAL_EXPOSURE } from '../data/memberCatalog';
 
 interface CalculationAuditPageProps {
   // Pool-level results, UNFILTERED by line view: the page selects its own
@@ -972,10 +971,10 @@ function buildAssumptionRows(): AuditRow[] {
     },
     {
       metric: 'Total Market Members',
-      value: String(TOTAL_MARKET_MEMBERS),
-      formula: 'Total simulated market member count.',
+      value: String(MARKET_MEMBER_COUNT),
+      formula: 'Count of the fixed canonical roster (memberCatalog.ts) — derived from the roster itself, not a hand-maintained constant.',
       note:
-        'Used to create the pool’s competitive universe. Does not mean all members are active in the player pool.',
+        'Used to create the pool’s competitive universe. Does not mean all members are active in the player pool. The roster never grows or shrinks.',
     },
     {
       metric: 'Starting Exposure Share (per line)',
@@ -985,11 +984,11 @@ function buildAssumptionRows(): AuditRow[] {
         'The exposure target drives the starting member count per line; lines start with different but overlapping rosters.',
     },
     {
-      metric: 'Total Market Exposure Range',
-      value: `${TOTAL_MARKET_EXPOSURE.min}M to ${TOTAL_MARKET_EXPOSURE.max}M`,
-      formula: 'Total market payroll exposure range.',
+      metric: 'Total Market Exposure (per line)',
+      value: `WC ${MARKET_TOTAL_EXPOSURE.WC.toLocaleString()}M · GL ${MARKET_TOTAL_EXPOSURE.GL.toLocaleString()}M · Property TIV ${MARKET_TOTAL_EXPOSURE.Property.toLocaleString()}M`,
+      formula: 'Sum of every canonical-roster member\'s exposure, per line — derived from the roster itself, not a hand-maintained constant.',
       note:
-        'Used to calculate market share. If total market exposure is too small, the starting pool may appear to have unrealistic market share.',
+        'The denominator for market share. WC and GL share the payroll base; Property uses TIV.',
     },
     {
       metric: 'Starting Rate per $100 Range',
