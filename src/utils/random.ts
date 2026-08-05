@@ -74,6 +74,42 @@ export class SeededRandom {
     }
   }
 
+  // Returns a sample from a Poisson distribution with the given mean.
+  // Knuth's product method below lambda 30 (exact, and lambda is small in
+  // practice — per-member-per-class claim counts); a normal approximation
+  // with continuity correction above, where Knuth's loop would be slow and
+  // the approximation is close (relative error in the mean under 1%).
+  poisson(lambda: number): number {
+    if (!(lambda > 0)) return 0;
+    if (lambda < 30) {
+      const limit = Math.exp(-lambda);
+      let product = this.next();
+      let count = 0;
+      while (product > limit) {
+        count++;
+        product *= this.next();
+      }
+      return count;
+    }
+    return Math.max(0, Math.round(this.normal(lambda, Math.sqrt(lambda))));
+  }
+
+  // Returns an index into `weights`, chosen with probability proportional to
+  // each weight. Weights need not be normalised; non-positive total returns 0.
+  // One draw per call — a multinomial over N trials is N calls.
+  categorical(weights: number[]): number {
+    let total = 0;
+    for (const w of weights) total += Math.max(0, w);
+    if (!(total > 0)) return 0;
+    const target = this.next() * total;
+    let cumulative = 0;
+    for (let i = 0; i < weights.length; i++) {
+      cumulative += Math.max(0, weights[i]);
+      if (target < cumulative) return i;
+    }
+    return weights.length - 1;
+  }
+
   // Shuffles array in place (Fisher-Yates)
   shuffle<T>(arr: T[]): T[] {
     for (let i = arr.length - 1; i > 0; i--) {
