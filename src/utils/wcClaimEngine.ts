@@ -419,6 +419,7 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
       // WC injuries are individual events; a shared catastrophe grouping is a
       // Property concept and stays false here.
       isCatastrophe: false,
+      claimIds: [`${occurrenceId}-c1`],
     });
     claims.push({
       id: `${occurrenceId}-c1`,

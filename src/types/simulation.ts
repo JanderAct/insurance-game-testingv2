@@ -71,8 +71,10 @@ export interface MemberLossResult {
 // ---------------------------------------------------------------------------
 
 // One loss event. Groups the claims it causes (a single event can produce
-// several claims), which is the unit occurrence-based reinsurance will
-// eventually attach to.
+// several claims — GL's abuse batches are the first multi-claim user; WC
+// emits 1:1; Property's weather/cat events will reuse the same shape), and
+// is the unit the $1M retention waterfall nets against: the retention
+// applies to the OCCURRENCE total, i.e. the sum over claimIds.
 export interface Occurrence {
   id: string;
   line: CoverageLine;
@@ -81,6 +83,7 @@ export interface Occurrence {
   calendarYear: number;
   region: number;         // the member's region 1-5, for regional correlation (e.g. catastrophes)
   isCatastrophe: boolean; // part of a regional/pool-wide catastrophe event
+  claimIds: string[];     // every claim this event produced (WC: exactly one)
 }
 
 export type ClaimStatus = 'open' | 'closed' | 'reopened';
@@ -131,6 +134,20 @@ export interface Claim {
   // Absent on catastrophic claims, which carry `annuity` instead.
   paymentPattern?: number[];
   annuity?: ClaimAnnuity;
+  // --- GL claim-level fields (Part B) ---
+  // Indemnity/ALAE split of grossUltimate. Kept separately because the
+  // statutory cap applies to INDEMNITY ONLY (caps bound damages, not defense
+  // costs), while the $1M occurrence retention applies to the combined total
+  // — a capped state-law claim can still pierce retention via defense costs.
+  indemnity?: number;
+  alae?: number;
+  // stateLaw claims are capped at GL_STATUTORY_CAP in the waterfall;
+  // federal1983 claims are uncapped (why law enforcement owns the tail).
+  legalBasis?: 'stateLaw' | 'federal1983';
+  litigationStage?: string;
+  // yearNumber the claim settles (accident + report lag + stage lag) — the
+  // year whose dollars the booked severity is trended to.
+  settlementYear?: number;
 }
 
 // Seeded, read-only operating history shown before Year 1 begins.
