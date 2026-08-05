@@ -36,6 +36,139 @@ export const AGGREGATE_LOSS_DISTRIBUTION = {
   catastropheThresholdConfidence: 0.95,
 };
 
+// ===========================================================================
+// WORKERS' COMPENSATION claim-level loss model (design doc Part A).
+//
+// Replaces, for WC only, the aggregate member-Gamma draw above: individual
+// claims are generated per member per rating class, so the $1M retention
+// waterfall, per-claim reserving, and per-tail development have real objects
+// to work on. GL and Property still use MEMBER_LOSS_VOLATILITY /
+// AGGREGATE_LOSS_DISTRIBUTION until their own generators are built.
+//
+// Two model-wide conventions worth stating up front:
+//
+// 1. NO GENERAL SEVERITY TREND. Every severity figure here is in ACCIDENT-YEAR
+//    dollars; claims are tagged with their accident year and inflated at
+//    SETTLEMENT (Phase 3), which is what makes a retroactive legislative or
+//    inflation shock able to reprice an old accident year. The only inflation
+//    inside this model is the catastrophic tier's own 6%/yr medical escalation,
+//    which is needed because that tier's grossUltimate is the NOMINAL sum of a
+//    decades-long payment stream. Frequency, by contrast, does trend (below).
+//
+// 2. FREQUENCY TREND IS A DECLINE and pure premium does NOT track it. WC's
+//    purePremiumPer100 is derived ONCE from the neutral-book expectation and
+//    held (see wcClaimEngine), while realized frequency falls 1.5%/yr. The
+//    loss ratio therefore drifts down slightly over a game — a deliberate
+//    consequence of holding the pick while frequency improves, and the
+//    counterpart to the severity inflation that Phase 3 will add on the other
+//    side.
+// ===========================================================================
+
+export const WC_CLASS_KEYS = ['clerical', 'publicWorks', 'police', 'fire'] as const;
+export type WcClassKey = (typeof WC_CLASS_KEYS)[number];
+
+export const WC_TIERS = ['medOnly', 'temp', 'perm', 'catastrophic'] as const;
+export type WcTier = (typeof WC_TIERS)[number];
+
+export const WC_LOSS_MODEL = {
+  // --- A1 frequency -------------------------------------------------------
+  // Claims per $1M of that class's payroll per year. Calibrated to the
+  // canonical roster: expected pool claim counts 75 / 511 / 79 / 144 = ~809.
+  rateClassPer1M: { clerical: 0.15, publicWorks: 0.80, police: 1.20, fire: 1.50 } as Record<WcClassKey, number>,
+
+  // Workplace safety improves ~1.5%/yr. Applied as (1 + trend)^(yearNumber-1),
+  // so live Year 1 is the reference (factor 1.0) and the pre-game years carry
+  // a factor slightly ABOVE 1 — the past was more dangerous, which is both
+  // realistic and keeps the pre-game consistent with the live model.
+  frequencyTrendPerYear: -0.015,
+
+  // Per member-year frequency noise, mean 1 (SD 0.25). Makes claim counts
+  // overdispersed relative to pure Poisson.
+  memberFrequencyNoise: { shape: 16, scale: 1 / 16 },
+
+  // Pool-wide year factor, mean 1 (SD 0.20). ONE draw per year SHARED ACROSS
+  // ALL LINES (drawn in processYear, not per line) — this is the aggregate
+  // correlation that commonLossFactor used to supply per-line.
+  poolYearFactor: { shape: 25, scale: 1 / 25 },
+
+  // --- A6 risk-quality beta budget (total nominal 0.12) -------------------
+  // Frequency channel is fully realized; the tier-mix and duration channels
+  // are diluted by tier mix and by indemnity's share of severity.
+  // Catastrophic probability is deliberately NOT affected by risk quality.
+  rqFrequencyBeta: 0.08,   // theta_WC(RQ) = exp(-0.08 * (RQ - 5))
+  rqTierMixDelta: 0.030,   // per point of (5 - RQ), on non-catastrophic tiers
+  rqDurationBeta: 0.033,   // on temp/perm duration (~0.015 realized after dilution)
+
+  // --- A2 tier mix --------------------------------------------------------
+  // [medOnly, temp, perm, catastrophic] per rating class.
+  tierProbabilities: {
+    clerical:    { medOnly: 0.78, temp: 0.20, perm: 0.019, catastrophic: 0.0005 },
+    publicWorks: { medOnly: 0.68, temp: 0.26, perm: 0.057, catastrophic: 0.003 },
+    police:      { medOnly: 0.60, temp: 0.30, perm: 0.095, catastrophic: 0.005 },
+    fire:        { medOnly: 0.58, temp: 0.30, perm: 0.113, catastrophic: 0.007 },
+  } as Record<WcClassKey, Record<WcTier, number>>,
+
+  // Severity-ordering scores for the risk-quality tier tilt: worse risk
+  // quality shifts weight toward the higher-score (costlier) tiers.
+  tierMixScores: { medOnly: 0, temp: 1, perm: 2 } as Record<'medOnly' | 'temp' | 'perm', number>,
+
+  // --- A3 severity (accident-year dollars; lognormal mean + CV) -----------
+  severity: {
+    medOnly: { mean: 1800, cv: 1.0 },
+    temp: { durationWeeksMean: 9, durationWeeksCv: 1.2, medicalMean: 16000, medicalCv: 1.5 },
+    perm: { durationWeeksMean: 45, durationWeeksCv: 1.0, medicalMean: 65000, medicalCv: 1.8 },
+  },
+
+  // Average annual wage by class; the weekly indemnity benefit is
+  // min(2/3 x weekly wage, statutory cap).
+  classAnnualWage: { clerical: 62_000, publicWorks: 58_000, police: 85_000, fire: 82_000 } as Record<WcClassKey, number>,
+  indemnityWageReplacement: 2 / 3,
+  // A visible policy lever. At current class wages the binding weekly benefit
+  // tops out at ~$1,090 (police), so this cap is dormant today — it starts to
+  // bite once wages inflate or a high-wage class is added.
+  statutoryWeeklyCap: 1450,
+
+  // --- A4 catastrophic tier (an inflating annuity, not a single draw) -----
+  catastrophic: {
+    ageMin: 25,
+    ageMax: 55,
+    // Disability-adjusted remaining life: (lifeExpectancyAge - age) x
+    // disabilityAdjustment. A closed-form PROXY standing in for a mortality
+    // table — deliberately simple, and the only place a table would be needed.
+    lifeExpectancyAge: 80,
+    disabilityAdjustment: 0.85,
+    medicalFirstYear: 180_000,
+    medicalInflationPerYear: 0.06,
+    retirementAge: 65, // indemnity runs to here, medical runs for life
+  },
+
+  // --- A5 presumption claims (police/fire occupational disease) -----------
+  // A separate process with a long report lag: the hook for a retroactive
+  // legislative shock. theta_WC(RQ) is deliberately NOT applied — presumption
+  // exposure is statutory, not a function of how well the member is run.
+  presumption: {
+    ratePer1MPoliceFire: 0.06, // ~10 claims/yr pool-wide on the canonical roster
+    reportLagYearsMean: 8,
+    reportLagYearsCv: 0.8,
+    severityMean: 350_000,
+    severityCv: 1.5,
+  },
+
+  // --- A7 payout patterns (data for Phase 3 reserving; nothing reads them yet)
+  // Fractions of the claim paid in years 1..n after the accident year.
+  // Catastrophic uses its own annuity schedule instead. Presumption is
+  // recognized at report and then pays out like perm.
+  payoutPatterns: {
+    medOnly: [0.90, 0.10],
+    temp: [0.60, 0.30, 0.10],
+    perm: [0.35, 0.25, 0.20, 0.12, 0.08],
+  } as Record<'medOnly' | 'temp' | 'perm', number[]>,
+
+  // Geographic severity multiplier, indexed by member.region - 1 (regions
+  // 1-5). A direct lookup, not interpolated.
+  regionMultiplier: [0.92, 0.97, 1.03, 1.08, 1.12],
+};
+
 // Base retention probability per member per year — high by default for realistic public entity pools
 export const BASE_RETENTION = 0.95;
 
