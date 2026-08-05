@@ -38,6 +38,7 @@ import type {
   StartingFinancials,
 } from '../types/simulation';
 import { generateStartingPoolState } from './instanceGenerator';
+import { getPredefinedMarketMembers } from '../data/memberCatalog';
 import { OPENING_MULTIPLE_BAND } from '../data/defaultAssumptions';
 import { processYear, aggregateLineResults } from './simulationEngine';
 import { emptyLinePoolState } from './lineHelpers';
@@ -187,14 +188,24 @@ export function runPriorHistory(
     lines[line] = pg ? pg.lineState : emptyLinePoolState();
   }
 
-  // Shared market roster: a member is 'active' if active in ANY line's ending
-  // roster (matches the live-year shared-market semantics).
+  // Shared market roster: the FULL canonical marketplace, with a member
+  // 'active' if active in ANY line's ending pre-game roster and 'prospect'
+  // otherwise — the same OR-semantic instanceGenerator applies at bootstrap.
+  //
+  // The base set must be the full catalog, not any line's ending roster: a
+  // line's ending members are its ACTIVES ONLY (the engine stores
+  // memberResult.activeMembers each year), so basing the market on
+  // perLine[0].members silently shrank the live-year universe to WC's
+  // pre-game survivors. The activeIds OR-union was always computed correctly
+  // across lines — it was just applied over that shrunken base, which
+  // collapsed recruitment to a near-empty candidate pool and pushed displayed
+  // market share to ~97% (>100% for non-WC lines, whose actives weren't even
+  // subsets of the base).
   const activeIds = new Set<string>();
   for (const pg of perLine) {
     for (const m of pg.members) if (m.status === 'active') activeIds.add(m.id);
   }
-  const baseMembers = perLine[0]?.members ?? [];
-  const allMarketMembers: Member[] = baseMembers.map(m => ({
+  const allMarketMembers: Member[] = getPredefinedMarketMembers().map(m => ({
     ...m,
     status: activeIds.has(m.id) ? ('active' as const) : ('prospect' as const),
   }));
