@@ -110,6 +110,18 @@ export class SeededRandom {
     return weights.length - 1;
   }
 
+  // Returns a sample from a Pareto distribution with minimum x_m and tail
+  // index alpha, via the inverse CDF: x_m * u^(-1/alpha). Note the tail is
+  // heavy by design: for alpha <= 2 the variance is INFINITE (and for
+  // alpha <= 1 even the mean is), so verification of Pareto-driven figures
+  // must rest on medians/quantiles/tail counts, never on tight sample-mean
+  // assertions.
+  pareto(xm: number, alpha: number): number {
+    if (!(xm > 0) || !(alpha > 0)) return 0;
+    const u = Math.max(this.next(), 1e-12);
+    return xm * Math.pow(u, -1 / alpha);
+  }
+
   // Shuffles array in place (Fisher-Yates)
   shuffle<T>(arr: T[]): T[] {
     for (let i = arr.length - 1; i > 0; i--) {
