@@ -85,6 +85,19 @@ export interface Occurrence {
 
 export type ClaimStatus = 'open' | 'closed' | 'reopened';
 
+// A catastrophic claim's payment stream. Lifetime-care claims are not a single
+// severity draw — they are decades of inflating medical payments plus wage
+// indemnity to retirement. Carried on the claim so reserving can consume the
+// real schedule instead of re-deriving it. grossUltimate is the NOMINAL sum of
+// this stream (undiscounted); present-value treatment is Phase 3.
+export interface ClaimAnnuity {
+  medicalFirstYearPayment: number;
+  medicalInflationPct: number;
+  medicalYears: number;
+  indemnityAnnualPayment: number;
+  indemnityYears: number;
+}
+
 // One claim within an occurrence.
 export interface Claim {
   id: string;
@@ -99,11 +112,19 @@ export interface Claim {
   // for Property. Deliberately a string, not a union — the tier vocabularies
   // belong to the distribution work.
   tier: string;
+  // The rating class the claim arose from (WC: clerical/publicWorks/police/
+  // fire). Kept alongside tier because WC severity depends on both.
+  ratingClass?: string;
   status: ClaimStatus;
   reportedYear: number;   // yearNumber the claim became known (>= accidentYear; supports IBNR vs case)
   grossUltimate: number;  // current estimate of the claim's full gross cost
   paidToDate: number;
   caseReserve: number;    // unpaid estimate on this claim (grossUltimate - paidToDate once reported)
+  // Fractions of grossUltimate expected to be paid in years 1..n after the
+  // accident year (A7). Data for Phase 3 reserving — nothing consumes it yet.
+  // Absent on catastrophic claims, which carry `annuity` instead.
+  paymentPattern?: number[];
+  annuity?: ClaimAnnuity;
 }
 
 // Seeded, read-only operating history shown before Year 1 begins.
@@ -303,6 +324,16 @@ export interface ResultSet {
   aggregateMemberLoss: number;
   commonLossFactor: number;
   catastropheFactor: number;
+  // Claim-level detail, WC only (the other lines still draw an aggregate).
+  // IN-MEMORY FOR THE CURRENT SESSION ONLY — deliberately NOT persisted to
+  // localStorage (~800 claims/yr x years would blow the quota); results saved
+  // and reloaded carry the aggregates, and per-claim detail is regenerated
+  // from seed x member x year on demand. Optional for exactly that reason:
+  // any consumer must handle its absence.
+  claims?: Claim[];
+  occurrences?: Occurrence[];
+  claimCountsByClass?: Record<string, number>;
+  claimCountsByTier?: Record<string, number>;
   shockLossAmount: number;
   grossUltimateLoss: number;
   shockLossIncurred: boolean;
