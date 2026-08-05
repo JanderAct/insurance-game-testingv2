@@ -61,6 +61,51 @@ export interface MemberLossResult {
   simulatedLoss: number;
 }
 
+// ---------------------------------------------------------------------------
+// Claim / Occurrence scaffolding for the loss-distribution work.
+//
+// TYPE SCAFFOLDING ONLY: nothing constructs, stores, or consumes these yet —
+// no generation logic, no processLineYear wiring, no reinsuranceEngine
+// involvement. They exist so the claim-level loss generator being designed
+// against the WC/GL distribution spec has a settled data shape to target.
+// ---------------------------------------------------------------------------
+
+// One loss event. Groups the claims it causes (a single event can produce
+// several claims), which is the unit occurrence-based reinsurance will
+// eventually attach to.
+export interface Occurrence {
+  id: string;
+  line: CoverageLine;
+  memberId: string;
+  accidentYear: number;   // yearNumber the event happened (pre-game years negative)
+  calendarYear: number;
+  region: number;         // the member's region 1-5, for regional correlation (e.g. catastrophes)
+  isCatastrophe: boolean; // part of a regional/pool-wide catastrophe event
+}
+
+export type ClaimStatus = 'open' | 'closed' | 'reopened';
+
+// One claim within an occurrence.
+export interface Claim {
+  id: string;
+  occurrenceId: string;
+  memberId: string;
+  line: CoverageLine;
+  accidentYear: number;   // yearNumber (pre-game years negative)
+  calendarYear: number;
+  // Sub-coverage / rating tier the claim falls under: a WC_CLASS_MIX class
+  // (clerical / publicWorks / police / fire) for WC, a GL_RELATIVITIES
+  // sub-line (general / epl / lawEnforcement / abuse) for GL, a peril label
+  // for Property. Deliberately a string, not a union — the tier vocabularies
+  // belong to the distribution work.
+  tier: string;
+  status: ClaimStatus;
+  reportedYear: number;   // yearNumber the claim became known (>= accidentYear; supports IBNR vs case)
+  grossUltimate: number;  // current estimate of the claim's full gross cost
+  paidToDate: number;
+  caseReserve: number;    // unpaid estimate on this claim (grossUltimate - paidToDate once reported)
+}
+
 // Seeded, read-only operating history shown before Year 1 begins.
 export interface HistoricalYear {
   historyYearNumber: number;

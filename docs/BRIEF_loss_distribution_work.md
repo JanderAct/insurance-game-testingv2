@@ -73,3 +73,6 @@ Frequency/severity + aggregate reporting patterns — **not** per-claim lifecycl
 management-consequence mechanic (funding adequacy expressed through rates/CLF), not an actuarial estimation
 exercise, so emergent noisy triangles aren't needed. Per-claim is deferred (mainly required later for
 occurrence-based reinsurance).
+
+> Update: Claim/Occurrence TYPE scaffolding now exists in `types/simulation.ts` (a decision made outside
+> this doc, superseding the deferral above at the type level only) — shapes only, wired into nothing.
