@@ -347,7 +347,7 @@ export interface ResultSet {
   aggregateMemberLoss: number;
   commonLossFactor: number;
   catastropheFactor: number;
-  // Claim-level detail, WC only (the other lines still draw an aggregate).
+  // Claim-level detail, WC and GL (Property still draws an aggregate).
   // IN-MEMORY FOR THE CURRENT SESSION ONLY — deliberately NOT persisted to
   // localStorage (~800 claims/yr x years would blow the quota); results saved
   // and reloaded carry the aggregates, and per-claim detail is regenerated
@@ -355,8 +355,9 @@ export interface ResultSet {
   // any consumer must handle its absence.
   claims?: Claim[];
   occurrences?: Occurrence[];
-  claimCountsByClass?: Record<string, number>;
-  claimCountsByTier?: Record<string, number>;
+  claimCountsByClass?: Record<string, number>;  // WC
+  claimCountsByTier?: Record<string, number>;   // WC
+  claimCountsBySub?: Record<string, number>;    // GL (general/epl/lawEnforcement/abuse + abuseIncidents)
   shockLossAmount: number;
   grossUltimateLoss: number;
   shockLossIncurred: boolean;

@@ -9,6 +9,7 @@ import { simulateMarketReturns, blendInvestmentReturn } from './investmentEngine
 import { simulateMemberMovement } from './membershipEngine';
 import { cloneMembershipHistory, openInterval, closeInterval } from './membershipHistory';
 import { computeKLine, deriveNeutralPurePremiumPer100, generateWcClaims } from './wcClaimEngine';
+import { computeKGl, generateGlClaims } from './glClaimEngine';
 import { generateNarrative } from './narrativeEngine';
 import { getMemberExposure } from './lineHelpers';
 import { getPredefinedMarketMembers } from '../data/memberCatalog';
@@ -65,9 +66,10 @@ interface LineYearContext {
   membershipHistory: MembershipHistory;
   // The year's pool-wide loss factor (mean 1), drawn ONCE in processYear and
   // shared by every line — the cross-line aggregate correlation that the
-  // per-line commonLossFactor could not express. WC's claim generator consumes
-  // it; GL and Property still draw their own commonLossFactor and IGNORE this,
-  // so there is no double application while they await their own generators.
+  // per-line commonLossFactor could not express. The WC and GL claim
+  // generators consume it; Property still draws its own commonLossFactor and
+  // IGNORES this, so there is no double application while it awaits its own
+  // generator.
   gPool: number;
   cash: number;
   investments: number;
@@ -230,16 +232,18 @@ export function processLineYear(
   const riskControlInvestment = poolPremium * lineDecisions.riskControlPct;
 
   // --- Loss Simulation ---
-  // WC generates individual claims (design doc Part A); GL and Property still
-  // draw the aggregate member-Gamma below until their own generators exist.
+  // WC and GL generate individual claims (design doc Parts A and B); Property
+  // still draws the aggregate member-Gamma below until its generator exists.
   const isWcClaimLine = line === 'WC';
+  const isGlClaimLine = line === 'GL';
+  const isClaimLine = isWcClaimLine || isGlClaimLine;
 
   const lossRng = deriveSubRng(instance.seed, yearNumber, lineRngLabel('losses', line));
 
-  // The aggregate annual factor for the NON-claim lines. WC does not draw it:
-  // its cross-line correlation now comes from the shared ctx.gPool, and
+  // The aggregate annual factor for the NON-claim lines. WC and GL do not draw
+  // it: their cross-line correlation now comes from the shared ctx.gPool, and
   // applying both would double-count the aggregate shock.
-  const commonLossFactor = isWcClaimLine
+  const commonLossFactor = isClaimLine
     ? ctx.gPool
     : lossRng.lognormal(
         AGGREGATE_LOSS_DISTRIBUTION.logMean,
@@ -249,10 +253,11 @@ export function processLineYear(
     FUNDING_CLF_TABLE[AGGREGATE_LOSS_DISTRIBUTION.catastropheThresholdConfidence];
   const catastropheFactor = 1;
 
-  let wcClaims: Claim[] | undefined;
-  let wcOccurrences: Occurrence[] | undefined;
+  let generatedClaims: Claim[] | undefined;
+  let generatedOccurrences: Occurrence[] | undefined;
   let wcCountsByClass: Record<string, number> | undefined;
   let wcCountsByTier: Record<string, number> | undefined;
+  let glCountsBySub: Record<string, number> | undefined;
   let memberLossResults: MemberLossResult[];
   let aggregateMemberLoss: number;
   let shockOccurred: boolean;
@@ -274,8 +279,8 @@ export function processLineYear(
       // moves the loss ratio instead of cancelling out.
       riskControlEffectiveness: newRCEffectiveness,
     });
-    wcClaims = generated.claims;
-    wcOccurrences = generated.occurrences;
+    generatedClaims = generated.claims;
+    generatedOccurrences = generated.occurrences;
     wcCountsByClass = generated.claimCountsByClass;
     wcCountsByTier = generated.claimCountsByTier;
     memberLossResults = generated.memberLossResults;
@@ -283,6 +288,29 @@ export function processLineYear(
     // A catastrophic-tier claim is WC's shock event, replacing the old
     // "aggregate factor exceeded a threshold" definition.
     shockOccurred = (generated.claimCountsByTier.catastrophic ?? 0) > 0;
+  } else if (isGlClaimLine) {
+    // Same discipline as WC: k_GL is the per-year roster/risk-quality-mix
+    // correction against the currently enrolled book; the pure premium itself
+    // is held (step 6b) rather than chasing enrollment.
+    const kGl = computeKGl(memberResult.activeMembers);
+    const generated = generateGlClaims({
+      members: memberResult.activeMembers,
+      yearNumber,
+      calendarYear,
+      instanceSeed: instance.seed,
+      kGl,
+      gPool: ctx.gPool,
+      // Risk control acts on the DRAW ONLY (finding 17), as in WC.
+      riskControlEffectiveness: newRCEffectiveness,
+    });
+    generatedClaims = generated.claims;
+    generatedOccurrences = generated.occurrences;
+    glCountsBySub = generated.claimCountsBySub;
+    memberLossResults = generated.memberLossResults;
+    aggregateMemberLoss = generated.grossUltimateLoss;
+    // GL's shock event (ruled J11): any single occurrence whose gross total
+    // (indemnity + ALAE, all claimants of an abuse batch combined) exceeds $1M.
+    shockOccurred = generated.maxOccurrenceGross > 1_000_000;
   } else {
     shockOccurred = commonLossFactor > catastropheThreshold;
     memberLossResults = memberResult.activeMembers.map(member => {
@@ -314,7 +342,9 @@ export function processLineYear(
     );
   }
 
-  const shockLossAmount = shockOccurred && !isWcClaimLine
+  // Claim lines carry their shock inside the drawn claims themselves; the
+  // separate shock-amount add-on only exists for the aggregate (Property) path.
+  const shockLossAmount = shockOccurred && !isClaimLine
     ? expectedLoss * Math.max(0, commonLossFactor - catastropheThreshold)
     : 0;
 
@@ -599,10 +629,11 @@ export function processLineYear(
 
     memberLossResults,
     aggregateMemberLoss,
-    claims: wcClaims,
-    occurrences: wcOccurrences,
+    claims: generatedClaims,
+    occurrences: generatedOccurrences,
     claimCountsByClass: wcCountsByClass,
     claimCountsByTier: wcCountsByTier,
+    claimCountsBySub: glCountsBySub,
     commonLossFactor,
     catastropheFactor,
     shockLossAmount,
