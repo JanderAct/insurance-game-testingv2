@@ -43,7 +43,13 @@
 //    asymmetry is deliberate and is justified at that call site.
 
 import type { Claim, ClaimAnnuity, CoverageLine, Member, MemberLossResult, Occurrence } from '../types/simulation';
-import { SeededRandom, deriveSubRng } from './random';
+import { deriveSubRng } from './random';
+import {
+  drawLognormal,
+  drawTruncatedLognormal,
+  expectedOverLognormal,
+  trendToSettlement,
+} from './claimMath';
 import {
   WC_CLASS_KEYS,
   WC_CLASS_MIX,
@@ -58,26 +64,10 @@ const NEUTRAL_RQ = 5;
 
 // --- small shared helpers ---------------------------------------------------
 
-// Lognormal parameters from a target mean and coefficient of variation, so
-// E[X] is exactly `mean` — which is what lets the analytic expectation use
-// `mean` directly and stay matched to the draw.
-function lognormalParams(mean: number, cv: number): { mu: number; sigma: number } {
-  const sigma = Math.sqrt(Math.log(1 + cv * cv));
-  return { mu: Math.log(mean) - (sigma * sigma) / 2, sigma };
-}
-
-function drawLognormal(rng: SeededRandom, mean: number, cv: number): number {
-  const { mu, sigma } = lognormalParams(mean, cv);
-  return rng.lognormal(mu, sigma);
-}
-
-// THE single point of dollar-vintage conversion. An amount stated in
-// accidentYear dollars, carried to settlementYear dollars at `rate`. Every
-// vintage change in this module routes through here — if you find yourself
-// writing Math.pow(1 + someTrend, ...) anywhere else, that is the bug.
-export function trendToSettlement(amount: number, rate: number, accidentYear: number, settlementYear: number): number {
-  return amount * Math.pow(1 + rate, settlementYear - accidentYear);
-}
+// trendToSettlement, the lognormal helpers and the truncated-lognormal pair
+// now live in claimMath.ts, shared with the GL generator. Their invariants
+// (single vintage-conversion point; truncate-and-renormalise with the draw
+// and the analytic integrating the identical density) are documented there.
 
 // The multiple of an accident-year amount that a payout pattern actually
 // settles for, once each pattern year is trended at the leg's own rate.
@@ -107,57 +97,6 @@ export function nominalSumOfStream(firstPayment: number, growth: number, years: 
   if (years <= 0) return 0;
   if (Math.abs(growth) < 1e-12) return firstPayment * years;
   return firstPayment * ((Math.pow(1 + growth, years) - 1) / growth);
-}
-
-// E[f(X)] for X ~ LogNormal(mean, cv) TRUNCATED at upperBound, by
-// deterministic quadrature over the underlying normal. Needed where f is
-// non-linear (the presumption lag enters as an exponent), so the analytic
-// expectation stays matched to the draw rather than evaluating f at the mean.
-//
-// The truncation RENORMALISES: both the numerator and the weight accumulate
-// only over x <= upperBound, giving E[f(X) | X <= upperBound]. Integrating the
-// numerator over the truncated range while normalising by the FULL density
-// would under-weight the result and silently break the draw/expectation match
-// — the draw rejects-and-redraws, so it samples the renormalised density.
-function expectedOverLognormal(
-  mean: number,
-  cv: number,
-  f: (x: number) => number,
-  upperBound = Number.POSITIVE_INFINITY,
-): number {
-  const { mu, sigma } = lognormalParams(mean, cv);
-  const POINTS = 20_000;
-  const Z_LIMIT = 8;
-  let weighted = 0;
-  let weight = 0;
-  const step = (2 * Z_LIMIT) / POINTS;
-  for (let i = 0; i < POINTS; i++) {
-    const z = -Z_LIMIT + (i + 0.5) * step;
-    const x = Math.exp(mu + sigma * z);
-    if (x > upperBound) continue;
-    const density = Math.exp(-0.5 * z * z);
-    weighted += density * f(x);
-    weight += density;
-  }
-  return weight > 0 ? weighted / weight : f(Math.exp(mu));
-}
-
-// A lognormal draw restricted to (0, upperBound] by REJECT-AND-REDRAW, not by
-// clamping. A hard min(x, bound) would pile probability mass onto exactly the
-// bound, so a claim reporting "at 40 years" would mean either "genuinely ~40"
-// or "capped down from longer" — precisely the latent ambiguity the
-// accident-year-dollar convention exists to eliminate. Rejection keeps the
-// density smooth and samples exactly the renormalised distribution that
-// expectedOverLognormal integrates.
-function drawTruncatedLognormal(rng: SeededRandom, mean: number, cv: number, upperBound: number): number {
-  for (let attempt = 0; attempt < 64; attempt++) {
-    const x = drawLognormal(rng, mean, cv);
-    if (x <= upperBound) return x;
-  }
-  // Unreachable in practice: the rejection rate is well under 1%, so 64
-  // consecutive rejections is a ~1e-140 event. Falls back to the median.
-  const { mu } = lognormalParams(mean, cv);
-  return Math.min(Math.exp(mu), upperBound);
 }
 
 function classPayroll(member: Member, cls: WcClassKey): number {
