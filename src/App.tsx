@@ -99,6 +99,12 @@ export default function App() {
 
         // Validate critical fields exist before restoring
         if (gs && sf && Array.isArray(gs.priorHistory) && sf.totalMarketExposure !== undefined && sf.surplus !== undefined) {
+          // Saves from before the membership-history ledger lack the field;
+          // default to an empty ledger (cooldown then treats everyone as
+          // never-enrolled, which only affects stale dev saves).
+          if (gs.poolState && !gs.poolState.membershipHistory) {
+            gs.poolState.membershipHistory = {};
+          }
           setGameState(gs);
           setStartingFinancials(sf);
           setInitialMembers(im ?? []);

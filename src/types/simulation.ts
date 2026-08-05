@@ -25,6 +25,15 @@ export interface Member {
   // regional loss correlation (e.g. catastrophes striking a region).
   region: number;
   exposureByLine: Partial<Record<CoverageLine, number>>; // exposure units, per coverage line
+  // LOSSY display convenience, NOT an enrollment record. Opening enrollees are
+  // stamped yearJoined: 1 ("was here when the game started" — the display
+  // convention the members table wants) even though they actually enrolled at
+  // the start of the pre-game (ledger startYear: -2). Consequently at Y1 a
+  // genuine Y1 recruit and an opening member both read yearJoined: 1 and are
+  // indistinguishable by this scalar alone — only PoolState.membershipHistory
+  // can separate them. Do NOT "repair" this field to the true year (it would
+  // surface pre-game internals in the UI) and do NOT answer per-line/per-year
+  // enrollment questions from it — use the ledger.
   yearJoined: number; // yearNumber when joined
   calendarYearJoined: number;
   riskQuality: number; // 1-10
@@ -408,15 +417,35 @@ export interface LinePoolState {
   totalMarketExposure: number;
 }
 
+// One continuous stretch of enrollment in a single coverage line, in ACTIVE
+// yearNumbers, inclusive on both ends (pre-game years are negative). A member
+// withdrawn during year Y's movement was last active in Y-1, so its interval
+// closes with endYear = Y-1; endYear null = currently enrolled.
+export interface EnrollmentInterval {
+  startYear: number;
+  endYear: number | null;
+}
+
+// The authoritative per-member, per-line enrollment record, keyed by member
+// id then coverage line: every past and present active interval, supporting
+// "was member X active in line Y during year Z" for any combination,
+// including multiple past intervals per member per line. Member.yearJoined /
+// yearWithdrawn remain as DENORMALIZED convenience fields only — per-line
+// questions (e.g. the re-enrollment cooldown) must be answered from this
+// ledger, never from Member.status, which is fold-corrupted across lines
+// (see membershipHistory.ts).
+export type MembershipHistory = Record<string, Partial<Record<CoverageLine, EnrollmentInterval[]>>>;
+
 // Pool ongoing state: fields shared across all lines, plus one LinePoolState per
 // line. Investments are NOT here — each line holds its own portfolio (Stage 2.9);
 // cash remains shared and is split by contribution share.
 export interface PoolState {
   cash: number;
   unearnedPremium: number;
-  allMarketMembers: Member[];      // all 100 fictional members
+  allMarketMembers: Member[];      // the full canonical marketplace (200 members)
   lines: Record<CoverageLine, LinePoolState>;
   interLineLoans: InterLineLoan[]; // pool-level ledger of outstanding inter-line loans
+  membershipHistory: MembershipHistory; // authoritative per-line enrollment intervals
 }
 
 // Top-level game state

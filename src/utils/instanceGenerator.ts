@@ -2,7 +2,7 @@
 // Exposure = payroll in millions of dollars
 // Premium = Exposure($M) × Rate_per_$100_payroll × 10,000
 
-import type { GameInstance, Member, PoolState, LinePoolState, StartingFinancials, ReserveCohort } from '../types/simulation';
+import type { GameInstance, Member, MembershipHistory, PoolState, LinePoolState, StartingFinancials, ReserveCohort } from '../types/simulation';
 import { SeededRandom, deriveSubRng } from './random';
 import { getPredefinedMarketMembers } from '../data/memberCatalog';
 import { getMemberExposure, emptyLinePoolState } from './lineHelpers';
@@ -168,7 +168,11 @@ export function generateGameInstance(instanceId: string, seed: number): GameInst
 export function generateStartingPoolState(
   instance: GameInstance,
   startingYear: number,
-  activeLines: CoverageLine[]
+  activeLines: CoverageLine[],
+  // The yearNumber of the first year the caller will simulate on this state
+  // (-2 for the pre-game bootstrap). Opening enrollees' ledger intervals are
+  // active from this year on.
+  firstYearNumber: number
 ): { poolState: PoolState; startingFinancials: StartingFinancials } {
   const rng = new SeededRandom(instance.seed + 777);
 
@@ -409,6 +413,17 @@ export function generateStartingPoolState(
     poolCash += lineCash;
   });
 
+  // Opening ledger: each line's enrollees are active from the first simulated
+  // year. This is the authoritative per-line enrollment record (the shared
+  // status field cannot answer per-line questions — see membershipHistory.ts).
+  const membershipHistory: MembershipHistory = {};
+  for (const line of activeLines) {
+    for (const id of enrolledIdsByLine[line] ?? []) {
+      const byLine = (membershipHistory[id] ??= {});
+      byLine[line] = [{ startYear: firstYearNumber, endYear: null }];
+    }
+  }
+
   const poolState: PoolState = {
     cash: poolCash,
     unearnedPremium,
@@ -419,6 +434,7 @@ export function generateStartingPoolState(
       Property: propertyLineState,
     },
     interLineLoans: [],
+    membershipHistory,
   };
 
   const startingFinancials: StartingFinancials = {

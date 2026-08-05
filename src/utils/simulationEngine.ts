@@ -1,12 +1,13 @@
 // Core simulation engine for Risk Pool Simulation v1
 // Premium formula: Premium = Exposure($M) × Rate_per_$100_payroll × 10,000
 
-import type { GameState, PoolState, DecisionSet, LinePoolState, LineDecisionSet, ResultSet, LineResultSet, ReserveCohort, Member, MemberLossResult, CoverageLine, GameInstance, AssetAllocation } from '../types/simulation';
+import type { GameState, PoolState, DecisionSet, LinePoolState, LineDecisionSet, ResultSet, LineResultSet, ReserveCohort, Member, MemberLossResult, MembershipHistory, CoverageLine, GameInstance, AssetAllocation } from '../types/simulation';
 import { SeededRandom, deriveSubRng } from './random';
 import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, MEMBER_LOSS_VOLATILITY, RISK_CONTROL_PARAMS, LINE_RESERVE_PAYDOWN_PCT, OPERATING_CASH_PCT_OF_PREMIUM } from '../data/defaultAssumptions';
 import { getReinsuranceStructure, calculateReinsuranceCost, calculateReinsuranceRecovery } from './reinsuranceEngine';
 import { simulateMarketReturns, blendInvestmentReturn } from './investmentEngine';
 import { simulateMemberMovement } from './membershipEngine';
+import { cloneMembershipHistory, openInterval, closeInterval } from './membershipHistory';
 import { generateNarrative } from './narrativeEngine';
 import { getMemberExposure } from './lineHelpers';
 
@@ -47,6 +48,11 @@ interface LineYearContext {
   yearNumber: number;
   calendarYear: number;
   allMarketMembers: Member[];
+  // The authoritative per-line enrollment ledger (as of this year's entry,
+  // plus earlier-processed lines' same-year updates — irrelevant to this
+  // line's own per-line reads). Recruitment eligibility reads from THIS,
+  // never from Member.status (see membershipHistory.ts).
+  membershipHistory: MembershipHistory;
   cash: number;
   investments: number;
   assetAllocation: AssetAllocation;
@@ -127,6 +133,7 @@ export function processLineYear(
   const memberResult = simulateMemberMovement({
     currentMembers: currentActiveMembers,
     allMarketMembers: ctx.allMarketMembers,
+    membershipHistory: ctx.membershipHistory,
     decisions: lineDecisions,
     line,
     currentMemberSatisfaction: lineState.memberSatisfaction,
@@ -756,6 +763,13 @@ export function processYear(
   // paid-off loans below.
   let interLineLoans = poolState.interLineLoans.map(loan => ({ ...loan }));
 
+  // Working copy of the membership-history ledger. Maintained by ROSTER DIFF
+  // per line below (prior actives vs updated actives), so it records exactly
+  // the transitions that actually happened regardless of internal movement
+  // mechanics — a member withdrawn and re-recruited within the same year
+  // never leaves the active roster and correctly records no transition.
+  const membershipHistory = cloneMembershipHistory(poolState.membershipHistory);
+
   let currentAllMarketMembers = poolState.allMarketMembers;
   const lineResults: Array<{ line: CoverageLine; result: LineResultSet }> = [];
   const updatedLineStates: Partial<Record<CoverageLine, LinePoolState>> = {};
@@ -810,6 +824,7 @@ export function processYear(
       yearNumber,
       calendarYear,
       allMarketMembers: currentAllMarketMembers,
+      membershipHistory,
       cash: poolState.cash * share,
       investments: lineState.investedAssets,
       assetAllocation: lineDecisions.assetAllocation,
@@ -826,6 +841,24 @@ export function processYear(
       lineDecisions,
       ctx
     );
+
+    // Ledger maintenance by roster diff: compare this line's active roster
+    // before and after the year. Joins open an interval (active from this
+    // year); departures close it (last active year = yearNumber - 1).
+    {
+      const prevActive = new Set(
+        lineState.members.filter(m => m.status === 'active').map(m => m.id)
+      );
+      const nowActive = new Set(
+        updatedLineState.members.filter(m => m.status === 'active').map(m => m.id)
+      );
+      for (const id of nowActive) {
+        if (!prevActive.has(id)) openInterval(membershipHistory, id, line, yearNumber);
+      }
+      for (const id of prevActive) {
+        if (!nowActive.has(id)) closeInterval(membershipHistory, id, line, yearNumber - 1);
+      }
+    }
 
     // --- Inter-line loan repayment pass (existing loans only) ---
     const loan = interLineLoans.find(l => l.borrowingLine === line);
@@ -913,6 +946,7 @@ export function processYear(
       ...updatedLineStates,
     },
     interLineLoans,
+    membershipHistory,
   };
 
   // Detect deficient lines that don't already carry a loan — these become

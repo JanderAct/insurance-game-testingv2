@@ -33,6 +33,7 @@ import type {
   LineResultSet,
   LinePoolState,
   Member,
+  MembershipHistory,
   PoolState,
   ResultSet,
   StartingFinancials,
@@ -63,6 +64,7 @@ interface LinePreGame {
   cash: number;                   // this line's own ending operating cash
   unearnedPremium: number;
   members: Member[];              // this line's ending roster
+  membershipHistory: MembershipHistory; // this line's pre-game enrollment ledger
   attempt: number;
 }
 
@@ -83,7 +85,8 @@ function simulateLineCandidate(
   const { poolState: bootstrap } = generateStartingPoolState(
     candidateInstance,
     setup.startingYear - PRE_GAME_YEARS,
-    [line]
+    [line],
+    -(PRE_GAME_YEARS - 1)
   );
   // Relabel this line's seed reserve cohorts 3 years older so they don't
   // collide with the pre-game years' own new accident-year cohorts.
@@ -164,6 +167,7 @@ function finalizeLine(
     cash: c.poolState.cash,
     unearnedPremium: c.poolState.unearnedPremium,
     members: c.poolState.lines[line].members,
+    membershipHistory: c.poolState.membershipHistory,
     attempt,
   };
 }
@@ -210,12 +214,25 @@ export function runPriorHistory(
     status: activeIds.has(m.id) ? ('active' as const) : ('prospect' as const),
   }));
 
+  // Merge the per-line pre-game ledgers. Each solo pre-game only ever wrote
+  // its own line's intervals, so the merge is a disjoint per-line union.
+  const membershipHistory: MembershipHistory = {};
+  for (const pg of perLine) {
+    for (const [memberId, byLine] of Object.entries(pg.membershipHistory)) {
+      const intervals = byLine[pg.line];
+      if (!intervals || intervals.length === 0) continue;
+      const target = (membershipHistory[memberId] ??= {});
+      target[pg.line] = intervals.map(iv => ({ ...iv }));
+    }
+  }
+
   const poolState: PoolState = {
     cash: perLine.reduce((s, p) => s + p.cash, 0),
     unearnedPremium: perLine.reduce((s, p) => s + p.unearnedPremium, 0),
     allMarketMembers,
     lines,
     interLineLoans: [],
+    membershipHistory,
   };
 
   // Pool-level pre-game history = per-year aggregate across the active lines.

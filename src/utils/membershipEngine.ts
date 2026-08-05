@@ -1,8 +1,9 @@
 // Membership engine for Risk Pool Simulation v1
 // Uses count-based attraction to keep growth realistic
 
-import type { Member, LineDecisionSet, CoverageLine } from '../types/simulation';
+import type { Member, LineDecisionSet, CoverageLine, MembershipHistory } from '../types/simulation';
 import { SeededRandom } from './random';
+import { canReenroll } from './membershipHistory';
 import { getMemberExposure } from './lineHelpers';
 import {
   MEMBER_MOVEMENT_WEIGHTS,
@@ -15,6 +16,9 @@ import {
 export interface MemberMovementInputs {
   currentMembers: Member[];
   allMarketMembers: Member[];
+  // Authoritative per-line enrollment ledger — the ONLY legitimate source for
+  // recruitment eligibility (see the candidate-pool filter below).
+  membershipHistory: MembershipHistory;
   decisions: LineDecisionSet;
   line: CoverageLine;
   currentMemberSatisfaction: number;
@@ -147,9 +151,21 @@ export function simulateMemberMovement(inputs: MemberMovementInputs): MemberMove
   const rawNewCount = Math.round(expectedNew * rng.range(0.3, 1.7));
   const actualNewCount = Math.min(rawNewCount, MAX_NEW_MEMBERS_PER_YEAR);
 
+  // Candidate-pool eligibility reads EXCLUSIVELY from membershipHistory,
+  // NEVER from Member.status. The shared status field is fold-corrupted
+  // across lines (one status per member, folded sequentially per line, so a
+  // member withdrawn from a later-processed line while active in an earlier
+  // one reads 'withdrawn' — CALIBRATION_FINDINGS 2/5) and cannot answer the
+  // per-line question "may this member (re-)enroll in THIS line?". The
+  // ledger is per-line by construction: canReenroll is true for a member
+  // never enrolled in this line, false while its interval is open (which
+  // also blocks same-year re-entry after a withdrawal — the ledger is
+  // updated in processYear AFTER this movement, so a just-withdrawn member
+  // still reads as enrolled here), and true again only once the 2-year
+  // per-line cooldown from the most recent withdrawal has elapsed.
   const activeIds = new Set(retainedMembers.map(m => m.id));
   const availableMembers = allMarketMembers.filter(
-    m => !activeIds.has(m.id) && m.status !== 'withdrawn'
+    m => !activeIds.has(m.id) && canReenroll(inputs.membershipHistory, m.id, line, yearNumber)
   );
 
   let candidatePool = [...availableMembers];
