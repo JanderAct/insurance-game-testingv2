@@ -8,9 +8,10 @@ import { getReinsuranceStructure, calculateReinsuranceCost, calculateReinsurance
 import { simulateMarketReturns, blendInvestmentReturn } from './investmentEngine';
 import { simulateMemberMovement } from './membershipEngine';
 import { cloneMembershipHistory, openInterval, closeInterval } from './membershipHistory';
-import { computeKLine, generateWcClaims } from './wcClaimEngine';
+import { computeKLine, deriveNeutralPurePremiumPer100, generateWcClaims } from './wcClaimEngine';
 import { generateNarrative } from './narrativeEngine';
 import { getMemberExposure } from './lineHelpers';
+import { getPredefinedMarketMembers } from '../data/memberCatalog';
 
 export function lookupCLF(level: number): number {
   const rounded = Math.round(level * 20) / 20;
@@ -29,6 +30,14 @@ export function lookupCLF(level: number): number {
 
   return FUNDING_CLF_TABLE[best];
 }
+
+// WC's pure premium: derived ONCE, at module load, from the claim generator's
+// analytic expectation over the FULL canonical roster at neutral risk quality,
+// then held for every line-year of every game. This is the finding-6 fix —
+// losses and premium are two views of the same model rather than two
+// independent assertions that drift apart. Computed rather than hardcoded so
+// it can never fall out of step with the generator's parameters.
+const WC_HELD_PURE_PREMIUM_PER_100 = deriveNeutralPurePremiumPer100(getPredefinedMarketMembers());
 
 // Line-specific label for a seeded sub-RNG stream. WC keeps its original,
 // unsuffixed label so a WC-only game's random draws (and therefore the Stage
@@ -119,10 +128,24 @@ export function processLineYear(
     Math.min(maxRC, priorRCEffectiveness + rcGain - rcDecay)
   );
 
-  const newPurePremiumPer100 =
-    lineState.purePremiumPer100 *
-    (1 + lossTrend) *
-    (1 - newRCEffectiveness);
+  // WC prices off the claim generator's OWN analytic expectation, so premium
+  // and losses share one basis by construction — the finding-6 constraint.
+  //
+  // Derived ONCE from the neutral book (full canonical roster at RQ 5) and
+  // then HELD: it does not track the roster year to year, because k_line
+  // already makes the per-year roster/risk-quality-mix correction. Letting
+  // both chase enrollment would double-correct and make the loss ratio wander.
+  //
+  // Risk control is deliberately ABSENT here while multiplying the draw's
+  // frequency (finding 17): applying it to both sides would cancel and rebuild
+  // the no-op. Instance lossTrend is likewise absent — WC trends frequency at
+  // its own -1.5%/yr inside the generator, and severity carries no general
+  // trend (accident-year dollars). lossTrend remains GL/Property-only.
+  const newPurePremiumPer100 = line === 'WC'
+    ? WC_HELD_PURE_PREMIUM_PER_100
+    : lineState.purePremiumPer100 *
+      (1 + lossTrend) *
+      (1 - newRCEffectiveness);
 
   // Preliminary contribution estimate used only for member movement.
   // Final premium is recalculated after member movement because exposure changes.
