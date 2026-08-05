@@ -344,7 +344,14 @@ export const TIV_TYPE_MULTIPLIER: Record<string, number> = {
 // purePremiumPer100 × 10,000), so scaling TIV scales premium and losses
 // together — the loss ratio is invariant, and so is the enrolled roster (the
 // exposure-targeted enrollment boundary scales identically).
-export const PROPERTY_TIV_SCALE = 7;
+//
+// 16 recalibrates for the canonical 200-member roster, preserving the OLD
+// catalog's RELATIVE Property share: aggregate TIV / aggregate payroll stays
+// ~50x (old: $13,719M TIV on $271.96M payroll at scale 7; canonical unscaled
+// TIV totals $3,996.25M on $1,300M payroll, and 16.41 restores the 50.44x
+// ratio — rounded to 16), so Property's premium keeps its ~80%-of-WC relative
+// weight as the whole game scales up, rather than shrinking to a sliver.
+export const PROPERTY_TIV_SCALE = 16;
 
 export const PROPERTY_STARTING_RATE_PER_100 = { min: 0.10, max: 0.30 };
 export const PROPERTY_EXPECTED_LOSS_RATIO = { min: 0.45, max: 0.60 };
