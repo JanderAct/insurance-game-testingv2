@@ -3,7 +3,7 @@
 
 import type { GameState, PoolState, DecisionSet, LinePoolState, LineDecisionSet, ResultSet, LineResultSet, ReserveCohort, Member, MemberLossResult, MembershipHistory, CoverageLine, GameInstance, AssetAllocation } from '../types/simulation';
 import { SeededRandom, deriveSubRng } from './random';
-import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, MEMBER_LOSS_VOLATILITY, RISK_CONTROL_PARAMS, LINE_RESERVE_PAYDOWN_PCT, OPERATING_CASH_PCT_OF_PREMIUM } from '../data/defaultAssumptions';
+import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, MEMBER_LOSS_VOLATILITY, RISK_CONTROL_PARAMS, LINE_RESERVE_PAYDOWN_PCT, OPERATING_CASH_PCT_OF_PREMIUM, WC_LOSS_MODEL } from '../data/defaultAssumptions';
 import { getReinsuranceStructure, calculateReinsuranceCost, calculateReinsuranceRecovery } from './reinsuranceEngine';
 import { simulateMarketReturns, blendInvestmentReturn } from './investmentEngine';
 import { simulateMemberMovement } from './membershipEngine';
@@ -53,6 +53,12 @@ interface LineYearContext {
   // line's own per-line reads). Recruitment eligibility reads from THIS,
   // never from Member.status (see membershipHistory.ts).
   membershipHistory: MembershipHistory;
+  // The year's pool-wide loss factor (mean 1), drawn ONCE in processYear and
+  // shared by every line — the cross-line aggregate correlation that the
+  // per-line commonLossFactor could not express. WC's claim generator consumes
+  // it; GL and Property still draw their own commonLossFactor and IGNORE this,
+  // so there is no double application while they await their own generators.
+  gPool: number;
   cash: number;
   investments: number;
   assetAllocation: AssetAllocation;
@@ -796,6 +802,13 @@ export function processYear(
     deriveSubRng(instance.seed, yearNumber, 'invest')
   );
 
+  // The pool-wide loss factor for this year: ONE draw, SHARED by every line.
+  // It has to live here rather than inside processLineYear because a per-line
+  // deriveSubRng cannot express a draw common to all lines. Its own purpose
+  // label means it consumes nothing from any existing stream.
+  const gPool = deriveSubRng(instance.seed, yearNumber, 'wc_gpool')
+    .gamma(WC_LOSS_MODEL.poolYearFactor.shape, WC_LOSS_MODEL.poolYearFactor.scale);
+
   // Sequential fold: each line sees the shared roster as updated by lines
   // already processed this year (a member withdrawing from one line becomes
   // ineligible for new recruitment into the next, but isn't retroactively
@@ -825,6 +838,7 @@ export function processYear(
       calendarYear,
       allMarketMembers: currentAllMarketMembers,
       membershipHistory,
+      gPool,
       cash: poolState.cash * share,
       investments: lineState.investedAssets,
       assetAllocation: lineDecisions.assetAllocation,
