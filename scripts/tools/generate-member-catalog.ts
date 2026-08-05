@@ -35,6 +35,7 @@ import {
   WC_CLASS_MIX,
   GL_RELATIVITIES,
 } from '../../src/data/defaultAssumptions';
+import { SeededRandom } from '../../src/utils/random';
 import type { MemberType, SizeCategory } from '../../src/types/simulation';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -140,11 +141,30 @@ function unscaledTiv(index: number, size: SizeCategory, type: MemberType): numbe
   return Number((base * TIV_TYPE_MULTIPLIER[type]).toFixed(2));
 }
 
+// --- Region: fixed one-time weighted draw, baked into the literal ---
+// One draw per member in roster order from SeededRandom(42) (the roster's
+// seed convention), weights 10/20/40/20/10 over regions 1-5. Synthetic and
+// invented here (the CSV has no Region column), independent of every other
+// column, and never re-rolled per game seed. A weighted DRAW, not stratified
+// assignment — counts scatter around [20, 40, 80, 40, 20] rather than
+// matching them exactly.
+const REGION_WEIGHTS = [0.10, 0.20, 0.40, 0.20, 0.10];
+const regionRng = new SeededRandom(42);
+const regions: number[] = rows.map(() => {
+  const u = regionRng.next();
+  let cum = 0;
+  for (let r = 0; r < REGION_WEIGHTS.length; r++) {
+    cum += REGION_WEIGHTS[r];
+    if (u < cum) return r + 1;
+  }
+  return REGION_WEIGHTS.length;
+});
+
 // --- Emit ---
 const rowLines = rows.map((r, i) => {
   const size = sizeById.get(r.id)!;
   const tiv = unscaledTiv(i, size, r.type);
-  return `  R('${r.id}', '${r.name.replace(/'/g, "\\'")}', '${r.type}', '${size}', ${r.payroll}, ${riskQuality(r)}, ${tiv}),`;
+  return `  R('${r.id}', '${r.name.replace(/'/g, "\\'")}', '${r.type}', '${size}', ${regions[i]}, ${r.payroll}, ${riskQuality(r)}, ${tiv}),`;
 });
 
 const out = `// Canonical 200-member marketplace — GENERATED FILE, do not edit by hand.
@@ -173,6 +193,7 @@ export interface CanonicalRosterRow {
   name: string;
   type: MemberType;
   sizeCategory: SizeCategory;
+  region: number;       // 1-5; fixed weighted draw (10/20/40/20/10), never re-rolled per game seed
   payroll: number;      // $M; the WC and GL exposure base
   riskQuality: number;  // 1-10 (clamped up to 1.0 at generation where the CSV was lower)
   unscaledTiv: number;  // $M before PROPERTY_TIV_SCALE; the Property exposure base
@@ -180,9 +201,9 @@ export interface CanonicalRosterRow {
 
 function R(
   id: string, name: string, type: MemberType, sizeCategory: SizeCategory,
-  payroll: number, riskQuality: number, unscaledTiv: number,
+  region: number, payroll: number, riskQuality: number, unscaledTiv: number,
 ): CanonicalRosterRow {
-  return { id, name, type, sizeCategory, payroll, riskQuality, unscaledTiv };
+  return { id, name, type, sizeCategory, region, payroll, riskQuality, unscaledTiv };
 }
 
 export const CANONICAL_ROSTER: ReadonlyArray<CanonicalRosterRow> = [
@@ -195,6 +216,7 @@ export const PREDEFINED_MARKET_MEMBERS: ReadonlyArray<Member> = CANONICAL_ROSTER
     name: row.name,
     type: row.type,
     sizeCategory: row.sizeCategory,
+    region: row.region,
     exposureByLine: {
       WC: row.payroll,
       GL: row.payroll,
@@ -237,3 +259,5 @@ console.log(`  risk quality clamped to 1.0: ${clamped.length ? clamped.join(', '
 const sizes: Record<string, number> = {};
 rows.forEach(r => { const s = sizeById.get(r.id)!; sizes[s] = (sizes[s] ?? 0) + 1; });
 console.log(`  size buckets: ${JSON.stringify(sizes)}`);
+const regionHist = [1, 2, 3, 4, 5].map(r => regions.filter(x => x === r).length);
+console.log(`  region histogram [1..5]: ${JSON.stringify(regionHist)} (expected around [20, 40, 80, 40, 20])`);

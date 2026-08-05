@@ -19,6 +19,11 @@ export interface Member {
   name: string;
   type: MemberType;
   sizeCategory: SizeCategory;
+  // Geographic region 1-5. A fixed, one-time-generated property of each
+  // canonical-roster member (weights 10/20/40/20/10) — independent of every
+  // other column and never re-rolled per game seed. Scaffolding for future
+  // regional loss correlation (e.g. catastrophes striking a region).
+  region: number;
   exposureByLine: Partial<Record<CoverageLine, number>>; // exposure units, per coverage line
   yearJoined: number; // yearNumber when joined
   calendarYearJoined: number;
