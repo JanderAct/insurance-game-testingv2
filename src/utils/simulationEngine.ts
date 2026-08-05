@@ -9,7 +9,7 @@ import { simulateMarketReturns, blendInvestmentReturn } from './investmentEngine
 import { simulateMemberMovement } from './membershipEngine';
 import { cloneMembershipHistory, openInterval, closeInterval } from './membershipHistory';
 import { computeKLine, deriveNeutralPurePremiumPer100, generateWcClaims } from './wcClaimEngine';
-import { computeKGl, generateGlClaims } from './glClaimEngine';
+import { computeKGl, deriveNeutralGlPurePremiumPer100, generateGlClaims } from './glClaimEngine';
 import { generateNarrative } from './narrativeEngine';
 import { getMemberExposure } from './lineHelpers';
 import { getPredefinedMarketMembers } from '../data/memberCatalog';
@@ -32,13 +32,28 @@ export function lookupCLF(level: number): number {
   return FUNDING_CLF_TABLE[best];
 }
 
-// WC's pure premium: derived ONCE, at module load, from the claim generator's
-// analytic expectation over the FULL canonical roster at neutral risk quality,
-// then held for every line-year of every game. This is the finding-6 fix —
-// losses and premium are two views of the same model rather than two
-// independent assertions that drift apart. Computed rather than hardcoded so
-// it can never fall out of step with the generator's parameters.
+// The claim lines' pure premiums: derived ONCE, at module load, from each
+// claim generator's analytic expectation over the FULL canonical roster at
+// neutral risk quality, then held for every line-year of every game. This is
+// the finding-6 fix — losses and premium are two views of the same model
+// rather than two independent assertions that drift apart. Computed rather
+// than hardcoded so they can never fall out of step with the generators'
+// parameters.
+// KNOWN AND ACCEPTED BY DESIGN — the enrolled-book composition effect.
+// Holding these off the NEUTRAL FULL BOOK means a given year's enrolled roster
+// is priced at the full market's average loss cost per exposure dollar, not its
+// own. k_line/k_GL correct the risk-quality tilt but deliberately NOT the
+// payroll/relativity mix of who actually enrolled. Measured for GL at 40 seeds
+// x 5 years: enrolled-book neutral pure premium 6.7807 vs the held 6.8305, so
+// the book is priced ~0.7% high, which moves the analytic gross loss ratio from
+// 66.8% to 66.36% — inside tolerance.
+// This is the PRICE of Correction 1, not a defect. Making the pure premium
+// track the enrolled mix would rebuild exactly the pricing-chases-roster
+// feedback loop Correction 1 exists to prevent: premium would fall as good
+// risks left, which changes who leaves next year, and the loss ratio would
+// wander instead of holding. Do not "fix" this.
 const WC_HELD_PURE_PREMIUM_PER_100 = deriveNeutralPurePremiumPer100(getPredefinedMarketMembers());
+const GL_HELD_PURE_PREMIUM_PER_100 = deriveNeutralGlPurePremiumPer100(getPredefinedMarketMembers());
 
 // Line-specific label for a seeded sub-RNG stream. WC keeps its original,
 // unsuffixed label so a WC-only game's random draws (and therefore the Stage
@@ -130,21 +145,26 @@ export function processLineYear(
     Math.min(maxRC, priorRCEffectiveness + rcGain - rcDecay)
   );
 
-  // WC prices off the claim generator's OWN analytic expectation, so premium
-  // and losses share one basis by construction — the finding-6 constraint.
+  // WC and GL price off their claim generators' OWN analytic expectations, so
+  // premium and losses share one basis by construction — the finding-6
+  // constraint.
   //
   // Derived ONCE from the neutral book (full canonical roster at RQ 5) and
-  // then HELD: it does not track the roster year to year, because k_line
-  // already makes the per-year roster/risk-quality-mix correction. Letting
+  // then HELD: they do not track the roster year to year, because k_line/k_GL
+  // already make the per-year roster/risk-quality-mix correction. Letting
   // both chase enrollment would double-correct and make the loss ratio wander.
   //
-  // Risk control is deliberately ABSENT here while multiplying the draw's
+  // Risk control is deliberately ABSENT here while multiplying the draws'
   // frequency (finding 17): applying it to both sides would cancel and rebuild
-  // the no-op. Instance lossTrend is likewise absent — WC trends frequency at
-  // its own -1.5%/yr inside the generator, and severity carries no general
-  // trend (accident-year dollars). lossTrend remains GL/Property-only.
+  // the no-op. Instance lossTrend is likewise absent from the claim lines —
+  // WC trends frequency at its own -1.5%/yr inside its generator; GL's 7%
+  // social inflation acts on the accident-to-settlement lag, which is
+  // year-invariant, so its expectation (and held premium) is constant too.
+  // lossTrend remains Property-only.
   const newPurePremiumPer100 = line === 'WC'
     ? WC_HELD_PURE_PREMIUM_PER_100
+    : line === 'GL'
+    ? GL_HELD_PURE_PREMIUM_PER_100
     : lineState.purePremiumPer100 *
       (1 + lossTrend) *
       (1 - newRCEffectiveness);
