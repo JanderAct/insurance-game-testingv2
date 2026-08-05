@@ -303,6 +303,9 @@ cause was the basis mismatch in the two displayed ratios.
 ## 7. Property's loss volatility is too SMOOTH for a catastrophe-exposed line
 **Status:** confirmed on the reference seed. Belongs with the loss-distribution rework (finding 3).
 
+**STATUS UPDATE:** still open, and now the ONLY remaining line-level loss-distribution problem. WC
+and GL have claim-level generators; Property is the last line on the legacy aggregate path.
+
 Actual loss-ratio spread over 5 years, reference seed:
 
 | Line | Range | Spread |
@@ -405,6 +408,10 @@ measurement basis.
 (loss centering) and finding 7 (Property's tail) are fixed. Recorded as a baseline to compare against
 after that work.
 
+**STATUS UPDATE:** mechanic #1 (reinsurance recovery) is LIVE. WC recoveries fire in 31% of
+line-years (mean 15.1% of gross); GL produces an occurrence over $1M in 80% of enrolled line-years.
+The remaining mechanics await Property's generator and the retention waterfall.
+
 Losses currently run at ~46% loss ratio against a 66.8% pricing assumption (finding 6). The
 consequence is broader than "the game has no stakes" — roughly a third of the built risk machinery
 cannot activate:
@@ -442,6 +449,11 @@ know that mechanic has something to bite on.
 ## 10. Competitive pressure has no effect — reinsurance cost min and max are identical
 **Status:** found while adding numeric formulas to the audit page. Distinct from finding 9's dormant
 mechanics, and much cheaper to fix.
+
+**STATUS UPDATE:** now unblocked. This finding was deferred pending recovery-frequency data, which
+the claim generators now supply. Reinsurance can be priced actuarially from E[ceded] computed
+directly off the claim distributions rather than as a flat % of premium. Resolve as part of the J10
+waterfall work.
 
 **Observation.** Reinsurance cost is computed as
 `costPct = max − competitivePressure × (max − min)`. But every program in REINSURANCE_PROGRAMS has its
@@ -489,6 +501,10 @@ which point separating min and max is the natural moment to give competitive pre
 ## 11. The catastrophe mechanism EXISTS in the code but is switched off
 **Status:** discovered during a dedicated audit-page investigation. Directly connected to finding 7 —
 likely the same problem.
+
+**SCOPE UPDATE:** now line-specific. WC and GL no longer use commonLossFactor or the hardcoded
+catastropheFactor path, and risk control applies to their draws (genuinely effective, not a no-op).
+Both findings remain true for Property, which is still on the legacy aggregate path.
 
 **`catastropheFactor` is hardcoded to 1** (`simulationEngine.ts:210`), then multiplied into every
 member's simulated loss (`:232`):
@@ -647,6 +663,10 @@ visible.
 **Status:** real, but SCOPED. An earlier version of this finding overstated it as "no loss-side mechanic can
 affect the loss ratio." That is wrong and the correction matters for sequencing.
 
+**SCOPE UPDATE:** now line-specific. WC and GL no longer use commonLossFactor or the hardcoded
+catastropheFactor path, and risk control applies to their draws (genuinely effective, not a no-op).
+Both findings remain true for Property, which is still on the legacy aggregate path.
+
 ### ⚠️ CORRECTION — what is and isn't neutralised
 ```
 Gamma mean:      memberExposure × newPurePremiumPer100 × 10,000
@@ -737,3 +757,38 @@ scaffolded and inert.
 **Caution:** apply them to the DRAW (like `commonLossFactor` and `catastropheFactor` already are), not to
 pure premium. Applied to pure premium they would cancel against pricing; applied to the draw they move the
 loss ratio as intended. See the correction in finding 17.
+
+---
+
+## 19. Design-doc reference figures are systematically stale post-canonical
+**Status:** documented pattern, no action needed beyond awareness.
+
+Three separate design-doc aggregate figures came in materially off once built against the canonical
+roster with fully-specified mechanics: WC's "~$19-20M gross" (actual scale far higher once the
+catastrophic annuity was modeled), GL general frequency "~832/yr" (roster-derived 897 — the figure
+assumed a mean GL relativity of 1.0 where the roster runs ~1.08), and GL ALAE "~35% of cost"
+(measured 42.6%). None is an implementation error; each is a reference figure computed against
+assumptions the real roster and the full mechanics don't satisfy.
+
+**Rule going forward:** design-doc aggregate dollar/percentage targets are REFERENCE ONLY. Assert
+structural ratios (frequencies vs roster-derived analytic, pay rates, draw-vs-expectation
+invariants) and REPORT dollar totals. Never tune parameters to hit a stale aggregate.
+
+## 20. GL ALAE runs 42.6% of gross, not the design's ~35%
+**Status:** structural and correct; documented so it isn't "fixed" later.
+
+The stage-keyed ALAE model (B4) puts real weight on the 2.5x and 6.0x multiples. Claims tried to
+verdict and LOST carry maximum defense cost with zero indemnity — 3.47% of the book, mean ALAE
+$0.20M against $0.04M for all claims. The 42.6% is what the specified stage mix produces; the ~35%
+reference predates it. This is the design's intended non-monotone behavior working, not a defect.
+
+## 21. GL's combined RQ cost ratio undershoots its stated beta budget
+**Status:** open, low priority, individually-verified channels.
+
+Measured combined total-cost ratio across the full RQ range is 1.953 against the design's
+exp(10 x 0.084) = 2.316 — a ~16% shortfall on the headline budget. Both individual channels verify:
+frequency beta brackets 0.055 (1.3199 low-side vs 1.3165 design; 0.7746 high-side vs 0.7596), and
+the gate gamma tracks pay rates within 0.4pp at every RQ level. So the channels are right but do not
+compound to the stated total. Some of the gap is tail noise (alpha=1.3), but likely not all. The
+design labeled 0.084 as "realized beta ~", so the target itself may be approximate. Worth revisiting
+when GL's tail has more sample, but not blocking.

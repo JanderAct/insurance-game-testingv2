@@ -13,6 +13,11 @@ Things that were discovered expensively and live only in conversation memory. Re
 - **Baseline-neutrality is the strongest test for a structural change.** If defaults produce byte-identical
   output, the restructure provably didn't leak into the math. The "projection" pattern (copy pool values
   into line slices at `processYear` entry) achieved this for the pool-wide decisions change.
+- **Never use background-task + polling-loop patterns for verification.** Run verification in the
+  foreground and let it print, or redirect to a file and cat it in the SAME command. A polling loop
+  watching a task-wrapper output file while the task redirects into a scratchpad file deadlocks
+  permanently — this cost 26 minutes of wall clock and ~30k tokens on a job that finished in 1m49s.
+  Harness runs here are 1-2 minutes; backgrounding buys nothing and can hang.
 
 ## Removing a concept safely
 - **Keep the RNG draw, discard the value.** Bootstrap draws are sequential — deleting one shifts every
