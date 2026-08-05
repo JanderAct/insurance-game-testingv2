@@ -1,13 +1,14 @@
 // Core simulation engine for Risk Pool Simulation v1
 // Premium formula: Premium = Exposure($M) × Rate_per_$100_payroll × 10,000
 
-import type { GameState, PoolState, DecisionSet, LinePoolState, LineDecisionSet, ResultSet, LineResultSet, ReserveCohort, Member, MemberLossResult, MembershipHistory, CoverageLine, GameInstance, AssetAllocation } from '../types/simulation';
+import type { Claim, GameState, Occurrence, PoolState, DecisionSet, LinePoolState, LineDecisionSet, ResultSet, LineResultSet, ReserveCohort, Member, MemberLossResult, MembershipHistory, CoverageLine, GameInstance, AssetAllocation } from '../types/simulation';
 import { SeededRandom, deriveSubRng } from './random';
 import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, MEMBER_LOSS_VOLATILITY, RISK_CONTROL_PARAMS, LINE_RESERVE_PAYDOWN_PCT, OPERATING_CASH_PCT_OF_PREMIUM, WC_LOSS_MODEL } from '../data/defaultAssumptions';
 import { getReinsuranceStructure, calculateReinsuranceCost, calculateReinsuranceRecovery } from './reinsuranceEngine';
 import { simulateMarketReturns, blendInvestmentReturn } from './investmentEngine';
 import { simulateMemberMovement } from './membershipEngine';
 import { cloneMembershipHistory, openInterval, closeInterval } from './membershipHistory';
+import { computeKLine, generateWcClaims } from './wcClaimEngine';
 import { generateNarrative } from './narrativeEngine';
 import { getMemberExposure } from './lineHelpers';
 
@@ -205,53 +206,92 @@ export function processLineYear(
   const operatingExpense = adminExpense;
   const riskControlInvestment = poolPremium * lineDecisions.riskControlPct;
 
-  // --- Member-Level Loss Simulation ---
-  // Each member's Gamma distribution has a mean equal to expected loss. Risk
-  // quality affects the coefficient of variation and therefore standard deviation.
+  // --- Loss Simulation ---
+  // WC generates individual claims (design doc Part A); GL and Property still
+  // draw the aggregate member-Gamma below until their own generators exist.
+  const isWcClaimLine = line === 'WC';
+
   const lossRng = deriveSubRng(instance.seed, yearNumber, lineRngLabel('losses', line));
 
-  // Continuous aggregate annual factor calibrated against stock-decision game
-  // outcomes. It replaces the old two-state normal/shock mixture, which made
-  // most ordinary years unrealistically low and occasional years too extreme.
-  const commonLossFactor = lossRng.lognormal(
-    AGGREGATE_LOSS_DISTRIBUTION.logMean,
-    AGGREGATE_LOSS_DISTRIBUTION.logSigma
-  ) * AGGREGATE_LOSS_DISTRIBUTION.actualLossLevelMultiplier;
+  // The aggregate annual factor for the NON-claim lines. WC does not draw it:
+  // its cross-line correlation now comes from the shared ctx.gPool, and
+  // applying both would double-count the aggregate shock.
+  const commonLossFactor = isWcClaimLine
+    ? ctx.gPool
+    : lossRng.lognormal(
+        AGGREGATE_LOSS_DISTRIBUTION.logMean,
+        AGGREGATE_LOSS_DISTRIBUTION.logSigma
+      ) * AGGREGATE_LOSS_DISTRIBUTION.actualLossLevelMultiplier;
   const catastropheThreshold =
     FUNDING_CLF_TABLE[AGGREGATE_LOSS_DISTRIBUTION.catastropheThresholdConfidence];
-  const shockOccurred = commonLossFactor > catastropheThreshold;
   const catastropheFactor = 1;
 
-  const memberLossResults: MemberLossResult[] = memberResult.activeMembers.map(member => {
-    const memberExposureAmount = getMemberExposure(member, line);
-    const memberExpectedLoss = memberExposureAmount * newPurePremiumPer100 * 10_000;
-    const riskQuality = Math.max(1, Math.min(10, member.riskQuality));
-    const coefficientOfVariation = MEMBER_LOSS_VOLATILITY.worstRiskCV
-      + ((riskQuality - 1) / 9)
-        * (MEMBER_LOSS_VOLATILITY.bestRiskCV - MEMBER_LOSS_VOLATILITY.worstRiskCV);
-    const standardDeviation = memberExpectedLoss * coefficientOfVariation;
-    const shape = 1 / (coefficientOfVariation * coefficientOfVariation);
-    const scale = memberExpectedLoss * coefficientOfVariation * coefficientOfVariation;
-    const independentLoss = lossRng.gamma(shape, scale);
+  let wcClaims: Claim[] | undefined;
+  let wcOccurrences: Occurrence[] | undefined;
+  let wcCountsByClass: Record<string, number> | undefined;
+  let wcCountsByTier: Record<string, number> | undefined;
+  let memberLossResults: MemberLossResult[];
+  let aggregateMemberLoss: number;
+  let shockOccurred: boolean;
 
-    return {
-      memberId: member.id,
-      memberName: member.name,
-      exposure: memberExposureAmount,
-      riskQuality: member.riskQuality,
-      expectedLoss: memberExpectedLoss,
-      coefficientOfVariation,
-      standardDeviation,
-      simulatedLoss: independentLoss * commonLossFactor * catastropheFactor,
-    };
-  });
+  if (isWcClaimLine) {
+    // k_line is recomputed against the CURRENTLY ENROLLED book, after member
+    // movement — it is the roster/risk-quality-mix correction, and the reason
+    // purePremiumPer100 can be held constant instead of chasing enrollment.
+    const kLine = computeKLine(memberResult.activeMembers);
+    const generated = generateWcClaims({
+      members: memberResult.activeMembers,
+      yearNumber,
+      calendarYear,
+      instanceSeed: instance.seed,
+      kLine,
+      gPool: ctx.gPool,
+      // Risk control acts on the DRAW ONLY (finding 17): it reduces realized
+      // frequency without touching the pricing expectation, so it genuinely
+      // moves the loss ratio instead of cancelling out.
+      riskControlEffectiveness: newRCEffectiveness,
+    });
+    wcClaims = generated.claims;
+    wcOccurrences = generated.occurrences;
+    wcCountsByClass = generated.claimCountsByClass;
+    wcCountsByTier = generated.claimCountsByTier;
+    memberLossResults = generated.memberLossResults;
+    aggregateMemberLoss = generated.grossUltimateLoss;
+    // A catastrophic-tier claim is WC's shock event, replacing the old
+    // "aggregate factor exceeded a threshold" definition.
+    shockOccurred = (generated.claimCountsByTier.catastrophic ?? 0) > 0;
+  } else {
+    shockOccurred = commonLossFactor > catastropheThreshold;
+    memberLossResults = memberResult.activeMembers.map(member => {
+      const memberExposureAmount = getMemberExposure(member, line);
+      const memberExpectedLoss = memberExposureAmount * newPurePremiumPer100 * 10_000;
+      const riskQuality = Math.max(1, Math.min(10, member.riskQuality));
+      const coefficientOfVariation = MEMBER_LOSS_VOLATILITY.worstRiskCV
+        + ((riskQuality - 1) / 9)
+          * (MEMBER_LOSS_VOLATILITY.bestRiskCV - MEMBER_LOSS_VOLATILITY.worstRiskCV);
+      const standardDeviation = memberExpectedLoss * coefficientOfVariation;
+      const shape = 1 / (coefficientOfVariation * coefficientOfVariation);
+      const scale = memberExpectedLoss * coefficientOfVariation * coefficientOfVariation;
+      const independentLoss = lossRng.gamma(shape, scale);
 
-  const aggregateMemberLoss = memberLossResults.reduce(
-    (sum, memberLoss) => sum + memberLoss.simulatedLoss,
-    0
-  );
+      return {
+        memberId: member.id,
+        memberName: member.name,
+        exposure: memberExposureAmount,
+        riskQuality: member.riskQuality,
+        expectedLoss: memberExpectedLoss,
+        coefficientOfVariation,
+        standardDeviation,
+        simulatedLoss: independentLoss * commonLossFactor * catastropheFactor,
+      };
+    });
+    aggregateMemberLoss = memberLossResults.reduce(
+      (sum, memberLoss) => sum + memberLoss.simulatedLoss,
+      0
+    );
+  }
 
-  const shockLossAmount = shockOccurred
+  const shockLossAmount = shockOccurred && !isWcClaimLine
     ? expectedLoss * Math.max(0, commonLossFactor - catastropheThreshold)
     : 0;
 
@@ -536,6 +576,10 @@ export function processLineYear(
 
     memberLossResults,
     aggregateMemberLoss,
+    claims: wcClaims,
+    occurrences: wcOccurrences,
+    claimCountsByClass: wcCountsByClass,
+    claimCountsByTier: wcCountsByTier,
     commonLossFactor,
     catastropheFactor,
     shockLossAmount,
