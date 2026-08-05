@@ -209,6 +209,162 @@ export const WC_LOSS_MODEL = {
   regionMultiplier: [0.92, 0.97, 1.03, 1.08, 1.12],
 };
 
+// ===========================================================================
+// GENERAL LIABILITY claim-level loss model (design doc Part B).
+//
+// The second line converted to individual claims, on the WC architecture:
+// matched draw/analytic-expectation pair, RC on the draw only, held pure
+// premium + annual k_GL, accident-year dollars with trendToSettlement as the
+// only vintage conversion, shared ctx.gPool (GL does not draw its own
+// aggregate factor). What is genuinely new versus WC: the liability GATE
+// (latent claim strength decides IF a claim pays, correlated with how much),
+// litigation-stage-keyed ALAE, per-claim settlement timing driving per-claim
+// severity trend, a Pareto tail on law enforcement, multi-claimant abuse
+// occurrences, and the stateLaw/federal1983 cap flag.
+// ===========================================================================
+
+export const GL_SUB_KEYS = ['general', 'epl', 'lawEnforcement', 'abuse'] as const;
+export type GlSubKey = (typeof GL_SUB_KEYS)[number];
+
+export const GL_LITIGATION_STAGES = ['closedOnInvestigation', 'settledPreSuit', 'suitDiscoverySettle', 'triedToVerdict'] as const;
+export type GlLitigationStage = (typeof GL_LITIGATION_STAGES)[number];
+
+// Social inflation: ONE shared severity trend across GL's four sub-coverages,
+// applied through the standard accident-year-dollars + trendToSettlement
+// convention (indemnity AND ALAE — defense costs ride the same tort
+// environment). GL-INTERNAL for now: it is not pool-wide and does not touch
+// WC. HOOK, NOT BUILT: a future shock-event system may replace this constant
+// with a cross-line inflation regime (which is exactly what would reprice
+// prior accident years retroactively); nothing here anticipates that beyond
+// keeping the rate a single named constant.
+export const GL_SOCIAL_INFLATION = 0.07;
+
+// Statutory damages cap for state-law claims — ILLUSTRATIVE value, a policy
+// lever like WC's weekly cap. Applies to INDEMNITY ONLY (statutory caps bound
+// damages, not defense costs), and only to claims flagged stateLaw; a
+// federal1983 claim is uncapped, which is why law enforcement owns the tail.
+// Consumed by the retention-waterfall phase, not by claim generation — claims
+// carry the flag from birth so the waterfall can apply cap -> retention ->
+// reinsurance in order.
+export const GL_STATUTORY_CAP = 1_000_000;
+
+export const GL_LOSS_MODEL = {
+  // --- B1 frequency --------------------------------------------------------
+  // lambda_sub = basePayroll x weight(GL_RELATIVITIES) x rate x theta_GL(RQ)
+  //              x k_GL x epsilon x gPool.
+  // Payroll bases: general/epl/abuse use the member's TOTAL payroll;
+  // lawEnforcement uses POLICE payroll (WC_CLASS_MIX[type].police x payroll).
+  // No frequency trend — flat by design (WC's -1.5%/yr is WC-specific safety
+  // improvement; GL frequency is not trending, its SEVERITY is, above).
+  //
+  // Full-market expected claims on the canonical roster: general ~897,
+  // epl ~108, lawEnforcement ~13.3, abuse ~3.4 incidents. The design doc's
+  // "~832 general" assumed a payroll-weighted mean relativity of 1.0; the
+  // roster's actual mean is ~1.08, so 897 is the operative roster-derived
+  // figure and 832 is a stale reference (ruled: rates verbatim, assert 897).
+  ratePer1M: { general: 0.64, epl: 0.084, lawEnforcement: 0.21, abuse: 0.003 } as Record<GlSubKey, number>,
+
+  // Per member-year frequency noise, mean 1 (SD ~0.35) — ONE draw per member
+  // per year shared across the four sub-coverages (the literal design
+  // reading). Wider than WC's k=16 because payroll is a looser GL predictor.
+  memberFrequencyNoise: { shape: 8, scale: 1 / 8 },
+
+  // --- B7 risk-quality channels (total realized beta ~0.084) ---------------
+  rqFrequencyBeta: 0.055, // theta_GL = exp(-0.055 x (RQ - 5)), all subs
+  // Gate-threshold shift per RQ point: worse RQ makes claims harder to
+  // defend (higher pay rate). Moves the PAY RATE only — paid-claim severity
+  // marginals stay the B3 distributions (ruled interpretation J9).
+  rqGateGamma: 0.05,
+  // NOTE deliberately skipped: an optional ~0.6 WC-GL theta correlation.
+  // Both lines currently read the same member.riskQuality, which correlates
+  // them at 1.0 already; a separate per-line RQ is a future refinement.
+
+  // --- B2/B3 liability gate + severity (accident-year dollars) -------------
+  // payRate at RQ 5; the gate threshold is t_sub = PhiInv(1 - payRate).
+  // ALAE is drawn on EVERY claim (defense costs exist even when nothing is
+  // paid); indemnity only when the latent strength clears the gate.
+  subCoverages: {
+    general: {
+      payRate: 0.45,
+      indemnity: { mean: 28_000, cv: 2.2 },
+      alae: { mean: 5_000, cv: 1.5 },
+      reportLag: { meanYears: 1.5, cv: 0.6, maxYears: 10 },
+      federal1983Share: 0.075, // 92.5% state-law (ruled J7)
+    },
+    epl: {
+      payRate: 0.38,
+      indemnity: { mean: 105_000, cv: 1.9 },
+      alae: { mean: 42_000, cv: 1.4 },
+      reportLag: { meanYears: 2, cv: 0.6, maxYears: 12 },
+      federal1983Share: 0.075,
+    },
+    lawEnforcement: {
+      payRate: 0.30,
+      // Bimodal: most paid LE claims are ordinary; 5% are the catastrophic
+      // civil-rights tail (Pareto alpha 1.3 — infinite variance, finite mean
+      // $4.33M). Component drawn first, gate quantile mapped within it (J8).
+      indemnity: { mean: 85_000, cv: 1.5 },
+      paretoTail: { weight: 0.05, xm: 1_000_000, alpha: 1.3 },
+      alae: { mean: 70_000, cv: 1.6 },
+      reportLag: { meanYears: 2, cv: 0.6, maxYears: 12 },
+      federal1983Share: 0.60, // 60% plead section 1983 -> uncapped (given)
+    },
+    abuse: {
+      payRate: 0.70,
+      indemnity: { mean: 650_000, cv: 2.0 },
+      alae: { mean: 150_000, cv: 1.2 },
+      // 50y bound (ruled J1): 45y truncates 1.2% of mass exactly where the 7%
+      // trend is steepest; 50y captures ~99.3% and matches what revival
+      // statutes exist to do — reopen 50-year-old claims. Same
+      // divergence-mandatory reasoning as WC presumption's 40y bound:
+      // E[(1.07)^lag] over an UNBOUNDED lognormal lag has no finite value.
+      reportLag: { meanYears: 15, cv: 0.6, maxYears: 50 },
+      federal1983Share: 0.88, // "mostly uncapped" -> 88% (ruled J7)
+    },
+  } as Record<GlSubKey, {
+    payRate: number;
+    indemnity: { mean: number; cv: number };
+    paretoTail?: { weight: number; xm: number; alpha: number };
+    alae: { mean: number; cv: number };
+    reportLag: { meanYears: number; cv: number; maxYears: number };
+    federal1983Share: number;
+  }>,
+
+  // --- B4 litigation stages -------------------------------------------------
+  // One stage per claim; the ALAE multiple applies to the sub's ALAE draw and
+  // the settlement lag adds to the report lag (settlement = accident +
+  // round(reportLag + stageLag), ruled J2). The tried-to-verdict stage with a
+  // gate loss is the max-defense-cost-zero-indemnity case — deliberate.
+  stageAlaeMultiple: { closedOnInvestigation: 0.3, settledPreSuit: 1.0, suitDiscoverySettle: 2.5, triedToVerdict: 6.0 } as Record<GlLitigationStage, number>,
+  stageSettlementLagYears: { closedOnInvestigation: 0.5, settledPreSuit: 1.5, suitDiscoverySettle: 3, triedToVerdict: 5 } as Record<GlLitigationStage, number>,
+  // epl and lawEnforcement skew toward discovery/verdict (ruled J4); abuse
+  // uses the general vector (no design guidance — flagged micro-call).
+  stageProbabilities: {
+    general:        [0.45, 0.30, 0.20, 0.05],
+    epl:            [0.25, 0.30, 0.30, 0.15],
+    lawEnforcement: [0.30, 0.25, 0.30, 0.15],
+    abuse:          [0.45, 0.30, 0.20, 0.05],
+  } as Record<GlSubKey, number[]>,
+
+  // --- abuse batch (the first multi-claim occurrence) -----------------------
+  abuseBatch: {
+    // Claimants per incident ~ Gamma-Poisson (NegBin) mean 5, dispersion r=2
+    // (variance 17.5), truncated to >= 1 by reject-and-redraw — a 0-claimant
+    // incident is a non-event (ruled J5). The truncation raises the realized
+    // mean to mean/(1 - P0) with P0 = (r/(r+mean))^r — the analytic
+    // expectation uses exactly that corrected mean.
+    claimantMean: 5,
+    claimantDispersion: 2,
+    // Within-batch severity correlation via ONE shared occurrence-level
+    // lognormal factor (mean 1) multiplying independent per-claimant
+    // lognormals; the total CV 2.0 splits 50/50 in log-variance between the
+    // shared and idiosyncratic components (ruled J6 — the harness REPORTS the
+    // realized batch-total distribution so the plausibility of single-batch
+    // size is a number, not a hope).
+    logVarianceShare: 0.5,
+  },
+};
+
 // Base retention probability per member per year — high by default for realistic public entity pools
 export const BASE_RETENTION = 0.95;
 
