@@ -47,13 +47,14 @@ export const AGGREGATE_LOSS_DISTRIBUTION = {
 //
 // Two model-wide conventions worth stating up front:
 //
-// 1. NO GENERAL SEVERITY TREND. Every severity figure here is in ACCIDENT-YEAR
-//    dollars; claims are tagged with their accident year and inflated at
-//    SETTLEMENT (Phase 3), which is what makes a retroactive legislative or
-//    inflation shock able to reprice an old accident year. The only inflation
-//    inside this model is the catastrophic tier's own 6%/yr medical escalation,
-//    which is needed because that tier's grossUltimate is the NOMINAL sum of a
-//    decades-long payment stream. Frequency, by contrast, does trend (below).
+// 1. DOLLAR VINTAGE IS EXPLICIT. Every severity figure here is stated in
+//    ACCIDENT-YEAR dollars. Carrying a payment forward to the year it is
+//    actually settled is done in exactly one place — trendToSettlement() in
+//    wcClaimEngine — using the two trend rates below. Nothing in the model
+//    stores a value whose vintage is ambiguous, which is what lets Phase 3
+//    reserving trend and discount FROM a known basis instead of trying to
+//    reconstruct a vintage the generator threw away. Frequency trends too,
+//    separately (below).
 //
 // 2. FREQUENCY TREND IS A DECLINE and pure premium does NOT track it. WC's
 //    purePremiumPer100 is derived ONCE from the neutral-book expectation and
@@ -112,6 +113,24 @@ export const WC_LOSS_MODEL = {
   // quality shifts weight toward the higher-score (costlier) tiers.
   tierMixScores: { medOnly: 0, temp: 1, perm: 2 } as Record<'medOnly' | 'temp' | 'perm', number>,
 
+  // --- Dollar vintage: trend rates and the one discount rate -------------
+  // Severity is DRAWN and STORED in accident-year dollars; these carry a
+  // payment forward to its settlement year (trendToSettlement). Medical and
+  // wage inflation are kept as SEPARATE rates deliberately — collapsing them
+  // into one would assert an equality between medical and wage inflation that
+  // is false, and GL will need the same distinction for its own legs.
+  medicalTrend: 0.06,    // medical leg of every tier, incl. the catastrophic annuity
+  indemnityTrend: 0.035, // indemnity / wage-linked legs
+
+  // The ONLY discounting done before Phase 3, and only for the catastrophic
+  // tier. Short-tail tiers settle within a few years, so their trended-nominal
+  // value is already within a rounding error of present value; the
+  // catastrophic tier's ~34-year inflating stream diverges by roughly 2.5x
+  // undiscounted, which makes an undiscounted nominal sum a meaningless number
+  // to book. Phase 3 replaces this flat rate with proper reserve-cohort
+  // discounting applied uniformly to every tier.
+  catastrophicDiscountRate: 0.04,
+
   // --- A3 severity (accident-year dollars; lognormal mean + CV) -----------
   severity: {
     medOnly: { mean: 1800, cv: 1.0 },
@@ -123,12 +142,17 @@ export const WC_LOSS_MODEL = {
   // min(2/3 x weekly wage, statutory cap).
   classAnnualWage: { clerical: 62_000, publicWorks: 58_000, police: 85_000, fire: 82_000 } as Record<WcClassKey, number>,
   indemnityWageReplacement: 2 / 3,
-  // A visible policy lever. At current class wages the binding weekly benefit
-  // tops out at ~$1,090 (police), so this cap is dormant today — it starts to
-  // bite once wages inflate or a high-wage class is added.
+  // A visible policy lever, INTENTIONALLY NON-BINDING at current wages: the
+  // binding weekly benefit tops out at ~$1,090 (police), well under this cap.
+  // It exists to be turned into a constraint later — by wage inflation, by a
+  // high-wage class, or by a deliberate scenario change — not to bite today.
   statutoryWeeklyCap: 1450,
 
   // --- A4 catastrophic tier (an inflating annuity, not a single draw) -----
+  // Frequency note: the design text says "~5-6/yr", but the tierProbabilities
+  // table above implies 2.97/yr on the canonical roster (0.04 clerical + 1.53
+  // publicWorks + 0.40 police + 1.01 fire). The table is the operative
+  // parameter; the "5-6" text is stale and is not asserted anywhere.
   catastrophic: {
     ageMin: 25,
     ageMax: 55,
@@ -138,8 +162,10 @@ export const WC_LOSS_MODEL = {
     lifeExpectancyAge: 80,
     disabilityAdjustment: 0.85,
     medicalFirstYear: 180_000,
-    medicalInflationPerYear: 0.06,
     retirementAge: 65, // indemnity runs to here, medical runs for life
+    // The medical leg escalates at medicalTrend and the indemnity leg at
+    // indemnityTrend (above) — the tier no longer carries its own hardcoded
+    // inflation rate.
   },
 
   // --- A5 presumption claims (police/fire occupational disease) -----------
@@ -150,6 +176,20 @@ export const WC_LOSS_MODEL = {
     ratePer1MPoliceFire: 0.06, // ~10 claims/yr pool-wide on the canonical roster
     reportLagYearsMean: 8,
     reportLagYearsCv: 0.8,
+    // The lag distribution is TRUNCATED AND RENORMALISED here — mandatory, not
+    // a tuning choice. Severity is trended forward over the lag at
+    // medicalTrend, and E[(1 + medicalTrend)^lag] for an unbounded lognormal
+    // lag is mathematically DIVERGENT (the lognormal's tail decays more slowly
+    // than the exponential grows), so expected severity has no finite value
+    // and the draw admits absurd claims — an uncapped 100-year lag books a
+    // $119M claim, which a long harness will eventually produce.
+    //
+    // 40 years covers a defensible worst case (exposure at ~22, latent
+    // occupational disease at ~62) and keeps the long-latency cancer and
+    // asbestos claims that make presumption a real policy issue. The book is
+    // insensitive to the exact bound (20y-60y moves it ~3%), so the choice is
+    // made on defensibility rather than on scale.
+    maxReportLagYears: 40,
     severityMean: 350_000,
     severityCv: 1.5,
   },

@@ -87,14 +87,20 @@ export type ClaimStatus = 'open' | 'closed' | 'reopened';
 
 // A catastrophic claim's payment stream. Lifetime-care claims are not a single
 // severity draw — they are decades of inflating medical payments plus wage
-// indemnity to retirement. Carried on the claim so reserving can consume the
-// real schedule instead of re-deriving it. grossUltimate is the NOMINAL sum of
-// this stream (undiscounted); present-value treatment is Phase 3.
+// indemnity to retirement. Stored NOMINAL (first-year payment plus the
+// escalation rate and duration of each leg) so Phase 3 reserving can consume
+// the real schedule rather than re-deriving it. The medical and indemnity legs
+// escalate at different rates on purpose.
+//
+// The claim's booked grossUltimate is the PRESENT VALUE of this stream, not
+// its nominal sum — see WC_LOSS_MODEL.catastrophicDiscountRate for why this
+// one tier is discounted before Phase 3.
 export interface ClaimAnnuity {
   medicalFirstYearPayment: number;
   medicalInflationPct: number;
   medicalYears: number;
   indemnityAnnualPayment: number;
+  indemnityInflationPct: number;
   indemnityYears: number;
 }
 
