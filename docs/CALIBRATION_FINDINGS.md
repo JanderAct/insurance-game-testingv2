@@ -221,73 +221,84 @@ rework deliberately deferred earlier). Logged so the growth is on record rather 
 
 ---
 
-## 6. ⚠️ MAJOR — losses are systematically underpriced-for: actual LR ~46% vs expected 66.8%
-**Status:** confirmed across 4 seeds / 60 line-years. Needs investigation then fix. Belongs with the
-per-line loss-distribution rework (finding 3) — same pass.
+## 6. ✅ RESOLVED — "actual LR ~46% vs expected 66.8%" was a denominator/numerator basis error, not underpricing
+**Status:** RESOLVED by the WC claim-generator work (steps 6a/6b). The loss distribution's center
+was never wrong. The apparent gap was two independent basis mismatches — first a denominator
+mismatch, then a numerator (net-vs-gross) mismatch — stacked on top of each other. On a consistent
+basis, expected and actual loss ratios reconcile to **66.88% vs 66.84%** (a 0.04pp match). The
+original finding text is preserved below the corrections for provenance, but its conclusion is wrong.
+
+### ⚠️ CORRECTION 1 — the original ~46% was measured on a different denominator than the 66.8% target
+
+`expectedLossRatio` and `actualLossRatio` were computed against different premium bases:
+
+```
+expectedLossRatio = expectedLoss / poolPremiumAndAdminExpense    (narrow: EL × 1.496)
+actualLossRatio   = netIncurredLoss / totalMemberCharge          (wide:  EL × 2.001, incl. reinsuranceCost)
+```
+
+`reinsuranceCost` (37.5% of pool premium at the default Moderate level) sits in `actualLossRatio`'s
+denominator with no counterpart in `expectedLossRatio`'s. Putting the SAME numerator over both
+denominators, the ratio changes by exactly the `totalMemberCharge / poolPremiumAndAdminExpense`
+factor (~1.34×) — which fully accounts for the apparent gap. This is a display/definition artifact,
+not a loss outcome.
+
+`E[commonLossFactor]` was measured directly (30 seeds × 5 years × 3 lines, 450 line-years,
+`scripts/diagnostics/loss-ratio-check.ts`): **mean 1.0171** (WC 1.0079, GL 1.0268, Property 1.0165),
+consistent with the `AGGREGATE_LOSS_DISTRIBUTION` design comment (theoretical ≈0.998). The earlier
+prediction in finding 17 that `E[commonLossFactor] ≈ 0.69` was **wrong** — it assumed the 46%/66.8%
+gap was real. It was not. There is no mis-centering to fix.
+
+### ⚠️ CORRECTION 2 — after the claim generator, net ≠ gross, so the check numerator must be gross
+
+The original finding ruled reinsurance out on the premise that "recoveries are zero in 13 of 15
+line-years, net ≈ gross almost everywhere." **That premise is now dead.** The WC claim generator
+produces real catastrophic claims (~$10M PV each) that reach the attachment: recoveries are now
+non-zero in **62 of 200 line-years (31%)**, mean recovery **15.1% of gross**. Finding 9's dormant
+mechanic #1 (reinsurance recovery) is live.
+
+Consequently the only apples-to-apples reconciliation is **gross ultimate loss** over the narrow
+(pricing) basis, because pricing's `expectedLoss` is itself gross:
+
+```
+gross ultimate / (poolPremium + admin) = 66.88%   vs   target 1/(CLF 1.346 + admin 0.15) = 66.84%
+```
+
+Net-incurred over the same basis reads ~57.3% — **9.5pp lower, and that is correct**: it is the
+pool's reinsurance recovering real losses, not a pricing miss. Net loss ratio should be displayed as
+its own (smaller) number and NEVER compared to the gross pricing target. Comparing net-incurred to a
+gross-derived 66.8% is the numerator-side twin of Correction 1's denominator mismatch.
+
+### How this was actually fixed (step 6b)
+
+WC's `newPurePremiumPer100` is now **derived once from the analytic expectation of the claim
+generator** (at RQ 5, over the full canonical roster) and held — so premium and losses share one
+basis by construction (see finding 17's "apply to the draw, not pure premium" constraint). Derived
+held WC pure premium: **$3.7269 per $100**. This is what makes the gross reconciliation land on
+target rather than by luck.
+
+**Scope note:** this is fixed for **WC only**. GL and Property still price off the old
+`commonLossFactor` / constant-based path and still exhibit the original definitional artifacts. They
+will be reconciled the same way when their claim generators are built. Until then, cross-line loss
+ratios are not comparable, and the cross-line premium split (WC ~19% / GL ~48% / Property ~33%) is
+**not** a considered balance — it is one reconciled line beside two legacy approximations still
+scaled for the old $272M-payroll book.
+
+### ⬇️ Original finding preserved below (conclusion superseded by the corrections above)
 
 **Observation.** The pricing assumes a 66.8% expected loss ratio (expected combined ratio exactly
 100%). Actual results, across 4 random seeds × 3 lines × 5 years:
-- **2 of 60 line-years reached or exceeded the expected 66.8%.** An unbiased draw would put ~half
-  above. 2/60 is overwhelming evidence of systematic bias, not seed luck.
-- **Mean actual loss ratio ≈ 46%** — actual losses run at roughly **69% of the loss cost the
-  pricing assumes**. Equivalently, premium is ~1.45× what the book's losses justify.
-- Actual combined ratios run 57–102% (mean ~80%) against a designed 100%, so **underwriting alone
-  throws off 10–25 points of margin before investment income.**
-- **Pool surplus growth at pure default decisions: +112%, +137%, +108%, +139% over 5 years.** Every
-  game roughly doubles with the player doing nothing.
+- 2 of 60 line-years reached or exceeded the expected 66.8%.
+- Mean actual loss ratio ≈ 46%.
+- Actual combined ratios run 57–102% (mean ~80%) against a designed 100%.
+- Pool surplus growth at pure default decisions: +112%, +137%, +108%, +139% over 5 years.
 
-**Reinsurance is NOT the explanation (ruled out).** `actualLossRatio` is net of recoveries while
-expected LR is gross, which looked like a possible apples-to-oranges artifact. But recoveries are
-**zero in 13 of 15 line-years** on the reference seed (default attachment is 1.25× expected, and
-losses average 0.70× expected, so losses rarely reach it). Net ≈ gross almost everywhere. The gap
-is genuinely between the pricing parameter and the loss generator.
-
-**Why it matters.** It undercuts the core teaching premise: with a 10–25 point structural cushion,
-careless management still prints money, so consequences take many years to bite if ever. It also
-makes the displayed "Expected Loss Ratio: 66.8%" misleading about what the book actually does. And
-it distorts the shock-event plan — shocks would have to overcome a persistent ~20-point margin
-before creating genuine risk, forcing them to be implausibly large. Fix the centering first so
-shocks can be realistically sized.
-
-**The specific question to investigate:** on the same exposure, does the mean of the simulated loss
-draw equal the expected loss used in pricing? Report GROSS actual loss ratio against expected (not
-just net). Candidate causes: the pure-premium/expected-loss parameter sitting above the loss
-distribution's actual mean; the CLF loading stacking on an already-conservative expected loss; a
-trend assumption inflating expected but not actual; or a distribution parameterization error
-(e.g. mean vs median confusion).
-
-### ⚠️ CORRECTION — this is a denominator-definition artifact, not a mis-centered draw
-
-Status: RESOLVED. Root cause confirmed empirically via scripts/diagnostics/loss-ratio-check.ts
-(30 seeds × 5 years × 3 lines, 450 line-years, read-only, default decisions).
-
-expectedLossRatio and actualLossRatio are computed against two different premium bases:
-```
-expectedLossRatio = expectedLoss / poolPremiumAndAdminExpense   (narrow: EL × 1.496)
-actualLossRatio   = netIncurredLoss / totalMemberCharge         (wide: EL × 2.001, incl. reinsuranceCost)
-```
-reinsuranceCost (37.5% of pool premium at the default Moderate level) sits in actualLossRatio's
-denominator with no counterpart in expectedLossRatio's. This is a DIFFERENT mechanism from the
-recoveries check (numerator, correctly ruled out) — the denominator effect was never checked.
-
-Measured:
-- expectedLossRatio (displayed, narrow basis): 66.84%
-- actualLossRatio (displayed, wide basis): 49.94%
-- actual loss ratio put on the SAME narrow basis: 66.72%
-
-On a common denominator the two agree to within 0.1 point. The ~17-point apparent gap is fully
-explained by reinsuranceCost inflating one denominator, not by a mis-centered loss distribution.
-
-commonLossFactor confirmed centered correctly: mean 1.0171 across 450 line-years (WC 1.0079,
-GL 1.0268, Property 1.0165) — consistent with the AGGREGATE_LOSS_DISTRIBUTION design comment
-(theoretical mean ≈0.998), confirmed empirically not just theoretically.
-
-**REVISED CONCLUSION:** the loss distribution's center is fine and needs no recentering. The
-~17-point structural margin is the CLF load working as designed (see finding 17), not
-underpricing. The "2 of 60 line-years reached 66.8%" observation is explained the same way —
-those line-years were compared against a ratio on a larger denominator. Finding 7 (Property's
-thin tail) is UNAFFECTED and remains the real open loss-distribution problem; per-line shape/tail
-work should proceed on that basis. Centering is solved; shape is not.
+These observations were real; the *inference* that they showed underpricing was the error. The
+"2 of 60 above expected" symptom was itself a product of comparing against a target computed on the
+wrong (narrow) basis — on the correct basis the per-line-year distribution is centered, roughly half
+above and half below. The candidate causes listed originally (pure-premium above the draw mean, CLF
+stacking, trend inflation, mean/median confusion) were all investigated and none was the cause; the
+cause was the basis mismatch in the two displayed ratios.
 
 ## 7. Property's loss volatility is too SMOOTH for a catastrophe-exposed line
 **Status:** confirmed on the reference seed. Belongs with the loss-distribution rework (finding 3).
@@ -659,6 +670,9 @@ will show up in the loss ratio. Only trend and risk control require the pricing 
 and actual runs at ~69% of expected, `E[commonLossFactor]` is probably **≈0.69 rather than 1.0**. If so,
 finding 6 is a one-parameter fix. If it measures 1.0, the gap lives elsewhere. Cheap to check and it would
 resolve the largest open finding.
+
+**UPDATE:** measured at 1.017, not 0.69 — see finding 6, Correction 1. The 0.69 guess assumed the
+46%/66.8% gap was real; it was a denominator artifact, so there is no mis-centering to fix.
 
 ### The original (correctly scoped) finding follows
 
