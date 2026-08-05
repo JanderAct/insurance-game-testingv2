@@ -256,6 +256,39 @@ distribution's actual mean; the CLF loading stacking on an already-conservative 
 trend assumption inflating expected but not actual; or a distribution parameterization error
 (e.g. mean vs median confusion).
 
+### ⚠️ CORRECTION — this is a denominator-definition artifact, not a mis-centered draw
+
+Status: RESOLVED. Root cause confirmed empirically via scripts/diagnostics/loss-ratio-check.ts
+(30 seeds × 5 years × 3 lines, 450 line-years, read-only, default decisions).
+
+expectedLossRatio and actualLossRatio are computed against two different premium bases:
+```
+expectedLossRatio = expectedLoss / poolPremiumAndAdminExpense   (narrow: EL × 1.496)
+actualLossRatio   = netIncurredLoss / totalMemberCharge         (wide: EL × 2.001, incl. reinsuranceCost)
+```
+reinsuranceCost (37.5% of pool premium at the default Moderate level) sits in actualLossRatio's
+denominator with no counterpart in expectedLossRatio's. This is a DIFFERENT mechanism from the
+recoveries check (numerator, correctly ruled out) — the denominator effect was never checked.
+
+Measured:
+- expectedLossRatio (displayed, narrow basis): 66.84%
+- actualLossRatio (displayed, wide basis): 49.94%
+- actual loss ratio put on the SAME narrow basis: 66.72%
+
+On a common denominator the two agree to within 0.1 point. The ~17-point apparent gap is fully
+explained by reinsuranceCost inflating one denominator, not by a mis-centered loss distribution.
+
+commonLossFactor confirmed centered correctly: mean 1.0171 across 450 line-years (WC 1.0079,
+GL 1.0268, Property 1.0165) — consistent with the AGGREGATE_LOSS_DISTRIBUTION design comment
+(theoretical mean ≈0.998), confirmed empirically not just theoretically.
+
+**REVISED CONCLUSION:** the loss distribution's center is fine and needs no recentering. The
+~17-point structural margin is the CLF load working as designed (see finding 17), not
+underpricing. The "2 of 60 line-years reached 66.8%" observation is explained the same way —
+those line-years were compared against a ratio on a larger denominator. Finding 7 (Property's
+thin tail) is UNAFFECTED and remains the real open loss-distribution problem; per-line shape/tail
+work should proceed on that basis. Centering is solved; shape is not.
+
 ## 7. Property's loss volatility is too SMOOTH for a catastrophe-exposed line
 **Status:** confirmed on the reference seed. Belongs with the loss-distribution rework (finding 3).
 
