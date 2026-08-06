@@ -57,7 +57,7 @@ console.log(`=== GL generator: full canonical market, ${YEARS} independent draw-
 const runs = runYears(roster, YEARS);
 const allClaims: Claim[] = runs.flatMap(r => r.claims);
 
-console.log('--- 1. per-sub frequency (roster-derived analytic; design "~832 general" is stale reference) ---');
+console.log('--- 1. per-sub frequency (roster-derived analytic; roster v2 targets) ---');
 {
   const kGl = computeKGl(roster);
   // Analytic per-sub expected counts at the roster's actual RQ mix, x kGl.
@@ -79,7 +79,9 @@ console.log('--- 1. per-sub frequency (roster-derived analytic; design "~832 gen
     lawEnforcement: mean(runs.map(r => r.claimCountsBySub.lawEnforcement)),
     abuse: mean(runs.map(r => r.claimCountsBySub.abuseIncidents)),
   };
-  const refs: Record<string, string> = { general: '897 (stale ref 832)', epl: '~108', lawEnforcement: '~13.3', abuse: '~3.4 incidents' };
+  // Roster v2 targets. lawEnforcement MORE THAN DOUBLES vs v1's ~13.3 because
+  // police payroll went $66.2M -> $137.2M in the County/City rebalance.
+  const refs: Record<string, string> = { general: 'v2 882.8', epl: 'v2 ~111.3', lawEnforcement: 'v2 ~28.4 (v1 ~13.3)', abuse: 'v2 ~3.2 incidents' };
   for (const sub of GL_SUB_KEYS) {
     const rel = Math.abs(measured[sub] - analytic[sub]) / analytic[sub];
     console.log(`  ${sub.padEnd(15)} measured ${measured[sub].toFixed(2).padStart(8)}   analytic ${analytic[sub].toFixed(2).padStart(8)}   (${refs[sub]})  ${note(rel < 0.05, `${sub} freq ${measured[sub].toFixed(1)} vs ${analytic[sub].toFixed(1)}`)}`);
