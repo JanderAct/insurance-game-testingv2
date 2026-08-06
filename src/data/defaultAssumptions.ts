@@ -1,6 +1,8 @@
 // Centralized assumptions for Risk Pool Simulation v1
 // V2: Allow admin-editable assumptions from a backend config
 
+import type { Region } from '../types/simulation';
+
 // Administrative expense is 15% of Pure Premium at CLF 1.000. It is added
 // after the selected CLF is applied and is not itself multiplied by the CLF.
 export const ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM = 0.15;
@@ -204,9 +206,15 @@ export const WC_LOSS_MODEL = {
     perm: [0.35, 0.25, 0.20, 0.12, 0.08],
   } as Record<'medOnly' | 'temp' | 'perm', number[]>,
 
-  // Geographic severity multiplier, indexed by member.region - 1 (regions
-  // 1-5). A direct lookup, not interpolated.
-  regionMultiplier: [0.92, 0.97, 1.03, 1.08, 1.12],
+  // Geographic severity multiplier, keyed by the roster's authored Region.
+  //
+  // MEAN-NEUTRAL BY CONSTRUCTION: the three factors average exactly 1.00 at
+  // equal assignment probability, so region redistributes severity between
+  // members without moving the book's expected severity. The superseded 5-region
+  // array [0.92, 0.97, 1.03, 1.08, 1.12] under weights 10/20/40/20/10 had a
+  // weighted mean of 1.026 — region was silently adding 2.6% to every WC
+  // severity, which the pure premium then absorbed as if it were pure risk.
+  regionMultiplier: { North: 0.95, Central: 1.00, South: 1.05 } as Record<Region, number>,
 };
 
 // ===========================================================================
@@ -639,49 +647,16 @@ export const GL_STARTING_FINANCIALS = {
 
 // Property starting assumptions. Property's exposure base is Total Insured
 // Value (TIV, $M) — buildings, apparatus, and equipment — not payroll, and a
-// member's TIV need not track its payroll closely (see TIV_TYPE_MULTIPLIER
-// below). Rate per $100 of TIV is much smaller than WC/GL's per-$100-payroll
-// rate since TIV dollar amounts are much larger. Tunable placeholders.
-export const TIV_RANGES: Record<string, { min: number; max: number }> = {
-  Small: { min: 2, max: 8 },
-  Medium: { min: 6, max: 20 },
-  Large: { min: 18, max: 55 },
-  'Very Large': { min: 50, max: 140 },
-};
-
-// Infrastructure-heavy member types carry disproportionately more insured
-// property value per payroll dollar than administrative-heavy types — this
-// decorrelates Property exposure from payroll exposure per member.
-export const TIV_TYPE_MULTIPLIER: Record<string, number> = {
-  City: 1.0,
-  County: 1.0,
-  'Fire District': 2.2,
-  'Water District': 1.8,
-  'Transit Authority': 1.6,
-  'School District': 1.7,
-  'Park District': 1.3,
-  'Recreation District': 1.3,
-  'Special District': 1.0,
-};
-
-// Calibration: scale every member's Property TIV up by this factor so the
-// Property book is a substantial third line rather than a rounding error.
-// Applied at module load in memberCatalog.ts (each member's baked unscaledTiv
-// × this constant), so it remains a live knob — changing it rescales every
-// member's TIV proportionally without regenerating the catalog. Rate and loss
-// ratio are unchanged, and losses are exposure-proportional (mean loss = TIV ×
-// purePremiumPer100 × 10,000), so scaling TIV scales premium and losses
-// together — the loss ratio is invariant, and so is the enrolled roster (the
-// exposure-targeted enrollment boundary scales identically).
+// member's TIV deliberately does NOT track its payroll closely. Rate per $100
+// of TIV is much smaller than WC/GL's per-$100-payroll rate since TIV dollar
+// amounts are much larger.
 //
-// 16 recalibrates for the canonical 200-member roster, preserving the OLD
-// catalog's RELATIVE Property share: aggregate TIV / aggregate payroll stays
-// ~50x (old: $13,719M TIV on $271.96M payroll at scale 7; canonical unscaled
-// TIV totals $3,996.25M on $1,300M payroll, and 16.41 restores the 50.44x
-// ratio — rounded to 16), so Property's premium keeps its ~80%-of-WC relative
-// weight as the whole game scales up, rather than shrinking to a sliver.
-export const PROPERTY_TIV_SCALE = 16;
-
+// TIV IS AUTHORED DATA as of roster v2: each member's value is a stored column
+// of roster_canonical_v2.csv, totalling $5,250.8M (a blended 4.04x payroll).
+// The former derivation — TIV_RANGES x TIV_TYPE_MULTIPLIER via the generator's
+// tivFor(), then a PROPERTY_TIV_SCALE multiplier applied at module load — is
+// deleted. There is no scale knob any more; to change Property's exposure,
+// change the CSV.
 export const PROPERTY_STARTING_RATE_PER_100 = { min: 0.10, max: 0.30 };
 export const PROPERTY_EXPECTED_LOSS_RATIO = { min: 0.45, max: 0.60 };
 export const PROPERTY_STARTING_FINANCIALS = {

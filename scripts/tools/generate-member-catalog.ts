@@ -1,24 +1,33 @@
-// One-time generator: src/data/roster_canonical.csv -> src/data/memberCatalog.ts
+// One-time generator: src/data/roster_canonical_v2.csv -> src/data/memberCatalog.ts
 //
 // The canonical roster (200 members, $1,300M payroll) is the permanent, fixed
 // marketplace — it never grows or shrinks. This script converts the CSV into a
 // checked-in static TypeScript module (no runtime CSV parsing), replacing the
-// old procedural 100-member generator. Re-run only if roster_canonical.csv
-// itself is ever replaced:
+// old procedural 100-member generator. Re-run only if the CSV is replaced:
 //
 //   npx tsx scripts/tools/generate-member-catalog.ts
+//
+// v2 (current) vs v1 (src/data/roster_canonical.csv, kept for provenance):
+// payroll rebalanced to County 30% / City 20% with the rest scaled to fill the
+// remaining 50%; TIV and Region are now STORED CSV COLUMNS rather than derived
+// in-repo. IDs, Names, Types and all four GL relativity columns are unchanged;
+// Risk Quality is unchanged except four members clamped to 1.0 at source; the
+// WC class columns moved only because payroll moved.
 //
 // What it does, and the decisions baked in (all user-approved):
 // - Risk Quality is CLAMPED to a minimum of 1.0 (the documented 1-10 range).
 //   The clamped member IDs are printed so the adjustment is visible.
 // - sizeCategory buckets the 200 members over payroll-sorted order in the same
 //   proportions as the old catalog's sizeForIndex (55% Small / 30% Medium /
-//   12% Large / 3% Very Large -> 110 / 60 / 24 / 6 members).
-// - Property TIV ports the old tivFor() as-is: position (index*7)%10 within
-//   the size bucket's TIV_RANGES span (deliberately NOT payroll-ordered, so
-//   TIV stays decorrelated from payroll), times TIV_TYPE_MULTIPLIER, rounded
-//   to 2dp BEFORE the PROPERTY_TIV_SCALE multiplier (which the emitted catalog
-//   applies at module load, keeping the scale a live calibration knob).
+//   12% Large / 3% Very Large -> 110 / 60 / 24 / 6 members). It is a DISPLAY
+//   attribute only (MembershipPage's SizeBadge, the spreadsheet export); since
+//   v2 it is no longer an input to TIV.
+// - Property TIV is read STRAIGHT FROM THE CSV in final $M. The old derivation
+//   (tivFor() over TIV_RANGES x TIV_TYPE_MULTIPLIER, then a PROPERTY_TIV_SCALE
+//   multiplier applied at module load) is DELETED along with those constants —
+//   TIV is authored data now, not a calibration knob.
+// - Region is read STRAIGHT FROM THE CSV as 'North' | 'Central' | 'South'. The
+//   old synthetic SeededRandom(42) weighted draw over regions 1-5 is DELETED.
 // - Satisfaction keeps the old catalog's formula (6.2 + ((index*19)%23)/10) —
 //   the CSV carries no satisfaction column.
 // - The CSV's eight WC_*/GL_* class columns are NOT ingested: they are exactly
@@ -30,16 +39,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import {
-  TIV_RANGES,
-  TIV_TYPE_MULTIPLIER,
   WC_CLASS_MIX,
   GL_RELATIVITIES,
 } from '../../src/data/defaultAssumptions';
-import { SeededRandom } from '../../src/utils/random';
-import type { MemberType, SizeCategory } from '../../src/types/simulation';
+import type { MemberType, Region, SizeCategory } from '../../src/types/simulation';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CSV_PATH = path.join(__dirname, '../../src/data/roster_canonical.csv');
+const CSV_PATH = path.join(__dirname, '../../src/data/roster_canonical_v2.csv');
 const OUT_PATH = path.join(__dirname, '../../src/data/memberCatalog.ts');
 
 const VALID_TYPES: ReadonlySet<string> = new Set([
@@ -47,12 +53,16 @@ const VALID_TYPES: ReadonlySet<string> = new Set([
   'School District', 'Park District', 'Recreation District', 'Special District',
 ]);
 
+const VALID_REGIONS: ReadonlySet<string> = new Set(['North', 'Central', 'South']);
+
 interface CsvRow {
   id: string;
   name: string;
   type: MemberType;
   payroll: number;
   riskQualityRaw: number;
+  region: Region;
+  tiv: number;                          // $M, final — no scale factor applied
   wc: [number, number, number, number]; // clerical, pubworks, police, fire ($M)
   gl: [number, number, number, number]; // gen, epl, lawenf, abuse (relativities)
 }
@@ -61,7 +71,7 @@ interface CsvRow {
 // The file is CRLF-terminated; strip \r or the last column parses corrupted.
 const raw = fs.readFileSync(CSV_PATH, 'utf8').replace(/\r/g, '').trim().split('\n');
 const header = raw[0].split(',');
-const expectedHeader = 'ID,Name,Type,Payroll ($M),Risk Quality,WC_clerical,WC_pubworks,WC_police,WC_fire,GL_gen,GL_epl,GL_lawenf,GL_abuse';
+const expectedHeader = 'ID,Name,Type,Payroll ($M),Risk Quality,Region,TIV ($M),WC_clerical,WC_pubworks,WC_police,WC_fire,GL_gen,GL_epl,GL_lawenf,GL_abuse';
 if (header.join(',') !== expectedHeader) {
   throw new Error(`Unexpected CSV header:\n  got      ${header.join(',')}\n  expected ${expectedHeader}`);
 }
@@ -69,14 +79,17 @@ if (header.join(',') !== expectedHeader) {
 const rows: CsvRow[] = raw.slice(1).filter(l => l.trim()).map(l => {
   const c = l.split(',');
   if (!VALID_TYPES.has(c[2])) throw new Error(`Row ${c[0]}: unknown Type "${c[2]}"`);
+  if (!VALID_REGIONS.has(c[5])) throw new Error(`Row ${c[0]}: unknown Region "${c[5]}"`);
   return {
     id: c[0],
     name: c[1],
     type: c[2] as MemberType,
     payroll: parseFloat(c[3]),
     riskQualityRaw: parseFloat(c[4]),
-    wc: [parseFloat(c[5]), parseFloat(c[6]), parseFloat(c[7]), parseFloat(c[8])],
-    gl: [parseFloat(c[9]), parseFloat(c[10]), parseFloat(c[11]), parseFloat(c[12])],
+    region: c[5] as Region,
+    tiv: parseFloat(c[6]),
+    wc: [parseFloat(c[7]), parseFloat(c[8]), parseFloat(c[9]), parseFloat(c[10])],
+    gl: [parseFloat(c[11]), parseFloat(c[12]), parseFloat(c[13]), parseFloat(c[14])],
   };
 });
 
@@ -86,6 +99,28 @@ if (new Set(rows.map(r => r.id)).size !== 200) throw new Error('Duplicate member
 const payrollSum = rows.reduce((s, r) => s + r.payroll, 0);
 if (Math.abs(payrollSum - 1300) > 0.01) {
   throw new Error(`Payroll sum ${payrollSum.toFixed(4)} deviates from $1,300M by more than $0.01M`);
+}
+
+// v2 payroll rebalance: County 30% / City 20% of the book, by design.
+const shareOf = (type: string) =>
+  rows.filter(r => r.type === type).reduce((s, r) => s + r.payroll, 0) / payrollSum;
+for (const [type, target] of [['County', 0.30], ['City', 0.20]] as const) {
+  if (Math.abs(shareOf(type) - target) > 0.001) {
+    throw new Error(`${type} payroll share ${(shareOf(type) * 100).toFixed(2)}% deviates from ${target * 100}%`);
+  }
+}
+
+const tivSum = rows.reduce((s, r) => s + r.tiv, 0);
+if (Math.abs(tivSum - 5250.8) > 0.5) {
+  throw new Error(`TIV sum $${tivSum.toFixed(1)}M deviates from the expected $5,250.8M`);
+}
+
+const regionCounts: Record<string, number> = { North: 0, Central: 0, South: 0 };
+rows.forEach(r => { regionCounts[r.region]++; });
+for (const [region, expected] of [['North', 72], ['Central', 61], ['South', 67]] as const) {
+  if (regionCounts[region] !== expected) {
+    throw new Error(`Region ${region} count ${regionCounts[region]} != expected ${expected}`);
+  }
 }
 
 // --- Verify WC_CLASS_MIX reproduces the CSV's WC dollar columns (<= $100/cell) ---
@@ -131,79 +166,54 @@ byPayrollDesc.forEach(({ r }, rank) => {
   sizeById.set(r.id, rank < 6 ? 'Very Large' : rank < 30 ? 'Large' : rank < 90 ? 'Medium' : 'Small');
 });
 
-// --- Unscaled Property TIV: old tivFor() ported as-is ---
-// Position (index*7)%10 across the bucket's range (decorrelated from payroll
-// by design), times the type multiplier, rounded to 2dp BEFORE the scale.
-function unscaledTiv(index: number, size: SizeCategory, type: MemberType): number {
-  const position = (index * 7) % 10;
-  const { min, max } = TIV_RANGES[size];
-  const base = min + (max - min) * (position / 9);
-  return Number((base * TIV_TYPE_MULTIPLIER[type]).toFixed(2));
-}
-
-// --- Region: fixed one-time weighted draw, baked into the literal ---
-// One draw per member in roster order from SeededRandom(42) (the roster's
-// seed convention), weights 10/20/40/20/10 over regions 1-5. Synthetic and
-// invented here (the CSV has no Region column), independent of every other
-// column, and never re-rolled per game seed. A weighted DRAW, not stratified
-// assignment — counts scatter around [20, 40, 80, 40, 20] rather than
-// matching them exactly.
-const REGION_WEIGHTS = [0.10, 0.20, 0.40, 0.20, 0.10];
-const regionRng = new SeededRandom(42);
-const regions: number[] = rows.map(() => {
-  const u = regionRng.next();
-  let cum = 0;
-  for (let r = 0; r < REGION_WEIGHTS.length; r++) {
-    cum += REGION_WEIGHTS[r];
-    if (u < cum) return r + 1;
-  }
-  return REGION_WEIGHTS.length;
-});
-
 // --- Emit ---
 const rowLines = rows.map((r, i) => {
   const size = sizeById.get(r.id)!;
-  const tiv = unscaledTiv(i, size, r.type);
-  return `  R('${r.id}', '${r.name.replace(/'/g, "\\'")}', '${r.type}', '${size}', ${regions[i]}, ${r.payroll}, ${riskQuality(r)}, ${tiv}),`;
+  void i;
+  return `  R('${r.id}', '${r.name.replace(/'/g, "\\'")}', '${r.type}', '${size}', '${r.region}', ${r.payroll}, ${riskQuality(r)}, ${r.tiv}),`;
 });
 
 const out = `// Canonical 200-member marketplace — GENERATED FILE, do not edit by hand.
-// Source of truth: src/data/roster_canonical.csv, converted by
+// Source of truth: src/data/roster_canonical_v2.csv, converted by
 // scripts/tools/generate-member-catalog.ts (see that script for every rule:
-// risk-quality clamping, size bucketing, TIV construction, satisfaction).
+// risk-quality clamping, size bucketing, satisfaction).
 //
 // The roster is permanent and fixed: it never grows or shrinks, no entity is
 // ever created or deleted, and it is deliberately independent of the game
 // seed. Every game uses these same 200 entities; the seed only determines
-// which of them begin in the pool. Payroll totals $1,300M and drives both WC
-// and GL exposure (public-entity pools have one payroll base, not a separate
-// commercial-style GL revenue base). Property uses TIV — an independently
-// constructed exposure base that deliberately does NOT track payroll (see
-// TIV_TYPE_MULTIPLIER).
+// which of them begin in the pool. Payroll totals $1,300M (County 30% / City
+// 20% by design) and drives both WC and GL exposure — public-entity pools have
+// one payroll base, not a separate commercial-style GL revenue base.
+//
+// Property uses TIV, and Region is a stored attribute: BOTH ARE AUTHORED CSV
+// COLUMNS as of roster v2, not derived here. TIV totals $5,250.8M (a blended
+// 4.04x payroll) and carries no scale factor — the former PROPERTY_TIV_SCALE,
+// TIV_RANGES and TIV_TYPE_MULTIPLIER are deleted. Region is North/Central/
+// South as authored, replacing the former synthetic SeededRandom(42) draw over
+// regions 1-5.
 //
 // Each member's WC class-payroll split and GL sub-line relativities are exact
 // functions of its Type — see WC_CLASS_MIX and GL_RELATIVITIES in
 // defaultAssumptions.ts. They are intentionally NOT stored per member.
 
-import type { CoverageLine, Member, MemberType, SizeCategory } from '../types/simulation';
-import { PROPERTY_TIV_SCALE } from './defaultAssumptions';
+import type { CoverageLine, Member, MemberType, Region, SizeCategory } from '../types/simulation';
 
 export interface CanonicalRosterRow {
   id: string;
   name: string;
   type: MemberType;
-  sizeCategory: SizeCategory;
-  region: number;       // 1-5; fixed weighted draw (10/20/40/20/10), never re-rolled per game seed
-  payroll: number;      // $M; the WC and GL exposure base
-  riskQuality: number;  // 1-10 (clamped up to 1.0 at generation where the CSV was lower)
-  unscaledTiv: number;  // $M before PROPERTY_TIV_SCALE; the Property exposure base
+  sizeCategory: SizeCategory;   // display only; no longer a TIV input
+  region: Region;               // stored CSV column
+  payroll: number;              // $M; the WC and GL exposure base
+  riskQuality: number;          // 1-10 (clamped up to 1.0 at generation where the CSV was lower)
+  tiv: number;                  // $M; the Property exposure base, final (no scale factor)
 }
 
 function R(
   id: string, name: string, type: MemberType, sizeCategory: SizeCategory,
-  region: number, payroll: number, riskQuality: number, unscaledTiv: number,
+  region: Region, payroll: number, riskQuality: number, tiv: number,
 ): CanonicalRosterRow {
-  return { id, name, type, sizeCategory, region, payroll, riskQuality, unscaledTiv };
+  return { id, name, type, sizeCategory, region, payroll, riskQuality, tiv };
 }
 
 export const CANONICAL_ROSTER: ReadonlyArray<CanonicalRosterRow> = [
@@ -220,7 +230,7 @@ export const PREDEFINED_MARKET_MEMBERS: ReadonlyArray<Member> = CANONICAL_ROSTER
     exposureByLine: {
       WC: row.payroll,
       GL: row.payroll,
-      Property: row.unscaledTiv * PROPERTY_TIV_SCALE,
+      Property: row.tiv,
     },
     yearJoined: 0,
     calendarYearJoined: 0,
@@ -253,11 +263,12 @@ fs.writeFileSync(OUT_PATH, out);
 console.log(`Wrote ${OUT_PATH}`);
 console.log(`  rows: ${rows.length}`);
 console.log(`  payroll sum: $${payrollSum.toFixed(4)}M (target $1,300M, delta ${(payrollSum - 1300).toFixed(4)})`);
+console.log(`  payroll shares: County ${(shareOf('County') * 100).toFixed(2)}%  City ${(shareOf('City') * 100).toFixed(2)}%`);
+console.log(`  TIV sum: $${tivSum.toFixed(1)}M (blended ${(tivSum / payrollSum).toFixed(2)}x payroll)`);
+console.log(`  region counts: ${JSON.stringify(regionCounts)}`);
 console.log(`  WC_CLASS_MIX worst residual: $${worstWcResidualDollars.toFixed(2)} at ${worstWcCell} (limit $100)`);
 console.log(`  GL_RELATIVITIES: exact match on all 800 cells`);
 console.log(`  risk quality clamped to 1.0: ${clamped.length ? clamped.join(', ') : 'none'}`);
 const sizes: Record<string, number> = {};
 rows.forEach(r => { const s = sizeById.get(r.id)!; sizes[s] = (sizes[s] ?? 0) + 1; });
 console.log(`  size buckets: ${JSON.stringify(sizes)}`);
-const regionHist = [1, 2, 3, 4, 5].map(r => regions.filter(x => x === r).length);
-console.log(`  region histogram [1..5]: ${JSON.stringify(regionHist)} (expected around [20, 40, 80, 40, 20])`);

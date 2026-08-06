@@ -14,16 +14,20 @@ export type MemberType =
 
 export type SizeCategory = 'Small' | 'Medium' | 'Large' | 'Very Large';
 
+// Geographic region, an authored canonical-roster column since v2 (replacing a
+// synthetic 1-5 draw). Three regions, assigned 72 / 61 / 67 across the roster.
+export type Region = 'North' | 'Central' | 'South';
+
 export interface Member {
   id: string;
   name: string;
   type: MemberType;
   sizeCategory: SizeCategory;
-  // Geographic region 1-5. A fixed, one-time-generated property of each
-  // canonical-roster member (weights 10/20/40/20/10) — independent of every
-  // other column and never re-rolled per game seed. Scaffolding for future
-  // regional loss correlation (e.g. catastrophes striking a region).
-  region: number;
+  // Geographic region — an authored column of the canonical roster (v2), never
+  // re-rolled per game seed. Feeds WC's regional severity multiplier and is
+  // scaffolding for future regional loss correlation (catastrophes striking a
+  // region), which is what Property's generator will want.
+  region: Region;
   exposureByLine: Partial<Record<CoverageLine, number>>; // exposure units, per coverage line
   // LOSSY display convenience, NOT an enrollment record. Opening enrollees are
   // stamped yearJoined: 1 ("was here when the game started" — the display
@@ -81,7 +85,7 @@ export interface Occurrence {
   memberId: string;
   accidentYear: number;   // yearNumber the event happened (pre-game years negative)
   calendarYear: number;
-  region: number;         // the member's region 1-5, for regional correlation (e.g. catastrophes)
+  region: Region;         // the member's region, for regional correlation (e.g. catastrophes)
   isCatastrophe: boolean; // part of a regional/pool-wide catastrophe event
   claimIds: string[];     // every claim this event produced (WC: exactly one)
 }

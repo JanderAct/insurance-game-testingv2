@@ -42,7 +42,7 @@
 //    catastrophic tier books present value (see catastrophicStream). The
 //    asymmetry is deliberate and is justified at that call site.
 
-import type { Claim, ClaimAnnuity, CoverageLine, Member, MemberLossResult, Occurrence } from '../types/simulation';
+import type { Claim, ClaimAnnuity, CoverageLine, Member, MemberLossResult, Occurrence, Region } from '../types/simulation';
 import { deriveSubRng } from './random';
 import {
   drawLognormal,
@@ -111,9 +111,11 @@ function weeklyBenefit(cls: WcClassKey): number {
   return Math.min(M.indemnityWageReplacement * weeklyWage, M.statutoryWeeklyCap);
 }
 
-export function regionMultiplier(region: number): number {
-  const idx = Math.max(1, Math.min(M.regionMultiplier.length, Math.round(region))) - 1;
-  return M.regionMultiplier[idx];
+// Keyed lookup over the roster's authored Region. Mean-neutral by construction
+// (see the table's comment) — unlike the superseded 1-5 array, region no longer
+// shifts the book's expected severity, only its distribution across members.
+export function regionMultiplier(region: Region): number {
+  return M.regionMultiplier[region] ?? 1;
 }
 
 // Risk-quality frequency factor. RQ 10 (best) draws fewer claims, RQ 1 more.
