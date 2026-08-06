@@ -18,6 +18,60 @@ Things that were discovered expensively and live only in conversation memory. Re
   watching a task-wrapper output file while the task redirects into a scratchpad file deadlocks
   permanently — this cost 26 minutes of wall clock and ~30k tokens on a job that finished in 1m49s.
   Harness runs here are 1-2 minutes; backgrounding buys nothing and can hang.
+- **If a commit message cites a number, the tool that produced it belongs in the repo.** Any script that
+  verifies a committed claim must itself be committed. This was nearly lost three separate times — the
+  solo-export guard and its baselines, and both the WC and GL cutover harnesses (which hold the two-part
+  6b check) — all lived only in the ephemeral scratchpad while their *results* were recorded in commit
+  messages. Results without reproducible tooling are assertions, not verification.
+- **A test that cannot fail is worse than no test.** The WC harness's region check fed integers 1–5 into
+  what had become a keyed string lookup (`North`/`Central`/`South`), so every probe hit the `?? 1` default
+  and the assertion was structurally incapable of failing. It passed for as long as it existed. When a
+  type or key space changes, re-read every assertion that touches it and confirm it can still go red.
+- **Heavy-tailed lines cannot be gated on a realized mean.** Use a two-part check: HARD ASSERT the
+  deterministic analytic ratio, REPORT the realized draw with its confidence interval, and flag only if
+  realized falls outside its own CI of the analytic. GL's realized loss ratio swung from 0.9361× to
+  1.0438× of its analytic across two roster versions on an unchanged, separately-verified generator —
+  an α=1.3 Pareto plus abuse batches with P99 ≈ 8× mean cannot be resolved to ±2pp at 200 line-years.
+  This is not a weakened bar: pricing correctness decomposes into (a) draw ≡ analytic expectation and
+  (b) analytic ratio = target, both of which ARE asserted.
+
+## Rulings and stopping
+- **A failed verification check stops the work UNCOMMITTED. Whether it blocks is the user's call, not
+  Claude Code's.** Diagnosing the cause is exactly right; deciding it doesn't count is not. This applies
+  even when the failure is provably pre-existing or out of scope — say so in the report and wait.
+  A generic git-hygiene hook is not a ruling; do not let it launder a commit past a failed check, and do
+  not revert the change to silence the hook (that destroys the thing needing a ruling).
+- **Several "failures" have turned out to be mis-specified checks, not broken code.** WC 6b and GL 6b both
+  failed on numerator/denominator basis errors in the check itself. Report the decomposition and let the
+  ruling correct the check.
+- **Ask for the plan before code** on anything load-bearing. Measuring before building has repeatedly
+  caught blowups cheaply (the A1 over-capitalisation, the wrong seed fix, three broken audit checks,
+  the presumption trend divergence).
+
+## Claim-generator conventions (binding on all lines)
+Established by the WC and GL builds. Property and any future line inherit these.
+- **Accident-year dollars, with `trendToSettlement` (`src/utils/claimMath.ts`) as the ONLY vintage
+  conversion point.** No ambiguous-vintage values enter the model. This is what makes retroactive
+  repricing (social inflation, legislative shocks) possible at all.
+- **Every trend-compounded lag MUST be truncated and renormalized, and the analytic must integrate the
+  IDENTICAL truncated density.** `E[(1+r)^lag]` over an unbounded lognormal lag is mathematically
+  DIVERGENT, not merely large — the moment series grows like `exp(k²σ²/2)`. WC presumption at 6% over a
+  lognormal mean-8yr lag returned 6.6e27 from quadrature; the true value is infinite. Bounds in use:
+  WC presumption 40y; GL general 10y, EPL/LE 12y, abuse 50y. Prefer truncate-and-renormalize (reject and
+  redraw) over a hard `min(lag, cap)`, which piles artificial probability mass exactly at the bound.
+- **Risk control applies to the DRAW only, never to the pricing expectation.** Applying it to both cancels
+  and recreates finding 17's no-op.
+- **Pure premium is derived ONCE from the neutral (RQ 5) full-roster analytic expectation and HELD.**
+  `k_line`/`k_GL` does the per-year roster-mix correction. Both recomputing annually double-corrects and
+  creates a pricing-chases-roster feedback loop. The known consequence — the enrolled book prices ~0.7%
+  off the full-roster neutral — is accepted and documented at the derivation site.
+- **Undiscounted nominal sums of long-tail inflating streams are invalid booked values.** WC catastrophic
+  booked nominal is ~$21.8M/claim against ~$8.7M PV — a 2.5× artifact of 6% medical inflation compounded
+  undiscounted over ~34 years. Store the nominal stream for later reserving; book the PV. Phase 3
+  reserving must discount WC catastrophic AND presumption or it overstates liabilities by the compounding
+  factor.
+- **`g_pool`** (Gamma(25, 1/25)) is drawn once per year in `processYear` and shared across lines. Converted
+  lines read `ctx.gPool`; unconverted lines still draw `commonLossFactor`. Never draw a second one.
 
 ## Removing a concept safely
 - **Keep the RNG draw, discard the value.** Bootstrap draws are sequential — deleting one shifts every
@@ -28,17 +82,20 @@ Things that were discovered expensively and live only in conversation memory. Re
   function of its label, so adding/removing draws elsewhere can't disturb them. The bootstrap still uses a
   sequential shared stream, which is why removals there are destructive. **Labels are inputs to the
   randomness** — renaming a label (e.g. `Property` → `PR`) changes its stream and shifts all baselines.
+- **Changing a candidate pool's LENGTH shifts the RNG stream even if membership logic is unchanged.**
+  `rng.shuffle` is Fisher–Yates and consumes exactly n−1 draws. The 2-year re-enrollment cooldown and the
+  100→200 member roster each changed n, shifting every subsequent draw. Where the size change is intrinsic
+  to the feature, the keep-the-draw trick does not apply — verify statistically instead.
 - **Invested assets are the balance-sheet PLUG** against a surplus pinned at K × premium. Removing an
   asset/liability pair does *not* move net position by their difference — invested assets absorb it and
   both sides drop by the former liability. Counterintuitive; verify rather than predict.
 
 ## Model tiers
-- **Opus/Fable:** bootstrap, seeding, contribution-share weights, reserve cohorts, anything where a
-  subtle error is hard to detect.
-- **Sonnet:** display, formula conversion, mechanical deletion, reorganisation — where verification is
-  unambiguous.
-- Ask for **the plan before code** on anything load-bearing. Measuring before building has repeatedly
-  caught blowups cheaply (the A1 over-capitalisation, the wrong seed fix, three broken audit checks).
+- **Opus/Fable:** bootstrap, seeding, contribution-share weights, reserve cohorts, claim generators,
+  pure-premium derivation, anything where a subtle error is hard to detect.
+- **Sonnet:** display, formula conversion, mechanical deletion, reorganisation, documentation edits with
+  supplied content — where verification is unambiguous.
+- Every task prompt should state the tier at the top.
 
 ## Known hazards
 - **The opening-band redraw is chaotic** (finding 8). Any systematic change to premium/capital/reserves
@@ -46,8 +103,21 @@ Things that were discovered expensively and live only in conversation memory. Re
   compare distributions — do NOT baseline-diff.
 - **Pure-premium multipliers cancel** (finding 17). Anything multiplying `purePremiumPer100` moves premium
   and losses in lockstep and has zero loss-ratio effect. Apply loss-side factors to the DRAW.
+- **Loss ratios must match on BOTH numerator and denominator basis** (finding 6, corrections 1 and 2).
+  `expectedLossRatio` uses `poolPremiumAndAdminExpense` (narrow); `actualLossRatio` uses
+  `totalMemberCharge` (wide, includes reinsurance cost). Separately, pricing's `expectedLoss` is GROSS, so
+  once reinsurance recovery is live, net-incurred cannot be compared to a gross-derived target. The only
+  apples-to-apples reconciliation is gross ultimate over the narrow basis.
+- **Design-doc aggregate dollar and percentage figures are REFERENCE ONLY** (finding 19). WC's "~$19–20M",
+  GL's "~832 general claims/yr" and "~35% ALAE", and the property docs' "$3.3B TIV / ~1,500 locations" have
+  all failed contact with the canonical roster. Assert structural ratios (frequencies vs roster-derived
+  analytic, pay rates, draw-vs-expectation invariants); REPORT dollar totals. Never tune a parameter to hit
+  a stale aggregate.
+- **Keyed lookups that can miss should THROW, not default.** A silent `?? 1` fallback means the factor has
+  no effect and nothing signals it. Applies to region multipliers, `WC_CLASS_MIX`, `GL_RELATIVITIES`, and
+  any future zone-keyed table.
 - **Claude Code paste-chips arrive EMPTY in the planning chat.** Long pastes auto-collapse to a "PASTED"
-  attachment that transfers as an empty document. Use screenshots or .docx uploads instead.
+  attachment that transfers as an empty document. Use screenshots or .docx/.md uploads instead.
 - **`e94387e` is a bad commit** — corrupt v9 baselines (NAN reserve rows). Superseded by `8693655`.
 - **The baseline generator once held its own copy of the result-metric list** and drifted from the app
   twice. Now extracted to `src/utils/resultMetrics.ts` (`RESULT_METRICS`), imported by both. Keep it that
