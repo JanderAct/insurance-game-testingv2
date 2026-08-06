@@ -18,7 +18,7 @@ import {
   generateWcClaims,
   regionMultiplier,
 } from '../../src/utils/wcClaimEngine';
-import type { Member } from '../../src/types/simulation';
+import type { Member, Region } from '../../src/types/simulation';
 
 const YEARS = 50; // draws per configuration — statistical, not a single run
 const problems: string[] = [];
@@ -60,15 +60,15 @@ console.log('=== 1. FULL-MARKET AGGREGATES (all 200 members, gPool=1, RQ actual,
   const presump = runs.map(r => r.claimCountsByClass.presumption);
   const gross = runs.map(r => r.grossUltimateLoss);
 
-  console.log(`  four-class claims/yr : ${mean(coreCounts).toFixed(1)} raw, ${mean(deTrended).toFixed(1)} de-trended (target ~809)  ${note(Math.abs(mean(deTrended) - 809) < 30, `four-class claims ${mean(deTrended).toFixed(1)} vs 809`)}`);
-  console.log(`  presumption claims/yr: ${mean(presump).toFixed(2)} (target ~10)  ${note(Math.abs(mean(presump) - 9.72) < 1.5, `presumption ${mean(presump).toFixed(2)} vs ~10`)}`);
+  console.log(`  four-class claims/yr : ${mean(coreCounts).toFixed(1)} raw, ${mean(deTrended).toFixed(1)} de-trended (target ~837.8)  ${note(Math.abs(mean(deTrended) - 837.8) < 30, `four-class claims ${mean(deTrended).toFixed(1)} vs 837.8`)}`);
+  console.log(`  presumption claims/yr: ${mean(presump).toFixed(2)} (target ~14.9)  ${note(Math.abs(mean(presump) - 14.9) < 1.5, `presumption ${mean(presump).toFixed(2)} vs ~14.9`)}`);
   // REPORTED, NOT ASSERTED. The design's "$19-20M combined" figure predates the
   // A4 annuity model and is known-stale; book scale is an open cross-line
   // recalibration item. Frequency, which is NOT stale, is asserted above.
   console.log(`  gross loss/yr        : ${fmt$(mean(gross))} de-trended ${fmt$(mean(gross.map((g, i) => g / trend(i + 1))))} — REPORTED (the "$19-20M" design figure is known-stale, predates the annuity model)`);
 
   console.log('  per-class counts (de-trended mean vs target):');
-  const targets: Record<string, number> = { clerical: 75, publicWorks: 511, police: 79, fire: 144 };
+  const targets: Record<string, number> = { clerical: 77.4, publicWorks: 427.8, police: 164.6, fire: 167.9 };
   for (const c of WC_CLASS_KEYS) {
     const m = mean(runs.map((r, i) => r.claimCountsByClass[c] / trend(i + 1)));
     const t = targets[c];
@@ -147,7 +147,7 @@ console.log('\n=== 2. ENROLLED SUBSET SCALES PROPORTIONALLY (~30% of the market)
   const counts = mean(runs.map((r, i) => WC_CLASS_KEYS.reduce((s, c) => s + r.claimCountsByClass[c], 0) / trend(i + 1)));
   const gross = mean(runs.map((r, i) => r.grossUltimateLoss / trend(i + 1)));
   console.log(`  subset payroll share : ${(share * 100).toFixed(1)}% of market`);
-  console.log(`  claims/yr            : ${counts.toFixed(1)} de-trended (proportional target ~${(809 * share).toFixed(0)})  ${note(Math.abs(counts - 809 * share) / (809 * share) < 0.15, `subset claims ${counts.toFixed(1)} vs proportional ${(809 * share).toFixed(0)}`)}`);
+  console.log(`  claims/yr            : ${counts.toFixed(1)} de-trended (proportional target ~${(837.8 * share).toFixed(0)})  ${note(Math.abs(counts - 837.8 * share) / (837.8 * share) < 0.15, `subset claims ${counts.toFixed(1)} vs proportional ${(837.8 * share).toFixed(0)}`)}`);
   console.log(`  gross loss/yr        : ${fmt$(gross)} de-trended (proportional to full-market book)`);
 }
 
@@ -291,7 +291,15 @@ console.log('\n=== 9. DETERMINISM AND CLAIM INTEGRITY ===');
   console.log(`  non-catastrophic carry a payment pattern: ${note(nonCat.every(c => (c.paymentPattern?.length ?? 0) > 0), 'non-catastrophic claim missing paymentPattern')}`);
   const presump = a.claims.filter(c => c.tier === 'presumption');
   console.log(`  presumption tagged with report lag > accident year: ${note(presump.every(p => p.reportedYear > p.accidentYear), 'presumption claim not lagged')}  (n=${presump.length}, mean lag ${presump.length ? (mean(presump.map(p => p.reportedYear - p.accidentYear))).toFixed(1) : 'n/a'}yr)`);
-  console.log(`  region multipliers in [0.92, 1.12]: ${note([1, 2, 3, 4, 5].every(r => regionMultiplier(r) >= 0.92 && regionMultiplier(r) <= 1.12), 'region multiplier out of range')}`);
+  // Roster v2: keyed by Region, and MEAN-NEUTRAL at equal assignment
+  // probability (the old 1-5 array averaged 1.026 under its 10/20/40/20/10
+  // weights, quietly inflating every WC severity by 2.6%).
+  const regionKeys: Region[] = ['North', 'Central', 'South'];
+  const regionMean = regionKeys.reduce((s, r) => s + regionMultiplier(r), 0) / regionKeys.length;
+  console.log(`  region multipliers ${regionKeys.map(r => `${r} ${regionMultiplier(r).toFixed(2)}`).join(' / ')}`);
+  console.log(`  region multiplier mean ${regionMean.toFixed(4)} — must be 1.0000 (mean-neutral): ${note(Math.abs(regionMean - 1) < 1e-9, `region multipliers average ${regionMean.toFixed(4)}, not mean-neutral`)}`);
+  const rosterRegionMean = mean(roster.map(m => regionMultiplier(m.region)));
+  console.log(`  roster-weighted region mean ${rosterRegionMean.toFixed(4)} (72/61/67 split, so near but not exactly 1)`);
 }
 
 console.log(problems.length === 0
