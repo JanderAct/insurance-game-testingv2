@@ -28,6 +28,18 @@ export interface Member {
   // scaffolding for future regional loss correlation (catastrophes striking a
   // region), which is what Property's generator will want.
   region: Region;
+  // Property's location schedule, both authored roster columns since v3.
+  // `locations` is the integer count of insured sites and is the attritional
+  // frequency base (1,866 pool-wide) — a physical fact about the member, NOT
+  // derived from insured value. `primaryAssetShare` is the fraction of the
+  // member's TIV sitting in its DESIGNATED PRIMARY ASSET — which is not
+  // necessarily its largest: for 9 v3 members the nominal primary is the
+  // smaller site. Together they chop member TIV into per-location values,
+  // which is what caps each claim's severity and keeps the per-risk
+  // reinsurance layer alive (it fires on within-member concentration, not on
+  // member-level TIV skew).
+  locations: number;
+  primaryAssetShare: number;
   exposureByLine: Partial<Record<CoverageLine, number>>; // exposure units, per coverage line
   // LOSSY display convenience, NOT an enrollment record. Opening enrollees are
   // stamped yearJoined: 1 ("was here when the game started" — the display
