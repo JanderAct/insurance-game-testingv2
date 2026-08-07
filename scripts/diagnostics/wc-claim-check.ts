@@ -60,7 +60,7 @@ console.log('=== 1. FULL-MARKET AGGREGATES (all 200 members, gPool=1, RQ actual,
   const presump = runs.map(r => r.claimCountsByClass.presumption);
   const gross = runs.map(r => r.grossUltimateLoss);
 
-  console.log(`  four-class claims/yr : ${mean(coreCounts).toFixed(1)} raw, ${mean(deTrended).toFixed(1)} de-trended (target ~837.8)  ${note(Math.abs(mean(deTrended) - 837.8) < 30, `four-class claims ${mean(deTrended).toFixed(1)} vs 837.8`)}`);
+  console.log(`  four-class claims/yr : ${mean(coreCounts).toFixed(1)} raw, ${mean(deTrended).toFixed(1)} de-trended (target ~838.2)  ${note(Math.abs(mean(deTrended) - 838.2) < 30, `four-class claims ${mean(deTrended).toFixed(1)} vs 838.2`)}`);
   console.log(`  presumption claims/yr: ${mean(presump).toFixed(2)} (target ~14.9)  ${note(Math.abs(mean(presump) - 14.9) < 1.5, `presumption ${mean(presump).toFixed(2)} vs ~14.9`)}`);
   // REPORTED, NOT ASSERTED. The design's "$19-20M combined" figure predates the
   // A4 annuity model and is known-stale; book scale is an open cross-line
@@ -68,7 +68,7 @@ console.log('=== 1. FULL-MARKET AGGREGATES (all 200 members, gPool=1, RQ actual,
   console.log(`  gross loss/yr        : ${fmt$(mean(gross))} de-trended ${fmt$(mean(gross.map((g, i) => g / trend(i + 1))))} — REPORTED (the "$19-20M" design figure is known-stale, predates the annuity model)`);
 
   console.log('  per-class counts (de-trended mean vs target):');
-  const targets: Record<string, number> = { clerical: 77.4, publicWorks: 427.8, police: 164.6, fire: 167.9 };
+  const targets: Record<string, number> = { clerical: 77.3, publicWorks: 428.7, police: 164.6, fire: 167.7 };
   for (const c of WC_CLASS_KEYS) {
     const m = mean(runs.map((r, i) => r.claimCountsByClass[c] / trend(i + 1)));
     const t = targets[c];
@@ -147,7 +147,7 @@ console.log('\n=== 2. ENROLLED SUBSET SCALES PROPORTIONALLY (~30% of the market)
   const counts = mean(runs.map((r, i) => WC_CLASS_KEYS.reduce((s, c) => s + r.claimCountsByClass[c], 0) / trend(i + 1)));
   const gross = mean(runs.map((r, i) => r.grossUltimateLoss / trend(i + 1)));
   console.log(`  subset payroll share : ${(share * 100).toFixed(1)}% of market`);
-  console.log(`  claims/yr            : ${counts.toFixed(1)} de-trended (proportional target ~${(837.8 * share).toFixed(0)})  ${note(Math.abs(counts - 837.8 * share) / (837.8 * share) < 0.15, `subset claims ${counts.toFixed(1)} vs proportional ${(837.8 * share).toFixed(0)}`)}`);
+  console.log(`  claims/yr            : ${counts.toFixed(1)} de-trended (proportional target ~${(838.2 * share).toFixed(0)})  ${note(Math.abs(counts - 838.2 * share) / (838.2 * share) < 0.15, `subset claims ${counts.toFixed(1)} vs proportional ${(838.2 * share).toFixed(0)}`)}`);
   console.log(`  gross loss/yr        : ${fmt$(gross)} de-trended (proportional to full-market book)`);
 }
 
