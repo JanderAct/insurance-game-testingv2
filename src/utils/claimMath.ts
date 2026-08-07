@@ -102,6 +102,23 @@ export function trendToSettlement(amount: number, rate: number, accidentYear: nu
 // numerator over the truncated range while normalising by the FULL density
 // would under-weight the result and silently break the draw/expectation match
 // — the draw rejects-and-redraws, so it samples the renormalised density.
+//
+// ⚠ LOGNORMAL ONLY. This is a FIXED-GRID quadrature over the underlying normal,
+// and it is correct here precisely because a lognormal density is bounded and
+// smooth on that grid. It is NOT a general-purpose expectation routine, and it
+// is the thing someone will reach for when a new distribution turns up.
+//
+// It fails silently on any density with an interior or endpoint SINGULARITY —
+// notably Beta(a, b) with a < 1, whose density goes as t^(a-1) and is unbounded
+// at 0. Property's attritional damage ratio is Beta(0.08, 1.92): a fixed grid
+// through that spike underestimates the mass near zero, deflating the CDF and
+// inflating the survival function. That exact mistake produced 21.8 per-risk
+// breaches/yr against a true 1.78 — a 12x error that looked entirely plausible
+// until it was checked against Monte Carlo.
+//
+// For Beta quantities use the closed form where one exists (E[X] = mu under the
+// mean-concentration parameterization) or Monte Carlo otherwise. See
+// SeededRandom.beta in random.ts.
 export function expectedOverLognormal(
   mean: number,
   cv: number,

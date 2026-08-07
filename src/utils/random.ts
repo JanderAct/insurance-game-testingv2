@@ -122,6 +122,31 @@ export class SeededRandom {
     return xm * Math.pow(u, -1 / alpha);
   }
 
+  // Returns a sample from a Beta(a, b) distribution, via the standard gamma
+  // ratio X/(X+Y) with X ~ Gamma(a,1), Y ~ Gamma(b,1). Consumes the gamma
+  // stream twice per draw.
+  //
+  // Property's damage ratio uses the MEAN-CONCENTRATION parameterization —
+  // a = mu * nu, b = (1 - mu) * nu — so mu is the mean and nu controls
+  // dispersion (see betaFromMeanConcentration below).
+  //
+  // BEWARE alpha < 1. At a < 1 the density is UNBOUNDED at 0 (proportional to
+  // t^(a-1)), and Property's attritional ratio runs a = 0.08. That is a
+  // perfectly well-behaved integrable singularity for SAMPLING, but it breaks
+  // fixed-grid quadrature: integrating the density from 0 outward through the
+  // spike underestimates the mass there, deflating the CDF and inflating the
+  // survival function. A first attempt at the per-risk breach rate did exactly
+  // this and returned 21.8 breaches/yr against a true 1.78 — a 12x error that
+  // looked plausible. VERIFY BETA QUANTITIES BY MONTE CARLO OR CLOSED FORM
+  // (E[X] = mu exactly), never by naive quadrature over the density.
+  beta(a: number, b: number): number {
+    if (!(a > 0) || !(b > 0)) return 0;
+    const x = this.gamma(a, 1);
+    const y = this.gamma(b, 1);
+    const s = x + y;
+    return s > 0 ? x / s : 0;
+  }
+
   // Shuffles array in place (Fisher-Yates)
   shuffle<T>(arr: T[]): T[] {
     for (let i = arr.length - 1; i > 0; i--) {
