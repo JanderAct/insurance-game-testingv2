@@ -775,3 +775,92 @@ export const PROPERTY_LOSS_MODEL = {
   // single location $93.5M). Flatten Primary Asset Share and the treaty dies.
   perRiskRetention: 2_000_000,
 };
+
+// ===========================================================================
+// PROPERTY CAT and WEATHER parameters — INERT.
+//
+// NOTHING READS THESE. They are recorded now so the weather and cat bands have
+// their calibration ready, and so the numbers live in the repo rather than in
+// a chat attachment. Full derivation: docs/PROPERTY_CAT_ENGINE_DESIGN.md and
+// docs/PROPERTY_NONCAT_DESIGN.md.
+//
+// ⚠ EVERY mu BELOW IS A NUMERIC SOLVE AGAINST A TARGET AAL, NOT A CLOSED FORM.
+// Intensity enters the event TWICE — once through the footprint
+// (hit_rate = min(base_footprint x intensity, cap)) and once through the damage
+// ratio (event_mean_dr = mu x intensity) — so expected loss per event scales
+// with E[I^2] = 1 + CV^2, not E[I]^2 = 1. A closed-form mu/(1+CV^2) correction
+// does NOT land either, because the footprint cap interacts with the intensity
+// draw (quake especially: cap 0.95 binds often at CV 1.1). These values were
+// solved by simulation against each peril's target AAL holding lambda,
+// base_footprint, cap and CV fixed.
+//
+// RE-SOLVE mu IF lambda, base_footprint, cap OR CV MOVES — and if the roster
+// moves, since the solve is against v3's TIV and zone structure. Unlike the WC
+// and GL pure premiums, these do NOT recompute themselves.
+//
+// Target AALs: flood $2.90M / wildfire $2.71M / earthquake $1.87M
+// = $7.47M cat total, plus weather $4.5M.
+export const PROPERTY_CAT_MODEL = {
+  flood:      { lambda: 0.70,  baseFootprint: 0.15, cap: 0.60, intensityCv: 0.7, betaMean: 0.00818, betaConcentration: 1.5, targetAal: 2_900_000 },
+  wildfire:   { lambda: 0.80,  baseFootprint: 0.20, cap: 0.70, intensityCv: 0.5, betaMean: 0.00582, betaConcentration: 2.5, targetAal: 2_710_000 },
+  earthquake: { lambda: 0.045, baseFootprint: 0.40, cap: 0.95, intensityCv: 1.1, betaMean: 0.02532, betaConcentration: 1.5, targetAal: 1_870_000 },
+
+  // Events draw a region by hazard weight. This is the ONLY thing that
+  // differentiates the three regions — zone TIV is near-even (2513.9 / 2400.2 /
+  // 2079.2), so uniform weights would make geography decorative.
+  hazardWeights: {
+    flood:      { North: 0.30, Central: 0.25, South: 0.45 },  // South = coastal/riverine
+    wildfire:   { North: 0.45, Central: 0.35, South: 0.20 },  // North = WUI / dry interface
+    earthquake: { North: 0.25, Central: 0.45, South: 0.30 },  // Central = fault proximity
+  } as Record<'flood' | 'wildfire' | 'earthquake', Record<Region, number>>,
+
+  // Earthquake ALONE can span two ADJACENT regions under one occurrence id;
+  // flood and wildfire are always single-region. North<->Central and
+  // Central<->South are adjacent; NORTH AND SOUTH NEVER CO-OCCUR.
+  //
+  // A quake drawing Central engages one neighbour (50/50) with this
+  // probability, giving 0.45 x 0.35 = 0.1575 extra zone-equivalents. The quake
+  // AAL only reconciles WITH this: 0.045 x 0.40 x $2,331M x 2.532% is ~$1.05M
+  // single-zone, and reaching $1.87M requires the span. A naive re-derivation
+  // that omits it will look wrong — the span is load-bearing.
+  earthquakeSpan: { probability: 0.35, adjacency: { North: ['Central'], Central: ['North', 'South'], South: ['Central'] } },
+
+  // Two-layer structure. The occurrence limit is LIVE, not decorative.
+  occurrenceAttachment: 5_000_000,
+  // ⚠ $1B BINDS AT v3 TIV — do NOT assert it never fires. A two-region quake
+  // exposes up to ~$4,662M (2x the average zone; the worst actual pair,
+  // North+Central, is $4,914M), simulated span-quakes reach ~$2,224M, and
+  // ~0.175% exceed $1B. Above the limit THE POOL RE-RETAINS THE EXCESS — a
+  // genuine tail exposure and a real reason the aggregate matters.
+  occurrenceLimit: 1_000_000_000,
+  aggregateStopMultiple: 1.75,   // x expected annual retained; finite by default
+};
+
+export const PROPERTY_WEATHER_MODEL = {
+  // PER-ZONE Poisson: each of the three zones draws its own count at 2.5, for
+  // 7.5 events/yr pool-wide. This is the ruled reading of NC2.1, which also
+  // contained a contradictory "draw a zone by weather hazard weight" line —
+  // two different mechanisms, and per-zone is the one that reproduces both
+  // 7.5 events/yr and the $4.5M target. That line is deleted, not implemented.
+  lambdaPerZone: 2.5,
+  baseFootprint: 0.10,
+  cap: 0.50,
+  intensityCv: 0.6,
+  betaMean: 0.00189,        // numeric solve — see the warning above
+  betaConcentration: 4.0,   // lighter tail than cat
+  targetAal: 4_500_000,
+
+  // ⚠ WEATHER HAS NO REGIONAL HAZARD DIFFERENTIATION. Every zone draws the
+  // same expected event count, so loss varies by zone ONLY through TIV
+  // (North $2,513.9M / Central $2,400.2M / South $2,079.2M). No weather hazard
+  // table exists in either design doc. If differentiation is wanted later it
+  // needs its OWN table — do NOT borrow flood's, which encodes coastal/riverine
+  // exposure rather than storm frequency.
+  regionalHazardDifferentiation: null,
+
+  // RQ: frequency LOCKED (hazard is nature's, not the member's); RQ affects the
+  // damage ratio only. Development 80/20 over two years.
+  rqFrequencyBeta: 0,
+  rqSeverityBeta: 0.04,
+  payoutPattern: [0.80, 0.20],
+};
