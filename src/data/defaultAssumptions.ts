@@ -683,15 +683,7 @@ export const STARTING_FINANCIALS = {
 // Slider ranges (not player-editable in v1)
 export const SLIDER_RANGES = {
   rateChange: { min: -0.20, max: 0.30, step: 0.01, default: 0 },
-  // EXPERIMENT — 0.60 (CLF 1.003), pending a calibration ruling. NOT settled.
-  // 0.75 (CLF 1.346) loaded premium with 17.3 points of underwriting margin,
-  // which made a five-year loss unreachable: 0 of 50 games ended below their
-  // starting surplus even though 8.0% of individual years ran a combined ratio
-  // above 100%. 0.60 is the lowest table entry at or above a CLF of 1.0
-  // (1.003), so it removes essentially all of that pricing margin without
-  // inventing a table row or interpolating. Revert this single line to 0.75 to
-  // restore the prior behaviour.
-  fundingConfidenceLevel: { min: 0.50, max: 0.95, step: 0.05, default: 0.60 },
+  fundingConfidenceLevel: { min: 0.50, max: 0.95, step: 0.05, default: 0.75 },
   dividendPct: { min: 0, max: 0.15, step: 0.005, default: 0 },
   assessmentPct: { min: 0, max: 0.25, step: 0.005, default: 0 },
   underwritingStrictness: { min: 0, max: 10, step: 1, default: 5 },

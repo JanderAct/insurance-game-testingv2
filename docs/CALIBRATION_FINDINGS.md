@@ -934,3 +934,103 @@ five thresholds plus the left tail. Every comparison fell within |z| < 1.5, and 
 z = 0.54. The suspicion was unfounded. The validation is retained as a regression check on
 `SeededRandom.beta`, which matters because the same primitive will price the cat and weather bands,
 where the numerically-solved mu values are calibrated entirely against tail behaviour.
+
+## 24. The pool cannot lose money over five years at default settings
+**Status:** measured, not yet fixed. See findings 25 (root cause) and 9 (dormant mechanics this
+compounds with).
+
+Measured over 50 five-year games at default decisions (WC + GL, seeds recorded in
+`scripts/diagnostics/clf-downside-check.ts`'s commit history), with realized gross-to-expected at
+**0.9967** — i.e. this sample was NOT lucky, unlike the five earlier live playthroughs that drew ~0.79:
+
+- **0/50 games ended below starting surplus.** Worst ending ratio 1.356x; median 2.698x.
+- **20/250 pool-years (8.0%) had a combined ratio above 100%.**
+- **11/250 pool-years (4.4%) saw surplus decrease** year over year.
+- Growth decomposition: underwriting income 65.8% of the five-year total, investment income 34.2%.
+
+**The gap between 8% of YEARS losing money and 0% of GAMES losing money is pure compounding.** Bad
+years occur — the loss distribution genuinely reaches past the pricing margin about one year in
+twelve — but they never cluster enough within a five-year window to overcome the surrounding good
+years plus investment income earned on a surplus that only ever grows. This is a materially different
+(and better) finding than "the loss distribution never reaches the margin": the annual mechanics work,
+the compounding does not create two-sided risk at game length.
+
+### The experiment: funding confidence 0.75 -> 0.60 (CLF 1.346 -> 1.003), REVERTED
+
+Same 50 seeds, one changed default, no re-baseline of the change (both export gates were left
+knowingly red for the duration and are green again after reverting):
+
+| | 0.75 (CLF 1.346) | 0.60 (CLF 1.003) |
+|---|---|---|
+| games ending below start | 0/50 | 1/50 |
+| pool-years CR > 100% | 8.0% | 31.6% |
+| pool-years surplus decreasing | 4.4% | 19.2% |
+| median ending/starting | 2.698x | 1.897x |
+| min ending/starting | 1.356x | **0.080x** (one near-wipeout) |
+| underwriting / investment split | 65.8% / 34.2% | 39.1% / 60.9% |
+
+**Conclusion: the CLF default transforms the ANNUAL risk profile but barely moves five-year
+downside.** A losing year goes from one in twelve to nearly one in three, and a near-wipeout becomes
+possible — but games ending below starting surplus only moves 0% -> 2%. Once pricing margin is
+removed, investment income on surplus that is never returned to members becomes the MAJORITY of
+growth (60.9%), so the pool keeps compounding upward on the interest of its own reserves regardless of
+how tightly losses are priced. **CLF is necessary, not sufficient.** A genuine two-sided-risk design
+needs a surplus-return mechanism (dividends, or something structural) alongside a corrected price.
+
+**Contamination note — do not read the experiment column as an isolated CLF effect.** Realized
+gross-to-expected moved 0.9967 -> 1.0651 on the *identical* seeds, because enrolment responds to
+price and there is a live sign bug in `membershipEngine.ts`'s satisfaction update:
+`delta += (fundingConfidenceLevel - 0.75) * 0.5`. Lowering the confidence level LOWERS satisfaction
+(the delta goes negative), which is backwards — a cheaper, less-margin-loaded price should not make
+members less happy. That drove differential retention toward worse members, and the book got 6.5%
+more expensive than the CLF change alone would have produced. **The isolated CLF effect is somewhat
+better than measured** (i.e. the true downside-frequency increase from 1.003 alone, without the
+satisfaction contamination, is smaller than 19.2%/31.6%). Fix the sign bug before re-measuring, or the
+next CLF experiment inherits the same contamination.
+
+The 0.60 default has been REVERTED to 0.75; this finding documents the measurement, not a decision.
+
+## 25. Members are charged for ceded losses TWICE — the ~8-point structural profit
+**Status:** identified, not yet fixed. The important finding from the CLF experiment — more so than
+finding 24 itself. Interacts with the deferred J10 waterfall work; design together, not separately.
+
+**The observation.** Expected combined ratio exceeded actual by 7.6 points at CLF 1.346 and 7.8
+points at CLF 1.003 — the SAME gap at both settings, measured on the 50-seed sets in finding 24.
+Identical size across a materially different price is the signature of a structural offset, not
+noise or a calibration miss.
+
+**The cause.** The pool prices to GROSS expected loss but only ever pays NET:
+
+```
+members pay:  poolPremium + adminExpense + reinsuranceCost
+pool pays:    netUltimateLoss + adminExpense + reinsuranceCost
+pool profit = poolPremium - netUltimateLoss
+```
+
+`reinsuranceCost` cancels in the profit identity — it is a pure pass-through, charged to members and
+paid out to a reinsurer, net effect zero on pool surplus. But `poolPremium = CLF x GROSS expectedLoss`,
+which funds ALL expected losses, including the ~18% that reinsurance is expected to cede. Members are
+then ALSO charged `reinsuranceCost` to buy the recovery on that same ceded portion. **The ceded slice
+is funded twice: once through gross-priced premium, once through the reinsurance cost line — and the
+pool keeps the recovery instead of the member.** This is worth roughly 8 points of combined ratio,
+permanently, at whatever CLF is selected — which is exactly why raising or lowering CLF changes the
+ANNUAL risk profile (finding 24) without ever closing this gap.
+
+**The fix, not yet built.** Pricing the retention to NET expected loss —
+`poolPremium = CLF x E[netUltimateLoss]` instead of gross — would give exactly zero expected profit at
+CLF 1.0, matching the CLF-1.0 invariant's intent for the first time on a genuinely fair basis. It would
+also make the reinsurance decision a real tradeoff for the first time: more cover would LOWER premium
+(smaller retained expected loss) while RAISING reinsurance cost, a genuine two-sided choice. Today more
+cover only raises cost, because premium is blind to how much is ceded.
+
+**This is a pricing-basis fix and belongs with the J10 waterfall work, not before it.** Net-basis
+pricing requires knowing, at pricing time, what the retention structure actually cedes — which is
+exactly the reinsuranceLevel-to-retention mapping J10 already blocks on. Design them together.
+
+**A separate, smaller issue — do NOT conflate with this finding.** The reinsurance COST ITSELF may
+also be mispriced relative to what it actually recovers (members pay ~0.376 x expected loss for ~0.18
+x expected loss of recovery, roughly $5.4M/yr of overpayment at current scale). Fixing the cost to an
+actuarially fair `E[ceded] x loading` price would NOT change pool surplus at all — the cost is a
+pass-through, so any fairness correction there is a MEMBER-VALUE issue, not a pool-profit issue. That
+belongs with finding 10 (reinsurance cost band), not here. This finding is about the double-funding of
+the ceded loss itself, which is what moves pool surplus.
