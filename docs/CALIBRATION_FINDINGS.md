@@ -792,3 +792,36 @@ the gate gamma tracks pay rates within 0.4pp at every RQ level. So the channels 
 compound to the stated total. Some of the gap is tail noise (alpha=1.3), but likely not all. The
 design labeled 0.084 as "realized beta ~", so the target itself may be approximate. Worth revisiting
 when GL's tail has more sample, but not blocking.
+
+## 22. The cat/weather AAL identity omitted the intensity-squared term
+**Status:** RESOLVED before implementation. Recorded because the general rule generalises.
+
+**The error.** The original cat and weather AAL identity was written as
+
+```
+AAL ~ lambda x footprint x zone_TIV x mu
+```
+
+treating intensity as if it entered once with mean 1. It enters **twice** — once through the
+footprint (`hit_rate = min(base_footprint x intensity, cap)`) and again through the damage ratio
+(`event_mean_dr = mu x intensity`). Expected loss per event therefore scales with **E[I²] = 1 + CV²**,
+not E[I]² = 1. Using the single-entry identity overshot **cat by 1.37x and weather by 1.58x** — the
+weather miss is larger because 1 + CV² compounds against a larger relative mu.
+
+**Why no closed-form fix lands.** The obvious correction, dividing mu by (1 + CV²), does not work
+either: the footprint **cap** interacts with the intensity draw, so the two entries are not
+independent. Earthquake is the clearest case — at CV 1.1 with cap 0.95, the cap binds on a large
+share of draws, truncating the footprint's response to intensity while the damage ratio's response
+continues unchecked. Every mu is therefore a **numeric solve by simulation** against its peril's
+target AAL, holding lambda, base_footprint, cap and CV fixed. The superseded pre-correction values
+(1.18 / 0.73 / 3.83%) are recorded in the design doc so they are not mistaken for current.
+
+**Caught before implementation**, so nothing was ever built on the wrong numbers — the mu values in
+`PROPERTY_CAT_MODEL` and `PROPERTY_WEATHER_MODEL` are the post-correction solves.
+
+**The general rule, which outlives this instance:** *when one random factor drives BOTH the extent of
+an event and its per-unit severity, expected loss scales with E[factor²] = 1 + CV², and mu must be
+solved numerically rather than derived.* Any future peril, shock layer, or contagion mechanism where
+a single intensity variable feeds two multiplicative channels inherits this. Re-solve whenever
+lambda, footprint, cap, CV **or the roster** moves — unlike the WC and GL pure premiums, these
+constants do not recompute themselves.
