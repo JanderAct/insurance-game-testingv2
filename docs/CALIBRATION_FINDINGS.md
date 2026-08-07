@@ -825,3 +825,54 @@ solved numerically rather than derived.* Any future peril, shock layer, or conta
 a single intensity variable feeds two multiplicative channels inherits this. Re-solve whenever
 lambda, footprint, cap, CV **or the roster** moves — unlike the WC and GL pure premiums, these
 constants do not recompute themselves.
+
+## 23. A tail level-error that every internal check passed — caught only by an external target
+**Status:** RESOLVED at plan time, before any code was written. Recorded for the verification lesson.
+
+**The bug.** The per-risk breach rate was first computed by integrating the Beta(0.08, 1.92) damage-ratio
+density with fixed-grid Simpson quadrature. That density goes as `t^(-0.92)` and is **unbounded at
+t = 0**. A fixed grid cannot resolve the spike, so it under-counts the mass near zero, which deflates
+the CDF and inflates the survival function at every threshold. The result: **21.8 breaches/yr against
+a true ~1.78/yr**, a 12x error.
+
+**Why it was dangerous rather than obvious.** 21.8/yr is absurd on its face *only if you already know
+the answer*. It is a plausible-looking number produced by a standard technique, and it survived every
+internal consistency check available at the time:
+
+- The **mean was correct**. E[damage ratio] = 0.04 came out right, because the quadrature error lives
+  in the tail and the mean is dominated by the bulk.
+- **No other check examined that region.** Frequency, pay rate, the expected-loss identity and the
+  draw-vs-analytic invariant all pass through a tail level-error untouched — none of them integrates
+  the survival function.
+
+A **level error confined to a tail is invisible to checks that measure levels elsewhere.** Nothing
+internal would have flagged it.
+
+**What actually caught it.** Two internal methods disagreed — the quadrature said 21.8/yr, a Monte
+Carlo of the same quantity said 1.77/yr — and a disagreement alone does not say which side is wrong.
+What resolved it immediately was the **independently pre-computed external target of ~1.78/yr**,
+calculated outside the engine before the engine existed. That number identified the quadrature as the
+faulty side in one step, with no need to settle the question from first principles.
+
+**The lesson, which is the point of this finding:**
+
+> When two internal methods disagree, a pre-computed external target resolves it immediately instead
+> of requiring the disagreement be settled from first principles. This is the strongest argument for
+> computing harness targets independently, before the engine is built, rather than deriving them from
+> the engine afterwards — a target derived from the code under test cannot arbitrate against it.
+
+**Consequences carried into the code.** `expectedOverLognormal` in `claimMath.ts` is marked LOGNORMAL
+ONLY, with the failure mode and this incident named at the call site, because it is the fixed-grid
+routine someone will reach for when a new distribution appears. `SeededRandom.beta` carries the same
+warning. Beta quantities are verified by closed form (E[X] = mu exactly under the mean-concentration
+parameterization) or by Monte Carlo, and never by quadrature over the density. Where a survival
+probability genuinely must be integrated, integrate from `x` to 1 — away from the singularity at zero
+— which is safe here because `b > 1` leaves the upper endpoint well behaved.
+
+**One related check, recorded for completeness.** A second instance of tail mis-estimation was
+subsequently suspected in the gamma-ratio Beta sampler itself. It was tested directly: 5,000,000 draws
+through the engine's real RNG path, compared against exact incomplete-beta survival probabilities at
+five thresholds plus the left tail. Every comparison fell within |z| < 1.5, and the mean within
+z = 0.54. The suspicion was unfounded. The validation is retained as a regression check on
+`SeededRandom.beta`, which matters because the same primitive will price the cat and weather bands,
+where the numerically-solved mu values are calibrated entirely against tail behaviour.

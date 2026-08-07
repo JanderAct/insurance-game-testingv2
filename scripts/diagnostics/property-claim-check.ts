@@ -182,7 +182,9 @@ console.log('\n--- 4. per-risk layer (the $2M retention) — REPORTED, wide sani
   //   +1.8%      booked (settlement-trended) $   -> 1.833/yr
   //
   //   = 1.833/yr exact for what the engine actually does, confirmed by
-  //     simulation at 1.851/yr over 2,000 years.
+  //     simulation at 1.851/yr over 2,000 years. This harness runs 600 years
+  //     and reports ~1.943/yr — about one Poisson SE above the exact figure,
+  //     which is why the band below is wide rather than tight.
   //
   // eps and gPool do NOT appear: both have mean 1 and enter lambda LINEARLY,
   // and a breach is a per-claim severity event, so their dispersion has no
