@@ -164,6 +164,15 @@ export interface Claim {
   // yearNumber the claim settles (accident + report lag + stage lag) — the
   // year whose dollars the booked severity is trended to.
   settlementYear?: number;
+  // --- Property claim-level fields (design doc property_noncat NC1) ---
+  // Property severity is EMERGED FROM THE BOOK rather than drawn as a dollar
+  // amount: severity = damageRatio x the hit location's TIV, which is what
+  // bounds every claim at insured value. Both components are recorded so that
+  // cap is externally checkable — a harness can assert
+  // grossUltimate <= locationTiv without re-deriving the location schedule,
+  // and damageRatio can be tested against its Beta directly.
+  damageRatio?: number;
+  locationTiv?: number;
 }
 
 // Seeded, read-only operating history shown before Year 1 begins.
