@@ -57,7 +57,7 @@ console.log(`=== GL generator: full canonical market, ${YEARS} independent draw-
 const runs = runYears(roster, YEARS);
 const allClaims: Claim[] = runs.flatMap(r => r.claims);
 
-console.log('--- 1. per-sub frequency (roster-derived analytic; roster v2 targets) ---');
+console.log('--- 1. per-sub frequency (roster-derived analytic; roster v3 targets) ---');
 {
   const kGl = computeKGl(roster);
   // Analytic per-sub expected counts at the roster's actual RQ mix, x kGl.
@@ -79,9 +79,10 @@ console.log('--- 1. per-sub frequency (roster-derived analytic; roster v2 target
     lawEnforcement: mean(runs.map(r => r.claimCountsBySub.lawEnforcement)),
     abuse: mean(runs.map(r => r.claimCountsBySub.abuseIncidents)),
   };
-  // Roster v2 targets. lawEnforcement MORE THAN DOUBLES vs v1's ~13.3 because
-  // police payroll went $66.2M -> $137.2M in the County/City rebalance.
-  const refs: Record<string, string> = { general: 'v2 882.8', epl: 'v2 ~111.3', lawEnforcement: 'v2 ~28.4 (v1 ~13.3)', abuse: 'v2 ~3.2 incidents' };
+  // Roster v3 targets. lawEnforcement stays ~28 (police payroll is unchanged
+  // from v2's rebalance); v3's movement is RQ decorrelation, which shifts the
+  // theta mix rather than the exposure base.
+  const refs: Record<string, string> = { general: 'v3 881.2', epl: 'v3 ~111.5', lawEnforcement: 'v3 ~28.4', abuse: 'v3 ~3.2 incidents' };
   for (const sub of GL_SUB_KEYS) {
     const rel = Math.abs(measured[sub] - analytic[sub]) / analytic[sub];
     console.log(`  ${sub.padEnd(15)} measured ${measured[sub].toFixed(2).padStart(8)}   analytic ${analytic[sub].toFixed(2).padStart(8)}   (${refs[sub]})  ${note(rel < 0.05, `${sub} freq ${measured[sub].toFixed(1)} vs ${analytic[sub].toFixed(1)}`)}`);
@@ -233,13 +234,66 @@ console.log('\n--- 7. lag truncation (divergence guard) ---');
   }
 }
 
+// --- 8. INVARIANT 1, on a CI-BASED GATE ---------------------------------------
+// WHAT THIS SECTION IS: a GROSS-ERROR DETECTOR — sign flips, missing factors,
+// wrong denominators, a sub wired to the wrong exposure base. For abuse and
+// lawEnforcement it is NOT a precision check, and a passing result here must
+// never be read as proof those subs are exactly right. A subtle 5% error in
+// abuse alone would sail through: at 1,500 draw-years its 99% CI is still
+// +/-9.4%, because the batch-total tail dominates the mean.
+//
+// THE DIVISION OF LABOUR. Precision on abuse and LE comes from the COMPONENT
+// checks, not from here — frequency (section 1), pay rate (2), batch-size and
+// within-batch correlation (4), Pareto incidence and federal share (5). Those
+// are individually far tighter because none of them is dominated by the
+// batch-total tail: a count or a rate has bounded per-observation variance
+// where a heavy-tailed dollar sum does not. If abuse is wrong, expect to catch
+// it there, and treat any movement here as corroboration rather than proof.
+//
+// WHY A CI GATE AND NOT A FIXED PERCENTAGE. A fixed tolerance silently encodes
+// an assumption about variance that heavy tails violate. Abuse's per-year CV is
+// 1.41, so at the old 300-year sample the standard error on its mean was 8.1%
+// and the former +/-3% gate on the non-LE total failed ~46% of the time ON
+// CORRECT CODE. The gate below is self-calibrating: it measures the realized
+// per-year variance and flags only when the drawn mean lies outside its own
+// CI of the analytic, so light-tailed subs get tight gates automatically and
+// heavy-tailed ones get honest wide ones.
+//
+// 99% NOT 95%: across four sub-coverages a 95% gate flags 18.5% of correct
+// runs; 99% brings that to 3.9%. A one-in-five false-positive rate would train
+// us to ignore the check.
+//
+// SAMPLE SIZE, NOT TOLERANCE, BUYS DETECTION POWER. This section alone runs
+// 1,500 years (the rest of the harness stays at its own sample): at 300 years a
+// 99% gate on abuse is +/-21%, wide enough to miss almost any realistic bug; at
+// 1,500 it is +/-9.4%. Widening a tolerance to stop false positives destroys
+// the check; raising the sample tightens it legitimately.
 console.log('\n--- 8. draw vs analytic expectation (invariant 1) ---');
 {
   const kGl = computeKGl(roster);
-  // Per-sub booked dollars from the draw:
+  const INV1_YEARS = 1500;
+  const Z99 = 2.5758;
+  // Dedicated deeper sample for this section only.
+  const perYear: Record<string, number[]> = { general: [], epl: [], lawEnforcement: [], abuse: [] };
+  const fullPerYear: number[] = [];
+  for (let y = 1; y <= INV1_YEARS; y++) {
+    const r = generateGlClaims({
+      members: roster, yearNumber: y, calendarYear: 2025 + y,
+      instanceSeed: 4242 + y * 7919, kGl, gPool: 1, riskControlEffectiveness: 0,
+    });
+    const bucket: Record<string, number> = { general: 0, epl: 0, lawEnforcement: 0, abuse: 0 };
+    for (const c of r.claims) bucket[c.tier] = (bucket[c.tier] ?? 0) + c.grossUltimate;
+    for (const k of Object.keys(perYear)) perYear[k].push(bucket[k] ?? 0);
+    fullPerYear.push(r.grossUltimateLoss);
+  }
+  const sdOf = (xs: number[]) => {
+    const m = mean(xs);
+    return Math.sqrt(xs.reduce((a, x) => a + (x - m) ** 2, 0) / Math.max(1, xs.length - 1));
+  };
+  // 99% half-width on the MEAN, as a fraction of the analytic target.
+  const ciHalfWidth = (xs: number[]) => Z99 * sdOf(xs) / Math.sqrt(xs.length);
   const drawn: Record<string, number> = { general: 0, epl: 0, lawEnforcement: 0, abuse: 0 };
-  for (const c of allClaims) drawn[c.tier] = (drawn[c.tier] ?? 0) + c.grossUltimate;
-  for (const k of Object.keys(drawn)) drawn[k] /= YEARS;
+  for (const k of Object.keys(drawn)) drawn[k] = mean(perYear[k]);
   // Per-sub analytic: rebuild from internals (mirrors expectedGlGrossLoss's terms).
   const analytic: Record<string, number> = { general: 0, epl: 0, lawEnforcement: 0, abuse: 0 };
   for (const m of roster) {
@@ -255,21 +309,34 @@ console.log('\n--- 8. draw vs analytic expectation (invariant 1) ---');
       analytic[sub] += sub === 'abuse' ? lam * glInternals.expectedClaimantsPerIncident() * per : lam * per;
     }
   }
-  let strictTotalDrawn = 0, strictTotalAnalytic = 0;
+  console.log(`  (${INV1_YEARS} draw-years, dedicated deeper sample; 99% CI gates)`);
+  // LIGHT-TAILED SUBS keep the strict fixed assertion AND get the CI gate.
+  // general and epl have bounded per-year variance, so 3% is a real bar there.
+  const STRICT: string[] = ['general', 'epl'];
+  let lightDrawn = 0, lightAnalytic = 0;
+  const lightPerYear: number[] = new Array(INV1_YEARS).fill(0);
   for (const sub of GL_SUB_KEYS) {
-    const rel = Math.abs(drawn[sub] - analytic[sub]) / analytic[sub];
-    if (sub === 'lawEnforcement') {
-      console.log(`  ${sub.padEnd(15)} drawn ${fmt$(drawn[sub])} vs analytic ${fmt$(analytic[sub])} (${(rel * 100).toFixed(1)}%) — REPORTED (Pareto: infinite variance)`);
+    const rel = (drawn[sub] - analytic[sub]) / analytic[sub];
+    const ci = ciHalfWidth(perYear[sub]) / analytic[sub];
+    const inCI = Math.abs(drawn[sub] - analytic[sub]) <= ciHalfWidth(perYear[sub]);
+    const line = `  ${sub.padEnd(15)} drawn ${fmt$(drawn[sub])} vs analytic ${fmt$(analytic[sub])} (${(rel * 100 >= 0 ? '+' : '')}${(rel * 100).toFixed(2)}%, 99% CI +/-${(ci * 100).toFixed(2)}%)`;
+    if (STRICT.includes(sub)) {
+      lightDrawn += drawn[sub]; lightAnalytic += analytic[sub];
+      for (let i = 0; i < INV1_YEARS; i++) lightPerYear[i] += perYear[sub][i];
+      console.log(`${line}  strict ${note(Math.abs(rel) < 0.03, `${sub} draw vs analytic ${(rel * 100).toFixed(1)}% exceeds the 3% light-tailed bar`)}  CI ${note(inCI, `${sub} outside its 99% CI of the analytic`)}`);
     } else {
-      strictTotalDrawn += drawn[sub]; strictTotalAnalytic += analytic[sub];
-      console.log(`  ${sub.padEnd(15)} drawn ${fmt$(drawn[sub])} vs analytic ${fmt$(analytic[sub])} (${(rel * 100).toFixed(2)}%)  ${note(rel < (sub === 'abuse' ? 0.10 : 0.03), `${sub} draw vs analytic ${(rel * 100).toFixed(1)}%`)}`);
+      // abuse and lawEnforcement: tail-dominated, CI gate only.
+      console.log(`${line}  CI ${note(inCI, `${sub} outside its 99% CI of the analytic — gross-error signal, investigate`)}  (tail-dominated: CI gate only)`);
     }
   }
-  const relStrict = Math.abs(strictTotalDrawn - strictTotalAnalytic) / strictTotalAnalytic;
-  console.log(`  total EXCLUDING LE: drawn ${fmt$(strictTotalDrawn)} vs analytic ${fmt$(strictTotalAnalytic)} (${(relStrict * 100).toFixed(2)}%)  ${note(relStrict < 0.03, `non-LE total ${(relStrict * 100).toFixed(1)}%`)}`);
+  const relLight = (lightDrawn - lightAnalytic) / lightAnalytic;
+  const lightInCI = Math.abs(lightDrawn - lightAnalytic) <= ciHalfWidth(lightPerYear);
+  console.log(`  light-tailed total (general+epl): drawn ${fmt$(lightDrawn)} vs analytic ${fmt$(lightAnalytic)} (${(relLight * 100).toFixed(2)}%, 99% CI +/-${(ciHalfWidth(lightPerYear) / lightAnalytic * 100).toFixed(2)}%)  strict ${note(Math.abs(relLight) < 0.03, `light-tailed total ${(relLight * 100).toFixed(1)}%`)}  CI ${note(lightInCI, 'light-tailed total outside its 99% CI')}`);
   const full = expectedGlGrossLoss(roster, { kGl });
   console.log(`  FULL analytic (expectedGlGrossLoss) ${fmt$(full)} vs component rebuild ${fmt$(analytic.general + analytic.epl + analytic.lawEnforcement + analytic.abuse)}  ${note(Math.abs(full - (analytic.general + analytic.epl + analytic.lawEnforcement + analytic.abuse)) / full < 1e-9, 'expectedGlGrossLoss disagrees with its own components')}`);
-  console.log(`  FULL drawn total ${fmt$(mean(runs.map(r => r.grossUltimateLoss)))} vs FULL analytic ${fmt$(full)} — REPORTED (LE tail included)`);
+  const fullDrawn = mean(fullPerYear);
+  const fullInCI = Math.abs(fullDrawn - full) <= ciHalfWidth(fullPerYear);
+  console.log(`  FULL drawn total ${fmt$(fullDrawn)} vs FULL analytic ${fmt$(full)} (${((fullDrawn - full) / full * 100).toFixed(2)}%, 99% CI +/-${(ciHalfWidth(fullPerYear) / full * 100).toFixed(2)}%)  CI ${note(fullInCI, 'full book outside its 99% CI of the analytic')}`);
 }
 
 console.log('\n--- 9. determinism, integrity, shock signal, held pure premium ---');

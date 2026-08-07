@@ -34,6 +34,22 @@ Things that were discovered expensively and live only in conversation memory. Re
   an α=1.3 Pareto plus abuse batches with P99 ≈ 8× mean cannot be resolved to ±2pp at 200 line-years.
   This is not a weakened bar: pricing correctness decomposes into (a) draw ≡ analytic expectation and
   (b) analytic ratio = target, both of which ARE asserted.
+- **Any assertion on the sample mean of a heavy-tailed quantity must be CI-based against its own
+  realized variance, never a fixed percentage.** A fixed tolerance silently encodes an assumption
+  about variance that heavy tails violate. GL abuse has a per-year CV of 1.41, so at 300 draw-years
+  the standard error on its mean is 8.1% and a ±3% gate on the non-LE total fails 46% of the time on
+  correct code. Note also that the SAMPLE SIZE, not the tolerance, is what buys detection power:
+  widening a tolerance to stop false positives destroys the check, whereas raising the sample tightens
+  it legitimately — at 300 years a 99% gate on abuse is ±21%, at 1,500 years it is ±9.4%. Use 99%
+  rather than 95% when several quantities are gated at once (four sub-coverages at 95% flag 18.5% of
+  correct runs; at 99%, 3.9%). Third occurrence of this failure mode.
+- **Say out loud which checks are gross-error detectors and which are precision instruments.** A
+  CI gate wide enough to be honest about a heavy tail is, by construction, too wide to catch a subtle
+  error — invariant 1 on GL abuse would not notice a 5% mis-specification. Precision for those
+  quantities comes from the COMPONENT checks (frequency, pay rate, batch-size distribution), which are
+  tighter because counts and rates have bounded per-observation variance where heavy-tailed dollar
+  sums do not. Write the division of labour into the harness, or a passing wide gate will later be
+  mistaken for proof of exactness.
 
 ## Rulings and stopping
 - **A failed verification check stops the work UNCOMMITTED. Whether it blocks is the user's call, not
