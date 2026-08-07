@@ -60,6 +60,16 @@ Things that were discovered expensively and live only in conversation memory. Re
 - **Several "failures" have turned out to be mis-specified checks, not broken code.** WC 6b and GL 6b both
   failed on numerator/denominator basis errors in the check itself. Report the decomposition and let the
   ruling correct the check.
+- **Verify that a ruling's premises exist in the code before acting on it.** A ruling that cites
+  specific code paths, measurements, or prior reports can be wrong about all of them — planning-side
+  context can drift from the repo (empty document transfers, stale clones, conflated conversation
+  threads), and analysis can be internally consistent while describing a codebase that does not
+  exist. Four consecutive rulings in this project were premised on artifacts absent from the repo
+  (a 1.63/yr measurement, an 8% tail deficit, a covariance mechanism, an inverse-CDF bisection path).
+  The independent arithmetic in those rulings was correct; the claims about the code were not. Grep
+  for the cited path, re-run the cited measurement, and if the premises fail, STOP AND SAY SO rather
+  than reconciling to the ruling — refusing to commit a false finding is the stop rule applied to the
+  planning side, and it is as binding as any harness check.
 - **Ask for the plan before code** on anything load-bearing. Measuring before building has repeatedly
   caught blowups cheaply (the A1 over-capitalisation, the wrong seed fix, three broken audit checks,
   the presumption trend divergence).
