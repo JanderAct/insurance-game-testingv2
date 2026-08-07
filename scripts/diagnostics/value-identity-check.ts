@@ -52,7 +52,7 @@ import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import type { CoverageLine, GameState, LineResultSet, ResultSet } from '../../src/types/simulation';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v4.json');
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v5.json');
 
 function seedOf(id: string) {
   let h = 5381;

@@ -1,4 +1,4 @@
-// One-time generator: src/data/roster_canonical_v3.csv -> src/data/memberCatalog.ts
+// One-time generator: src/data/roster_canonical_v4.csv -> src/data/memberCatalog.ts
 //
 // The canonical roster (200 members, $1,300M payroll) is the permanent, fixed
 // marketplace — it never grows or shrinks. This script converts the CSV into a
@@ -7,17 +7,31 @@
 //
 //   npx tsx scripts/tools/generate-member-catalog.ts
 //
-// ROSTER LINEAGE (v1 and v2 CSVs are kept in place for provenance only):
+// ROSTER LINEAGE (v1, v2 and v3 CSVs are kept in place for provenance only):
 // - v1 roster_canonical.csv    — TIV and Region derived in-repo.
 // - v2 roster_canonical_v2.csv — payroll rebalanced to County 30% / City 20%;
 //   TIV and Region became STORED columns, deleting PROPERTY_TIV_SCALE,
 //   TIV_RANGES, TIV_TYPE_MULTIPLIER and the synthetic SeededRandom(42) draw.
-// - v3 roster_canonical_v3.csv — CURRENT. Risk quality decoupled from member
-//   type; Transit capped at 25% of its type's payroll; fire/water payroll
-//   floors; City/County TIV ratios raised to ~5x/6x; region stratified within
-//   type; TIV jitter tightened to sigma 0.25; and TWO NEW STORED COLUMNS,
-//   Locations (integer site count) and Primary Asset Share, which together
-//   give Property a per-member location schedule.
+// - v3 roster_canonical_v3.csv — Risk quality decoupled from member type;
+//   Transit capped at 25% of its type's payroll; fire/water payroll floors;
+//   City/County TIV ratios raised to ~5x/6x; region stratified within type;
+//   TIV jitter tightened to sigma 0.25; and TWO NEW STORED COLUMNS, Locations
+//   (integer site count) and Primary Asset Share, which together give
+//   Property a per-member location schedule.
+// - v4 roster_canonical_v4.csv — CURRENT. TIV ONLY, rescaled per type by a
+//   fixed factor (TIV_new = TIV_old x scale_factor) to fix a plausibility
+//   failure: v3's ratios held far too little insured value per type (a county
+//   at 6.0x held $102M for a courthouse, jail, sheriff facilities, a health
+//   building AND road yards; a modern jail alone runs $50-100M). Because
+//   TIV_v3 = payroll x ratio x jitter, multiplying by (new_ratio/old_ratio) is
+//   ALGEBRAICALLY IDENTICAL to regenerating with the new ratio and the SAME
+//   jitter draw — within-type spread and each member's rank in it are
+//   preserved exactly; nothing was redrawn. Payroll, RQ, Region, Locations,
+//   Primary Asset Share and all WC/GL columns are BYTE-IDENTICAL to v3 — only
+//   the TIV column moved. New ratios: School 9.0 (x3.6000), Water 25.0
+//   (x2.7778), Fire 7.5 (x2.1429), County 12.0 (x2.0000), Recreation 6.0
+//   (x2.0000), Transit 11.0 (x1.8333), City 9.0 (x1.8000), Special 9.0
+//   (x1.6364), Park 7.0 (x1.5556).
 //
 // What it does, and the decisions baked in (all user-approved):
 // - Risk Quality is CLAMPED to a minimum of 1.0 (the documented 1-10 range).
@@ -45,7 +59,7 @@ import {
 import type { MemberType, Region, SizeCategory } from '../../src/types/simulation';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CSV_PATH = path.join(__dirname, '../../src/data/roster_canonical_v3.csv');
+const CSV_PATH = path.join(__dirname, '../../src/data/roster_canonical_v4.csv');
 const OUT_PATH = path.join(__dirname, '../../src/data/memberCatalog.ts');
 
 // WC class columns are authored to 4dp of $M, i.e. quantized to $100. Four
@@ -131,13 +145,15 @@ for (const [type, target] of [['County', 0.30], ['City', 0.20]] as const) {
   }
 }
 
+// v4: TIV totals $14,303.5M (2.045x the v3 total of $6,993.3M), a blended
+// 11.00x payroll, from the per-type rescale documented above.
 const tivSum = rows.reduce((s, r) => s + r.tiv, 0);
-if (Math.abs(tivSum - 6993.3) > 0.5) {
-  throw new Error(`TIV sum $${tivSum.toFixed(1)}M deviates from the expected $6,993.3M`);
+if (Math.abs(tivSum - 14303.5) > 1) {
+  throw new Error(`TIV sum $${tivSum.toFixed(1)}M deviates from the expected $14,303.5M`);
 }
 const largestTivShare = Math.max(...rows.map(r => r.tiv)) / tivSum;
 if (largestTivShare > 0.05) {
-  throw new Error(`Largest member is ${(largestTivShare * 100).toFixed(2)}% of book TIV (expected ~3.4%, cap 5%)`);
+  throw new Error(`Largest member is ${(largestTivShare * 100).toFixed(2)}% of book TIV (expected ~3.3%, cap 5%)`);
 }
 
 const locationsSum = rows.reduce((s, r) => s + r.locations, 0);
@@ -146,11 +162,17 @@ if (locationsSum !== 1866) {
 }
 
 // Zone TIV drives the cat/weather footprint engines, so it is asserted here
-// rather than rediscovered later: North 2513.9 / Central 2400.2 / South 2079.2.
+// rather than rediscovered later. v4 values (v3 was North 2513.9 / Central
+// 2400.2 / South 2079.2): the per-type rescale is not uniform, so the zone
+// mix shifted along with the total — North 5039.0 / Central 4840.6 /
+// South 4423.9. THE PINNED CAT/WEATHER MU VALUES ARE STILL VALID: AAL scales
+// linearly with zone TIV in the mechanism itself, so a proportional TIV move
+// changes dollar AALs without invalidating the physical mu solve. Do not
+// re-solve mu off this change alone.
 const zoneTiv: Record<string, number> = { North: 0, Central: 0, South: 0 };
 rows.forEach(r => { zoneTiv[r.region] += r.tiv; });
-for (const [zone, expected] of [['North', 2513.9], ['Central', 2400.2], ['South', 2079.2]] as const) {
-  if (Math.abs(zoneTiv[zone] - expected) > 0.5) {
+for (const [zone, expected] of [['North', 5039.0], ['Central', 4840.6], ['South', 4423.9]] as const) {
+  if (Math.abs(zoneTiv[zone] - expected) > 1) {
     throw new Error(`Zone ${zone} TIV $${zoneTiv[zone].toFixed(1)}M != expected $${expected}M`);
   }
 }
@@ -218,9 +240,9 @@ const rowLines = rows.map(r => {
 });
 
 const out = `// Canonical 200-member marketplace — GENERATED FILE, do not edit by hand.
-// Source of truth: src/data/roster_canonical_v3.csv, converted by
+// Source of truth: src/data/roster_canonical_v4.csv, converted by
 // scripts/tools/generate-member-catalog.ts (see that script for every rule:
-// risk-quality clamping, size bucketing, satisfaction, and the full v1->v3
+// risk-quality clamping, size bucketing, satisfaction, and the full v1->v4
 // roster lineage).
 //
 // The roster is permanent and fixed: it never grows or shrinks, no entity is
@@ -230,19 +252,24 @@ const out = `// Canonical 200-member marketplace — GENERATED FILE, do not edit
 // 20% by design) and drives both WC and GL exposure — public-entity pools have
 // one payroll base, not a separate commercial-style GL revenue base.
 //
-// EVERYTHING PROPERTY NEEDS IS AUTHORED, NOT DERIVED. TIV totals $6,993.3M (a
-// blended 5.38x payroll) and carries no scale factor. Region is North/Central/
-// South as authored (zone TIV 2513.9 / 2400.2 / 2079.2). Locations (1,866
-// pool-wide) and Primary Asset Share together define each member's location
-// schedule, which is what the Property attritional generator draws against and
-// what keeps the per-risk reinsurance layer alive.
+// EVERYTHING PROPERTY NEEDS IS AUTHORED, NOT DERIVED. TIV totals $14,303.5M (a
+// blended 11.00x payroll) and carries no scale factor. v4 rescaled TIV per
+// member TYPE (School x3.6, Water x2.7778, Fire x2.1429, County/Recreation x2,
+// Transit x1.8333, City x1.8, Special x1.6364, Park x1.5556) off v3's
+// TIV = payroll x ratio x jitter, so within-type spread and rank are preserved
+// exactly — WC, GL, Payroll, RQ, Region, Locations and Primary Asset Share are
+// all byte-identical to v3. Region is North/Central/South as authored (zone
+// TIV 5039.0 / 4840.6 / 4423.9). Locations (1,866 pool-wide) and Primary Asset
+// Share together define each member's location schedule, which is what the
+// Property attritional generator draws against and what keeps the per-risk
+// reinsurance layer alive.
 //
 // PRIMARY ASSET SHARE MEANS "THE DESIGNATED PRIMARY ASSET", NOT "THE LARGEST".
-// For 9 v3 members the nominal primary is actually the smaller site — e.g. a
-// 2-location member with share 0.41 holds 41% in its primary and 59% in the
-// other. The schedule still sums to member TIV and severity is still capped at
-// the hit location's value, so nothing downstream is affected; do not assert
-// that the primary is the maximum.
+// For 9 members (unchanged since v3) the nominal primary is actually the
+// smaller site — e.g. a 2-location member with share 0.41 holds 41% in its
+// primary and 59% in the other. The schedule still sums to member TIV and
+// severity is still capped at the hit location's value, so nothing downstream
+// is affected; do not assert that the primary is the maximum.
 //
 // Each member's WC class-payroll split and GL sub-line relativities are exact
 // functions of its Type — see WC_CLASS_MIX and GL_RELATIVITIES in

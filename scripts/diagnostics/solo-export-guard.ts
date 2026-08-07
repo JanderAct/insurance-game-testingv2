@@ -36,17 +36,21 @@
 //   npx tsx scripts/diagnostics/solo-export-guard.ts            # compare to baseline
 //   npx tsx scripts/diagnostics/solo-export-guard.ts --write    # re-capture baseline
 //
-// Baseline: baselines/SOLO_EXPORT_GUARD_v4.json. v3 was retired by the
+// Baseline: baselines/SOLO_EXPORT_GUARD_v5.json. v4 was retired by roster v4
+// (TIV-only rescale, see roster_canonical_v4.csv), and v3 before that by the
 // expected-combined-ratio fix, which added one exported metric, corrected two
 // values and renamed six labels — a legitimate export-shape change with no
 // engine movement behind it (proven by value-identity-check).
 //
-// Baselines are also RETIRED at every roster version —
-// v2 moved payroll, TIV and Region; v3 decorrelated risk quality from member
-// type, raised TIV to $6,993.3M and added the Locations / Primary Asset Share
-// columns. Every line's numbers legitimately changed, so no pre-v3 hash can
-// ever match again. Property moves too, even though its CODE is untouched,
-// because its exposure base IS the TIV column.
+// Baselines are RETIRED at every roster version — v2 moved payroll, TIV and
+// Region; v3 decorrelated risk quality from member type and added the
+// Locations / Primary Asset Share columns; v4 rescaled TIV per member type
+// (total $6,993.3M -> $14,303.5M) to fix an insured-value plausibility
+// failure, touching NO other column. Every Property-derived number
+// legitimately changed each time, so no earlier-version hash can ever match
+// again. WC and GL are the control: value-identity-check confirms their
+// solo-game fields never move across any of these roster revisions, because
+// neither line's generator reads TIV.
 import * as XLSX from 'xlsx';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -61,7 +65,7 @@ import { RESULT_METRICS } from '../../src/utils/resultMetrics';
 import type { GameState, CoverageLine, ResultSet } from '../../src/types/simulation';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v4.json');
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v5.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

@@ -1,0 +1,201 @@
+ID,Name,Type,Payroll ($M),Risk Quality,Region,TIV ($M),Locations,Primary Asset Share,WC_clerical,WC_pubworks,WC_police,WC_fire,GL_gen,GL_epl,GL_lawenf,GL_abuse
+member-001,Brookhaven School District 001,School District,5.462,3.9,North,49.918,8,0.222,3.8234,1.5294,0.1092,0.0,0.9,1.1,0.1,1.8
+member-002,Summit County 002,County,32.282,6.6,Central,434.186,14,0.324,14.5269,8.0705,6.4564,3.2282,1.0,1.1,1.0,0.8
+member-003,Ridgeway City 003,City,4.246,8.0,Central,35.120,8,0.28,1.4861,1.2738,0.9341,0.552,1.1,1.0,1.0,0.6
+member-004,Summit Fire District 004,Fire District,0.939,5.6,North,5.327,5,0.388,0.0751,0.0376,0.0,0.8263,0.9,0.9,0.05,0.2
+member-005,Northvale Water District 005,Water District,1.553,7.8,North,39.606,3,0.661,0.4659,1.0871,0.0,0.0,0.8,1.2,0.0,0.1
+member-006,Clearwater Park District 006,Park District,4.233,3.4,Central,33.371,12,0.268,1.2699,2.9631,0.0,0.0,1.0,0.8,0.05,1.6
+member-007,Eastbrook County 007,County,23.509,1.7,North,229.732,20,0.343,10.5791,5.8773,4.7018,2.3509,1.0,1.1,1.0,0.8
+member-008,Clearwater Water District 008,Water District,1.825,3.1,South,34.956,6,0.62,0.5475,1.2775,0.0,0.0,0.8,1.2,0.0,0.1
+member-009,Glenmoor Recreation District 009,Recreation District,2.244,3.5,Central,10.562,6,0.373,1.0098,1.2342,0.0,0.0,1.0,0.8,0.05,1.9
+member-010,Cedar Falls City 010,City,3.659,1.9,South,31.624,9,0.252,1.2806,1.0977,0.805,0.4757,1.1,1.0,1.0,0.6
+member-011,Brookhaven School District 011,School District,2.135,6.7,North,14.602,5,0.25,1.4945,0.5978,0.0427,0.0,0.9,1.1,0.1,1.8
+member-012,Westfield Park District 012,Park District,16.832,4.1,North,97.228,11,0.246,5.0496,11.7824,0.0,0.0,1.0,0.8,0.05,1.6
+member-013,Lakeside Water District 013,Water District,0.966,3.7,Central,34.581,4,0.679,0.2898,0.6762,0.0,0.0,0.8,1.2,0.0,0.1
+member-014,Eastbrook Water District 014,Water District,2.568,4.9,North,92.512,4,0.614,0.7704,1.7976,0.0,0.0,0.8,1.2,0.0,0.1
+member-015,Lakeside School District 015,School District,5.326,6.7,Central,51.566,7,0.21,3.7282,1.4913,0.1065,0.0,0.9,1.1,0.1,1.8
+member-016,Summit Transit Authority 016,Transit Authority,2.413,5.6,South,23.752,33,0.394,0.6032,1.8097,0.0,0.0,1.6,1.0,0.1,0.3
+member-017,Southgate County 017,County,7.201,5.7,Central,86.794,12,0.303,3.2405,1.8002,1.4402,0.7201,1.0,1.1,1.0,0.8
+member-018,Clearwater County 018,County,23.163,3.4,Central,167.300,10,0.316,10.4234,5.7908,4.6326,2.3163,1.0,1.1,1.0,0.8
+member-019,Maplewood City 019,City,14.538,4.3,North,114.478,11,0.275,5.0883,4.3614,3.1984,1.8899,1.1,1.0,1.0,0.6
+member-020,Pinecrest County 020,County,2.805,4.9,North,34.548,12,0.389,1.2623,0.7013,0.561,0.2805,1.0,1.1,1.0,0.8
+member-021,Summit County 021,County,26.826,5.2,Central,403.804,13,0.312,12.0717,6.7065,5.3652,2.6826,1.0,1.1,1.0,0.8
+member-022,Glenmoor Fire District 022,Fire District,0.887,4.6,South,6.971,2,0.41,0.071,0.0355,0.0,0.7806,0.9,0.9,0.05,0.2
+member-023,Riverton Water District 023,Water District,3.475,5.0,Central,101.681,6,0.666,1.0425,2.4325,0.0,0.0,0.8,1.2,0.0,0.1
+member-024,Lakeside City 024,City,7.978,5.4,South,71.334,13,0.283,2.7923,2.3934,1.7552,1.0371,1.1,1.0,1.0,0.6
+member-025,Glenmoor Recreation District 025,Recreation District,1.895,4.7,Central,16.884,5,0.323,0.8528,1.0423,0.0,0.0,1.0,0.8,0.05,1.9
+member-026,Summit School District 026,School District,1.054,8.0,Central,8.816,7,0.249,0.7378,0.2951,0.0211,0.0,0.9,1.1,0.1,1.8
+member-027,Summit Recreation District 027,Recreation District,13.857,9.8,South,90.174,6,0.302,6.2356,7.6214,0.0,0.0,1.0,0.8,0.05,1.9
+member-028,Stonehill Park District 028,Park District,2.692,4.9,South,22.769,11,0.286,0.8076,1.8844,0.0,0.0,1.0,0.8,0.05,1.6
+member-029,Clearwater Water District 029,Water District,0.966,6.2,Central,30.189,6,0.688,0.2898,0.6762,0.0,0.0,0.8,1.2,0.0,0.1
+member-030,Westfield Special District 030,Special District,2.948,5.4,Central,31.967,6,0.481,1.474,1.474,0.0,0.0,0.9,1.0,0.05,0.4
+member-031,Valley Recreation District 031,Recreation District,1.694,3.5,Central,17.532,7,0.363,0.7623,0.9317,0.0,0.0,1.0,0.8,0.05,1.9
+member-032,Oakdale County 032,County,9.284,6.6,North,91.842,20,0.344,4.1778,2.321,1.8568,0.9284,1.0,1.1,1.0,0.8
+member-033,Westfield Special District 033,Special District,1.062,4.8,North,17.231,4,0.418,0.531,0.531,0.0,0.0,0.9,1.0,0.05,0.4
+member-034,Stonehill Special District 034,Special District,10.43,4.0,North,124.232,6,0.471,5.215,5.215,0.0,0.0,0.9,1.0,0.05,0.4
+member-035,Eastbrook Fire District 035,Fire District,2.295,5.8,Central,17.368,3,0.428,0.1836,0.0918,0.0,2.0196,0.9,0.9,0.05,0.2
+member-036,Summit City 036,City,3.659,3.3,South,36.911,15,0.261,1.2806,1.0977,0.805,0.4757,1.1,1.0,1.0,0.6
+member-037,Summit Park District 037,Park District,5.275,4.6,South,36.275,12,0.29,1.5825,3.6925,0.0,0.0,1.0,0.8,0.05,1.6
+member-038,Ridgeway County 038,County,4.756,8.5,North,45.832,16,0.385,2.1402,1.189,0.9512,0.4756,1.0,1.1,1.0,0.8
+member-039,Stonehill Special District 039,Special District,2.837,5.8,North,23.914,6,0.475,1.4185,1.4185,0.0,0.0,0.9,1.0,0.05,0.4
+member-040,Oakdale Water District 040,Water District,2.033,6.4,North,32.872,6,0.636,0.6099,1.4231,0.0,0.0,0.8,1.2,0.0,0.1
+member-041,Northvale Transit Authority 041,Transit Authority,3.241,6.8,Central,34.912,27,0.396,0.8103,2.4308,0.0,0.0,1.6,1.0,0.1,0.3
+member-042,Eastbrook School District 042,School District,2.571,2.0,Central,21.726,8,0.247,1.7997,0.7199,0.0514,0.0,0.9,1.1,0.1,1.8
+member-043,Southgate Park District 043,Park District,3.42,5.5,Central,32.671,8,0.25,1.026,2.394,0.0,0.0,1.0,0.8,0.05,1.6
+member-044,Riverton Recreation District 044,Recreation District,5.281,4.7,Central,38.020,5,0.365,2.3764,2.9045,0.0,0.0,1.0,0.8,0.05,1.9
+member-045,Harbor County 045,County,39.04,3.1,South,478.198,14,0.391,17.568,9.76,7.808,3.904,1.0,1.1,1.0,0.8
+member-046,Ashford School District 046,School District,2.469,7.4,Central,19.843,12,0.25,1.7283,0.6913,0.0494,0.0,0.9,1.1,0.1,1.8
+member-047,Ashford County 047,County,23.468,3.2,Central,219.038,18,0.391,10.5606,5.867,4.6936,2.3468,1.0,1.1,1.0,0.8
+member-048,Westfield Water District 048,Water District,2.615,5.8,North,49.920,3,0.634,0.7845,1.8305,0.0,0.0,0.8,1.2,0.0,0.1
+member-049,Westfield City 049,City,4.137,2.9,South,27.254,11,0.286,1.4479,1.2411,0.9101,0.5378,1.1,1.0,1.0,0.6
+member-050,Ashford Fire District 050,Fire District,2.989,5.1,Central,22.715,3,0.436,0.2391,0.1196,0.0,2.6303,0.9,0.9,0.05,0.2
+member-051,Eastbrook County 051,County,3.011,5.8,South,22.202,19,0.358,1.355,0.7528,0.6022,0.3011,1.0,1.1,1.0,0.8
+member-052,Southgate Water District 052,Water District,4.389,6.2,South,110.648,4,0.653,1.3167,3.0723,0.0,0.0,0.8,1.2,0.0,0.1
+member-053,Eastbrook School District 053,School District,1.957,5.0,North,17.834,12,0.243,1.3699,0.548,0.0391,0.0,0.9,1.1,0.1,1.8
+member-054,Riverton Special District 054,Special District,3.818,5.9,Central,40.103,5,0.457,1.909,1.909,0.0,0.0,0.9,1.0,0.05,0.4
+member-055,Lakeside Transit Authority 055,Transit Authority,13.775,4.1,North,204.481,28,0.399,3.4438,10.3313,0.0,0.0,1.6,1.0,0.1,0.3
+member-056,Pinecrest Water District 056,Water District,4.266,7.8,Central,102.159,4,0.683,1.2798,2.9862,0.0,0.0,0.8,1.2,0.0,0.1
+member-057,Summit Fire District 057,Fire District,1.403,6.0,South,15.227,5,0.387,0.1122,0.0561,0.0,1.2346,0.9,0.9,0.05,0.2
+member-058,Ridgeway School District 058,School District,1.171,4.2,North,11.016,7,0.21,0.8197,0.3279,0.0234,0.0,0.9,1.1,0.1,1.8
+member-059,Maplewood Special District 059,Special District,0.91,5.0,Central,8.635,6,0.42,0.455,0.455,0.0,0.0,0.9,1.0,0.05,0.4
+member-060,Oakdale City 060,City,2.011,5.2,South,19.620,13,0.253,0.7038,0.6033,0.4424,0.2614,1.1,1.0,1.0,0.6
+member-061,Lakeside County 061,County,16.673,3.6,North,254.288,12,0.37,7.5028,4.1682,3.3346,1.6673,1.0,1.1,1.0,0.8
+member-062,Glenmoor City 062,City,27.998,5.4,South,194.384,11,0.269,9.7993,8.3994,6.1596,3.6397,1.1,1.0,1.0,0.6
+member-063,Valley City 063,City,8.914,7.3,North,79.232,15,0.279,3.1199,2.6742,1.9611,1.1588,1.1,1.0,1.0,0.6
+member-064,Harbor City 064,City,16.989,7.8,North,182.014,8,0.256,5.9462,5.0967,3.7376,2.2086,1.1,1.0,1.0,0.6
+member-065,Maplewood Transit Authority 065,Transit Authority,6.071,4.2,Central,84.862,15,0.392,1.5177,4.5533,0.0,0.0,1.6,1.0,0.1,0.3
+member-066,Stonehill Fire District 066,Fire District,0.887,3.2,North,7.603,2,0.444,0.071,0.0355,0.0,0.7806,0.9,0.9,0.05,0.2
+member-067,Northvale Transit Authority 067,Transit Authority,27.862,3.1,North,430.736,16,0.373,6.9655,20.8965,0.0,0.0,1.6,1.0,0.1,0.3
+member-068,Eastbrook Transit Authority 068,Transit Authority,38.338,7.3,North,404.868,30,0.383,9.5845,28.7535,0.0,0.0,1.6,1.0,0.1,0.3
+member-069,Cedar Falls Transit Authority 069,Transit Authority,1.874,5.1,Central,22.000,29,0.421,0.4685,1.4055,0.0,0.0,1.6,1.0,0.1,0.3
+member-070,Lakeside Recreation District 070,Recreation District,5.457,5.5,North,24.338,5,0.361,2.4556,3.0013,0.0,0.0,1.0,0.8,0.05,1.9
+member-071,Oakdale Water District 071,Water District,1.485,4.4,Central,31.600,6,0.7,0.4455,1.0395,0.0,0.0,0.8,1.2,0.0,0.1
+member-072,Westfield City 072,City,7.163,3.7,South,62.840,11,0.294,2.5071,2.1489,1.5759,0.9312,1.1,1.0,1.0,0.6
+member-073,Westfield Special District 073,Special District,3.738,5.5,South,50.722,6,0.415,1.869,1.869,0.0,0.0,0.9,1.0,0.05,0.4
+member-074,Ridgeway Park District 074,Park District,3.803,3.9,Central,20.383,10,0.207,1.1409,2.6621,0.0,0.0,1.0,0.8,0.05,1.6
+member-075,Clearwater Park District 075,Park District,3.628,3.2,South,34.191,5,0.235,1.0884,2.5396,0.0,0.0,1.0,0.8,0.05,1.6
+member-076,Southgate Transit Authority 076,Transit Authority,3.175,2.6,Central,28.286,15,0.379,0.7937,2.3812,0.0,0.0,1.6,1.0,0.1,0.3
+member-077,Northvale City 077,City,2.676,4.1,North,22.214,15,0.258,0.9366,0.8028,0.5887,0.3479,1.1,1.0,1.0,0.6
+member-078,Lakeside Fire District 078,Fire District,10.087,6.4,Central,88.881,2,0.441,0.807,0.4035,0.0,8.8766,0.9,0.9,0.05,0.2
+member-079,Northvale Park District 079,Park District,0.899,3.6,North,5.018,9,0.234,0.2697,0.6293,0.0,0.0,1.0,0.8,0.05,1.6
+member-080,Fairmont City 080,City,19.87,5.7,Central,210.991,15,0.258,6.9545,5.961,4.3714,2.5831,1.1,1.0,1.0,0.6
+member-081,Fairmont Transit Authority 081,Transit Authority,6.389,4.5,South,68.542,8,0.415,1.5973,4.7918,0.0,0.0,1.6,1.0,0.1,0.3
+member-082,Southgate Water District 082,Water District,4.811,4.5,South,176.501,4,0.686,1.4433,3.3677,0.0,0.0,0.8,1.2,0.0,0.1
+member-083,Westfield Special District 083,Special District,3.251,4.3,Central,33.610,5,0.402,1.6255,1.6255,0.0,0.0,0.9,1.0,0.05,0.4
+member-084,Valley Water District 084,Water District,0.966,8.4,North,34.686,3,0.604,0.2898,0.6762,0.0,0.0,0.8,1.2,0.0,0.1
+member-085,Lakeside Park District 085,Park District,4.641,2.2,Central,29.592,5,0.262,1.3923,3.2487,0.0,0.0,1.0,0.8,0.05,1.6
+member-086,Northvale Special District 086,Special District,5.78,6.3,North,74.324,8,0.472,2.89,2.89,0.0,0.0,0.9,1.0,0.05,0.4
+member-087,Ashford County 087,County,38.359,3.8,South,429.182,18,0.303,17.2615,9.5898,7.6718,3.8359,1.0,1.1,1.0,0.8
+member-088,Clearwater Recreation District 088,Recreation District,9.194,4.4,Central,58.742,3,0.399,4.1373,5.0567,0.0,0.0,1.0,0.8,0.05,1.9
+member-089,Southgate County 089,County,10.127,3.4,North,233.340,11,0.303,4.5572,2.5318,2.0254,1.0127,1.0,1.1,1.0,0.8
+member-090,Pinecrest Recreation District 090,Recreation District,3.677,7.1,North,25.278,5,0.386,1.6546,2.0224,0.0,0.0,1.0,0.8,0.05,1.9
+member-091,Brookhaven Water District 091,Water District,4.601,2.6,South,113.268,3,0.656,1.3803,3.2207,0.0,0.0,0.8,1.2,0.0,0.1
+member-092,Eastbrook City 092,City,6.945,6.8,Central,56.241,11,0.287,2.4307,2.0835,1.5279,0.9029,1.1,1.0,1.0,0.6
+member-093,Glenmoor Special District 093,Special District,2.084,3.4,North,21.568,8,0.499,1.042,1.042,0.0,0.0,0.9,1.0,0.05,0.4
+member-094,Northvale Park District 094,Park District,3.967,4.5,Central,18.359,12,0.272,1.1901,2.7769,0.0,0.0,1.0,0.8,0.05,1.6
+member-095,Clearwater City 095,City,9.219,5.5,North,81.909,8,0.294,3.2266,2.7657,2.0282,1.1985,1.1,1.0,1.0,0.6
+member-096,Maplewood City 096,City,2.571,6.7,Central,18.398,13,0.272,0.8999,0.7713,0.5656,0.3342,1.1,1.0,1.0,0.6
+member-097,Harbor Water District 097,Water District,3.32,3.2,North,87.248,5,0.617,0.996,2.324,0.0,0.0,0.8,1.2,0.0,0.1
+member-098,Oakdale County 098,County,26.296,1.5,South,319.682,16,0.396,11.8332,6.574,5.2592,2.6296,1.0,1.1,1.0,0.8
+member-099,Ridgeway Special District 099,Special District,0.583,5.5,South,7.320,5,0.418,0.2915,0.2915,0.0,0.0,0.9,1.0,0.05,0.4
+member-100,Maplewood Water District 100,Water District,6.916,4.7,North,154.535,5,0.639,2.0748,4.8412,0.0,0.0,0.8,1.2,0.0,0.1
+member-101,Stonehill School District 101,School District,1.759,8.7,Central,13.396,10,0.235,1.2313,0.4925,0.0352,0.0,0.9,1.1,0.1,1.8
+member-102,Stonehill Transit Authority 102,Transit Authority,2.052,5.4,South,28.460,28,0.409,0.513,1.539,0.0,0.0,1.6,1.0,0.1,0.3
+member-103,Glenmoor Transit Authority 103,Transit Authority,5.529,5.2,North,85.791,10,0.382,1.3822,4.1467,0.0,0.0,1.6,1.0,0.1,0.3
+member-104,Stonehill Park District 104,Park District,7.436,2.0,Central,56.772,6,0.262,2.2308,5.2052,0.0,0.0,1.0,0.8,0.05,1.6
+member-105,Ridgeway Water District 105,Water District,3.134,4.3,North,89.128,5,0.644,0.9402,2.1938,0.0,0.0,0.8,1.2,0.0,0.1
+member-106,Pinecrest Water District 106,Water District,0.995,6.3,South,20.695,6,0.604,0.2985,0.6965,0.0,0.0,0.8,1.2,0.0,0.1
+member-107,Lakeside Water District 107,Water District,1.894,8.1,Central,53.234,6,0.682,0.5682,1.3258,0.0,0.0,0.8,1.2,0.0,0.1
+member-108,Valley School District 108,School District,1.677,4.3,Central,25.283,5,0.247,1.1739,0.4696,0.0335,0.0,0.9,1.1,0.1,1.8
+member-109,Stonehill Fire District 109,Fire District,3.795,1,South,31.248,3,0.351,0.3036,0.1518,0.0,3.3396,0.9,0.9,0.05,0.2
+member-110,Brookhaven County 110,County,13.183,4.4,Central,143.250,10,0.388,5.9324,3.2957,2.6366,1.3183,1.0,1.1,1.0,0.8
+member-111,Pinecrest Special District 111,Special District,0.738,7.7,North,8.591,3,0.414,0.369,0.369,0.0,0.0,0.9,1.0,0.05,0.4
+member-112,Glenmoor Water District 112,Water District,2.044,4.6,Central,76.048,3,0.611,0.6132,1.4308,0.0,0.0,0.8,1.2,0.0,0.1
+member-113,Northvale Transit Authority 113,Transit Authority,3.412,2.2,North,30.110,17,0.387,0.853,2.559,0.0,0.0,1.6,1.0,0.1,0.3
+member-114,Ashford Special District 114,Special District,10.082,1.5,North,87.109,4,0.464,5.041,5.041,0.0,0.0,0.9,1.0,0.05,0.4
+member-115,Pinecrest County 115,County,18.156,5.4,North,181.754,12,0.399,8.1702,4.539,3.6312,1.8156,1.0,1.1,1.0,0.8
+member-116,Pinecrest City 116,City,5.244,4.8,North,48.964,14,0.267,1.8354,1.5732,1.1537,0.6817,1.1,1.0,1.0,0.6
+member-117,Summit County 117,County,5.279,4.7,South,103.024,13,0.326,2.3756,1.3197,1.0558,0.5279,1.0,1.1,1.0,0.8
+member-118,Valley School District 118,School District,19.983,5.2,South,120.290,9,0.232,13.9881,5.5952,0.3997,0.0,0.9,1.1,0.1,1.8
+member-119,Summit Recreation District 119,Recreation District,6.21,6.9,South,40.476,3,0.314,2.7945,3.4155,0.0,0.0,1.0,0.8,0.05,1.9
+member-120,Pinecrest Water District 120,Water District,5.504,8.5,South,158.448,3,0.685,1.6512,3.8528,0.0,0.0,0.8,1.2,0.0,0.1
+member-121,Oakdale Fire District 121,Fire District,2.206,10.0,North,16.305,5,0.373,0.1765,0.0882,0.0,1.9413,0.9,0.9,0.05,0.2
+member-122,Stonehill Transit Authority 122,Transit Authority,3.474,5.0,South,44.311,28,0.35,0.8685,2.6055,0.0,0.0,1.6,1.0,0.1,0.3
+member-123,Eastbrook Fire District 123,Fire District,0.897,4.3,North,6.247,4,0.384,0.0718,0.0359,0.0,0.7894,0.9,0.9,0.05,0.2
+member-124,Ridgeway County 124,County,14.276,3.8,Central,166.270,18,0.331,6.4242,3.569,2.8552,1.4276,1.0,1.1,1.0,0.8
+member-125,Ashford City 125,City,1.965,5.0,North,13.748,14,0.266,0.6877,0.5895,0.4323,0.2555,1.1,1.0,1.0,0.6
+member-126,Harbor City 126,City,8.229,6.2,Central,78.845,9,0.287,2.8801,2.4687,1.8104,1.0698,1.1,1.0,1.0,0.6
+member-127,Harbor Special District 127,Special District,20.462,5.9,Central,151.683,3,0.408,10.231,10.231,0.0,0.0,0.9,1.0,0.05,0.4
+member-128,Glenmoor Water District 128,Water District,4.856,3.1,Central,101.209,3,0.672,1.4568,3.3992,0.0,0.0,0.8,1.2,0.0,0.1
+member-129,Summit Recreation District 129,Recreation District,7.462,1.7,South,34.154,3,0.363,3.3579,4.1041,0.0,0.0,1.0,0.8,0.05,1.9
+member-130,Clearwater Recreation District 130,Recreation District,6.931,3.3,North,45.180,3,0.323,3.1189,3.8121,0.0,0.0,1.0,0.8,0.05,1.9
+member-131,Glenmoor Water District 131,Water District,4.689,4.4,South,100.934,4,0.696,1.4067,3.2823,0.0,0.0,0.8,1.2,0.0,0.1
+member-132,Valley Park District 132,Park District,8.019,8.5,North,46.760,10,0.281,2.4057,5.6133,0.0,0.0,1.0,0.8,0.05,1.6
+member-133,Northvale Transit Authority 133,Transit Authority,10.073,5.7,South,86.526,22,0.405,2.5183,7.5548,0.0,0.0,1.6,1.0,0.1,0.3
+member-134,Lakeside City 134,City,0.966,3.7,North,6.718,11,0.287,0.3381,0.2898,0.2125,0.1256,1.1,1.0,1.0,0.6
+member-135,Maplewood City 135,City,3.264,5.9,North,20.381,9,0.299,1.1424,0.9792,0.7181,0.4243,1.1,1.0,1.0,0.6
+member-136,Ashford Fire District 136,Fire District,3.479,6.2,South,20.100,2,0.434,0.2783,0.1392,0.0,3.0615,0.9,0.9,0.05,0.2
+member-137,Summit Fire District 137,Fire District,2.485,4.9,Central,11.730,3,0.386,0.1988,0.0994,0.0,2.1868,0.9,0.9,0.05,0.2
+member-138,Eastbrook City 138,City,9.783,1.7,Central,99.646,14,0.28,3.424,2.9349,2.1523,1.2718,1.1,1.0,1.0,0.6
+member-139,Brookhaven Recreation District 139,Recreation District,0.964,3.8,South,7.124,3,0.326,0.4338,0.5302,0.0,0.0,1.0,0.8,0.05,1.9
+member-140,Fairmont County 140,County,18.9,4.7,Central,346.460,12,0.335,8.505,4.725,3.78,1.89,1.0,1.1,1.0,0.8
+member-141,Pinecrest Transit Authority 141,Transit Authority,20.833,7.4,North,181.862,26,0.353,5.2082,15.6247,0.0,0.0,1.6,1.0,0.1,0.3
+member-142,Valley Park District 142,Park District,2.582,4.3,South,20.811,7,0.273,0.7746,1.8074,0.0,0.0,1.0,0.8,0.05,1.6
+member-143,Lakeside Special District 143,Special District,1.923,6.4,Central,12.911,7,0.435,0.9615,0.9615,0.0,0.0,0.9,1.0,0.05,0.4
+member-144,Stonehill Special District 144,Special District,3.216,5.3,Central,38.107,3,0.436,1.608,1.608,0.0,0.0,0.9,1.0,0.05,0.4
+member-145,Ridgeway School District 145,School District,5.583,4.5,Central,53.838,12,0.235,3.9081,1.5632,0.1117,0.0,0.9,1.1,0.1,1.8
+member-146,Westfield City 146,City,3.227,3.3,South,30.874,8,0.258,1.1294,0.9681,0.7099,0.4195,1.1,1.0,1.0,0.6
+member-147,Westfield Park District 147,Park District,1.502,5.1,North,15.078,14,0.24,0.4506,1.0514,0.0,0.0,1.0,0.8,0.05,1.6
+member-148,Summit Recreation District 148,Recreation District,2.006,5.0,North,7.688,8,0.37,0.9027,1.1033,0.0,0.0,1.0,0.8,0.05,1.9
+member-149,Maplewood Water District 149,Water District,1.487,3.3,Central,33.256,3,0.67,0.4461,1.0409,0.0,0.0,0.8,1.2,0.0,0.1
+member-150,Ashford City 150,City,2.018,5.6,South,21.339,14,0.265,0.7063,0.6054,0.444,0.2623,1.1,1.0,1.0,0.6
+member-151,Fairmont Special District 151,Special District,0.793,6.5,South,6.776,3,0.433,0.3965,0.3965,0.0,0.0,0.9,1.0,0.05,0.4
+member-152,Clearwater Water District 152,Water District,2.406,1.6,North,56.028,6,0.628,0.7218,1.6842,0.0,0.0,0.8,1.2,0.0,0.1
+member-153,Pinecrest School District 153,School District,11.785,5.5,South,115.628,11,0.245,8.2495,3.2998,0.2357,0.0,0.9,1.1,0.1,1.8
+member-154,Brookhaven Water District 154,Water District,2.788,6.8,North,67.134,4,0.657,0.8364,1.9516,0.0,0.0,0.8,1.2,0.0,0.1
+member-155,Brookhaven Recreation District 155,Recreation District,16.607,2.6,South,131.064,3,0.356,7.4731,9.1339,0.0,0.0,1.0,0.8,0.05,1.9
+member-156,Maplewood Park District 156,Park District,0.64,7.4,South,6.779,8,0.289,0.192,0.448,0.0,0.0,1.0,0.8,0.05,1.6
+member-157,Ridgeway City 157,City,7.368,5.0,South,65.250,8,0.279,2.5788,2.2104,1.621,0.9578,1.1,1.0,1.0,0.6
+member-158,Valley Water District 158,Water District,2.917,5.4,South,52.956,6,0.665,0.8751,2.0419,0.0,0.0,0.8,1.2,0.0,0.1
+member-159,Ridgeway Park District 159,Park District,2.367,5.3,North,12.342,7,0.266,0.7101,1.6569,0.0,0.0,1.0,0.8,0.05,1.6
+member-160,Brookhaven City 160,City,4.249,5.9,Central,31.871,12,0.277,1.4871,1.2747,0.9348,0.5524,1.1,1.0,1.0,0.6
+member-161,Northvale Park District 161,Park District,1.204,5.2,North,8.932,15,0.272,0.3612,0.8428,0.0,0.0,1.0,0.8,0.05,1.6
+member-162,Stonehill City 162,City,6.695,2.9,Central,70.783,8,0.287,2.3432,2.0085,1.4729,0.8704,1.1,1.0,1.0,0.6
+member-163,Cedar Falls School District 163,School District,0.929,1.1,North,7.330,7,0.249,0.6503,0.2601,0.0186,0.0,0.9,1.1,0.1,1.8
+member-164,Pinecrest Water District 164,Water District,2.119,5.4,South,87.978,6,0.641,0.6357,1.4833,0.0,0.0,0.8,1.2,0.0,0.1
+member-165,Ridgeway Fire District 165,Fire District,2.153,7.0,South,17.743,5,0.418,0.1722,0.0861,0.0,1.8946,0.9,0.9,0.05,0.2
+member-166,Lakeside Fire District 166,Fire District,1.977,8.5,Central,15.810,2,0.382,0.1582,0.0791,0.0,1.7398,0.9,0.9,0.05,0.2
+member-167,Harbor County 167,County,12.027,4.8,South,151.876,13,0.381,5.4121,3.0067,2.4054,1.2027,1.0,1.1,1.0,0.8
+member-168,Westfield Special District 168,Special District,1.215,2.1,South,10.183,3,0.47,0.6075,0.6075,0.0,0.0,0.9,1.0,0.05,0.4
+member-169,Stonehill Recreation District 169,Recreation District,1.994,2.4,North,12.240,7,0.382,0.8973,1.0967,0.0,0.0,1.0,0.8,0.05,1.9
+member-170,Southgate City 170,City,2.509,5.3,North,21.303,15,0.252,0.8781,0.7527,0.552,0.3262,1.1,1.0,1.0,0.6
+member-171,Riverton Transit Authority 171,Transit Authority,2.716,5.4,Central,38.512,30,0.411,0.679,2.037,0.0,0.0,1.6,1.0,0.1,0.3
+member-172,Riverton City 172,City,11.095,6.6,Central,85.243,15,0.286,3.8832,3.3285,2.4409,1.4424,1.1,1.0,1.0,0.6
+member-173,Riverton Water District 173,Water District,2.421,3.5,South,64.648,4,0.696,0.7263,1.6947,0.0,0.0,0.8,1.2,0.0,0.1
+member-174,Harbor City 174,City,14.013,6.8,North,93.731,8,0.263,4.9045,4.2039,3.0829,1.8217,1.1,1.0,1.0,0.6
+member-175,Harbor School District 175,School District,4.155,6.5,South,44.323,5,0.23,2.9085,1.1634,0.0831,0.0,0.9,1.1,0.1,1.8
+member-176,Summit Special District 176,Special District,5.134,5.0,South,46.549,6,0.463,2.567,2.567,0.0,0.0,0.9,1.0,0.05,0.4
+member-177,Brookhaven Park District 177,Park District,0.612,2.1,South,3.131,8,0.203,0.1836,0.4284,0.0,0.0,1.0,0.8,0.05,1.6
+member-178,Stonehill Park District 178,Park District,0.498,2.8,Central,2.310,9,0.244,0.1494,0.3486,0.0,0.0,1.0,0.8,0.05,1.6
+member-179,Valley Recreation District 179,Recreation District,6.411,2.8,North,49.946,6,0.4,2.8849,3.5261,0.0,0.0,1.0,0.8,0.05,1.9
+member-180,Ridgeway City 180,City,7.844,4.2,Central,43.922,11,0.267,2.7454,2.3532,1.7257,1.0197,1.1,1.0,1.0,0.6
+member-181,Brookhaven School District 181,School District,2.247,3.6,South,22.626,11,0.21,1.5729,0.6292,0.0449,0.0,0.9,1.1,0.1,1.8
+member-182,Pinecrest County 182,County,13.139,8.0,North,90.878,14,0.307,5.9125,3.2847,2.6278,1.3139,1.0,1.1,1.0,0.8
+member-183,Stonehill Park District 183,Park District,1.886,2.5,North,10.167,12,0.252,0.5658,1.3202,0.0,0.0,1.0,0.8,0.05,1.6
+member-184,Brookhaven Park District 184,Park District,1.765,5.7,South,13.476,8,0.225,0.5295,1.2355,0.0,0.0,1.0,0.8,0.05,1.6
+member-185,Ridgeway Special District 185,Special District,3.741,7.8,South,38.295,5,0.498,1.8705,1.8705,0.0,0.0,0.9,1.0,0.05,0.4
+member-186,Clearwater Water District 186,Water District,0.966,1,North,21.684,5,0.666,0.2898,0.6762,0.0,0.0,0.8,1.2,0.0,0.1
+member-187,Stonehill Recreation District 187,Recreation District,4.648,5.4,Central,26.306,5,0.337,2.0916,2.5564,0.0,0.0,1.0,0.8,0.05,1.9
+member-188,Pinecrest School District 188,School District,6.925,6.6,North,68.558,8,0.22,4.8475,1.939,0.1385,0.0,0.9,1.1,0.1,1.8
+member-189,Clearwater County 189,County,8.239,6.9,South,124.970,20,0.318,3.7076,2.0598,1.6478,0.8239,1.0,1.1,1.0,0.8
+member-190,Southgate Transit Authority 190,Transit Authority,2.124,5.8,Central,22.661,30,0.386,0.531,1.593,0.0,0.0,1.6,1.0,0.1,0.3
+member-191,Northvale Recreation District 191,Recreation District,2.304,4.6,North,12.566,6,0.36,1.0368,1.2672,0.0,0.0,1.0,0.8,0.05,1.9
+member-192,Harbor City 192,City,28.958,4.2,Central,193.050,15,0.287,10.1353,8.6874,6.3708,3.7645,1.1,1.0,1.0,0.6
+member-193,Clearwater School District 193,School District,14.228,9.1,North,133.283,10,0.211,9.9596,3.9838,0.2846,0.0,0.9,1.1,0.1,1.8
+member-194,Oakdale School District 194,School District,2.472,6.8,South,26.680,10,0.219,1.7304,0.6922,0.0494,0.0,0.9,1.1,0.1,1.8
+member-195,Harbor School District 195,School District,4.201,6.9,South,34.146,5,0.207,2.9407,1.1763,0.084,0.0,0.9,1.1,0.1,1.8
+member-196,Riverton Water District 196,Water District,5.321,8.3,Central,90.554,4,0.652,1.5963,3.7247,0.0,0.0,0.8,1.2,0.0,0.1
+member-197,Lakeside Water District 197,Water District,1.583,6.4,Central,34.186,5,0.67,0.4749,1.1081,0.0,0.0,0.8,1.2,0.0,0.1
+member-198,Glenmoor Fire District 198,Fire District,1.715,6.6,North,12.388,5,0.434,0.1372,0.0686,0.0,1.5092,0.9,0.9,0.05,0.2
+member-199,Maplewood Recreation District 199,Recreation District,0.889,2.8,South,5.496,8,0.312,0.4001,0.489,0.0,0.0,1.0,0.8,0.05,1.9
+member-200,Oakdale Fire District 200,Fire District,6.117,5.1,North,48.757,2,0.415,0.4894,0.2447,0.0,5.383,0.9,0.9,0.05,0.2
