@@ -14,10 +14,13 @@
 //   npx tsx scripts/diagnostics/solo-export-guard.ts            # compare to baseline
 //   npx tsx scripts/diagnostics/solo-export-guard.ts --write    # re-capture baseline
 //
-// Baseline: baselines/SOLO_EXPORT_GUARD_v2.json, captured at roster v2 after
-// the WC and GL recalibration. Pre-v2 baselines are RETIRED — roster v2 moved
-// payroll, TIV and Region, so every line's numbers legitimately changed and no
-// pre-v2 hash can ever match again.
+// Baseline: baselines/SOLO_EXPORT_GUARD_v3.json, captured at roster v3 after
+// the WC and GL recalibration. Baselines are RETIRED at every roster version —
+// v2 moved payroll, TIV and Region; v3 decorrelated risk quality from member
+// type, raised TIV to $6,993.3M and added the Locations / Primary Asset Share
+// columns. Every line's numbers legitimately changed, so no pre-v3 hash can
+// ever match again. Property moves too, even though its CODE is untouched,
+// because its exposure base IS the TIV column.
 import * as XLSX from 'xlsx';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -32,7 +35,7 @@ import { RESULT_METRICS } from '../../src/utils/resultMetrics';
 import type { GameState, CoverageLine, ResultSet } from '../../src/types/simulation';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v2.json');
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v3.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');
