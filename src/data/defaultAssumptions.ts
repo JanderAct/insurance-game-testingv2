@@ -703,3 +703,75 @@ export const LINE_RESERVE_PAYDOWN_PCT: Record<string, number> = {
   GL: RESERVE_PAYDOWN_PCT,
   Property: 0.65,
 };
+
+// ===========================================================================
+// PROPERTY loss model — ATTRITIONAL band only (design doc property_noncat
+// section NC1). The cat and weather bands are recorded separately below and
+// are INERT; only this block has a generator behind it.
+//
+// Property has three bands with different generative structures:
+//   attritional — independent claims, routine loss plus the occasional large
+//                 single-risk loss; owns the per-risk XoL layer      $16.8M
+//   weather     — event -> zone -> footprint -> correlated claims     $4.5M
+//   cat         — rare, severe, same event structure                  $7.5M
+// Expected property loss is ~$28.8M in total, so ATTRITIONAL ALONE IS 58%.
+// That is why Property is not cut over to its generator on the attritional
+// band alone: a pure premium derived from 58% of eventual loss would price
+// Property at 58% of its cost, and the loss ratio would break the moment
+// weather and cat landed. Cutover happens once all three bands exist.
+export const PROPERTY_LOSS_MODEL = {
+  // Frequency is per STORED LOCATION, not per member and not off TIV. Location
+  // count is a physical fact about a member; 1,866 locations x 0.06 = ~112
+  // claims/yr pool-wide.
+  baseFrequencyPerLocation: 0.06,
+
+  // FLAT by design (NC1.1). Attritional property frequency carries no trend —
+  // climate drift belongs to the weather band and, ultimately, a shock layer.
+  frequencyTrendPerYear: 0,
+
+  // Poisson, NOT negative binomial. Correlated lumpy variance is deliberately
+  // quarantined into the weather and cat bands, which leaves attritional close
+  // to genuinely independent. Do not "improve" this to NegBin — the band's job
+  // is to be the stable one.
+  //
+  // eps is the per-member-year frequency noise: Gamma(k, 1/k) with SD 1/sqrt(k).
+  // k = 44.4 gives SD 0.15 — MUCH tighter than WC's k=16 (SD 0.25) or GL's k=8
+  // (SD 0.354), because this band is genuinely stable.
+  memberFrequencyNoise: { shape: 44.4, scale: 1 / 44.4 },
+
+  // Damage ratio, mean-concentration parameterization: a = mu*nu,
+  // b = (1-mu)*nu. mu 0.04 / nu 2 -> Beta(0.08, 1.92): J-shaped, median ~1%,
+  // mean 4%, thin tail toward total loss. Severity is damageRatio x the HIT
+  // LOCATION's TIV, so it is capped at insured value by construction.
+  //
+  // NOTE a < 1: the density is unbounded at zero. Verify anything derived from
+  // this distribution by closed form or Monte Carlo, never by fixed-grid
+  // quadrature (see SeededRandom.beta and expectedOverLognormal).
+  damageRatio: { mean: 0.04, concentration: 2 },
+
+  // RQ channels, total beta 0.12 -> ~3.3x worst-to-best.
+  //   frequency: housekeeping, electrical, inspections
+  //   severity:  sprinklers, suppression — scales the Beta MEAN only, nu fixed,
+  //              so RQ acts on the DAMAGE RATIO and never on the dollar amount.
+  //              That is what preserves the insured-value cap.
+  rqFrequencyBeta: 0.08,
+  rqSeverityBeta: 0.04,
+
+  // Short-tailed: reported the year it happens, paid out over three.
+  reportLagYears: 0,
+  payoutPattern: [0.70, 0.25, 0.05],
+
+  // Construction cost inflation, applied through the standard accident-year
+  // -> settlement convention (patternTrendFactor over the payout vector), the
+  // same machinery WC's non-catastrophic tiers use. No second trending
+  // convention.
+  severityTrendPerYear: 0.04,
+
+  // Per-risk XoL retention. Confirmed at v3 by four independent simulations
+  // (1.77 / 1.78 / 1.78 / 1.77 breaches per year, 1.58% of attritional claims).
+  // The treaty is alive ONLY through within-member concentration: at a flat
+  // ~$3.75M average location almost no damage ratio breaches $2M, but Primary
+  // Asset Share concentrates each member's TIV into one dominant site (largest
+  // single location $93.5M). Flatten Primary Asset Share and the treaty dies.
+  perRiskRetention: 2_000_000,
+};
