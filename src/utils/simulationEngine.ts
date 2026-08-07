@@ -603,9 +603,35 @@ export function processLineYear(
 
   // --- Ratios ---
   // Use net incurred loss instead of net ultimate loss so the ratios match the accounting income statement.
+  //
+  // TWO DENOMINATORS EXIST AND THEY ARE NOT INTERCHANGEABLE (finding 6). Every
+  // ratio below states which one it uses in its name, because mixing them is
+  // the single most repeated error in this project:
+  //
+  //   PRICING BASIS      poolPremiumAndAdminExpense  = poolPremium + admin
+  //                      -> the finding-6 reconciliation basis. Gross ultimate
+  //                         over this is what the WC/GL 6b harness checks
+  //                         assert against 66.8%. DO NOT CHANGE IT.
+  //   MEMBER-CHARGE BASIS totalMemberCharge          = the above + reinsurance
+  //                      -> what members actually pay, and the only basis on
+  //                         which a loss ratio and an expense ratio may be
+  //                         ADDED, since a combined ratio is meaningless unless
+  //                         both terms share a denominator.
   const expectedLossRatio = expectedLoss / Math.max(poolPremiumAndAdminExpense, 1);
-  const expectedExpenseRatio = 1 - expectedLossRatio;
-  const expectedCombinedRatio = 1;
+  const expectedLossRatioMemberBasis = expectedLoss / Math.max(totalMemberCharge, 1);
+  // Computed from the LIVE expense values, not as 1 - lossRatio. The old form
+  // was a residual reverse-engineered to force the combined ratio to 1.000,
+  // which is why the display insisted the pool broke even while surplus
+  // tripled over five years.
+  const expectedExpenseRatio =
+    (adminExpense + reinsuranceCost) / Math.max(totalMemberCharge, 1);
+  // Both terms on the member-charge basis, so this is a real combined ratio.
+  // It is NOT 1.000 except by coincidence: at CLF 1.0 the pool charges exactly
+  // its expected cost and the ratio lands at 100%, while at the default CLF
+  // 1.346 it is ~82.7% — 17.3 points of intended underwriting margin, which is
+  // what a 75%-confidence funding level is FOR. The margin is correct
+  // behaviour; the old 1.000 display was what hid it.
+  const expectedCombinedRatio = expectedLossRatioMemberBasis + expectedExpenseRatio;
 
   const actualLossRatio = netIncurredLoss / Math.max(totalMemberCharge, 1);
   const actualExpenseRatio =
@@ -747,6 +773,7 @@ export function processLineYear(
 
     // Ratios
     expectedLossRatio,
+    expectedLossRatioMemberBasis,
     expectedExpenseRatio,
     expectedCombinedRatio,
     actualLossRatio,
@@ -1262,8 +1289,12 @@ export function aggregateLineResults(
   const reserveRiskMarginNeededSum = sum('reserveRiskMarginNeeded');
   const excessAvailableSurplusSum = sum('excessAvailableSurplus');
 
+  // Same two-denominator discipline as the line level (see the block there).
   const expectedLossRatio = expectedLossSum / Math.max(poolPremiumAndAdminExpenseSum, 1);
-  const expectedExpenseRatio = 1 - expectedLossRatio;
+  const expectedLossRatioMemberBasis = expectedLossSum / Math.max(totalMemberChargeSum, 1);
+  const expectedExpenseRatio =
+    (adminExpenseSum + reinsuranceCostSum) / Math.max(totalMemberChargeSum, 1);
+  const expectedCombinedRatio = expectedLossRatioMemberBasis + expectedExpenseRatio;
   const actualLossRatio = netIncurredLossSum / Math.max(totalMemberChargeSum, 1);
   const actualExpenseRatio = (adminExpenseSum + reinsuranceCostSum) / Math.max(totalMemberChargeSum, 1);
   const actualCombinedRatio = actualLossRatio + actualExpenseRatio;
@@ -1410,8 +1441,9 @@ export function aggregateLineResults(
     surplusTieOutDifference: sum('surplusTieOutDifference'),
 
     expectedLossRatio,
+    expectedLossRatioMemberBasis,
     expectedExpenseRatio,
-    expectedCombinedRatio: first.expectedCombinedRatio,
+    expectedCombinedRatio,
     actualLossRatio,
     actualExpenseRatio,
     actualCombinedRatio,

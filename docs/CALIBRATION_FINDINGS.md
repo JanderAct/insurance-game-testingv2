@@ -300,6 +300,64 @@ above and half below. The candidate causes listed originally (pure-premium above
 stacking, trend inflation, mean/median confusion) were all investigated and none was the cause; the
 cause was the basis mismatch in the two displayed ratios.
 
+### ⚠️ CORRECTION 3 — the Expected Combined Ratio was *constructed* to read 100%
+
+Same root cause, third surface. The mixed-basis error has now surfaced three times:
+
+| | what was mixed | how it presented |
+|---|---|---|
+| Correction 1 | expected loss ratio on the narrow basis vs actual on the wide basis | "actual LR ~46% vs 66.8% expected" — an apparent 20-point underpricing that did not exist |
+| Correction 2 | net-incurred numerator against a gross-derived target, once reinsurance recovery went live | WC 6b appearing to fail at ~57% when the gross basis read 66.88% |
+| **Correction 3** | **a narrow-basis loss ratio added to a wide-basis expense ratio** | **Expected Combined Ratio reading exactly 100% every year** |
+
+The combined ratio was computed as `expectedLossRatio + expectedExpenseRatio`, where
+
+```
+expectedLossRatio    = expectedLoss / poolPremiumAndAdminExpense   (NARROW — excludes reinsurance)
+expectedExpenseRatio = 1 - expectedLossRatio                       (a RESIDUAL, not an expense measure)
+expectedCombinedRatio = 1                                          (hardcoded)
+```
+
+**The expense ratio was not an expense ratio.** It was `1 − lossRatio`, a residual reverse-engineered
+so the two terms would always sum to 1.0 — and the combined ratio was then hardcoded to 1 anyway.
+The display was therefore not merely *inconsistent*: it was **constructed to report 100% whatever the
+pricing did**. No pricing change, funding-confidence change, or reinsurance change could ever have
+moved it.
+
+**That is why nothing looked wrong for the life of the project.** Five playthroughs showed surplus
+tripling over five years while the display insisted the pool was priced to break even, and the two
+facts never confronted each other because the "break even" figure was an identity, not a
+measurement.
+
+**The true figure.** On a consistent member-charge basis at the default CLF 1.346:
+
+```
+totalMemberCharge = EL x (CLF 1.346 + admin 0.15 + reins 0.375 x 1.346) = 2.001 x EL
+expected loss ratio  = 1 / 2.001                = 50.0%
+expense ratio        = (0.15 + 0.5048) / 2.001  = 32.7%
+EXPECTED COMBINED    = 82.7%
+```
+
+The pool is designed to earn **17.3 points of underwriting margin** at the default funding
+confidence. That is correct behaviour for a 75%-confidence risk margin — the margin was never the
+bug, the display was. Verified at both ends: 82.7% at the default CLF, and exactly 100.00% at CLF 1.0
+where numerator and denominator become algebraically identical (the confidence slider has no 1.0
+entry; 0.60 gives CLF 1.003 and reads 99.80%).
+
+**What was kept.** The narrow-basis ratio survives as its own labelled metric, *Expected Loss Ratio
+(pricing basis)*, because it is the correct basis for the finding-6 reconciliation and the WC/GL 6b
+harness checks depend on that exact definition. Both bases are now labelled at every surface — export,
+results display and audit page — and the audit page carries a reconciliation check asserting that
+loss + expense = combined exactly on the member-charge basis. That check cannot fail while the bases
+agree, which is precisely what makes it a regression guard: it goes red the moment a
+mixed-denominator term is reintroduced.
+
+**The generalisable lesson.** A ratio whose denominator is not stated in its name is a latent version
+of this bug. Three times now, two quantities that looked comparable were not, and in the worst case
+the inconsistency was *stabilised* into an identity that could never look wrong. Where a derived
+metric is defined as `1 − something`, ask what would happen if the underlying values moved — if the
+answer is "nothing", it is not measuring anything.
+
 ## 7. Property's loss volatility is too SMOOTH for a catastrophe-exposed line
 **Status:** confirmed on the reference seed. Belongs with the loss-distribution rework (finding 3).
 

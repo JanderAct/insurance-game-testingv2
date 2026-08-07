@@ -1,10 +1,32 @@
-// Byte-identity guard across engine commits.
+// EXPORT SHAPE GUARD — did the export's SHAPE change?
 //
 // Plays full 5-year games in four line configurations (WC-solo, GL-solo,
 // Property-solo, and all three together) across three seeds, exports each
 // through the real results workbook, and SHA-256s the PARSED CELL DATA rather
 // than the .xlsx wrapper — the wrapper carries timestamps and zip ordering
 // that change without the numbers changing, so hashing it would be noise.
+//
+// ============================================================================
+// THIS IS THE SHAPE CHECK, NOT THE VALUE CHECK. Read the same block in
+// value-identity-check.ts before "improving" either.
+//
+// The hash covers VALUES, LABELS, ROW SET AND ORDERING all at once, so it
+// cannot say WHICH of them moved. That makes it:
+//   - excellent at catching an unintended reorder, a dropped row, or a
+//     restructure leaking into another line's math;
+//   - useless as a display-layer gate, because renaming a label or adding a
+//     metric turns it red by construction while nothing computed has changed.
+//
+// Its companion, value-identity-check.ts, keys on FIELD NAME and is therefore
+// label- and order-independent: it answers "did any VALUE move?" and is the
+// PRIMARY gate for display-layer work. Expected pattern for a display fix:
+// GREEN there, RED here. For an engine regression: RED there.
+//
+// Concretely: the expected-combined-ratio fix corrected two exported metrics,
+// added one and renamed six labels. All 12 hashes here moved — as they had to —
+// while value-identity confirmed 14,400 fields bit-identical. Do NOT re-hash a
+// red guard here without first confirming value-identity is green.
+// ============================================================================
 //
 // Purpose: when a change is supposed to touch only one line, the other lines'
 // solo hashes must not move. That is the strongest available proof a
@@ -14,8 +36,12 @@
 //   npx tsx scripts/diagnostics/solo-export-guard.ts            # compare to baseline
 //   npx tsx scripts/diagnostics/solo-export-guard.ts --write    # re-capture baseline
 //
-// Baseline: baselines/SOLO_EXPORT_GUARD_v3.json, captured at roster v3 after
-// the WC and GL recalibration. Baselines are RETIRED at every roster version —
+// Baseline: baselines/SOLO_EXPORT_GUARD_v4.json. v3 was retired by the
+// expected-combined-ratio fix, which added one exported metric, corrected two
+// values and renamed six labels — a legitimate export-shape change with no
+// engine movement behind it (proven by value-identity-check).
+//
+// Baselines are also RETIRED at every roster version —
 // v2 moved payroll, TIV and Region; v3 decorrelated risk quality from member
 // type, raised TIV to $6,993.3M and added the Locations / Primary Asset Share
 // columns. Every line's numbers legitimately changed, so no pre-v3 hash can
@@ -35,7 +61,7 @@ import { RESULT_METRICS } from '../../src/utils/resultMetrics';
 import type { GameState, CoverageLine, ResultSet } from '../../src/types/simulation';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v3.json');
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v4.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

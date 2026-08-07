@@ -281,13 +281,17 @@ export default function ResultsPage({ lockedResults, lineView }: ResultsPageProp
               />
               <Row label="Investment Income" value={formatCurrency(result.investmentIncome)} valueColor={colorForNetIncome(result.investmentIncome)} />
               <div className="border-t border-gray-100 my-1" />
-              <Row label="Expected Loss Ratio" value={formatPct(result.expectedLossRatio)} />
-              <Row label="Expected Expense Ratio" value={formatPct(result.expectedExpenseRatio)} />
-              <Row label="Expected Combined Ratio" value={formatPct(result.expectedCombinedRatio)} />
+              {/* Denominators are named because two exist and adding across
+                  them is finding 6's recurring error. Pricing basis =
+                  poolPremium + admin; member charge basis adds reinsurance. */}
+              <Row label="Expected Loss Ratio (pricing basis)" value={formatPct(result.expectedLossRatio)} />
+              <Row label="Expected Loss Ratio (member charge)" value={formatPct(result.expectedLossRatioMemberBasis)} />
+              <Row label="Expected Expense Ratio (member charge)" value={formatPct(result.expectedExpenseRatio)} />
+              <Row label="Expected Combined Ratio (member charge)" value={formatPct(result.expectedCombinedRatio)} />
               <div className="border-t border-gray-100 my-1" />
-              <Row label="Actual Loss Ratio (Net)" value={formatPct(result.actualLossRatio)} />
-              <Row label="Actual Expense Ratio" value={formatPct(result.actualExpenseRatio)} />
-              <Row label="Actual Combined Ratio" value={formatPct(result.actualCombinedRatio)} valueColor={colorForRatio(result.actualCombinedRatio)} />
+              <Row label="Actual Loss Ratio (Net, member charge)" value={formatPct(result.actualLossRatio)} />
+              <Row label="Actual Expense Ratio (member charge)" value={formatPct(result.actualExpenseRatio)} />
+              <Row label="Actual Combined Ratio (member charge)" value={formatPct(result.actualCombinedRatio)} valueColor={colorForRatio(result.actualCombinedRatio)} />
               <div className="border-t border-gray-100 my-1" />
               <Row label="Net Income" value={formatCurrency(result.netIncome)} valueColor={colorForNetIncome(result.netIncome)} />
             </ResultCard>

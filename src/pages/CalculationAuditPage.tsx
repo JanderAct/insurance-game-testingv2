@@ -555,6 +555,8 @@ export interface AuditCheckSet {
   totalAssetsSplit: AuditCheck;
   totalLiabilitiesSplit: AuditCheck;
   assetsMinusLiabilities: AuditCheck;
+  // Ratio-basis guard (no statement line of its own)
+  expectedCombinedRatioBasis: AuditCheck;
   // Cash & investments rollforward (no statement line of their own)
   endingCashSweep: AuditCheck;
   endingInvestmentsSweep: AuditCheck;
@@ -732,6 +734,16 @@ export function computeAuditChecks(
     r.totalLiabilities
   );
   const assetsMinusLiabilities = mkCheck(r.totalAssets - r.totalLiabilities, r.endingSurplus);
+  // BASIS GUARD. On the member-charge basis the expected loss ratio and the
+  // expected expense ratio must sum EXACTLY to the expected combined ratio,
+  // because all three share the total-member-charge denominator. It cannot
+  // fail while the bases agree — which is precisely what makes it a regression
+  // guard: it goes red the moment someone reintroduces a mixed-denominator
+  // term, which is how the combined ratio came to read a hardcoded 100%.
+  const expectedCombinedRatioBasis = mkCheck(
+    r.expectedLossRatioMemberBasis + r.expectedExpenseRatio,
+    r.expectedCombinedRatio,
+  );
   // One identity, both directions: ending = beginning + change, equivalently
   // change = ending - beginning. (These were previously two separate rows.)
   const netPositionRollforward = mkCheck(r.beginingSurplus + r.netIncome, r.endingSurplus);
@@ -843,6 +855,7 @@ export function computeAuditChecks(
     totalAssetsSplit,
     totalLiabilitiesSplit,
     assetsMinusLiabilities,
+    expectedCombinedRatioBasis,
     endingCashSweep,
     endingInvestmentsSweep,
     poolSum,
@@ -1564,9 +1577,23 @@ export function buildSupportingRows(
     },
   ];
 
+  // BASIS GUARD — the reconciliation that makes this page's ratio card
+  // self-checking. On the member-charge basis all three ratios share one
+  // denominator, so loss + expense must equal combined EXACTLY. It cannot fail
+  // while the bases agree, and that is the point: it turns red the instant a
+  // mixed-denominator term is reintroduced, which is exactly how the combined
+  // ratio came to read a hardcoded 100% for the life of the project.
+  const basisGuardDiff = Math.abs(
+    (result.expectedLossRatioMemberBasis + result.expectedExpenseRatio) - result.expectedCombinedRatio,
+  );
+  const basisGuardStatus: CheckStatus = basisGuardDiff < 1e-12 ? 'pass' : 'fail';
+  const basisGuardNote = basisGuardStatus === 'pass'
+    ? 'Basis check: loss + expense = combined exactly, all three over total member charge.'
+    : `Basis check FAILED by ${basisGuardDiff.toExponential(2)} — a term is on the wrong denominator.`;
+
   const ratioRows: AuditRow[] = [
     {
-      metric: 'Expected Loss Ratio',
+      metric: 'Expected Loss Ratio (pricing basis)',
       value: formatPct(result.expectedLossRatio),
       numericValue: result.expectedLossRatio,
       formula: { kind: 'ratio', numerator: curTerm(result.expectedLoss, 'expected pool loss'), denominator: curTerm(result.poolPremium + result.adminExpense, 'pool premium + admin expense') },
@@ -1575,19 +1602,35 @@ export function buildSupportingRows(
         value: result.poolPremium + result.adminExpense,
         spec: { kind: 'sum', terms: [curTerm(result.poolPremium, 'pool premium'), curTerm(result.adminExpense, 'admin expense')] },
       },
+      explain: 'PRICING basis — the denominator EXCLUDES reinsurance cost. This is the finding-6 reconciliation figure that the WC and GL generator checks assert against 66.8%. It is not a component of the combined ratio: adding it to an expense ratio measured over total member charge would mix denominators.',
     },
     {
-      metric: 'Expected Expense Ratio',
+      metric: 'Expected Loss Ratio (member charge basis)',
+      value: formatPct(result.expectedLossRatioMemberBasis),
+      numericValue: result.expectedLossRatioMemberBasis,
+      formula: { kind: 'ratio', numerator: curTerm(result.expectedLoss, 'expected pool loss'), denominator: curTerm(result.totalMemberCharge, 'total member charge') },
+      explain: 'MEMBER-CHARGE basis — the denominator INCLUDES reinsurance cost. This is the loss-ratio component of the combined ratio below.',
+    },
+    {
+      metric: 'Expected Expense Ratio (member charge basis)',
       value: formatPct(result.expectedExpenseRatio),
       numericValue: result.expectedExpenseRatio,
-      formula: { kind: 'sum', terms: [pctTerm(1, '1.0'), pctTerm(-result.expectedLossRatio, 'expected loss ratio')] },
+      formula: { kind: 'ratio', numerator: curTerm(result.adminExpense + result.reinsuranceCost, 'admin expense + reinsurance cost'), denominator: curTerm(result.totalMemberCharge, 'total member charge') },
+      subFormula: {
+        label: 'admin expense + reinsurance cost',
+        value: result.adminExpense + result.reinsuranceCost,
+        spec: { kind: 'sum', terms: [curTerm(result.adminExpense, 'admin expense'), curTerm(result.reinsuranceCost, 'reinsurance cost')] },
+      },
+      explain: 'Computed from the actual expense dollars. It was previously defined as 1.0 − loss ratio, a residual that forced the combined ratio to 100% regardless of pricing.',
     },
     {
-      metric: 'Expected Combined Ratio',
+      metric: 'Expected Combined Ratio (member charge basis)',
       value: formatPct(result.expectedCombinedRatio),
       numericValue: result.expectedCombinedRatio,
-      formula: { kind: 'sum', terms: [pctTerm(result.expectedLossRatio, 'expected loss ratio'), pctTerm(result.expectedExpenseRatio, 'expected expense ratio')] },
-      explain: 'Designed to equal 100% by construction (expense ratio is defined as 1.0 − loss ratio).',
+      formula: { kind: 'sum', terms: [pctTerm(result.expectedLossRatioMemberBasis, 'expected loss ratio (member charge)'), pctTerm(result.expectedExpenseRatio, 'expected expense ratio (member charge)')] },
+      explain: 'Both terms share the total-member-charge denominator, so the sum is meaningful. It is NOT 100% except at funding confidence CLF 1.0: at the default CLF the pool charges a deliberate risk margin, and the shortfall below 100% IS that margin. The former 100% reading was an artifact of adding a pricing-basis loss ratio to a residual expense ratio.',
+      note: basisGuardNote,
+      status: basisGuardStatus,
     },
     {
       metric: 'Actual Loss Ratio',

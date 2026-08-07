@@ -521,42 +521,58 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
     {
       key: 'expectedLossRatio',
       category: 'Ratios and Capital',
-      label: 'Expected Loss Ratio',
+      // PRICING basis (poolPremium + admin). This is the finding-6
+      // reconciliation figure the WC/GL 6b harness checks assert against
+      // 66.8% — it is NOT a component of the combined ratio and must not be
+      // added to an expense ratio.
+      label: 'Expected Loss Ratio (pricing basis)',
       value: r => formatPct(r.expectedLossRatio),
       csvValue: r => r.expectedLossRatio,
     },
     {
+      key: 'expectedLossRatioMemberBasis',
+      category: 'Ratios and Capital',
+      // MEMBER-CHARGE basis (adds reinsurance cost to the denominator). This
+      // is the one that pairs with the expense ratio below.
+      label: 'Expected Loss Ratio (member charge basis)',
+      value: r => formatPct(r.expectedLossRatioMemberBasis),
+      csvValue: r => r.expectedLossRatioMemberBasis,
+    },
+    {
       key: 'expectedExpenseRatio',
       category: 'Ratios and Capital',
-      label: 'Expected Expense Ratio',
+      label: 'Expected Expense Ratio (member charge basis)',
       value: r => formatPct(r.expectedExpenseRatio),
       csvValue: r => r.expectedExpenseRatio,
     },
     {
       key: 'expectedCombinedRatio',
       category: 'Ratios and Capital',
-      label: 'Expected Combined Ratio',
+      // Both terms on the member-charge basis. ~82.7% at the default CLF
+      // 1.346, i.e. 17.3 points of intended underwriting margin; 100.0% at
+      // CLF 1.0. It formerly read a hardcoded 1.000.
+      label: 'Expected Combined Ratio (member charge basis)',
       value: r => formatPct(r.expectedCombinedRatio),
       csvValue: r => r.expectedCombinedRatio,
     },
     {
       key: 'actualLossRatio',
       category: 'Ratios and Capital',
-      label: 'Actual Loss Ratio',
+      label: 'Actual Loss Ratio (member charge basis)',
       value: r => formatPct(r.actualLossRatio),
       csvValue: r => r.actualLossRatio,
     },
     {
       key: 'actualExpenseRatio',
       category: 'Ratios and Capital',
-      label: 'Actual Expense Ratio',
+      label: 'Actual Expense Ratio (member charge basis)',
       value: r => formatPct(r.actualExpenseRatio),
       csvValue: r => r.actualExpenseRatio,
     },
     {
       key: 'actualCombinedRatio',
       category: 'Ratios and Capital',
-      label: 'Actual Combined Ratio',
+      label: 'Actual Combined Ratio (member charge basis)',
       value: r => formatPct(r.actualCombinedRatio),
       csvValue: r => r.actualCombinedRatio,
     },

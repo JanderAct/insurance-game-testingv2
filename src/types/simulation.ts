@@ -488,13 +488,20 @@ export interface ResultSet {
   surplusFromIncome: number;                // beginingSurplus + netIncome
   surplusTieOutDifference: number;          // endingSurplus - surplusFromIncome
 
-  // Ratios
-  expectedLossRatio: number;
-  expectedExpenseRatio: number;
-  expectedCombinedRatio: number;
-  actualLossRatio: number;
-  actualExpenseRatio: number;
-  actualCombinedRatio: number;
+  // Ratios — EVERY ONE STATES ITS DENOMINATOR, because two exist and mixing
+  // them is finding 6's recurring error.
+  //   pricing basis       = poolPremiumAndAdminExpense (poolPremium + admin)
+  //   member-charge basis = totalMemberCharge (the above + reinsurance cost)
+  // A loss ratio and an expense ratio may only be ADDED when they share a
+  // denominator, which is why the combined ratios use the member-charge basis
+  // on both terms.
+  expectedLossRatio: number;             // PRICING basis — the finding-6 reconciliation figure
+  expectedLossRatioMemberBasis: number;  // MEMBER-CHARGE basis — the combined-ratio component
+  expectedExpenseRatio: number;          // MEMBER-CHARGE basis
+  expectedCombinedRatio: number;         // member-charge basis on both terms
+  actualLossRatio: number;               // MEMBER-CHARGE basis
+  actualExpenseRatio: number;            // MEMBER-CHARGE basis
+  actualCombinedRatio: number;           // member-charge basis on both terms
   combinedRatio: number;
   lossRatio: number;
   expenseRatio: number;
