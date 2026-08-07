@@ -48,6 +48,7 @@ import {
   drawLognormal,
   drawTruncatedLognormal,
   expectedOverLognormal,
+  patternTrendFactor,
   trendToSettlement,
 } from './claimMath';
 import {
@@ -64,23 +65,11 @@ const NEUTRAL_RQ = 5;
 
 // --- small shared helpers ---------------------------------------------------
 
-// trendToSettlement, the lognormal helpers and the truncated-lognormal pair
-// now live in claimMath.ts, shared with the GL generator. Their invariants
+// trendToSettlement, patternTrendFactor, the lognormal helpers and the
+// truncated-lognormal pair now live in claimMath.ts, shared with the GL and
+// Property generators. Their invariants
 // (single vintage-conversion point; truncate-and-renormalise with the draw
 // and the analytic integrating the identical density) are documented there.
-
-// The multiple of an accident-year amount that a payout pattern actually
-// settles for, once each pattern year is trended at the leg's own rate.
-// Pattern index 0 is the accident year itself (factor 1.0), so a short pattern
-// yields a small, CORRECT uplift rather than the silent 1.0 that omitting
-// trend would give.
-function patternTrendFactor(pattern: number[], rate: number, accidentYear: number): number {
-  let factor = 0;
-  for (let i = 0; i < pattern.length; i++) {
-    factor += pattern[i] * trendToSettlement(1, rate, accidentYear, accidentYear + i);
-  }
-  return factor;
-}
 
 // Present value of a payment stream that starts at `firstPayment` in year 0
 // (undiscounted) and escalates at `growth`, discounted at `discount`.

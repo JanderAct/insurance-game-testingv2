@@ -160,3 +160,21 @@ export function drawTruncatedLognormal(rng: SeededRandom, mean: number, cv: numb
   const { mu } = lognormalParams(mean, cv);
   return Math.min(Math.exp(mu), upperBound);
 }
+
+// The multiple of an accident-year amount that a payout pattern actually
+// settles for, once each pattern year is trended at the leg's own rate.
+// Pattern index 0 is the accident year itself (factor 1.0), so a short pattern
+// yields a small, CORRECT uplift rather than the silent 1.0 that omitting
+// trend would give.
+//
+// SHARED so that every line trends a payout vector the same way. WC uses it
+// per leg (medical and indemnity at different rates); Property uses it for
+// construction-cost inflation over its 70/25/5 pattern. A second trending
+// convention is exactly what the accident-year-dollars rule exists to prevent.
+export function patternTrendFactor(pattern: number[], rate: number, accidentYear: number): number {
+  let factor = 0;
+  for (let i = 0; i < pattern.length; i++) {
+    factor += pattern[i] * trendToSettlement(1, rate, accidentYear, accidentYear + i);
+  }
+  return factor;
+}
