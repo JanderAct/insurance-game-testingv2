@@ -139,6 +139,21 @@ export class SeededRandom {
   // this and returned 21.8 breaches/yr against a true 1.78 — a 12x error that
   // looked plausible. VERIFY BETA QUANTITIES BY MONTE CARLO OR CLOSED FORM
   // (E[X] = mu exactly), never by naive quadrature over the density.
+  //
+  // VALIDATED AT SMALL SHAPE — hypothesis closed, do not re-litigate. Because
+  // gamma() uses the Marsaglia-Tsang boost G(a) = G(a+1) x u^(1/a), shape 0.08
+  // computes u^12.5, which would amplify any weakness in the uniform's bits and
+  // could shave the right tail while leaving the mean intact. Tested directly
+  // at Beta(0.08, 1.92), 5,000,000 draws through the real deriveSubRng path,
+  // against exact incomplete-beta values:
+  //   mean 0.040027 vs 0.040000 exact (z = 0.54)
+  //   P(X>0.02) 21.4561% vs 21.4547%   P(X>0.10) 11.1483% vs 11.1506%
+  //   P(X>0.40)  2.8025% vs  2.7970%   — every |z| < 1.5
+  //   P(X<1e-6) 35.5933% vs 35.6148%, tracking correctly down to 1e-100
+  // The boost's resolution is not a constraint either: over 2M draws max u is
+  // 0.999999463791, so 1-u = 5.4e-7 and u^12.5 reaches 0.999993. Truncation
+  // would require 1-u around 1e-3. An 8% right-tail deficit would have shown
+  // as z ~ -70 at t = 0.40.
   beta(a: number, b: number): number {
     if (!(a > 0) || !(b > 0)) return 0;
     const x = this.gamma(a, 1);

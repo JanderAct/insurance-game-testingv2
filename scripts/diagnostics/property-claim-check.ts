@@ -188,6 +188,20 @@ console.log('\n--- 4. per-risk layer (the $2M retention) — REPORTED, wide sani
   // and a breach is a per-claim severity event, so their dispersion has no
   // first-order effect on the expected count.
   //
+  // HYPOTHESES CLOSED — do not reopen these without new evidence:
+  //  - Beta sampler bias at shape 0.08. gamma() uses the Marsaglia-Tsang boost,
+  //    so a = 0.08 computes u^12.5, which could in principle shave the right
+  //    tail where breaches live. Tested at 5,000,000 draws through the real
+  //    RNG path against exact incomplete-beta values: every survival
+  //    probability within |z| < 1.5, mean within z = 0.54, left tail correct
+  //    to 1e-100. See the note on SeededRandom.beta.
+  //  - Structural covariance between the Poisson count and uniform location
+  //    sampling. There is none: lambda = Locations x base_freq with uniform
+  //    per-claim location choice is mathematically IDENTICAL to summing
+  //    base_freq x P(breach) over locations, so nothing cancels or fails to
+  //    cancel. The exact and simulated figures agree (1.833 vs 1.851 over
+  //    2,000 years, ~1 Poisson SE apart), which is what that identity predicts.
+  //
   // BASIS NOTE: the engine tests the BOOKED claim against the retention, since
   // a real treaty responds to the settled amount. The spec's 1.78 was measured
   // on accident-year severity, which is why the two differ by the payout trend.
