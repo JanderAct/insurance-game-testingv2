@@ -799,7 +799,9 @@ export const PROPERTY_LOSS_MODEL = {
 // and GL pure premiums, these do NOT recompute themselves.
 //
 // Target AALs: flood $2.90M / wildfire $2.71M / earthquake $1.87M
-// = $7.47M cat total, plus weather $4.5M.
+// = $7.47M cat total AT v3 TIV, plus weather $9.20M at v4 TIV (see
+// PROPERTY_WEATHER_MODEL.targetAal, which has been rescaled; the cat targets
+// have NOT been, and are still v3 figures).
 export const PROPERTY_CAT_MODEL = {
   flood:      { lambda: 0.70,  baseFootprint: 0.15, cap: 0.60, intensityCv: 0.7, betaMean: 0.00818, betaConcentration: 1.5, targetAal: 2_900_000 },
   wildfire:   { lambda: 0.80,  baseFootprint: 0.20, cap: 0.70, intensityCv: 0.5, betaMean: 0.00582, betaConcentration: 2.5, targetAal: 2_710_000 },
@@ -846,16 +848,40 @@ export const PROPERTY_WEATHER_MODEL = {
   baseFootprint: 0.10,
   cap: 0.50,
   intensityCv: 0.6,
-  betaMean: 0.00189,        // numeric solve — see the warning above
+  betaMean: 0.00189,        // numeric solve — see the warning above, and mu IS UNCHANGED below
   betaConcentration: 4.0,   // lighter tail than cat
-  targetAal: 4_500_000,
+
+  // TARGET AAL AT ROSTER v4 — rescaled from the v3 figure of $4.50M.
+  //
+  // mu IS UNCHANGED AND WAS NOT RE-SOLVED, which is the one case where the
+  // "re-solve mu if the roster moves" warning above does not bite. Weather AAL
+  // is EXACTLY LINEAR IN ZONE TIV: locations are hit by independent per-location
+  // Bernoulli draws at hit_rate, so expected affected TIV is hit_rate x zone TIV
+  // whatever the size mix, and expected loss per event is
+  // hit_rate(I) x mu x I x zoneTIV. Nothing in that expression depends on the
+  // TIV level, so AAL = C x mu x TIV: double the TIV and the target doubles at
+  // the same mu. (Cat is NOT in this position — it draws its zone by hazard
+  // weight, so its AAL depends on a hazard-weighted TIV mix, and roster v4
+  // rescaled the three zones by different factors: 2.0045 / 2.0168 / 2.1277.
+  // Cat's targets above are still v3 and its mu WILL need re-solving.)
+  //
+  // The rescale: 4.50M x 14,303.6 / 6,993.3 = 4.50M x 2.045325 = $9.204M.
+  //
+  // ⚠ THIS IS $9.204M, NOT the $9.26M quoted in the plan this work was approved
+  // against. That figure does not reconcile against the linear identity above
+  // (it would require a v3 TIV of $6,951M rather than the actual $6,993.3M).
+  // The derived value is used here because it is the one the identity yields.
+  // Difference 0.6%, far inside any verification gate, but an anchor mu is
+  // solved against should be exactly derivable.
+  targetAal: 9_204_000,
 
   // ⚠ WEATHER HAS NO REGIONAL HAZARD DIFFERENTIATION. Every zone draws the
   // same expected event count, so loss varies by zone ONLY through TIV
-  // (North $2,513.9M / Central $2,400.2M / South $2,079.2M). No weather hazard
-  // table exists in either design doc. If differentiation is wanted later it
-  // needs its OWN table — do NOT borrow flood's, which encodes coastal/riverine
-  // exposure rather than storm frequency.
+  // (v4: North $5,039.0M / Central $4,840.6M / South $4,423.9M, summing to the
+  // book's $14,303.5M; these were $2,513.9M / $2,400.2M / $2,079.2M at v3). No
+  // weather hazard table exists in either design doc. If differentiation is
+  // wanted later it needs its OWN table — do NOT borrow flood's, which encodes
+  // coastal/riverine exposure rather than storm frequency.
   regionalHazardDifferentiation: null,
 
   // RQ: frequency LOCKED (hazard is nature's, not the member's); RQ affects the
