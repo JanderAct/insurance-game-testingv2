@@ -2,6 +2,8 @@
 // Premium formula: Premium = Exposure($M) × Rate_per_$100_payroll × 10,000
 
 import type { Claim, GameState, Occurrence, PoolState, DecisionSet, LinePoolState, LineDecisionSet, ResultSet, LineResultSet, ReserveCohort, Member, MemberLossResult, MembershipHistory, CoverageLine, GameInstance, AssetAllocation } from '../types/simulation';
+import type { LineShockEffects } from '../types/shocks';
+import { resolveShocks } from './shockResolver';
 import { SeededRandom, deriveSubRng } from './random';
 import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, MEMBER_LOSS_VOLATILITY, RISK_CONTROL_PARAMS, LINE_RESERVE_PAYDOWN_PCT, OPERATING_CASH_PCT_OF_PREMIUM, WC_LOSS_MODEL } from '../data/defaultAssumptions';
 import { getReinsuranceStructure, calculateReinsuranceCost, calculateReinsuranceRecovery } from './reinsuranceEngine';
@@ -86,6 +88,19 @@ interface LineYearContext {
   // IGNORES this, so there is no double application while it awaits its own
   // generator.
   gPool: number;
+  // This line's slice of the year's shock resolution, PROJECTED DOWN from
+  // processYear. Absent when nothing is in force, which keeps the no-shock code
+  // path textually identical to what it was before shocks existed.
+  //
+  // A line receives only its OWN effects and cannot see another line's, which
+  // is the point: events emit into several lines from one cause, but the
+  // coordination happens at pool level and a line-local generator never learns
+  // that another line exists.
+  shock?: LineShockEffects;
+  // Resolved dotted path -> absolute value for this line's loss model,
+  // accumulated across every future-horizon override in force. Consumed through
+  // the parameter overlay (wcParams.ts), never by reaching into the global.
+  paramOverrides?: Record<string, number>;
   cash: number;
   investments: number;
   assetAllocation: AssetAllocation;
@@ -954,6 +969,16 @@ export function processYear(
   const gPool = deriveSubRng(instance.seed, yearNumber, 'wc_gpool')
     .gamma(WC_LOSS_MODEL.poolYearFactor.shape, WC_LOSS_MODEL.poolYearFactor.scale);
 
+  // Shock resolution — pool level, for the same reason gPool is drawn here: a
+  // per-line deriveSubRng cannot express something common to all lines, and a
+  // single event can emit into several of them. Per-line effects are projected
+  // into each LineYearContext below.
+  //
+  // CONSUMES NO RANDOMNESS, and returns undefined rather than an empty object
+  // when nothing is in force, so a game with no shocks takes exactly the code
+  // path it took before shocks existed.
+  const shocks = resolveShocks(instance, yearNumber);
+
   // Sequential fold: each line sees the shared roster as updated by lines
   // already processed this year (a member withdrawing from one line becomes
   // ineligible for new recruitment into the next, but isn't retroactively
@@ -984,6 +1009,8 @@ export function processYear(
       allMarketMembers: currentAllMarketMembers,
       membershipHistory,
       gPool,
+      shock: shocks?.byLine[line],
+      paramOverrides: shocks?.paramOverrides[line],
       cash: poolState.cash * share,
       investments: lineState.investedAssets,
       assetAllocation: lineDecisions.assetAllocation,

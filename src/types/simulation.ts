@@ -1,5 +1,9 @@
 // Core TypeScript types for Risk Pool Simulation v1
 
+// Type-only, and circular with shocks.ts (which imports CoverageLine and Region
+// from here). Erased at compile time, so the cycle never reaches the bundle.
+import type { ScheduledShock } from './shocks';
+
 export type MemberStatus = 'active' | 'withdrawn' | 'prospect';
 export type MemberType =
   | 'City'
@@ -260,6 +264,16 @@ export interface GameInstance {
     competitivePressure: number;   // 0-1
     memberSensitivity: number;     // 0-1 how reactive members are to price
   };
+  // Shock events scheduled for this game, by catalog id and fire year. See
+  // src/data/shockCatalog.ts.
+  //
+  // OPTIONAL AND ABSENT BY DEFAULT, AND THAT IS LOAD-BEARING. generateGameInstance
+  // does NOT draw to populate this and does not write the field at all unless a
+  // scenario supplies one, so a game with no shocks is byte-identical to one
+  // from before shocks existed. Probability-based firing, when it is added,
+  // populates this same list from its own purpose-keyed RNG label; everything
+  // downstream is unchanged by that.
+  scheduledShocks?: ScheduledShock[];
 }
 
 // Coverage lines a pool can write. Selected once at game setup and locked for
