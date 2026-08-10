@@ -6,8 +6,10 @@
 //
 // Run: npx tsx scripts/diagnostics/wc-claim-check.ts
 //
-// Lives outside src/ so tsconfig.app.json's "include": ["src"] never sees it
-// and `npm run typecheck` is unaffected.
+// Lives outside src/, so tsconfig.app.json's "include": ["src"] never sees it —
+// but it IS covered by tsconfig.scripts.json, and `npm run typecheck` runs
+// both. A harness that cannot compile is worse than no harness: this file used
+// to be checked only at runtime, on whichever path a given execution exercised.
 
 import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
 import { WC_CLASS_KEYS, WC_LOSS_MODEL } from '../../src/data/defaultAssumptions';

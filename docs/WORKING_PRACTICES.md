@@ -5,6 +5,16 @@ Things that were discovered expensively and live only in conversation memory. Re
 - **`npm run typecheck` is the real command.** Root `tsc --noEmit` is a NO-OP — root tsconfig has
   `"files": []` with project references, so it checks zero files and always exits 0. Several earlier
   "typecheck clean" claims were vacuous.
+- **A harness that cannot compile is worse than no harness.** scripts/ sat outside tsconfig.app.json
+  for the whole project, so no diagnostic was ever typechecked — they failed only at runtime, on
+  whichever paths a given run exercised. The harnesses hold most of the verification logic in this
+  project; an unchecked bug in one reports green. This is the "a test that cannot fail" entry one
+  level up. Now covered by its own tsconfig.
+- **When a documented hazard recurs, make it impossible rather than documenting it harder.** The root
+  `tsc --noEmit` no-op was recorded in the very first entry of this file and still produced vacuous
+  "typecheck clean" claims across a whole build phase, because the wrong command exits 0 with no
+  output — nothing signals the mistake. A practice that depends on remembering will be forgotten. The
+  root path is now removed.
 - **Hand-check a printed sample of any displayed formula.** A harness that verifies operands cannot see
   *formatting*. Twice a displayed rate was too imprecise to hand-multiply back to its row (e.g. "−0.8%"
   against a −$153,009 row). Only manual sample inspection caught it, both times.
@@ -50,6 +60,15 @@ Things that were discovered expensively and live only in conversation memory. Re
   tighter because counts and rates have bounded per-observation variance where heavy-tailed dollar
   sums do not. Write the division of labour into the harness, or a passing wide gate will later be
   mistaken for proof of exactness.
+- **Shock and no-shock runs on the same seed are NOT paired.** poisson() consumes a variable number of
+  uniforms, so anything that changes a frequency — freqMultiplier, exposureChange, an injected claim
+  that draws — reshapes every subsequent draw in that stream. A "with shock minus without shock" delta
+  on one seed therefore measures the shock PLUS a reshuffle of everything downstream. Measured
+  instance: the GL EPL surge read a $2.85M whole-line delta against a $4.47M analytic until it was
+  isolated to EPL alone, where it landed at $4.32M — the gap was abuse-tail reshuffle, not the shock.
+  Either measure the affected sub-coverage in isolation, or run enough seeds that the reshuffle
+  averages out; state which in the harness header. Same family as the full-market/enrolled error:
+  arithmetically correct, measured against the wrong thing.
 
 ## Rulings and stopping
 - **A failed verification check stops the work UNCOMMITTED. Whether it blocks is the user's call, not

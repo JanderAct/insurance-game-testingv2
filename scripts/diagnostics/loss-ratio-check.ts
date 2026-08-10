@@ -12,8 +12,9 @@
 //      poolPremiumAndAdminExpense) against actualLossRatio (denominator
 //      totalMemberCharge, which additionally includes reinsuranceCost)?
 //
-// Deliberately outside src/ so tsconfig.app.json's "include": ["src"] never
-// sees it — `npm run typecheck` is unaffected. Run with `npx tsx`.
+// Deliberately outside src/, so tsconfig.app.json's "include": ["src"] never
+// sees it — but tsconfig.scripts.json does, and `npm run typecheck` runs both.
+// Run with `npx tsx`.
 //
 // No engine/pricing/loss logic is reimplemented anywhere below — every
 // captured field is read straight off the LineResultSet objects processYear

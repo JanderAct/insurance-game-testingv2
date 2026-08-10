@@ -1,0 +1,38 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    // DOM is here for the files scripts PULL IN, not for scripts themselves.
+    // scripts/ imports src/utils/wcParams.ts, which calls the global
+    // structuredClone() — a real Node 17+ global at runtime, but one
+    // @types/node does not declare (it lives only in lib.dom.d.ts /
+    // lib.webworker.d.ts in TypeScript's bundled libs). src/ already compiles
+    // with DOM present (tsconfig.app.json, for the browser build), so this
+    // keeps the shared engine files checked against the same assumed globals
+    // in both compilations rather than manufacturing a false error here.
+    // No diagnostic script uses a DOM-only API (document, window, etc.) —
+    // that would still be a real bug if one ever did.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "types": ["node"],
+    "skipLibCheck": true,
+
+    /* Bundler mode — same as tsconfig.app.json/tsconfig.node.json, since
+       scripts import extensionless relative paths the same way. */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+
+    /* Linting — identical to tsconfig.app.json. scripts/ pulls in most of
+       src/utils and src/data transitively (TypeScript checks imported files
+       regardless of "include"), so using different strictness here would mean
+       the same source file is held to two different bars depending on which
+       config happens to load it first. */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["scripts"]
+}
