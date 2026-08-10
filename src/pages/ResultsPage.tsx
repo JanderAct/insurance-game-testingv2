@@ -130,6 +130,39 @@ export default function ResultsPage({ lockedResults, lineView }: ResultsPageProp
 
       {result && (
         <div className="space-y-5">
+          {/* CONFIGURED SHOCK EVENTS — a separate banner from the shockLossIncurred
+              one below, and deliberately so. That flag already means three
+              different line-specific things (a WC catastrophic claim, a GL
+              occurrence over $1M, or Property's aggregate factor exceeding its
+              threshold), and a scheduled event is a fourth, unrelated concept.
+              Rendered only when something fired, so a shock-free game shows
+              exactly what it always did. */}
+          {(result.shockEvents?.length ?? 0) > 0 && (
+            <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 space-y-3">
+              <div className="flex items-start gap-3">
+                <Zap className="text-amber-600 flex-shrink-0 mt-0.5" size={20} />
+                <p className="font-bold text-amber-900">
+                  {result.shockEvents!.length === 1 ? 'Shock Event' : `${result.shockEvents!.length} Shock Events`} in force this year
+                </p>
+              </div>
+              {result.shockEvents!.map(s => (
+                <div key={s.shockId} className="pl-8 text-sm">
+                  <p className="font-semibold text-amber-900">
+                    {s.shockId} {s.name}
+                    <span className="ml-2 font-normal text-amber-700">
+                      {s.band} · {s.horizon === 'future' ? `persisting from year ${s.yearFired}` : 'this year only'} · {s.linesAffected.join(' + ')}
+                    </span>
+                  </p>
+                  <p className="text-amber-800">{s.description}</p>
+                  <p className="text-amber-700 font-mono text-xs mt-1">
+                    {s.attributableClaims > 0 && `${s.attributableClaims} claim${s.attributableClaims === 1 ? '' : 's'} injected, ${formatCurrency(s.attributableGrossLoss)} attributable. `}
+                    {s.expectedGrossLossAdded > 0 && `${formatCurrency(s.expectedGrossLossAdded)} expected additional gross loss.`}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+
           {result.shockLossIncurred && (
             <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
               <AlertTriangle className="text-red-500 flex-shrink-0 mt-0.5" size={20} />

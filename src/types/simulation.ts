@@ -2,7 +2,7 @@
 
 // Type-only, and circular with shocks.ts (which imports CoverageLine and Region
 // from here). Erased at compile time, so the cycle never reaches the bundle.
-import type { ScheduledShock } from './shocks';
+import type { ScheduledShock, ShockRecord } from './shocks';
 
 export type MemberStatus = 'active' | 'withdrawn' | 'prospect';
 export type MemberType =
@@ -425,7 +425,17 @@ export interface ResultSet {
   claimCountsBySub?: Record<string, number>;    // GL (general/epl/lawEnforcement/abuse + abuseIncidents)
   shockLossAmount: number;
   grossUltimateLoss: number;
+  // ⚠ NOT THE SHOCK EVENT SYSTEM. This flag predates it and already carries
+  // THREE different line-specific meanings — a WC catastrophic-tier claim, a GL
+  // occurrence over $1M, or Property's aggregate factor exceeding its
+  // threshold. Configured shock events record on `shockEvents` below, on a
+  // separate channel, precisely so that overloading this one does not corrupt
+  // three live signals.
   shockLossIncurred: boolean;
+  // Configured shock events in force this year that touched THIS line. Absent
+  // when none are — an array field, so value-identity-check (which captures
+  // only numeric fields) is blind to it by construction.
+  shockEvents?: ShockRecord[];
   reinsuranceCost: number;
   attachment: number;          // 100% of expected loss; boundary between Pool Losses and Excess Losses
   poolLosses: number;          // min(grossUltimateLoss, attachment) — retained below attachment

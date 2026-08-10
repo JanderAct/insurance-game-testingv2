@@ -137,9 +137,14 @@ export interface ShockRecord extends ShockFiring {
 // ---------------------------------------------------------------------------
 
 export interface LineShockEffects {
-  // Sub-coverage key -> factor. '*' means the whole line.
+  // Sub-coverage key -> COMPOUNDED factor. '*' means the whole line. Two events
+  // raising the same frequency compound rather than the later one winning: two
+  // independent causes genuinely do both.
   freqMultipliers?: Record<string, number>;
-  injections?: { tier: string; count: number; ratingClass?: string }[];
+  // shockId is carried so an injected claim's cost maps back to the event that
+  // caused it. Frequency multipliers carry no such tag because their cost is
+  // not exactly attributable in the first place — see ShockRecord.
+  injections?: { tier: string; count: number; ratingClass?: string; shockId: string }[];
 }
 
 export interface ShockResolution {

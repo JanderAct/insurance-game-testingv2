@@ -2,8 +2,26 @@
 // Premium formula: Premium = Exposure($M) × Rate_per_$100_payroll × 10,000
 
 import type { Claim, GameState, Occurrence, PoolState, DecisionSet, LinePoolState, LineDecisionSet, ResultSet, LineResultSet, ReserveCohort, Member, MemberLossResult, MembershipHistory, CoverageLine, GameInstance, AssetAllocation } from '../types/simulation';
-import type { LineShockEffects } from '../types/shocks';
+import type { LineShockEffects, ShockFiring, ShockRecord } from '../types/shocks';
 import { resolveShocks } from './shockResolver';
+
+// Collapse the per-line shock records into one row per EVENT for the pool
+// result, summing each cost across the lines that event touched and unioning
+// the lines it affected. Returns undefined when no line recorded anything, so
+// the pool result carries no empty array.
+function mergeShockRecords(lineResults: LineResultSet[]): ShockRecord[] | undefined {
+  const merged = new Map<string, ShockRecord>();
+  for (const r of lineResults) {
+    for (const rec of r.shockEvents ?? []) {
+      const existing = merged.get(rec.shockId);
+      if (!existing) { merged.set(rec.shockId, { ...rec, linesAffected: [...rec.linesAffected] }); continue; }
+      existing.attributableGrossLoss += rec.attributableGrossLoss;
+      existing.attributableClaims += rec.attributableClaims;
+      existing.expectedGrossLossAdded += rec.expectedGrossLossAdded;
+    }
+  }
+  return merged.size > 0 ? [...merged.values()] : undefined;
+}
 import { SeededRandom, deriveSubRng } from './random';
 import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, MEMBER_LOSS_VOLATILITY, RISK_CONTROL_PARAMS, LINE_RESERVE_PAYDOWN_PCT, OPERATING_CASH_PCT_OF_PREMIUM, WC_LOSS_MODEL } from '../data/defaultAssumptions';
 import { getReinsuranceStructure, calculateReinsuranceCost, calculateReinsuranceRecovery } from './reinsuranceEngine';
@@ -101,6 +119,11 @@ interface LineYearContext {
   // accumulated across every future-horizon override in force. Consumed through
   // the parameter overlay (wcParams.ts), never by reaching into the global.
   paramOverrides?: Record<string, number>;
+  // The firings that touched this line, for RECORDING. Separate from `shock`
+  // because effects are what the generators consume and firings are what the
+  // audit page reads — a compounded frequency multiplier no longer knows which
+  // events produced it, so the narrative has to travel alongside it.
+  shockFirings?: ShockFiring[];
   cash: number;
   investments: number;
   assetAllocation: AssetAllocation;
@@ -296,6 +319,19 @@ export function processLineYear(
   let memberLossResults: MemberLossResult[];
   let aggregateMemberLoss: number;
   let shockOccurred: boolean;
+
+  // Shock cost, accumulated per shockId by the effect application below and
+  // read once at result assembly. Empty when no shock is in force.
+  //
+  // TWO SEPARATE NUMBERS, ON PURPOSE. An injected claim has an exactly
+  // attributable cost. A frequency multiplier does NOT — a multiplied Poisson
+  // draw cannot be decomposed into "the base claims" and "the extra ones", and
+  // recovering it would need a counterfactual second draw of the whole line. So
+  // the exact figure is reported where it exists and the analytic expectation
+  // where it does not, and they are never summed into one misleading total.
+  const shockAttributableLoss: Record<string, number> = {};
+  const shockAttributableClaims: Record<string, number> = {};
+  const shockExpectedAdded: Record<string, number> = {};
 
   if (isWcClaimLine) {
     // k_line is recomputed against the CURRENTLY ENROLLED book, after member
@@ -700,6 +736,14 @@ export function processLineYear(
     shockLossAmount,
     grossUltimateLoss,
     shockLossIncurred: shockOccurred,
+    shockEvents: ctx.shockFirings?.length
+      ? ctx.shockFirings.map((f): ShockRecord => ({
+          ...f,
+          attributableGrossLoss: shockAttributableLoss[f.shockId] ?? 0,
+          attributableClaims: shockAttributableClaims[f.shockId] ?? 0,
+          expectedGrossLossAdded: shockExpectedAdded[f.shockId] ?? 0,
+        }))
+      : undefined,
     reinsuranceCost,
     attachment,
     poolLosses,
@@ -1011,6 +1055,7 @@ export function processYear(
       gPool,
       shock: shocks?.byLine[line],
       paramOverrides: shocks?.paramOverrides[line],
+      shockFirings: shocks?.firings.filter(f => f.linesAffected.includes(line)),
       cash: poolState.cash * share,
       investments: lineState.investedAssets,
       assetAllocation: lineDecisions.assetAllocation,
@@ -1383,6 +1428,10 @@ export function aggregateLineResults(
     shockLossAmount: sum('shockLossAmount'),
     grossUltimateLoss: sum('grossUltimateLoss'),
     shockLossIncurred: results.some(r => r.shockLossIncurred),
+    // ONE ROW PER EVENT, costs summed across the lines it hit — not one row per
+    // line. A cross-line event like #28 is a single cause, and showing it twice
+    // would read as two events.
+    shockEvents: mergeShockRecords(results),
     reinsuranceCost: reinsuranceCostSum,
     attachment: sum('attachment'),
     poolLosses: sum('poolLosses'),

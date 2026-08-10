@@ -137,7 +137,7 @@ export function resolveShocks(instance: GameInstance, yearNumber: number): Shock
         case 'injectClaim': {
           const bucket = lineBucket(byLine, effect.line);
           bucket.injections = bucket.injections ?? [];
-          bucket.injections.push({ tier: effect.tier, count: effect.count, ratingClass: effect.ratingClass });
+          bucket.injections.push({ tier: effect.tier, count: effect.count, ratingClass: effect.ratingClass, shockId: def.id });
           break;
         }
         case 'paramOverride': {

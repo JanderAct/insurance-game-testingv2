@@ -148,7 +148,40 @@ export function buildResultsWorkbook(
     XLSX.utils.book_append_sheet(wb, lineSheet, line);
   }
 
+  // SHOCK EVENTS — a sheet, and ONLY WHEN AT LEAST ONE FIRED.
+  //
+  // Deliberately NOT a RESULT_METRICS entry. That list is static, so any metric
+  // added to it renders a row for every year of every game, which would move
+  // every hash in solo-export-guard whether or not a shock ever fires. A whole
+  // sheet that simply does not exist when the array is empty leaves the sheet
+  // join byte-identical, so a shock-free game exports exactly what it always
+  // did. This is the difference between a green gate and a week of confusion.
+  const shockRows = buildShockRows(lockedResults);
+  if (shockRows.length > 1) {
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(shockRows), 'Shock Events');
+  }
+
   return wb;
+}
+
+// One row per event per year, or just the header when nothing fired (in which
+// case the caller drops the sheet entirely).
+function buildShockRows(lockedResults: ResultSet[]): (string | number)[][] {
+  const rows: (string | number)[][] = [[
+    'Year', 'Calendar Year', 'Event', 'Name', 'Band', 'Horizon', 'Year Fired', 'Lines',
+    'Attributable Gross Loss', 'Attributable Claims', 'Expected Gross Loss Added', 'Effects', 'Description',
+  ]];
+  for (const r of lockedResults) {
+    for (const s of r.shockEvents ?? []) {
+      rows.push([
+        r.yearNumber, r.calendarYear, s.shockId, s.name, s.band, s.horizon, s.yearFired,
+        s.linesAffected.join(' + '),
+        Math.round(s.attributableGrossLoss), s.attributableClaims, Math.round(s.expectedGrossLossAdded),
+        s.effects.map(e => e.detail).join('; '), s.description,
+      ]);
+    }
+  }
+  return rows;
 }
 
 export function buildExportFilename(instanceId: string, activeLines: CoverageLine[], lockedResults: ResultSet[]): string {

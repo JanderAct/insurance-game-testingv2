@@ -32,6 +32,8 @@ import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { resolveShocks } from '../../src/utils/shockResolver';
 import { SHOCK_CATALOG } from '../../src/data/shockCatalog';
+import { buildResultsWorkbook } from '../../src/utils/resultsExport';
+import { RESULT_METRICS } from '../../src/utils/resultMetrics';
 import type { CoverageLine, GameInstance, GameState, LineResultSet, ResultSet } from '../../src/types/simulation';
 import type { ScheduledShock } from '../../src/types/shocks';
 
@@ -149,6 +151,36 @@ console.log('\n--- 3. catalog ---');
     for (const e of def.effects) console.log(`          - ${e.kind}${'line' in e ? ` (${e.line})` : ''}`);
   }
   console.log(`  paramOverride paths validated against the real models at module load (shockCatalog.ts)`);
+}
+
+console.log('\n--- 4. recording surface ---');
+{
+  // A shock that changes the numbers invisibly is worse than no shock, so the
+  // record has to actually arrive: on the line it hit, on the pool, and in the
+  // export — and NOWHERE when nothing fires.
+  const results = play('MAMC6EA4', 5, [{ shockId: '#22', yearNumber: 2 }]);
+  const y1 = results[0], y2 = results[1], y3 = results[2];
+  console.log(`  Y1 (no shock) pool record: ${y1.shockEvents === undefined ? 'absent' : 'PRESENT'}  ${note(y1.shockEvents === undefined, 'a shock record appears in a year with no shock')}`);
+  console.log(`  Y2 (#22) pool record: ${y2.shockEvents?.length ?? 0} event(s)  ${note(y2.shockEvents?.length === 1, 'the pool record is missing in the shock year')}`);
+  console.log(`  Y3 (after) pool record: ${y3.shockEvents === undefined ? 'absent' : 'PRESENT'}  ${note(y3.shockEvents === undefined, 'a current-horizon record persists past its year')}`);
+  const rec = y2.shockEvents?.[0];
+  if (rec) {
+    console.log(`    ${rec.shockId} ${rec.name} — ${rec.band}/${rec.horizon}, lines ${rec.linesAffected.join('+')}`);
+    console.log(`    effects: ${rec.effects.map(e => e.detail).join('; ')}`);
+    console.log(`    attributable $${Math.round(rec.attributableGrossLoss).toLocaleString()} / ${rec.attributableClaims} claims, expected added $${Math.round(rec.expectedGrossLossAdded).toLocaleString()}`);
+  }
+  console.log(`  recorded on the GL line: ${y2.byLine.GL?.shockEvents?.length ?? 0}  ${note(y2.byLine.GL?.shockEvents?.length === 1, 'the affected line carries no record')}`);
+  console.log(`  NOT recorded on WC: ${y2.byLine.WC?.shockEvents === undefined ? 'absent' : 'PRESENT'}  ${note(y2.byLine.WC?.shockEvents === undefined, 'an unaffected line carries a record')}`);
+
+  // The export sheet must be CONDITIONAL. A RESULT_METRICS entry would render a
+  // row every year of every game and move all 12 hashes in solo-export-guard
+  // whether or not a shock ever fired.
+  const clean = buildResultsWorkbook(play('MAMC6EA4', 5, []), LINES, RESULT_METRICS);
+  const shocked = buildResultsWorkbook(results, LINES, RESULT_METRICS);
+  console.log(`  export sheets, no shock: ${clean.SheetNames.join(', ')}`);
+  console.log(`  export sheets, shocked:  ${shocked.SheetNames.join(', ')}`);
+  console.log(`  'Shock Events' sheet absent when clean: ${note(!clean.SheetNames.includes('Shock Events'), 'the shock sheet is emitted with no shocks — every export hash will move')}`);
+  console.log(`  'Shock Events' sheet present when shocked: ${note(shocked.SheetNames.includes('Shock Events'), 'the shock sheet is missing when a shock fired')}`);
 }
 
 console.log(problems.length === 0

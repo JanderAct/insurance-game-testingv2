@@ -8,6 +8,7 @@ import {
   AlertTriangle,
   Settings,
   Layers,
+  Zap,
 } from 'lucide-react';
 import type { CoverageLine, LineResultSet, LineView, ResultSet } from '../types/simulation';
 import { lineDisplayName } from '../utils/lineDisplay';
@@ -430,6 +431,15 @@ export default function CalculationAuditPage({ lockedResults, priorHistory, inst
         <AuditSection title="Pool = Sum of Active Lines" icon={<Layers size={16} />} rows={poolSumRows} />
       )}
 
+      {/* SHOCK EVENTS — rendered ONLY when something fired, so a shock-free game
+          shows exactly the page it always did. Placed immediately above the
+          supporting detail because a shock perturbs the loss and rate cards
+          below it, and the reader needs to know that before reading them.
+          A shock that changes the numbers invisibly is worse than no shock. */}
+      {(result.shockEvents?.length ?? 0) > 0 && (
+        <AuditSection title="Shock Events" icon={<Zap size={16} />} rows={buildShockAuditRows(result)} />
+      )}
+
       {/* Supporting detail behind the statement lines. */}
       <AuditSection title="Cash & Investments Rollforward" icon={<DollarSign size={16} />} rows={cashInvestmentRows} />
       <AuditSection title="Exposure and Membership" icon={<TrendingUp size={16} />} rows={exposureRows} />
@@ -441,6 +451,53 @@ export default function CalculationAuditPage({ lockedResults, priorHistory, inst
       <AuditSection title="Default Assumptions / Parameters" icon={<Settings size={16} />} rows={assumptionRows} />
     </div>
   );
+}
+
+// One block per event: what fired, what it did, and what it cost.
+//
+// THE TWO COST LINES ARE NOT ADDED TOGETHER, and the notes say why. An injected
+// claim's cost is exactly attributable; a frequency multiplier's is not, because
+// a multiplied Poisson draw cannot be split into base and extra claims without a
+// counterfactual re-draw of the whole line. Summing an exact figure and an
+// analytic expectation into one number would read as precision that is not there.
+function buildShockAuditRows(result: LineResultSet): AuditRow[] {
+  const rows: AuditRow[] = [];
+  for (const s of result.shockEvents ?? []) {
+    rows.push({ kind: 'section', metric: `${s.shockId} — ${s.name}`, value: '', formula: '' } as AuditRow);
+    rows.push({
+      metric: 'Band / horizon',
+      value: `${s.band} · ${s.horizon}`,
+      formula: s.description,
+      note: s.horizon === 'future'
+        ? `Fired in year ${s.yearFired}; persists from that year forward for the rest of this game.`
+        : 'Applies to this year only.',
+    } as AuditRow);
+    rows.push({
+      metric: 'Lines affected',
+      value: s.linesAffected.join(' + '),
+      formula: s.effects.map(e => `${e.kind}: ${e.detail}`).join('  |  '),
+      note: s.linesAffected.length > 1
+        ? 'One cause, several lines — resolved at pool level and projected into each line.'
+        : '',
+    } as AuditRow);
+    rows.push({
+      metric: 'Attributable gross loss',
+      value: formatCurrency(s.attributableGrossLoss),
+      numericValue: s.attributableGrossLoss,
+      formula: `${s.attributableClaims} injected claim${s.attributableClaims === 1 ? '' : 's'}, summed`,
+      note: s.attributableClaims > 0 ? 'Exact — these are specific claims.' : 'No injected claims in this event.',
+    } as AuditRow);
+    rows.push({
+      metric: 'Expected gross loss added',
+      value: formatCurrency(s.expectedGrossLossAdded),
+      numericValue: s.expectedGrossLossAdded,
+      formula: 'analytic expectation of the frequency / parameter effects',
+      note: 'NOT exact and NOT additive with the row above. A multiplied Poisson draw cannot be '
+        + 'decomposed into base and extra claims, so this is what the effect is expected to add, '
+        + 'not what this particular year realised.',
+    } as AuditRow);
+  }
+  return rows;
 }
 
 function AuditSection({ title, icon, rows }: AuditSectionProps) {
