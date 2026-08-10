@@ -359,6 +359,14 @@ export interface WcGenerationInputs {
   kLine: number;
   gPool: number;              // the year's pool-wide factor, drawn once in processYear
   riskControlEffectiveness: number; // DRAW ONLY — see invariant 2
+  // Claims a shock event injects this year. Absent when none — the injection
+  // block is skipped entirely and its RNG stream is never opened, so natural
+  // claims are bit-identical either way.
+  //
+  // The engine is deliberately IGNORANT OF SHOCKS: it takes a list of
+  // injections and returns a parallel list of outcomes, and the caller maps
+  // those back to the events that caused them.
+  injections?: { tier: string; count: number; ratingClass?: string }[];
 }
 
 export interface WcGenerationResult {
@@ -368,6 +376,9 @@ export interface WcGenerationResult {
   memberLossResults: MemberLossResult[];
   claimCountsByClass: Record<string, number>;
   claimCountsByTier: Record<string, number>;
+  // One entry per requested injection, in the same order. Exact attributable
+  // cost — these are specific claims with specific amounts.
+  injectionResults: { count: number; gross: number }[];
 }
 
 export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult {
@@ -538,6 +549,81 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
     });
   }
 
+  // --- shock injections -------------------------------------------------------
+  //
+  // Claims INJECTED by a shock event, emitted through the SAME `emit` closure
+  // the natural draws use. That is the point: an injected catastrophic claim is
+  // indistinguishable from a drawn one — same id scheme, same occurrence, same
+  // annuity, same present-value booking — because it is produced by the same
+  // code. Synthesising a severity here would create a second definition of what
+  // a catastrophic claim is, and the two would drift.
+  //
+  // ITS OWN RNG STREAM ('wc_inject'). deriveSubRng hashes the purpose string, so
+  // a new label cannot perturb an existing one, and the natural claims above are
+  // bit-identical whether or not anything is injected.
+  const injectionResults: { count: number; gross: number }[] = [];
+  if (inputs.injections?.length) {
+    const injRng = deriveSubRng(instanceSeed, yearNumber, 'wc_inject');
+
+    // WHO IT HAPPENS TO, drawn from the NATURAL INCIDENCE distribution:
+    // payroll x class rate x that class's catastrophic probability. An injected
+    // event lands where such an event actually lands, rather than on an
+    // arbitrary or worst-case member.
+    const targets: { member: Member; cls: WcClassKey; weight: number }[] = [];
+    let totalWeight = 0;
+    for (const member of members) {
+      for (const cls of WC_CLASS_KEYS) {
+        const payroll = classPayroll(member, cls);
+        if (payroll <= 0) continue;
+        const weight = payroll * M.rateClassPer1M[cls] * tierProbabilities(cls, member.riskQuality).catastrophic;
+        if (weight > 0) { targets.push({ member, cls, weight }); totalWeight += weight; }
+      }
+    }
+
+    const injectedByMember = new Map<string, number>();
+    for (const injection of inputs.injections) {
+      if (injection.tier !== 'catastrophic') {
+        throw new Error(`WC claim injection supports tier 'catastrophic' only; got '${injection.tier}'`);
+      }
+      let count = 0;
+      let gross = 0;
+      for (let i = 0; i < injection.count && totalWeight > 0; i++) {
+        let pick = targets[targets.length - 1];
+        if (!injection.ratingClass) {
+          let u = injRng.next() * totalWeight;
+          for (const t of targets) { u -= t.weight; if (u <= 0) { pick = t; break; } }
+        } else {
+          const eligible = targets.filter(t => t.cls === injection.ratingClass);
+          if (eligible.length === 0) throw new Error(`no member carries rating class '${injection.ratingClass}'`);
+          const sub = eligible.reduce((s, t) => s + t.weight, 0);
+          let u = injRng.next() * sub;
+          pick = eligible[eligible.length - 1];
+          for (const t of eligible) { u -= t.weight; if (u <= 0) { pick = t; break; } }
+        }
+
+        const regionMult = regionMultiplier(pick.member.region);
+        const age = injRng.range(M.catastrophic.ageMin, M.catastrophic.ageMax);
+        const { annuity, presentValue } = catastrophicStream(age, pick.cls, regionMult);
+        emit(pick.member, pick.cls, 'catastrophic', presentValue, yearNumber, { annuity });
+        claimCountsByClass[pick.cls] += 1;
+        claimCountsByTier.catastrophic += 1;
+        injectedByMember.set(pick.member.id, (injectedByMember.get(pick.member.id) ?? 0) + presentValue);
+        count += 1;
+        gross += presentValue;
+      }
+      injectionResults.push({ count, gross });
+    }
+
+    // memberLossResults is built inside the member loop above, so an injection
+    // emitted after it would otherwise be missing from its own member's
+    // simulatedLoss while still counting in the pool total. Patch it, rather
+    // than leave the two disagreeing.
+    for (const result of memberLossResults) {
+      const added = injectedByMember.get(result.memberId);
+      if (added) result.simulatedLoss += added;
+    }
+  }
+
   const grossUltimateLoss = claims.reduce((s, c) => s + c.grossUltimate, 0);
-  return { claims, occurrences, grossUltimateLoss, memberLossResults, claimCountsByClass, claimCountsByTier };
+  return { claims, occurrences, grossUltimateLoss, memberLossResults, claimCountsByClass, claimCountsByTier, injectionResults };
 }

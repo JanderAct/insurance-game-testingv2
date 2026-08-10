@@ -32,8 +32,9 @@ import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { resolveShocks, ownFreqMultipliers } from '../../src/utils/shockResolver';
 import { computeKGl, expectedGlGrossLoss, generateGlClaims } from '../../src/utils/glClaimEngine';
+import { computeKLine, generateWcClaims, nominalSumOfStream } from '../../src/utils/wcClaimEngine';
 import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
-import type { Member } from '../../src/types/simulation';
+import type { Claim, Member } from '../../src/types/simulation';
 import { SHOCK_CATALOG } from '../../src/data/shockCatalog';
 import { buildResultsWorkbook } from '../../src/utils/resultsExport';
 import { RESULT_METRICS } from '../../src/utils/resultMetrics';
@@ -71,6 +72,14 @@ function play(id: string, years: number, shocks?: ScheduledShock[]): ResultSet[]
 }
 
 const fmt$ = (x: number) => `$${(x / 1e6).toFixed(2)}M`;
+const throws = (fn: () => unknown) => { try { fn(); return false; } catch { return true; } };
+
+// Undiscounted sum of an annuity's two legs, for confirming a catastrophic
+// claim books PRESENT VALUE rather than the nominal stream.
+function nominalOf(a: NonNullable<Claim['annuity']>): number {
+  return nominalSumOfStream(a.medicalFirstYearPayment, a.medicalInflationPct, a.medicalYears)
+    + nominalSumOfStream(a.indemnityAnnualPayment, a.indemnityInflationPct, a.indemnityYears);
+}
 
 // A REAL enrolled book for one line, taken from the game's own enrollment path
 // rather than reconstructed — the share is drawn per seed inside
@@ -255,6 +264,63 @@ console.log('\n--- 5. #22 Employment Practices Surge — measured at both bases 
   // INVARIANT 2, the shock version: the multiplier must move the DRAW and stay
   // out of the PRICING expectation. Nothing that prices GL passes it.
   console.log(`  pricing expectation is shock-blind: ${fmt$(expectedGlGrossLoss(pool, { kGl: kPool }))} unchanged  ${note(expectedGlGrossLoss(pool, { kGl: kPool }) === poolBase, 'the priced expectation moved with the shock')}`);
+}
+
+console.log('\n--- 6. #15 Catastrophic WC Mega-Claim — measured at both bases ---');
+{
+  const roster = getPredefinedMarketMembers();
+  const pool = enrolledBook('MAMC6EA4', 'WC');
+  const inject = [{ tier: 'catastrophic', count: 2 }];
+
+  const run = (book: Member[], injections?: typeof inject) => generateWcClaims({
+    members: book, yearNumber: 3, calendarYear: 2028, instanceSeed: 24601,
+    kLine: computeKLine(book), gPool: 1, riskControlEffectiveness: 0, injections,
+  });
+
+  for (const [label, book] of [['FULL MARKET  ', roster], ['ENROLLED POOL', pool]] as [string, Member[]][]) {
+    const base = run(book);
+    const shocked = run(book, inject);
+    const outcome = shocked.injectionResults[0];
+    console.log(`  ${label} natural catastrophic ${base.claimCountsByTier.catastrophic}/yr at this seed, gross ${fmt$(base.grossUltimateLoss)}`);
+    console.log(`                injected ${outcome.count} claims, ${fmt$(outcome.gross)} — average ${fmt$(outcome.gross / outcome.count)} each`);
+    console.log(`                line gross ${fmt$(base.grossUltimateLoss)} -> ${fmt$(shocked.grossUltimateLoss)} (+${((shocked.grossUltimateLoss / base.grossUltimateLoss - 1) * 100).toFixed(1)}%)`);
+    // The injected claims must be the ONLY difference: natural claims are drawn
+    // from their own streams and an injection opens a separate label.
+    const delta = shocked.grossUltimateLoss - base.grossUltimateLoss;
+    console.log(`                delta === injected gross exactly: ${note(Math.abs(delta - outcome.gross) < 1e-6, `${label} injection perturbed the natural draw by ${delta - outcome.gross}`)}`);
+    console.log(`                natural claim count unchanged (${base.claims.length} -> ${shocked.claims.length - outcome.count}): ${note(shocked.claims.length - outcome.count === base.claims.length, 'injection changed the natural claim count')}`);
+  }
+
+  // WHY TWO AND NOT ONE. The tier already fires ~2.97/yr at full market, so the
+  // enrolled pool sees ~0.8/yr naturally. One injected claim adds roughly what
+  // a bad-luck year already delivers.
+  // ⚠ HOLD yearNumber FIXED AND VARY THE SEED. WC carries a frequency trend of
+  // -1.5%/yr, so looping yearNumber 1..N averages over an N-year decline rather
+  // than sampling one year N times: at year 200 lambda is 0.95^... of year 1's.
+  // A first version of this check looped the year and reported 1.10/yr against
+  // a true year-1 rate more than twice that.
+  let naturalFull = 0, naturalPool = 0;
+  const N = 200;
+  const kFullWc = computeKLine(roster), kPoolWc = computeKLine(pool);
+  for (let s = 1; s <= N; s++) {
+    naturalFull += generateWcClaims({ members: roster, yearNumber: 1, calendarYear: 2026, instanceSeed: 909 + s * 7919, kLine: kFullWc, gPool: 1, riskControlEffectiveness: 0 }).claimCountsByTier.catastrophic;
+    naturalPool += generateWcClaims({ members: pool, yearNumber: 1, calendarYear: 2026, instanceSeed: 909 + s * 7919, kLine: kPoolWc, gPool: 1, riskControlEffectiveness: 0 }).claimCountsByTier.catastrophic;
+  }
+  console.log(`  natural catastrophic rate, year 1, over ${N} seeds: full market ${(naturalFull / N).toFixed(2)}/yr, enrolled pool ${(naturalPool / N).toFixed(2)}/yr`);
+  console.log(`    the pool already sees ~1 every ${(N / Math.max(naturalPool, 1)).toFixed(1)} years unaided, which is why the event injects TWO —`);
+  console.log(`    one adds roughly what a bad-luck year already delivers, which under-delivers for a High band`);
+
+  // An injected claim must be a REAL claim, not a bolt-on amount.
+  const s = run(pool, inject);
+  const injected = s.claims.slice(-2);
+  const occIds = new Set(s.occurrences.map(o => o.id));
+  console.log(`  injected claims are real claims:`);
+  console.log(`    carry an annuity schedule: ${note(injected.every(c => c.annuity !== undefined), 'injected claim has no annuity')}`);
+  console.log(`    booked at present value, not nominal: ${note(injected.every(c => c.annuity !== undefined && c.grossUltimate < nominalOf(c.annuity)), 'injected claim is not PV-booked')}`);
+  console.log(`    have an occurrence: ${note(injected.every(c => occIds.has(c.occurrenceId)), 'injected claim has no occurrence')}`);
+  console.log(`    tier and rating class set: ${note(injected.every(c => c.tier === 'catastrophic' && !!c.ratingClass), 'injected claim missing tier or rating class')}`);
+  console.log(`    member losses reconcile to the line total: ${note(Math.abs(s.memberLossResults.reduce((t, m) => t + m.simulatedLoss, 0) - s.grossUltimateLoss) < 1e-6, 'injected claims are missing from memberLossResults')}`);
+  console.log(`    an unsupported tier throws: ${note(throws(() => run(pool, [{ tier: 'perm', count: 1 }])), 'an unsupported injection tier is silently accepted')}`);
 }
 
 console.log(problems.length === 0

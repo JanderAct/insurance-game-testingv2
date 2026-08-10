@@ -349,6 +349,7 @@ export function processLineYear(
       // frequency without touching the pricing expectation, so it genuinely
       // moves the loss ratio instead of cancelling out.
       riskControlEffectiveness: newRCEffectiveness,
+      injections: ctx.shock?.injections,
     });
     generatedClaims = generated.claims;
     generatedOccurrences = generated.occurrences;
@@ -359,6 +360,16 @@ export function processLineYear(
     // A catastrophic-tier claim is WC's shock event, replacing the old
     // "aggregate factor exceeded a threshold" definition.
     shockOccurred = (generated.claimCountsByTier.catastrophic ?? 0) > 0;
+
+    // EXACT attribution: the engine returns one outcome per requested
+    // injection, in order, and ctx.shock.injections carries the shockId that
+    // asked for each. No estimation involved — these are specific claims.
+    (ctx.shock?.injections ?? []).forEach((injection, i) => {
+      const outcome = generated.injectionResults[i];
+      if (!outcome) return;
+      shockAttributableLoss[injection.shockId] = (shockAttributableLoss[injection.shockId] ?? 0) + outcome.gross;
+      shockAttributableClaims[injection.shockId] = (shockAttributableClaims[injection.shockId] ?? 0) + outcome.count;
+    });
   } else if (isGlClaimLine) {
     // Same discipline as WC: k_GL is the per-year roster/risk-quality-mix
     // correction against the currently enrolled book; the pure premium itself

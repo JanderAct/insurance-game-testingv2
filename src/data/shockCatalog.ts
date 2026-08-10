@@ -101,9 +101,16 @@ export const SHOCK_CATALOG: Record<string, ShockDefinition> = {
   // hand-built severity would create a second definition of what a
   // catastrophic claim is, and the two would drift.
   //
-  // TWO CLAIMS, NOT ONE. The tier already fires ~2.97/yr at full market, so the
-  // enrolled pool sees ~0.8/yr naturally. Injecting one adds roughly what a
-  // bad-luck year already delivers, which under-delivers for a High band.
+  // TWO CLAIMS, NOT ONE. MEASURED at year 1 over 200 seeds: the tier fires
+  // 3.43/yr at full market and 1.01/yr on the enrolled pool. The pool already
+  // sees about one catastrophic claim a year unaided, so injecting ONE would be
+  // indistinguishable from an ordinary year — and arguably two is still modest
+  // for a High band. Each injected claim books ~$9.0M present value, so the
+  // event adds ~$18M against an enrolled WC gross of ~$14M.
+  //
+  // Measure this by HOLDING yearNumber FIXED AND VARYING THE SEED. WC carries a
+  // frequency trend of -1.5%/yr, so looping the year averages over a decline
+  // rather than sampling one year repeatedly.
   // -------------------------------------------------------------------------
   '#15': {
     id: '#15',
