@@ -80,6 +80,30 @@ export function lognormalInvCdf(mean: number, cv: number, u: number): number {
   return Math.exp(mu + sigma * normalInvCdf(u));
 }
 
+// E[X^k x 1{X <= bound}] for X ~ LogNormal(mean, cv) — the PARTIAL (truncated,
+// UNNORMALISED) k-th moment. Note the difference from expectedOverLognormal
+// below, which renormalises: this one does not, so partial moments over
+// complementary ranges ADD BACK to the full moment. That is what makes it the
+// right tool for a capped quantity:
+//
+//   E[min(b x X, c) x X] = b x E[X^2 1{X <= c/b}] + c x E[X 1{X > c/b}]
+//
+// and the second term is E[X] - E[X 1{X <= c/b}], with E[X] = mean exactly.
+//
+// EXACT, NO QUADRATURE. Closed form from the lognormal cgf:
+//   E[X^k 1{X <= t}] = exp(k mu + k^2 sigma^2 / 2) x Phi((ln t - mu - k sigma^2)/sigma)
+// The only approximation is normalCdf's ~1.5e-7. Prefer this over integrating
+// a capped function on a grid whenever the integrand is a power of X times an
+// indicator — which is the shape every hazard-intensity factor takes, because
+// intensity enters both the event footprint and the damage ratio.
+export function lognormalPartialMoment(mean: number, cv: number, k: number, bound: number): number {
+  const { mu, sigma } = lognormalParams(mean, cv);
+  const fullMoment = Math.exp(k * mu + (k * k * sigma * sigma) / 2);
+  if (!(bound > 0)) return 0;
+  if (!Number.isFinite(bound)) return fullMoment;
+  return fullMoment * normalCdf((Math.log(bound) - mu - k * sigma * sigma) / sigma);
+}
+
 // --- dollar vintage -----------------------------------------------------------
 
 // THE single point of dollar-vintage conversion. An amount stated in

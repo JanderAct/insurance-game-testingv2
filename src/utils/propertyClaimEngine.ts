@@ -36,10 +36,10 @@
 // COUNT, not off TIV: how often something burns is a function of how many
 // buildings you have, not what they are worth.
 
-import type { Claim, CoverageLine, Member, MemberLossResult, Occurrence } from '../types/simulation';
+import type { Claim, CoverageLine, Member, MemberLossResult, Occurrence, Region } from '../types/simulation';
 import { deriveSubRng, SeededRandom } from './random';
-import { patternTrendFactor } from './claimMath';
-import { PROPERTY_LOSS_MODEL } from '../data/defaultAssumptions';
+import { drawLognormal, lognormalParams, lognormalPartialMoment, patternTrendFactor } from './claimMath';
+import { PROPERTY_LOSS_MODEL, PROPERTY_WEATHER_MODEL } from '../data/defaultAssumptions';
 
 const M = PROPERTY_LOSS_MODEL;
 const LINE: CoverageLine = 'Property';
@@ -338,6 +338,390 @@ export function generatePropertyClaims(inputs: PropertyGenerationInputs): Proper
   };
 }
 
+// ===========================================================================
+// NON-CAT WEATHER band (design doc property_noncat section NC2).
+//
+// ALSO UNWIRED. Same reason as the attritional band above, and nothing calls
+// either one — cutover happens when all three bands exist.
+//
+// Hail, wind, freeze, non-catastrophic flood: event-driven like cat but
+// frequent and light. The signature is MANY SIMULTANEOUS MID-SIZED CLAIMS AND
+// NO SINGLE LARGE ONE, which is exactly why weather lives in the gap between
+// the two occurrence treaties (every claim too small for the per-risk XoL, the
+// occurrence total below the $5M cat attachment) and erodes into the aggregate
+// instead. That gap is the reason an aggregate treaty exists at all.
+//
+// THREE THINGS THIS BAND DOES DIFFERENTLY FROM ATTRITIONAL:
+//
+// 1. THE UNIT IS THE EVENT, NOT THE MEMBER. Frequency is drawn PER ZONE, not
+//    per member, and one event hits many members at once. This is the first
+//    genuinely multi-member occurrence in the model — hence Occurrence.memberIds.
+//
+// 2. WITHIN-EVENT CORRELATION IS THE MECHANIC. Every claim in an event shares
+//    the event's damage-ratio MEAN, so a severe storm makes all of its claims
+//    worse together. Independent per-claim severity would destroy the band's
+//    whole reason for existing.
+//
+// 3. INTENSITY ENTERS TWICE — once through the footprint
+//    (hit_rate = min(base x I, cap)) and once through the damage ratio
+//    (event mean dr = mu x I). Expected loss per event therefore scales with a
+//    SECOND moment of intensity, not with E[I] = 1 (finding 22).
+//
+// NO gPool, AND NO RISK CONTROL. Both are deliberate exclusions:
+//   - gPool is an ECONOMIC-CYCLE factor. Hazard bands are not modulated by the
+//     economic cycle. This generalises: the cat band must exclude it too, for
+//     the same reason. (What gPool would actually do here is raise variance and
+//     induce cross-line correlation — it would NOT move the AAL, since its mean
+//     is exactly 1.000.)
+//   - Risk control multiplies a member's realized frequency, and weather
+//     frequency is a per-zone hazard count with no member attribution, so there
+//     is nothing for it to multiply. The design locks RQ's frequency channel to
+//     zero for the same reason: the hazard is nature's, not the member's.
+//
+// NOT SCALED BY k_PR either — but do not read that as "weather is not
+// normalised." Weather HAS an RQ channel (severity, beta 0.04), so at an
+// enrolled book's risk-quality mix its expected loss sits slightly off the
+// priced level, and that drift is real. It needs its own normalisation ON ITS
+// OWN CHANNEL; that lands at cutover, when there is a premium to normalise
+// against. expectedWeatherGrossLoss takes a riskQualityOverride so the size of
+// the drift can be measured now.
+
+const W = PROPERTY_WEATHER_MODEL;
+const WEATHER = 'weather';
+
+// Fixed iteration order, so the year's event sequence is deterministic.
+const WEATHER_ZONES: Region[] = ['North', 'Central', 'South'];
+
+// Intensity above which the footprint hits its cap.
+const WX_CAP_INTENSITY = W.cap / W.baseFootprint;
+
+// E[ min(baseFootprint x I, cap) x I ] for I ~ LogNormal(mean 1, cv) — the
+// "intensity enters twice" factor, in closed form via partial moments.
+//
+// THE NAIVE 1 + CV^2 CORRECTION DOES NOT LAND, exactly as the design doc says:
+// that would be E[I^2] = 1.36, giving 0.1360, while the true value is 0.13555
+// because the footprint cap truncates the top of the intensity distribution.
+// The doc concludes from this that no closed form lands. That is true of the
+// naive correction only — splitting the expectation at the cap and using exact
+// lognormal PARTIAL moments handles it precisely, with no quadrature and so no
+// exposure to the singularity trap that fixed grids fall into.
+const WX_INTENSITY_FACTOR =
+  W.baseFootprint * lognormalPartialMoment(1, W.intensityCv, 2, WX_CAP_INTENSITY)
+  + W.cap * (1 - lognormalPartialMoment(1, W.intensityCv, 1, WX_CAP_INTENSITY));
+
+// Weather's own payout vector (80/20 over two years) at construction-cost
+// inflation. Same shared machinery, a different vector — not a second trending
+// convention.
+const WEATHER_PAYOUT_TREND_FACTOR = patternTrendFactor(W.payoutPattern, M.severityTrendPerYear, 0);
+
+export const WEATHER_BOOKED_TREND_FACTOR = WEATHER_PAYOUT_TREND_FACTOR;
+
+// RQ acts on the damage ratio ONLY (rqFrequencyBeta is 0 by design, not by
+// omission). Scales the Beta MEAN with nu held fixed, so a ratio <= 1 stays
+// <= 1 however RQ moves it — the same construction the attritional band uses.
+function weatherSeverityFactor(riskQuality: number): number {
+  return Math.exp(-W.rqSeverityBeta * (riskQuality - NEUTRAL_RQ));
+}
+
+function weatherBetaShape(mean: number): { a: number; b: number } {
+  const nu = W.betaConcentration;
+  return { a: mean * nu, b: (1 - mean) * nu };
+}
+
+// --- analytic expectation (invariant 1) -------------------------------------
+
+// Expected annual weather gross loss for a book, in booked dollars.
+//
+// THE IDENTITY. Locations are hit by INDEPENDENT per-location Bernoulli draws
+// at hit_rate, and the damage ratio is independent of which locations were hit,
+// so for one event in zone z:
+//
+//   E[loss | I] = hit_rate(I) x (mu x I) x zoneTIV(z)
+//
+// whatever the size mix of locations in the zone. Taking expectations over I
+// gives mu x E[min(b I, c) I] x zoneTIV(z), and summing over zones at a COMMON
+// lambda per zone collapses the zone structure entirely:
+//
+//   AAL = lambdaPerZone x mu x E[min(b I, c) I] x SUM_members(TIV x rqSev) x trend
+//
+// ⚠ THE MULTIPLIER IS lambdaPerZone, NOT 3 x lambdaPerZone. There are 7.5
+// events a year, but each one exposes ONE zone — about a third of the book —
+// so 2.5 x total TIV is the correct exposure, and 7.5 x total TIV triple-counts
+// it. This is the easiest thing in the band to get wrong by a factor of three.
+//
+// Also note what is NOT here: no location count (it cancels, as in the
+// attritional identity), and no zone TIVs (they sum to the book). Weather AAL
+// is therefore EXACTLY LINEAR IN TIV, which is why roster v4 rescaled the
+// target AAL without re-solving mu.
+export interface ExpectedWeatherLossOptions {
+  riskQualityOverride?: number;
+}
+
+export function expectedWeatherGrossLoss(
+  members: Member[],
+  options: ExpectedWeatherLossOptions = {},
+): number {
+  let weightedTiv = 0;
+  for (const member of members) {
+    const tiv = member.exposureByLine.Property ?? 0;
+    if (!(tiv > 0)) continue;
+    const rq = options.riskQualityOverride ?? member.riskQuality;
+    weightedTiv += tiv * weatherSeverityFactor(rq);
+  }
+  return W.lambdaPerZone
+    * W.betaMean
+    * WX_INTENSITY_FACTOR
+    * weightedTiv * 1e6          // TIV is carried in $M
+    * WEATHER_PAYOUT_TREND_FACTOR;
+}
+
+// --- the generator ----------------------------------------------------------
+
+export interface WeatherGenerationInputs {
+  members: Member[];
+  yearNumber: number;
+  calendarYear: number;
+  instanceSeed: number;
+}
+
+// One event's outcome. gross, affectedLocations and memberGross are per-EVENT;
+// the annual result below also carries per-member sums across all events,
+// because at cutover a member's weather loss has to be added to its attritional
+// loss and neither the event view nor the member view can be derived from the
+// other after the fact.
+export interface WeatherEventResult {
+  // null when the footprint caught nothing — a drawn event that hits no
+  // location produces NO occurrence, because an occurrence with no claims is
+  // not a loss event, it is a weather report.
+  occurrence: Occurrence | null;
+  claims: Claim[];
+  gross: number;
+  memberGross: Map<string, number>;
+  intensity: number;
+  hitRate: number;
+  locationsExposed: number;
+  affectedLocations: number;
+  maxClaimGross: number;
+}
+
+export interface WeatherEventSummary {
+  id: string;
+  region: Region;
+  intensity: number;
+  hitRate: number;
+  locationsExposed: number;
+  affectedLocations: number;
+  membersAffected: number;
+  gross: number;
+  maxClaimGross: number;
+}
+
+export interface WeatherGenerationResult {
+  claims: Claim[];
+  occurrences: Occurrence[];
+  grossUltimateLoss: number;
+  memberGross: Map<string, number>;   // per-member sums across the year
+  eventsDrawn: number;                // includes zero-footprint events
+  eventsWithLoss: number;             // == occurrences.length
+  events: WeatherEventSummary[];      // one row per event DRAWN
+}
+
+// The per-zone member index plus the streams an event consumes. Built once a
+// year by generateWeatherEvents; also the argument a harness builds directly
+// when it wants to force events at chosen intensities.
+export interface WeatherEventContext {
+  membersByZone: Map<Region, Member[]>;
+  yearNumber: number;
+  calendarYear: number;
+  hitRng: SeededRandom;
+  sevRng: SeededRandom;
+}
+
+export function groupMembersByZone(members: Member[]): Map<Region, Member[]> {
+  const byZone = new Map<Region, Member[]>();
+  for (const zone of WEATHER_ZONES) byZone.set(zone, []);
+  for (const member of members) {
+    if (!((member.exposureByLine.Property ?? 0) > 0)) continue;
+    byZone.get(member.region)?.push(member);
+  }
+  return byZone;
+}
+
+// FORCED-EVENT ENTRY POINT. Takes the zone and the realized intensity as
+// arguments rather than drawing them, so a harness can hold intensity fixed and
+// measure the footprint and severity response independently — the two channels
+// intensity feeds — instead of inferring them through the frequency draw.
+export function generateWeatherEvent(
+  ctx: WeatherEventContext,
+  region: Region,
+  intensity: number,
+  eventId: string,
+): WeatherEventResult {
+  const hitRate = Math.min(W.baseFootprint * intensity, W.cap);
+  // The event's SHARED damage-ratio mean — the within-event correlation.
+  const eventMeanDr = W.betaMean * intensity;
+
+  const claims: Claim[] = [];
+  const memberIds: string[] = [];
+  const memberGross = new Map<string, number>();
+  let gross = 0;
+  let locationsExposed = 0;
+  let affectedLocations = 0;
+  let maxClaimGross = 0;
+
+  for (const member of ctx.membersByZone.get(region) ?? []) {
+    const n = locationCount(member);
+    locationsExposed += n;
+
+    // Per-member because RQ scales the event mean; nu is untouched.
+    const { a, b } = weatherBetaShape(eventMeanDr * weatherSeverityFactor(member.riskQuality));
+    let memberLoss = 0;
+    let memberClaims = 0;
+
+    for (let index = 0; index < n; index++) {
+      // PER-LOCATION BERNOULLI, not a Binomial count followed by a selection.
+      // Distributionally identical for the count, but this way the affected
+      // set is made of ACTUAL locations carrying their ACTUAL TIVs, so
+      // within-member concentration (Primary Asset Share) flows through to
+      // event severity instead of being averaged away.
+      if (!ctx.hitRng.chance(hitRate)) continue;
+      affectedLocations++;
+
+      const hitTiv = locationTivAt(member, index);
+      const damageRatio = ctx.sevRng.beta(a, b);
+      const accidentYearSeverity = damageRatio * hitTiv * 1e6;   // TIV is $M
+      const claimGross = accidentYearSeverity * WEATHER_PAYOUT_TREND_FACTOR;
+
+      claims.push({
+        id: `${eventId}-${member.id}-L${index}`,
+        occurrenceId: eventId,
+        memberId: member.id,
+        line: LINE,
+        accidentYear: ctx.yearNumber,
+        calendarYear: ctx.calendarYear,
+        tier: WEATHER,
+        status: 'open',
+        // Report lag 0: storm damage is known the day it happens.
+        reportedYear: ctx.yearNumber,
+        grossUltimate: claimGross,
+        paidToDate: 0,
+        caseReserve: claimGross,
+        paymentPattern: [...W.payoutPattern],
+        damageRatio,
+        locationTiv: hitTiv * 1e6,
+      });
+
+      memberLoss += claimGross;
+      memberClaims++;
+      gross += claimGross;
+      if (claimGross > maxClaimGross) maxClaimGross = claimGross;
+    }
+
+    // Keyed on WHETHER A CLAIM WAS EMITTED, not on memberLoss > 0. The damage
+    // ratio is Beta with a tiny shape parameter, so a hit location can produce
+    // a genuinely negligible amount — but it was still hit, it still generated
+    // a claim record, and dropping it from memberIds would leave the occurrence
+    // disagreeing with its own claim list.
+    if (memberClaims > 0) {
+      memberIds.push(member.id);
+      memberGross.set(member.id, memberLoss);
+    }
+  }
+
+  const occurrence: Occurrence | null = claims.length === 0 ? null : {
+    id: eventId,
+    line: LINE,
+    // Present ONLY when the event hit exactly one member. A weather event
+    // normally hits dozens, and memberIds is the authoritative list.
+    memberId: memberIds.length === 1 ? memberIds[0] : undefined,
+    memberIds,
+    accidentYear: ctx.yearNumber,
+    calendarYear: ctx.calendarYear,
+    // The zone struck — the correlation unit, not any one member's region.
+    region,
+    // FALSE AS A BAND LABEL, not as a claim about size. Weather and cat are
+    // deliberately a fuzzy boundary: same process, overlapping ranges, and a
+    // severe weather event can punch into the cat retention. This flag says
+    // "generated by the weather band", and the treaty waterfall must decide
+    // what responds from the occurrence TOTAL, never from this flag.
+    isCatastrophe: false,
+    claimIds: claims.map(c => c.id),
+    peril: WEATHER,
+    intensity,
+  };
+
+  return {
+    occurrence, claims, gross, memberGross, intensity, hitRate,
+    locationsExposed, affectedLocations, maxClaimGross,
+  };
+}
+
+export function generateWeatherEvents(inputs: WeatherGenerationInputs): WeatherGenerationResult {
+  const { members, yearNumber, calendarYear, instanceSeed } = inputs;
+
+  // Purpose-keyed streams; new labels, so nothing existing is disturbed.
+  const freqRng = deriveSubRng(instanceSeed, yearNumber, 'pr_wx_freq');
+  const intensityRng = deriveSubRng(instanceSeed, yearNumber, 'pr_wx_intensity');
+  const ctx: WeatherEventContext = {
+    membersByZone: groupMembersByZone(members),
+    yearNumber,
+    calendarYear,
+    hitRng: deriveSubRng(instanceSeed, yearNumber, 'pr_wx_hit'),
+    sevRng: deriveSubRng(instanceSeed, yearNumber, 'pr_wx_sev'),
+  };
+
+  const claims: Claim[] = [];
+  const occurrences: Occurrence[] = [];
+  const events: WeatherEventSummary[] = [];
+  const memberGross = new Map<string, number>();
+  let grossUltimateLoss = 0;
+  let eventsDrawn = 0;
+
+  for (const region of WEATHER_ZONES) {
+    // PER-ZONE Poisson at 2.5, giving 7.5 events/yr pool-wide. Each zone draws
+    // its own count at the same rate: weather has no regional hazard
+    // differentiation, so zones differ only through TIV.
+    const count = freqRng.poisson(W.lambdaPerZone);
+    for (let i = 0; i < count; i++) {
+      // Mean exactly 1.0, CV 0.6, through the SAME lognormalParams the analytic
+      // factor above is built from — the draw and the expectation are one basis
+      // by construction, not by two matching hand-derivations.
+      const intensity = drawLognormal(intensityRng, 1, W.intensityCv);
+      const event = generateWeatherEvent(ctx, region, intensity, `PRWX-${yearNumber}-${region}-${i}`);
+      eventsDrawn++;
+
+      events.push({
+        id: `PRWX-${yearNumber}-${region}-${i}`,
+        region,
+        intensity: event.intensity,
+        hitRate: event.hitRate,
+        locationsExposed: event.locationsExposed,
+        affectedLocations: event.affectedLocations,
+        membersAffected: event.memberGross.size,
+        gross: event.gross,
+        maxClaimGross: event.maxClaimGross,
+      });
+
+      if (event.occurrence) occurrences.push(event.occurrence);
+      claims.push(...event.claims);
+      grossUltimateLoss += event.gross;
+      for (const [id, amount] of event.memberGross) {
+        memberGross.set(id, (memberGross.get(id) ?? 0) + amount);
+      }
+    }
+  }
+
+  return {
+    claims,
+    occurrences,
+    grossUltimateLoss,
+    memberGross,
+    eventsDrawn,
+    eventsWithLoss: occurrences.length,
+    events,
+  };
+}
+
 // Internals the harness needs to check the model against its own parameters
 // without duplicating them.
 export const propertyInternals = {
@@ -345,4 +729,11 @@ export const propertyInternals = {
   damageRatioMean,
   betaShape,
   payoutTrendFactor: PAYOUT_TREND_FACTOR,
+  weatherSeverityFactor,
+  weatherBetaShape,
+  weatherPayoutTrendFactor: WEATHER_PAYOUT_TREND_FACTOR,
+  wxIntensityFactor: WX_INTENSITY_FACTOR,
+  wxCapIntensity: WX_CAP_INTENSITY,
+  wxIntensityLogParams: lognormalParams(1, W.intensityCv),
+  weatherZones: WEATHER_ZONES,
 };
