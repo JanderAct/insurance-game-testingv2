@@ -380,6 +380,68 @@ console.log('\n--- 7. #10 WC Presumption Expansion — paramOverride and forward
   console.log(`    rates for you, and the treaty does not adjust either. Do not "fix" either of these.`);
 }
 
+console.log('\n--- 8. #28 Pandemic — THE CROSS-LINE TEST ---');
+{
+  // THE ARCHITECTURAL GAP THIS EVENT EXISTS TO PROVE. Every generator is
+  // line-local: processLineYear only ever sees its own line. #28 is ONE cause
+  // that has to reach two of them, so the resolution happens at pool level in
+  // processYear (which has all three lines in scope) and per-line effects are
+  // projected down. Both target lines are REAL cut-over claim-level generators,
+  // not stubs.
+  const wcOwn = ownFreqMultipliers('#28', 'WC')!;
+  const glOwn = ownFreqMultipliers('#28', 'GL')!;
+  console.log(`  WC effects ${JSON.stringify(wcOwn)}   GL effects ${JSON.stringify(glOwn)}`);
+
+  const results = play('MAMC6EA4', 5, [{ shockId: '#28', yearNumber: 2 }]);
+  const clean = play('MAMC6EA4', 5, []);
+  const y2 = results[1];
+  const rec = y2.shockEvents?.[0];
+  console.log(`  ONE pool record, not two: ${y2.shockEvents?.length ?? 0}  ${note(y2.shockEvents?.length === 1, 'a cross-line event produced more than one pool row')}`);
+  console.log(`  lines affected: ${rec?.linesAffected.join(' + ')}  ${note(rec?.linesAffected.length === 2 && rec.linesAffected.includes('WC') && rec.linesAffected.includes('GL'), 'the cross-line event did not reach both lines')}`);
+  console.log(`  recorded on BOTH line results: WC ${y2.byLine.WC?.shockEvents?.length ?? 0}, GL ${y2.byLine.GL?.shockEvents?.length ?? 0}  ${note((y2.byLine.WC?.shockEvents?.length === 1) && (y2.byLine.GL?.shockEvents?.length === 1), 'the event is missing from one of its lines')}`);
+  console.log(`  NOT on Property: ${y2.byLine.Property?.shockEvents === undefined ? 'absent' : 'PRESENT'}  ${note(y2.byLine.Property?.shockEvents === undefined, 'an untouched line carries the record')}`);
+  console.log(`  pool expected added ${fmt$(rec?.expectedGrossLossAdded ?? 0)} = WC ${fmt$(y2.byLine.WC?.shockEvents?.[0].expectedGrossLossAdded ?? 0)} + GL ${fmt$(y2.byLine.GL?.shockEvents?.[0].expectedGrossLossAdded ?? 0)}`);
+  console.log(`    ${note(Math.abs((rec?.expectedGrossLossAdded ?? 0) - ((y2.byLine.WC?.shockEvents?.[0].expectedGrossLossAdded ?? 0) + (y2.byLine.GL?.shockEvents?.[0].expectedGrossLossAdded ?? 0))) < 1, 'the pool row does not sum its lines')} — the pool row sums the lines it touched`);
+
+  // INVARIANT 1 FOR SHOCK EFFECTS, and this check earned its place. It caught a
+  // real bug: the presumption multiplier was applied to the generator's lambda
+  // but NOT to the analytic's presumption term, so WC reported $0.00M expected
+  // added while its realized gross moved $2.92M -> $8.07M. Whatever moves the
+  // draw must move the matched expectation.
+  for (const line of ['WC', 'GL'] as CoverageLine[]) {
+    const lineRec = y2.byLine[line]?.shockEvents?.[0];
+    const movedGross = y2.byLine[line]!.grossUltimateLoss !== clean[1].byLine[line]!.grossUltimateLoss;
+    const hasExpectation = (lineRec?.expectedGrossLossAdded ?? 0) > 0 || (lineRec?.attributableGrossLoss ?? 0) > 0;
+    console.log(`  ${line}: gross moved ${movedGross}, cost reported ${fmt$((lineRec?.expectedGrossLossAdded ?? 0) + (lineRec?.attributableGrossLoss ?? 0))}  ${note(movedGross === hasExpectation, `${line} moved the draw without reporting a cost — the analytic is not matched to the draw`)}`);
+  }
+
+  // BOTH LINES MOVE IN THE SHOCK YEAR, AND ONLY IN IT.
+  for (const line of ['WC', 'GL'] as CoverageLine[]) {
+    const moved = [0, 1, 2, 3, 4].map(i => results[i].byLine[line]!.grossUltimateLoss !== clean[i].byLine[line]!.grossUltimateLoss);
+    console.log(`  ${line} gross moved in years: ${moved.map((m, i) => (m ? i + 1 : null)).filter(Boolean).join(', ') || 'none'}`);
+    console.log(`    Y2 ${fmt$(clean[1].byLine[line]!.grossUltimateLoss)} -> ${fmt$(results[1].byLine[line]!.grossUltimateLoss)}  ${note(moved[1], `${line} did not move in the shock year`)}`);
+    // Years 1 and 3-5 must be untouched. A current-horizon event that leaks
+    // forward would be indistinguishable from a future-horizon one.
+    console.log(`    Y1 and Y3-Y5 untouched: ${note(!moved[0] && !moved[2] && !moved[3] && !moved[4], `${line} moved outside the shock year`)}`);
+  }
+
+  // Property is not just unrecorded — it must be numerically untouched, which
+  // is the real proof that a line receives only its own slice.
+  const prMoved = [0, 1, 2, 3, 4].some(i => results[i].byLine.Property!.grossUltimateLoss !== clean[i].byLine.Property!.grossUltimateLoss);
+  console.log(`  Property gross unmoved in every year: ${note(!prMoved, 'the cross-line event perturbed an untargeted line')}`);
+
+  // And the presumption channel specifically — #28 and #10 act on the same
+  // knob by different mechanisms, so they must compose rather than collide.
+  const both = play('MAMC6EA4', 5, [{ shockId: '#10', yearNumber: 1 }, { shockId: '#28', yearNumber: 2 }]);
+  const y2both = both[1];
+  console.log(`  #10 + #28 together in Y2: ${y2both.shockEvents?.length} records, ${y2both.shockEvents?.map(s => s.shockId).join(' + ')}  ${note(y2both.shockEvents?.length === 2, 'two concurrent events did not both record')}`);
+  console.log(`    #10 moves the base rate permanently, #28 multiplies the realized draw for one year —`);
+  console.log(`    same knob, different mechanisms, and they compose.`);
+  const wcBoth = y2both.byLine.WC!.grossUltimateLoss;
+  const wc28 = results[1].byLine.WC!.grossUltimateLoss;
+  console.log(`    WC Y2 gross: clean ${fmt$(clean[1].byLine.WC!.grossUltimateLoss)}, #28 only ${fmt$(wc28)}, both ${fmt$(wcBoth)}`);
+}
+
 console.log(problems.length === 0
   ? '\nALL SHOCK CHECKS PASS.'
   : `\n${problems.length} PROBLEMS:\n  ${problems.join('\n  ')}`);

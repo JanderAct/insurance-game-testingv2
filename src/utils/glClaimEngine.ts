@@ -44,6 +44,7 @@
 
 import type { Claim, CoverageLine, Member, MemberLossResult, Occurrence } from '../types/simulation';
 import { deriveSubRng } from './random';
+import { shockFactorFor } from './shockEffects';
 import {
   drawLognormal,
   drawTruncatedLognormal,
@@ -235,13 +236,6 @@ export function expectedGlGrossLoss(members: Member[], options: ExpectedGlLossOp
     }
   }
   return total;
-}
-
-// A shock frequency multiplier for one sub: the sub's own factor times any
-// whole-line factor. Both apply — an event targeting EPL and an event raising
-// all of GL are two independent causes, and a claim is subject to both.
-export function shockFactorFor(multipliers: Record<string, number>, sub: string): number {
-  return (multipliers[sub] ?? 1) * (multipliers['*'] ?? 1);
 }
 
 // --- exported: k_GL and the held pure premium ----------------------------------

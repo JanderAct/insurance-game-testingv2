@@ -32,6 +32,7 @@ import type {
 } from '../types/shocks';
 import { IMPLEMENTED_EFFECTS } from '../types/shocks';
 import { SHOCK_CATALOG, readModelPath } from '../data/shockCatalog';
+import { WHOLE_LINE } from './shockEffects';
 
 function describe(effect: ShockEffect): string {
   switch (effect.kind) {
@@ -57,9 +58,6 @@ function describe(effect: ShockEffect): string {
 function lineOf(effect: ShockEffect): CoverageLine | undefined {
   return 'line' in effect ? effect.line : undefined;
 }
-
-// The whole-line key for a frequency multiplier with no sub-coverage named.
-export const WHOLE_LINE = '*';
 
 function lineBucket(
   byLine: Partial<Record<CoverageLine, LineShockEffects>>,

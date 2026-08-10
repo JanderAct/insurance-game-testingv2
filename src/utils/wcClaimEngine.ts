@@ -59,6 +59,7 @@ import {
   type WcTier,
 } from '../data/defaultAssumptions';
 import { getWcParams } from './wcParams';
+import { shockFactorFor } from './shockEffects';
 
 const M = WC_LOSS_MODEL;
 const LINE: CoverageLine = 'WC';
@@ -283,6 +284,10 @@ export interface ExpectedWcLossOptions {
   // read in this function's own body picks them up. See wcParams.ts for what
   // the overlay does and does not reach.
   paramOverrides?: Record<string, number>;
+  // Shock frequency multipliers, for MEASURING a shock's expected cost — never
+  // for pricing. The difference between this expectation with and without them
+  // IS the analytic expected addition. Nothing that prices WC passes this.
+  freqMultipliers?: Record<string, number>;
 }
 
 // The analytic expected GROSS loss for a book of members — the pricing side
@@ -306,7 +311,8 @@ export function expectedWcGrossLoss(members: Member[], options: ExpectedWcLossOp
     for (const cls of WC_CLASS_KEYS) {
       const payroll = classPayroll(member, cls);
       if (payroll <= 0) continue;
-      const lambda = payroll * M.rateClassPer1M[cls] * theta * kLine * trend;
+      let lambda = payroll * M.rateClassPer1M[cls] * theta * kLine * trend;
+      if (options.freqMultipliers) lambda *= shockFactorFor(options.freqMultipliers, cls);
       total += lambda * expectedClaimSeverity(cls, rq, regionMult);
     }
 
@@ -316,9 +322,16 @@ export function expectedWcGrossLoss(members: Member[], options: ExpectedWcLossOp
       // the medical trend, so the expectation must use E[trend^round(lag)].
       const pfPayroll = classPayroll(member, 'police') + classPayroll(member, 'fire');
       if (pfPayroll > 0) {
+        // The presumption multiplier belongs HERE as well as in the draw.
+        // Omitting it made the analytic silently ignore a presumption shock —
+        // WC's expected added cost read $0.00M while its realized gross moved
+        // from $2.92M to $8.07M. Invariant 1 is not optional for shock effects:
+        // whatever moves the draw has to move the matched expectation.
+        let presumptionRate = M.presumption.ratePer1MPoliceFire;
+        if (options.freqMultipliers) presumptionRate *= shockFactorFor(options.freqMultipliers, 'presumption');
         total +=
           pfPayroll *
-          M.presumption.ratePer1MPoliceFire *
+          presumptionRate *
           M.presumption.severityMean *
           expectedPresumptionTrendFactor() *
           regionMult;
@@ -383,6 +396,10 @@ export interface WcGenerationInputs {
   injections?: { tier: string; count: number; ratingClass?: string }[];
   // Future-horizon shock parameter overrides for THIS instance.
   paramOverrides?: Record<string, number>;
+  // Current-horizon shock frequency multipliers. Keys are WC rating classes
+  // (clerical / publicWorks / police / fire), 'presumption', or '*' for the
+  // whole line. DRAW ONLY, like risk control.
+  freqMultipliers?: Record<string, number>;
 }
 
 export interface WcGenerationResult {
@@ -401,6 +418,7 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
   const { members, yearNumber, calendarYear, instanceSeed, kLine, gPool, riskControlEffectiveness } = inputs;
   // Shadows the module-level constant, as in expectedWcGrossLoss above.
   const M = getWcParams(inputs.paramOverrides);
+  const freqMultipliers = inputs.freqMultipliers;
 
   // Purpose-keyed streams, distinct from the legacy 'losses' label so WC's
   // internals can be reordered without disturbing GL/Property.
@@ -473,7 +491,8 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
 
       // A1: per member-year noise (mean 1) x the shared pool factor (mean 1).
       const epsilon = freqRng.gamma(M.memberFrequencyNoise.shape, M.memberFrequencyNoise.scale);
-      const lambda = payroll * M.rateClassPer1M[cls] * theta * kLine * trend * epsilon * gPool * rcFactor;
+      let lambda = payroll * M.rateClassPer1M[cls] * theta * kLine * trend * epsilon * gPool * rcFactor;
+      if (freqMultipliers) lambda *= shockFactorFor(freqMultipliers, cls);
       const count = freqRng.poisson(lambda);
       if (count <= 0) continue;
       claimCountsByClass[cls] += count;
@@ -530,7 +549,8 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
     // it was inert because the stored severity had no defined vintage.
     const pfPayroll = classPayroll(member, 'police') + classPayroll(member, 'fire');
     if (pfPayroll > 0) {
-      const lambda = pfPayroll * M.presumption.ratePer1MPoliceFire * gPool;
+      let lambda = pfPayroll * M.presumption.ratePer1MPoliceFire * gPool;
+      if (freqMultipliers) lambda *= shockFactorFor(freqMultipliers, 'presumption');
       const count = presumeRng.poisson(lambda);
       for (let i = 0; i < count; i++) {
         claimCountsByClass.presumption += 1;

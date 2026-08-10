@@ -355,6 +355,8 @@ export function processLineYear(
       // 125% of that same unchanged expectedLoss, so the treaty does not adjust
       // either. Do not "fix" either of these.
       paramOverrides: ctx.paramOverrides,
+      // Current-horizon multipliers, DRAW ONLY like risk control.
+      freqMultipliers: ctx.shock?.freqMultipliers,
       gPool: ctx.gPool,
       // Risk control acts on the DRAW ONLY (finding 17): it reduces realized
       // frequency without touching the pricing expectation, so it genuinely
@@ -386,13 +388,17 @@ export function processLineYear(
     // against the un-overridden book with WC's own analytic. Same construction
     // as GL's frequency attribution and for the same reason: reconstructing the
     // expectation would create a second definition of WC's expected loss.
-    if (ctx.paramOverrides && ctx.shockFirings?.length) {
+    if ((ctx.paramOverrides || ctx.shock?.freqMultipliers) && ctx.shockFirings?.length) {
       const baseline = expectedWcGrossLoss(memberResult.activeMembers, { kLine, yearNumber });
       for (const firing of ctx.shockFirings) {
-        const own = ownParamOverrides(firing.shockId, 'WC');
-        if (!own) continue;
-        shockExpectedAdded[firing.shockId] =
-          expectedWcGrossLoss(memberResult.activeMembers, { kLine, yearNumber, paramOverrides: own }) - baseline;
+        const overrides = ownParamOverrides(firing.shockId, 'WC');
+        const multipliers = ownFreqMultipliers(firing.shockId, 'WC');
+        if (!overrides && !multipliers) continue;
+        // Both channels of ONE event priced together, since an event carrying
+        // both is a single cause and splitting it would be arbitrary.
+        shockExpectedAdded[firing.shockId] = expectedWcGrossLoss(memberResult.activeMembers, {
+          kLine, yearNumber, paramOverrides: overrides, freqMultipliers: multipliers,
+        }) - baseline;
       }
     }
   } else if (isGlClaimLine) {
