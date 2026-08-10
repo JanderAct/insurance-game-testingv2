@@ -181,6 +181,23 @@ export function resolveShocks(instance: GameInstance, yearNumber: number): Shock
 // the same sub-coverage each report what they alone would add. Those figures do
 // not sum to the combined effect, and that is correct: the question is "what
 // did this event add", not "how should we split the interaction".
+// The same, for parameter overrides. Resolved against the MODEL's own value
+// rather than against any earlier override, so the figure answers "what would
+// this event alone have added" — which is what per-event attribution means.
+export function ownParamOverrides(shockId: string, line: CoverageLine): Record<string, number> | undefined {
+  const def = SHOCK_CATALOG[shockId];
+  if (!def) return undefined;
+  let out: Record<string, number> | undefined;
+  for (const effect of def.effects) {
+    if (effect.kind !== 'paramOverride' || effect.line !== line) continue;
+    const base = readModelPath(line, effect.path);
+    if (base === undefined) continue;
+    out = out ?? {};
+    out[effect.path] = effect.multiplier !== undefined ? base * effect.multiplier : effect.value!;
+  }
+  return out;
+}
+
 export function ownFreqMultipliers(shockId: string, line: CoverageLine): Record<string, number> | undefined {
   const def = SHOCK_CATALOG[shockId];
   if (!def) return undefined;

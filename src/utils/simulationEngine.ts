@@ -3,7 +3,7 @@
 
 import type { Claim, GameState, Occurrence, PoolState, DecisionSet, LinePoolState, LineDecisionSet, ResultSet, LineResultSet, ReserveCohort, Member, MemberLossResult, MembershipHistory, CoverageLine, GameInstance, AssetAllocation } from '../types/simulation';
 import type { LineShockEffects, ShockFiring, ShockRecord } from '../types/shocks';
-import { resolveShocks, ownFreqMultipliers } from './shockResolver';
+import { resolveShocks, ownFreqMultipliers, ownParamOverrides } from './shockResolver';
 
 // Collapse the per-line shock records into one row per EVENT for the pool
 // result, summing each cost across the lines that event touched and unioning
@@ -28,7 +28,7 @@ import { getReinsuranceStructure, calculateReinsuranceCost, calculateReinsurance
 import { simulateMarketReturns, blendInvestmentReturn } from './investmentEngine';
 import { simulateMemberMovement } from './membershipEngine';
 import { cloneMembershipHistory, openInterval, closeInterval } from './membershipHistory';
-import { computeKLine, deriveNeutralPurePremiumPer100, generateWcClaims } from './wcClaimEngine';
+import { computeKLine, deriveNeutralPurePremiumPer100, expectedWcGrossLoss, generateWcClaims } from './wcClaimEngine';
 import { computeKGl, deriveNeutralGlPurePremiumPer100, expectedGlGrossLoss, generateGlClaims } from './glClaimEngine';
 import { generateNarrative } from './narrativeEngine';
 import { getMemberExposure } from './lineHelpers';
@@ -337,13 +337,24 @@ export function processLineYear(
     // k_line is recomputed against the CURRENTLY ENROLLED book, after member
     // movement — it is the roster/risk-quality-mix correction, and the reason
     // purePremiumPer100 can be held constant instead of chasing enrollment.
-    const kLine = computeKLine(memberResult.activeMembers);
+    const kLine = computeKLine(memberResult.activeMembers, ctx.paramOverrides);
     const generated = generateWcClaims({
       members: memberResult.activeMembers,
       yearNumber,
       calendarYear,
       instanceSeed: instance.seed,
       kLine,
+      // Future-horizon overrides, resolved through the wcParams overlay.
+      //
+      // ⚠ THEY DO NOT REACH PREMIUM, AND THAT IS THE POINT (ruled). The priced
+      // expectedLoss is activeExposure x the HELD purePremiumPer100, not this
+      // generator's analytic, so a legislative change raises realized losses
+      // while premium stands still. The player must re-rate or bleed — a law
+      // that makes claims more expensive does not politely raise your rates for
+      // you. Second-order and equally deliberate: the reinsurance attachment is
+      // 125% of that same unchanged expectedLoss, so the treaty does not adjust
+      // either. Do not "fix" either of these.
+      paramOverrides: ctx.paramOverrides,
       gPool: ctx.gPool,
       // Risk control acts on the DRAW ONLY (finding 17): it reduces realized
       // frequency without touching the pricing expectation, so it genuinely
@@ -370,6 +381,20 @@ export function processLineYear(
       shockAttributableLoss[injection.shockId] = (shockAttributableLoss[injection.shockId] ?? 0) + outcome.gross;
       shockAttributableClaims[injection.shockId] = (shockAttributableClaims[injection.shockId] ?? 0) + outcome.count;
     });
+
+    // EXPECTED cost of any parameter override in force, per event, measured
+    // against the un-overridden book with WC's own analytic. Same construction
+    // as GL's frequency attribution and for the same reason: reconstructing the
+    // expectation would create a second definition of WC's expected loss.
+    if (ctx.paramOverrides && ctx.shockFirings?.length) {
+      const baseline = expectedWcGrossLoss(memberResult.activeMembers, { kLine, yearNumber });
+      for (const firing of ctx.shockFirings) {
+        const own = ownParamOverrides(firing.shockId, 'WC');
+        if (!own) continue;
+        shockExpectedAdded[firing.shockId] =
+          expectedWcGrossLoss(memberResult.activeMembers, { kLine, yearNumber, paramOverrides: own }) - baseline;
+      }
+    }
   } else if (isGlClaimLine) {
     // Same discipline as WC: k_GL is the per-year roster/risk-quality-mix
     // correction against the currently enrolled book; the pure premium itself

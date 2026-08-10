@@ -58,6 +58,7 @@ import {
   type WcClassKey,
   type WcTier,
 } from '../data/defaultAssumptions';
+import { getWcParams } from './wcParams';
 
 const M = WC_LOSS_MODEL;
 const LINE: CoverageLine = 'WC';
@@ -277,12 +278,20 @@ export interface ExpectedWcLossOptions {
   kLine?: number;        // default 1
   yearNumber?: number;   // default 1 (trend factor 1.0)
   includePresumption?: boolean; // default true
+  // Future-horizon shock parameter overrides for THIS instance. Resolved
+  // through the overlay and shadowed over the module-level `M` below, so every
+  // read in this function's own body picks them up. See wcParams.ts for what
+  // the overlay does and does not reach.
+  paramOverrides?: Record<string, number>;
 }
 
 // The analytic expected GROSS loss for a book of members — the pricing side
 // of invariant 1. Deliberately excludes risk control (invariant 2) and takes
 // E[member noise] = E[pool factor] = 1.
 export function expectedWcGrossLoss(members: Member[], options: ExpectedWcLossOptions = {}): number {
+  // Shadows the module-level constant. Identical to it by IDENTITY when no
+  // override is in force, so this line cannot move a number on its own.
+  const M = getWcParams(options.paramOverrides);
   const rqOverride = options.riskQualityOverride;
   const kLine = options.kLine ?? 1;
   const trend = frequencyTrend(options.yearNumber ?? 1);
@@ -329,8 +338,13 @@ export function expectedWcGrossLoss(members: Member[], options: ExpectedWcLossOp
 //
 // Presumption is excluded from both sides: it is risk-quality-invariant, so
 // including it would dilute the correction rather than sharpen it.
-export function computeKLine(members: Member[]): number {
-  const opts = { includePresumption: false as const };
+export function computeKLine(members: Member[], paramOverrides?: Record<string, number>): number {
+  // Overrides flow into BOTH sides of the ratio. k_line normalises the roster
+  // and risk-quality mix of the book as it actually is, so if legislation has
+  // changed the book's loss structure the correction has to see that. It scales
+  // the DRAW only and appears nowhere in pricing, so this does not leak into
+  // premium — see the note at the #10 apply site.
+  const opts = { includePresumption: false as const, paramOverrides };
   const neutral = expectedWcGrossLoss(members, { ...opts, riskQualityOverride: NEUTRAL_RQ });
   const adjusted = expectedWcGrossLoss(members, opts);
   if (!(adjusted > 0)) return 1;
@@ -367,6 +381,8 @@ export interface WcGenerationInputs {
   // injections and returns a parallel list of outcomes, and the caller maps
   // those back to the events that caused them.
   injections?: { tier: string; count: number; ratingClass?: string }[];
+  // Future-horizon shock parameter overrides for THIS instance.
+  paramOverrides?: Record<string, number>;
 }
 
 export interface WcGenerationResult {
@@ -383,6 +399,8 @@ export interface WcGenerationResult {
 
 export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult {
   const { members, yearNumber, calendarYear, instanceSeed, kLine, gPool, riskControlEffectiveness } = inputs;
+  // Shadows the module-level constant, as in expectedWcGrossLoss above.
+  const M = getWcParams(inputs.paramOverrides);
 
   // Purpose-keyed streams, distinct from the legacy 'losses' label so WC's
   // internals can be reordered without disturbing GL/Property.

@@ -30,9 +30,11 @@ import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
-import { resolveShocks, ownFreqMultipliers } from '../../src/utils/shockResolver';
+import { resolveShocks, ownFreqMultipliers, ownParamOverrides } from '../../src/utils/shockResolver';
 import { computeKGl, expectedGlGrossLoss, generateGlClaims } from '../../src/utils/glClaimEngine';
-import { computeKLine, generateWcClaims, nominalSumOfStream } from '../../src/utils/wcClaimEngine';
+import { computeKLine, expectedWcGrossLoss, generateWcClaims, nominalSumOfStream } from '../../src/utils/wcClaimEngine';
+import { getWcParams } from '../../src/utils/wcParams';
+import { WC_LOSS_MODEL } from '../../src/data/defaultAssumptions';
 import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
 import type { Claim, Member } from '../../src/types/simulation';
 import { SHOCK_CATALOG } from '../../src/data/shockCatalog';
@@ -321,6 +323,61 @@ console.log('\n--- 6. #15 Catastrophic WC Mega-Claim — measured at both bases 
   console.log(`    tier and rating class set: ${note(injected.every(c => c.tier === 'catastrophic' && !!c.ratingClass), 'injected claim missing tier or rating class')}`);
   console.log(`    member losses reconcile to the line total: ${note(Math.abs(s.memberLossResults.reduce((t, m) => t + m.simulatedLoss, 0) - s.grossUltimateLoss) < 1e-6, 'injected claims are missing from memberLossResults')}`);
   console.log(`    an unsupported tier throws: ${note(throws(() => run(pool, [{ tier: 'perm', count: 1 }])), 'an unsupported injection tier is silently accepted')}`);
+}
+
+console.log('\n--- 7. #10 WC Presumption Expansion — paramOverride and forward persistence ---');
+{
+  const roster = getPredefinedMarketMembers();
+  const pool = enrolledBook('MAMC6EA4', 'WC');
+  const own = ownParamOverrides('#10', 'WC')!;
+  console.log(`  override: ${JSON.stringify(own)} (base ${WC_LOSS_MODEL.presumption.ratePer1MPoliceFire})`);
+
+  // The overlay must return the GLOBAL BY IDENTITY when empty. Not "equal to" —
+  // identical. That is what makes "no shock cannot move a number" structural.
+  console.log(`  getWcParams(undefined) === WC_LOSS_MODEL: ${note(getWcParams(undefined) === WC_LOSS_MODEL, 'the overlay copies the model when there is nothing to override')}`);
+  console.log(`  getWcParams({}) === WC_LOSS_MODEL: ${note(getWcParams({}) === WC_LOSS_MODEL, 'the overlay copies the model for an empty override set')}`);
+  console.log(`  a path outside the allow-list throws: ${note(throws(() => getWcParams({ 'severity.medOnly.mean': 1 })), 'an unreachable override path is silently accepted')}`);
+  console.log(`    (the overlay reaches only reads lexically inside generateWcClaims, expectedWcGrossLoss and`);
+  console.log(`     computeKLine. A path also read by a module-level helper would be HALF-applied, which is`);
+  console.log(`     worse than not applying it — hence the allow-list.)`);
+  console.log(`  the global is not mutated: ${note(WC_LOSS_MODEL.presumption.ratePer1MPoliceFire === 0.06, 'the overlay mutated the global model')}`);
+
+  for (const [label, book] of [['FULL MARKET  ', roster], ['ENROLLED POOL', pool]] as [string, Member[]][]) {
+    const k = computeKLine(book);
+    const base = expectedWcGrossLoss(book, { kLine: k, yearNumber: 1 });
+    const over = expectedWcGrossLoss(book, { kLine: k, yearNumber: 1, paramOverrides: own });
+    // Presumption claim counts, year 1, averaged over seeds.
+    const S = 150;
+    let cBase = 0, cOver = 0;
+    for (let s = 1; s <= S; s++) {
+      const args = { members: book, yearNumber: 1, calendarYear: 2026, instanceSeed: 5150 + s * 7919, kLine: k, gPool: 1, riskControlEffectiveness: 0 };
+      cBase += generateWcClaims(args).claimCountsByTier.presumption;
+      cOver += generateWcClaims({ ...args, paramOverrides: own }).claimCountsByTier.presumption;
+    }
+    console.log(`  ${label} presumption ${(cBase / S).toFixed(2)}/yr -> ${(cOver / S).toFixed(2)}/yr (ratio ${(cOver / cBase).toFixed(3)}, expect 1.5)  ${note(Math.abs(cOver / cBase - 1.5) / 1.5 < 0.05, `${label} presumption count ratio ${(cOver / cBase).toFixed(3)} vs 1.5`)}`);
+    console.log(`                WC expected gross ${fmt$(base)} -> ${fmt$(over)}   added ${fmt$(over - base)}/yr FORWARD, PERMANENTLY`);
+  }
+
+  // FORWARD PERSISTENCE through a real game: absent before the fire year,
+  // present from it onward.
+  const results = play('MAMC6EA4', 5, [{ shockId: '#10', yearNumber: 3 }]);
+  const present = results.map(r => (r.shockEvents?.length ?? 0) > 0);
+  console.log(`  fired in Y3, recorded in years: ${present.map((p, i) => (p ? i + 1 : null)).filter(Boolean).join(', ')}  ${note(!present[0] && !present[1] && present[2] && present[3] && present[4], 'a future-horizon shock does not persist correctly across the game')}`);
+  const y4 = results[3].shockEvents![0];
+  console.log(`    Y4 record still reports yearFired ${y4.yearFired} and ${fmt$(y4.expectedGrossLossAdded)} expected added`);
+
+  // THE RULED DYNAMIC, ASSERTED. A legislative change raises realized losses
+  // and leaves premium standing still, because expectedLoss is built from the
+  // HELD purePremiumPer100 rather than the generator's analytic. The player
+  // must re-rate or bleed. The reinsurance attachment, being 125% of that same
+  // unchanged expectedLoss, does not adjust either. Both are deliberate.
+  const clean = play('MAMC6EA4', 5, []);
+  const wcShock = results[4].byLine.WC!, wcClean = clean[4].byLine.WC!;
+  console.log(`  Y5 premium unchanged by the override: pure premium ${wcShock.purePremiumPer100.toFixed(6)} vs ${wcClean.purePremiumPer100.toFixed(6)}  ${note(wcShock.purePremiumPer100 === wcClean.purePremiumPer100, 'the override moved the pure premium — it must not')}`);
+  console.log(`  Y5 expectedLoss unchanged: ${fmt$(wcShock.expectedLoss)} vs ${fmt$(wcClean.expectedLoss)}  ${note(wcShock.expectedLoss === wcClean.expectedLoss, 'the override moved the priced expected loss')}`);
+  console.log(`  Y5 attachment unchanged: ${fmt$(wcShock.attachment)} vs ${fmt$(wcClean.attachment)}  ${note(wcShock.attachment === wcClean.attachment, 'the override moved the reinsurance attachment')}`);
+  console.log(`    RULED AND INTENDED: a law that makes claims more expensive does not politely raise your`);
+  console.log(`    rates for you, and the treaty does not adjust either. Do not "fix" either of these.`);
 }
 
 console.log(problems.length === 0
