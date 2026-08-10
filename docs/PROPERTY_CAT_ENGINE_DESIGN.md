@@ -132,6 +132,19 @@ Mix matches the EP tables (38.5 / 36.3 / 25.2) with **lambda inside P4 ranges an
 
 > **mu is solved NUMERICALLY, not from a closed form.** Intensity enters twice — `hit_rate = min(base x intensity, cap)` AND `event_mean_dr = mu x intensity` — so expected loss per event scales with E[I^2] = 1 + CV^2, not E[I]^2 = 1. A closed-form mu/(1+CV^2) correction does NOT land, because the footprint cap interacts with the intensity draw (quake especially — cap 0.95 binds often at CV 1.1). mu is solved by simulation against each peril's target AAL, holding lambda, base_footprint, cap, and CV fixed. The mu values above are the numeric solutions (earlier draft values 1.18/0.73/3.83% were pre-correction and are superseded).
 
+> **REFINEMENT (weather build, roster v4).** The paragraph above is right that the naive `mu/(1+CV^2)` correction fails and right about why. It is wrong only in the stronger conclusion that *no* closed form lands. **Splitting the expectation AT the cap is exact**, with no quadrature:
+>
+> ```
+> E[min(b x I, c) x I] = b x E[I^2 1{I <= c/b}] + c x (E[I] - E[I 1{I <= c/b}])
+> E[I^k 1{I <= t}]     = exp(k mu_ln + k^2 sigma^2 / 2) x Phi((ln t - mu_ln - k sigma^2) / sigma)
+> ```
+>
+> valid because intensity is LogNormal here (P2.1) and E[I] = 1 exactly. Implemented as `lognormalPartialMoment` in `src/utils/claimMath.ts`; the weather band's AAL identity is built on it and verified to five decimals — `E[I x min(I, 5)] = 1.355546` against the naive `1 + CV^2 = 1.360000`, the cap accounting for the 0.328% gap. The same form applies to each cat peril, since all three share the `min(base x I, cap) x mu x I` structure.
+>
+> Two caveats before relying on it for cat. **(1)** It is exact for a cap on the FOOTPRINT only. If the eventual generator also clamps the damage-ratio mean (quake's `mu x I` reaches 1 near I = 39, probability ~3e-6 at CV 1.1), that clamp needs its own split. **(2)** It gives the per-event expectation; the zone hazard weights and the quake adjacency span still multiply in separately, and the span is load-bearing (see the note below).
+>
+> **This does NOT license re-solving the mu values.** They verify well inside tolerance as they stand — weather sits +0.33% from its target, which is mu's rounding to three significant figures — and moving a pinned constant for no behavioural gain is a worse trade than leaving a 0.33% residual documented. The closed form is recorded so an exact solve is *available* if some future change makes it worth doing.
+
 > **Quake AAL only reconciles WITH adjacency.** 0.045 x 0.40 x $2,331M x 2.532% = ~$1.05M single-zone; reaching $1.87M requires the two-region span contributing the 0.1575 extra zone-equivalents (P2.2). Non-obvious enough that a naive re-derivation will look wrong — the span is load-bearing for the quake number.
 
 ---

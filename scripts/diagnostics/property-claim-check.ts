@@ -85,6 +85,25 @@ function runYears(members: Member[], years: number, opts: { rc?: number; seedBas
   return out;
 }
 
+// A REAL enrolled Property book, taken from the game's own enrollment path
+// rather than reconstructed here — the share is drawn per seed inside
+// STARTING_EXPOSURE_SHARE (25-35% of market TIV), so a hand-rolled subset would
+// drift from what the engine actually enrolls.
+//
+// EVERY TREATY-FACING FIGURE HAS TO BE READ ON THIS BASIS, NOT THE FULL MARKET.
+// A treaty responds to the POOL's claims, and the pool is roughly a quarter of
+// the market, so a full-market firing rate runs ~3.7x high. Several per-risk
+// figures quoted in this project were full-market and therefore wrong by that
+// factor.
+function enrolledPropertyBook(instanceId: string): Member[] {
+  let h = 5381;
+  for (let i = 0; i < instanceId.length; i++) { h = ((h << 5) + h) ^ instanceId.charCodeAt(i); h = h >>> 0; }
+  const instance = generateGameInstance(instanceId, h);
+  const setup = { poolName: 'G', gameLength: 5, startingYear: 2026, instanceId, activeLines: ['Property'] as CoverageLine[] };
+  const { poolState } = runPriorHistory(instance, setup as never);
+  return poolState.lines.Property.members.filter(m => m.status === 'active');
+}
+
 console.log(`=== Property ATTRITIONAL generator: full canonical market, ${YEARS} draw-years, gPool=1, no RC ===\n`);
 
 console.log('--- 1. location schedule (the two stored roster columns) ---');
@@ -100,7 +119,10 @@ console.log('--- 1. location schedule (the two stored roster columns) ---');
     if (n > 1 && locationTivAt(m, 0) <= locationTivAt(m, 1)) notLargest++;
   }
   console.log(`  schedule sums to member TIV: worst error $${(worstSum * 1e6).toFixed(6)}  ${note(worstSum < 1e-9, 'location schedule does not sum to member TIV')}`);
-  console.log(`  largest single location ${fmt$(biggest * 1e6)}  ${note(Math.abs(biggest - 93.5) < 0.5, `largest location $${biggest.toFixed(1)}M != ~$93.5M`)}`);
+  // ROSTER v4 VALUE. Was $93.5M at v3; the TIV rescale doubled it to $186.98M
+  // (exactly 2.0x, as a pure scale change must). Update this alongside any
+  // future roster revision — it is a stale-constant check, not a model check.
+  console.log(`  largest single location ${fmt$(biggest * 1e6)}  ${note(Math.abs(biggest - 186.98) < 0.5, `largest location $${biggest.toFixed(1)}M != ~$186.98M (v4; was $93.5M at v3)`)}`);
   // DOCUMENTED, NOT ASSERTED: "primary" means designated, not largest.
   console.log(`  members whose designated primary is NOT their largest: ${notLargest} — documented, not asserted (9 expected at v3)`);
   const single = roster.filter(m => locationCount(m) === 1).length;
@@ -170,15 +192,43 @@ console.log('\n--- 3. severity: the insured-value cap and the damage ratio ---')
   console.log(`    tail: P(dr>0.10) ${(drs.filter(x => x > 0.10).length / drs.length * 100).toFixed(2)}%  P(dr>0.40) ${(drs.filter(x => x > 0.40).length / drs.length * 100).toFixed(2)}% — REPORTED`);
 }
 
-console.log('\n--- 4. per-risk layer (the $2M retention) — REPORTED, wide sanity band ---');
+console.log('\n--- 4. large-loss severity signal — DIAGNOSTIC ONLY, NOT GATED HERE ---');
 {
-  // WHY THIS IS REPORTED AND NOT HARD-GATED. This rate is a design input to the
-  // reinsurance tower (the $2M retention was sized against ~1.7-1.8/yr), so the
-  // number must be KNOWN — but it is a rare-event count with real structural
-  // spread between bases, and a tight gate on it would fire on correct code.
+  // THE TREATY-FIRING ASSERTION THAT USED TO LIVE HERE HAS BEEN REMOVED, NOT
+  // WEAKENED. It read: breaches/yr above the $2M per-risk retention must fall in
+  // 1.4-2.1. Two independent reasons it does not belong in a generator harness,
+  // and both matter.
+  //
+  // 1. IT MEASURED THE WRONG BASIS. The rate below is FULL-MARKET (200 members).
+  //    A treaty responds to the POOL's claims, and the pool is ~25% of market
+  //    TIV, so the full-market figure runs ~3.7x the rate a treaty would
+  //    actually see. Both bases are printed below so the gap is visible rather
+  //    than inferred. Several per-risk figures quoted in this project — including
+  //    in the comment this replaces — were full-market and wrong by that factor.
+  //
+  // 2. THE $2M PER-RISK RETENTION IS OBSOLETE. The property tower was settled as
+  //    a SINGLE OCCURRENCE LAYER AT $5M, collapsing per-risk and cat, on the
+  //    reasoning that a single-claim occurrence is still an occurrence. The old
+  //    assertion therefore tested a treaty structure that no longer exists.
+  //    NOTE: PROPERTY_LOSS_MODEL.perRiskRetention is STILL $2M in the constants
+  //    and the generator still counts breaches against it. That counter is kept
+  //    as a large-loss severity signal, which is genuinely useful — it is the
+  //    one statistic that dies if the location schedule stops concentrating —
+  //    but it is no longer a treaty check.
+  //
+  // WHERE THE TREATY CHECK GOES: the waterfall harness at cutover, measured on
+  // POOL claims at the $5M occurrence retention, across all three bands
+  // together. Expected there: ~0.71 breaches/yr. A treaty firing rate is a
+  // PORTFOLIO property — it depends on enrolment, on the band mix, and on the
+  // retention — and none of those three things is a property of a generator.
+  //
+  // HISTORICAL DECOMPOSITION, retained because it documents how the v3 number
+  // was built and is what a future re-derivation will be checked against:
   //
   // THE DETERMINISTIC-VS-FULL DECOMPOSITION, computed exactly (Beta survival
-  // integrated from x to 1, away from the t=0 singularity):
+  // integrated from x to 1, away from the t=0 singularity). ALL AT v3 TIV AND
+  // FULL-MARKET — roster v4 doubled every location value, so a fixed dollar
+  // threshold is now pierced far more often and none of these figures transfers:
   //
   //   1.776/yr   flat RQ 5, k_PR = 1, accident-year threshold
   //                  <- the spec's reference basis; its three independent
@@ -192,10 +242,8 @@ console.log('\n--- 4. per-risk layer (the $2M retention) — REPORTED, wide sani
   //   -3.9%      k_PR = 0.9611 scaling lambda    -> 1.801/yr
   //   +1.8%      booked (settlement-trended) $   -> 1.833/yr
   //
-  //   = 1.833/yr exact for what the engine actually does, confirmed by
-  //     simulation at 1.851/yr over 2,000 years. This harness runs 600 years
-  //     and reports ~1.943/yr — about one Poisson SE above the exact figure,
-  //     which is why the band below is wide rather than tight.
+  //   = 1.833/yr exact for what the engine did AT v3, confirmed by simulation at
+  //     1.851/yr over 2,000 years.
   //
   // eps and gPool do NOT appear: both have mean 1 and enter lambda LINEARLY,
   // and a breach is a per-claim severity event, so their dispersion has no
@@ -221,14 +269,22 @@ console.log('\n--- 4. per-risk layer (the $2M retention) — REPORTED, wide sani
   const runs = runYears(roster, 600, { seedBase: 90210 });
   const breaches = mean(runs.map(r => r.perRiskBreaches));
   const claims = mean(runs.map(r => r.claimCountsByBand.attritional));
-  const inBand = breaches >= 1.4 && breaches <= 2.1;
-  console.log(`  breaches/yr over $${(M.perRiskRetention / 1e6).toFixed(0)}M: ${breaches.toFixed(3)} — REPORTED`);
-  console.log(`    exact for this configuration 1.833; spec reference 1.776 on the deterministic basis`);
-  console.log(`    sanity band 1.4-2.1: ${inBand ? 'inside' : 'OUTSIDE'}  ${note(inBand, `per-risk breaches ${breaches.toFixed(2)} outside the 1.4-2.1 sanity band — the location schedule or the retention basis has moved`)}`);
-  console.log(`  as a share of attritional claims: ${(breaches / claims * 100).toFixed(2)}%`);
-  console.log(`  largest single claim ${fmt$(Math.max(...runs.map(r => r.maxClaimGross)))} — REPORTED`);
-  console.log(`    (the treaty is alive ONLY through Primary Asset Share concentration — a rate far`);
-  console.log(`     outside the band means the location schedule is being built wrong)`);
+  const pool = enrolledPropertyBook('MAMC6EA4');
+  const poolTiv = pool.reduce((s, m) => s + (m.exposureByLine.Property ?? 0), 0);
+  const marketTiv = roster.reduce((s, m) => s + (m.exposureByLine.Property ?? 0), 0);
+  const poolRuns = runYears(pool, 600, { seedBase: 90210 });
+  const poolBreaches = mean(poolRuns.map(r => r.perRiskBreaches));
+  console.log(`  claims over $${(M.perRiskRetention / 1e6).toFixed(0)}M (the obsolete per-risk threshold, kept as a severity signal):`);
+  console.log(`    FULL MARKET  ${breaches.toFixed(3)}/yr — ${(breaches / claims * 100).toFixed(2)}% of attritional claims`);
+  console.log(`    ENROLLED POOL ${poolBreaches.toFixed(3)}/yr at ${(poolTiv / marketTiv * 100).toFixed(1)}% of market TIV — ${(breaches / Math.max(poolBreaches, 1e-9)).toFixed(2)}x lower, and THIS is the treaty-facing basis`);
+  console.log(`    v3 reference 1.833/yr exact (full-market, v3 TIV); superseded by the v4 rescale, see comment`);
+  console.log(`  largest single claim ${fmt$(Math.max(...runs.map(r => r.maxClaimGross)))} (full market) — REPORTED`);
+  console.log(`  NOT GATED HERE. The treaty check belongs in the waterfall harness at cutover, on POOL claims`);
+  console.log(`  at the $5M single-occurrence retention across all three bands (~0.71/yr expected). A firing rate`);
+  console.log(`  is a portfolio property — enrolment, band mix, retention — and none of those is a generator's.`);
+  console.log(`  What this signal IS good for: the concentration it depends on. Primary Asset Share is the only`);
+  console.log(`  reason large single-risk losses exist at all, so a collapse toward zero here means the location`);
+  console.log(`  schedule has stopped concentrating — which no loss-ratio check would catch.`);
 }
 
 console.log('\n--- 5. RQ sweeps (NC1.3: beta_freq 0.08, beta_sev 0.04, total 0.12) ---');
@@ -390,19 +446,6 @@ function runWeatherYears(members: Member[], years: number, seedBase = 8080) {
     out.push(generateWeatherEvents({ members, yearNumber: y, calendarYear: 2025 + y, instanceSeed: seedBase + y * 7919 }));
   }
   return out;
-}
-
-// A REAL enrolled Property book, taken from the game's own enrollment path
-// rather than reconstructed here — the share is drawn per seed inside
-// STARTING_EXPOSURE_SHARE (25-35% of market TIV), so a hand-rolled subset would
-// drift from what the engine actually enrolls.
-function enrolledPropertyBook(instanceId: string): Member[] {
-  let h = 5381;
-  for (let i = 0; i < instanceId.length; i++) { h = ((h << 5) + h) ^ instanceId.charCodeAt(i); h = h >>> 0; }
-  const instance = generateGameInstance(instanceId, h);
-  const setup = { poolName: 'G', gameLength: 5, startingYear: 2026, instanceId, activeLines: ['Property'] as CoverageLine[] };
-  const { poolState } = runPriorHistory(instance, setup as never);
-  return poolState.lines.Property.members.filter(m => m.status === 'active');
 }
 
 console.log(`\n\n=== Property NON-CAT WEATHER band: full canonical market, ${WX_YEARS} draw-years ===`);
@@ -568,16 +611,19 @@ console.log('\n--- 11. weather severity, the insured-value cap, within-event cor
   // skewed for either to describe it.
   const eq = quantiles(wxEvents.map(e => e.gross));
   console.log(`  event gross: median ${fmt$(eq.median)}  p75 ${fmt$(eq.p75)}  p90 ${fmt$(eq.p90)}  p99 ${fmt$(eq.p99)}  max ${fmt$(eq.max)}  mean ${fmt$(mean(wxEvents.map(e => e.gross)))}`);
-  const overCat = wxEvents.filter(e => e.gross > 5_000_000).length;
+  const overRetention = wxEvents.filter(e => e.gross > 5_000_000).length;
   const overPerRisk = wxRuns.flatMap(r => r.claims).filter(c => c.grossUltimate > M.perRiskRetention).length;
-  console.log(`  ⚠ CALIBRATION CONSEQUENCE OF ROSTER v4, REPORTED NOT GATED:`);
-  console.log(`    events above the $5M cat attachment: ${overCat} of ${wxEvents.length} (${(overCat / wxEvents.length * 100).toFixed(2)}%, ${(overCat / WX_YEARS).toFixed(2)}/yr)`);
-  console.log(`    single claims above the $2M per-risk retention: ${overPerRisk} (${(overPerRisk / WX_YEARS).toFixed(2)}/yr)`);
-  console.log(`    NC2.2 tabulates BOTH occurrence treaties as "silent" for weather, with occurrence totals of`);
-  console.log(`    $0.6-0.9M. That was v3. Roster v4 doubled TIV, so event severity doubled too and the weather`);
-  console.log(`    band now reaches into both layers. NC2.3 already calls the weather/cat boundary deliberately`);
-  console.log(`    fuzzy, so this is not a contradiction — but "the aggregate is what responds to weather" is now`);
-  console.log(`    only typically true, and the reinsurance tower should be re-checked against these figures.`);
+  console.log(`  TREATY-FACING DIAGNOSTICS — FULL-MARKET BASIS, REPORTED NOT GATED:`);
+  console.log(`    events above the $5M occurrence retention: ${overRetention} of ${wxEvents.length} (${(overRetention / wxEvents.length * 100).toFixed(2)}%, ${(overRetention / WX_YEARS).toFixed(2)}/yr)`);
+  console.log(`    single claims above the obsolete $2M per-risk threshold: ${overPerRisk} (${(overPerRisk / WX_YEARS).toFixed(2)}/yr)`);
+  console.log(`    Both are FULL-MARKET and neither is a gate. A treaty responds to POOL claims, and the pool is`);
+  console.log(`    ~25% of market TIV, so read these as roughly 4x the rate a treaty would see. The real check`);
+  console.log(`    belongs in the waterfall harness at cutover, on pool claims at the $5M retention across all`);
+  console.log(`    three bands together — a firing rate is a portfolio property, not a generator property.`);
+  console.log(`    Nothing here is asserted against NC2.2's "both occurrence treaties silent for weather": that`);
+  console.log(`    table was written at the v3 anchor and at full-market scale, and weather/cat overlap is`);
+  console.log(`    accepted — NC2.3 already calls the boundary deliberately fuzzy. Weather reaching the`);
+  console.log(`    occurrence layer is the model working, not a miscalibration.`);
 }
 
 console.log('\n--- 12. weather RQ channels (NC2.3: frequency LOCKED, severity beta 0.04) ---');

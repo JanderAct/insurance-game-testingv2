@@ -866,13 +866,51 @@ footprint (`hit_rate = min(base_footprint x intensity, cap)`) and again through 
 not E[I]² = 1. Using the single-entry identity overshot **cat by 1.37x and weather by 1.58x** — the
 weather miss is larger because 1 + CV² compounds against a larger relative mu.
 
-**Why no closed-form fix lands.** The obvious correction, dividing mu by (1 + CV²), does not work
-either: the footprint **cap** interacts with the intensity draw, so the two entries are not
+**Why the naive closed-form fix does not land.** The obvious correction, dividing mu by (1 + CV²), does
+not work: the footprint **cap** interacts with the intensity draw, so the two entries are not
 independent. Earthquake is the clearest case — at CV 1.1 with cap 0.95, the cap binds on a large
 share of draws, truncating the footprint's response to intensity while the damage ratio's response
-continues unchecked. Every mu is therefore a **numeric solve by simulation** against its peril's
+continues unchecked. Every mu was therefore a **numeric solve by simulation** against its peril's
 target AAL, holding lambda, base_footprint, cap and CV fixed. The superseded pre-correction values
 (1.18 / 0.73 / 3.83%) are recorded in the design doc so they are not mistaken for current.
+
+**REFINEMENT (weather build, roster v4) — an exact closed form does exist.** This finding originally
+concluded that *no* closed form lands. That is too strong, and the correction is a refinement rather
+than a reversal: **everything above about intensity entering twice, about E[I²] = 1 + CV², and about
+the naive mu/(1+CV²) correction failing, still stands.** What was wrong was only the inference from
+"the naive correction fails" to "nothing analytic is available."
+
+The cap does not defeat a closed form; it just means the expectation has to be **split at the cap**
+rather than taken whole. With intensity LogNormal (which it is, in both the cat and weather specs):
+
+```
+E[min(b x I, c) x I] = b x E[I² 1{I <= c/b}] + c x (E[I] - E[I 1{I <= c/b}])
+E[I^k 1{I <= t}]     = exp(k mu_ln + k² sigma²/2) x Phi((ln t - mu_ln - k sigma²)/sigma)
+```
+
+Both terms are exact, E[I] = 1 by construction, and **there is no quadrature anywhere** — which
+matters here more than usual, since finding 23 is the record of what fixed-grid quadrature did to a
+singular density in this same model. Implemented as `lognormalPartialMoment`
+(`src/utils/claimMath.ts`); `expectedWeatherGrossLoss` is built on it, so the weather band has a real
+analytic partner to its draw rather than a simulated one. Verified to five decimals:
+`E[I x min(I, 5)] = 1.355546` against the naive `1 + CV² = 1.360000`, the cap accounting for the
+0.328% difference.
+
+**mu was NOT re-solved, and should not be.** The existing values verify well inside tolerance —
+weather sits +0.33% from its target, which is mu's own rounding to three significant figures — so
+re-solving would move a pinned constant for no behavioural gain. The closed form is recorded so the
+option is *available*, not so it gets exercised. Two caveats if it ever is: it is exact for a cap on
+the FOOTPRINT only (a clamp on the damage-ratio mean would need its own split), and it gives the
+per-event expectation, with zone hazard weights and the quake adjacency span still multiplying in
+separately.
+
+**A second thing the closed form settled.** Because it carries no zone structure — per-location
+Bernoulli hits make expected loss per event `hit_rate(I) x mu x I x zoneTIV` whatever the size mix,
+and a COMMON lambda per zone collapses the sum to the whole book — **weather AAL is exactly linear in
+TIV.** That is what licensed rescaling weather's target from $4.50M to $9.204M at roster v4 without
+touching mu. Cat is NOT in this position: it draws its zone by hazard weight, so its AAL depends on a
+hazard-weighted TIV mix, and v4 rescaled the three zones by different factors (2.0045 / 2.0168 /
+2.1277). **Cat's targets are still v3 figures and its mu genuinely does need re-solving.**
 
 **Caught before implementation**, so nothing was ever built on the wrong numbers — the mu values in
 `PROPERTY_CAT_MODEL` and `PROPERTY_WEATHER_MODEL` are the post-correction solves.

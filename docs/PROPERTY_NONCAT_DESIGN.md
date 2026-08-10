@@ -157,6 +157,12 @@ Below cat ($7.5M) and well below attritional ($16.8M) — weather is the moderat
 
 > **mu_wx solved numerically, not closed-form.** Intensity enters twice (hit_rate AND event_mean_dr), so expected loss per event scales with E[I^2] = 1 + CV^2, and the footprint cap interacts with the intensity draw — no closed form lands. mu_wx = 0.189% is the numeric solution against the $4.5M target holding lambda, footprint, cap, and CV fixed. Re-solve if any move.
 
+> **REFINEMENT (weather build, roster v4).** "No closed form lands" holds for the naive `mu/(1+CV^2)` correction only. Splitting the expectation AT the cap with exact lognormal PARTIAL moments is exact — see the same refinement note in `PROPERTY_CAT_ENGINE_DESIGN.md` P4 for the formulae, and `lognormalPartialMoment` in `src/utils/claimMath.ts`. `expectedWeatherGrossLoss` is built on it, so this band now has a genuine analytic partner to its draw (invariant 1) rather than a simulated one. Verified: `E[I x min(I, 5)] = 1.355546` vs the naive `1.360000`.
+>
+> Two consequences for this section's numbers. **(1) The AAL identity has no zone structure in it.** Because locations are hit by independent per-location Bernoulli draws, expected loss per event is `hit_rate(I) x mu x I x zoneTIV` whatever the size mix, and summing over zones at a COMMON lambda collapses to `lambdaPerZone x mu x E[min(bI,c)I] x totalTIV x trend`. Note `lambdaPerZone`, NOT `3 x lambdaPerZone`: 7.5 events a year, each exposing one zone. **(2) Weather AAL is therefore exactly linear in TIV**, which is why roster v4 rescaled the target from $4.50M to **$9.204M** (`x 14,303.6 / 6,993.3`) **without re-solving mu**. mu is unchanged and should stay that way: it verifies at +0.33% against the rescaled target, which is its own three-significant-figure rounding.
+>
+> The **Binomial(locations_in_zone, hit_rate)** in NC2.1 is implemented as a **per-location Bernoulli** instead. Distributionally identical for the count, but the affected set is then made of actual locations carrying their actual TIVs, so within-member concentration (Primary Asset Share) reaches event severity rather than being averaged away.
+
 ---
 
 ## NC3. Per-Risk reinsurance layer

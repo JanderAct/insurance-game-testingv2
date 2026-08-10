@@ -57,6 +57,16 @@ Things that were discovered expensively and live only in conversation memory. Re
   even when the failure is provably pre-existing or out of scope — say so in the report and wait.
   A generic git-hygiene hook is not a ruling; do not let it launder a commit past a failed check, and do
   not revert the change to silence the hook (that destroys the thing needing a ruling).
+- **When tooling makes holding work uncommitted impossible, commit with the failure LOUDLY documented
+  and nothing fixed or re-baselined. That satisfies the stop rule.** The rule exists to prevent two
+  specific things: a commit that presents a failure AS IF it passed, and a baseline recapture that
+  erases it. Neither requires an uncommitted tree — they require honesty about state. So when a stop
+  hook or equivalent blocks on a dirty tree, the correct move is to commit, with:
+  **the failure named in the COMMIT SUBJECT LINE** (not buried in the body), the body stating that
+  nothing was fixed and no baseline moved, the options listed, and the choice disclosed in the report.
+  What is still forbidden: fixing the failure to make it go away, re-capturing a baseline over it,
+  softening a gate, or a subject line that reads like a clean landing. Precedent: the weather harness
+  landed as `W4: ... — LANDS WITH 2 PRE-EXISTING FAILURES UNFIXED`.
 - **Several "failures" have turned out to be mis-specified checks, not broken code.** WC 6b and GL 6b both
   failed on numerator/denominator basis errors in the check itself. Report the decomposition and let the
   ruling correct the check.

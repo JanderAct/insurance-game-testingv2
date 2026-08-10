@@ -784,19 +784,32 @@ export const PROPERTY_LOSS_MODEL = {
 // a chat attachment. Full derivation: docs/PROPERTY_CAT_ENGINE_DESIGN.md and
 // docs/PROPERTY_NONCAT_DESIGN.md.
 //
-// ⚠ EVERY mu BELOW IS A NUMERIC SOLVE AGAINST A TARGET AAL, NOT A CLOSED FORM.
-// Intensity enters the event TWICE — once through the footprint
+// ⚠ EVERY mu BELOW WAS SOLVED NUMERICALLY AGAINST A TARGET AAL. Intensity
+// enters the event TWICE — once through the footprint
 // (hit_rate = min(base_footprint x intensity, cap)) and once through the damage
 // ratio (event_mean_dr = mu x intensity) — so expected loss per event scales
-// with E[I^2] = 1 + CV^2, not E[I]^2 = 1. A closed-form mu/(1+CV^2) correction
-// does NOT land either, because the footprint cap interacts with the intensity
-// draw (quake especially: cap 0.95 binds often at CV 1.1). These values were
-// solved by simulation against each peril's target AAL holding lambda,
-// base_footprint, cap and CV fixed.
+// with E[I^2] = 1 + CV^2, not E[I]^2 = 1, and a naive mu/(1+CV^2) correction
+// does NOT land, because the footprint cap interacts with the intensity draw
+// (quake especially: cap 0.95 binds often at CV 1.1).
+//
+// AN EXACT CLOSED FORM DOES EXIST, though — the cap does not defeat one, it just
+// means SPLITTING the expectation at the cap instead of taking it whole. See
+// claimMath.lognormalPartialMoment and finding 22's refinement note.
+// expectedWeatherGrossLoss is built on it.
+//
+// DO NOT RE-SOLVE mu ON THE STRENGTH OF THAT. The existing values verify well
+// inside tolerance (weather sits +0.33% from its target, which is mu's own
+// rounding to three significant figures), so a re-solve would move a pinned
+// constant for no behavioural gain. The closed form is recorded so the option is
+// available, not so it gets exercised.
 //
 // RE-SOLVE mu IF lambda, base_footprint, cap OR CV MOVES — and if the roster
-// moves, since the solve is against v3's TIV and zone structure. Unlike the WC
-// and GL pure premiums, these do NOT recompute themselves.
+// moves in a way that is not a pure scale change. Unlike the WC and GL pure
+// premiums, these do NOT recompute themselves. Weather is the ONE exemption from
+// the roster clause: its AAL is exactly linear in TIV (see targetAal below), so
+// roster v4 rescaled its target without re-solving. Cat has no such exemption —
+// it draws its zone by hazard weight, v4 rescaled the zones by DIFFERENT factors
+// (2.0045 / 2.0168 / 2.1277), and the cat targets below are still v3 figures.
 //
 // Target AALs: flood $2.90M / wildfire $2.71M / earthquake $1.87M
 // = $7.47M cat total AT v3 TIV, plus weather $9.20M at v4 TIV (see
