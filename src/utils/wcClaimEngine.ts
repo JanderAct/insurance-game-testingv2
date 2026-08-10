@@ -404,6 +404,7 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
       id: occurrenceId,
       line: LINE,
       memberId: member.id,
+      memberIds: [member.id],
       accidentYear: yearNumber,
       calendarYear,
       region: member.region,

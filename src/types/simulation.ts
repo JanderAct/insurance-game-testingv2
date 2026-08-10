@@ -88,18 +88,44 @@ export interface MemberLossResult {
 
 // One loss event. Groups the claims it causes (a single event can produce
 // several claims — GL's abuse batches are the first multi-claim user; WC
-// emits 1:1; Property's weather/cat events will reuse the same shape), and
+// emits 1:1; Property's weather/cat events reuse the same shape), and
 // is the unit the $1M retention waterfall nets against: the retention
 // applies to the OCCURRENCE total, i.e. the sum over claimIds.
 export interface Occurrence {
   id: string;
   line: CoverageLine;
-  memberId: string;
+  // WHO THE EVENT HIT. memberIds is the authoritative list and is ALWAYS
+  // populated (length >= 1). memberId is a single-member convenience field,
+  // present only when the event hit exactly one member.
+  //
+  // DO NOT "SIMPLIFY" memberId BACK TO A REQUIRED string. Its optionality is
+  // load-bearing, not stylistic. tsconfig sets strict: true, so memberId reads
+  // as `string | undefined` and the COMPILER forces every consumer to handle
+  // the multi-member case explicitly rather than silently attributing a
+  // pool-wide event to one member. Weather is the first genuinely multi-member
+  // occurrence: GL's abuse batches are multi-CLAIM but single-member, and that
+  // distinction is exactly what this shape exists to keep visible.
+  memberId?: string;
+  memberIds: string[];
   accidentYear: number;   // yearNumber the event happened (pre-game years negative)
   calendarYear: number;
-  region: Region;         // the member's region, for regional correlation (e.g. catastrophes)
+  // For a single-member event, that member's region. For a multi-member
+  // hazard event, the ZONE the event struck — the correlation unit itself,
+  // not a property of any one member.
+  region: Region;
   isCatastrophe: boolean; // part of a regional/pool-wide catastrophe event
   claimIds: string[];     // every claim this event produced (WC: exactly one)
+  // The hazard band this event belongs to, for lines that have more than one:
+  // Property emits 'attritional' | 'weather' | 'cat'. Absent on WC and GL,
+  // which have a single hazard band each — their sub-coverage vocabulary lives
+  // on Claim.tier and is a rating class, not a peril. Deliberately a string,
+  // for the same reason Claim.tier is.
+  peril?: string;
+  // The event's realized hazard intensity, where the band draws one (weather,
+  // cat). Unitless and band-specific: it is the driver that scales BOTH the
+  // event's footprint and its damage severity, so it is recorded to make that
+  // shared dependence externally checkable. Absent where no such draw exists.
+  intensity?: number;
 }
 
 export type ClaimStatus = 'open' | 'closed' | 'reopened';

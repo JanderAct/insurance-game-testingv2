@@ -298,11 +298,14 @@ export function generatePropertyClaims(inputs: PropertyGenerationInputs): Proper
           id: occurrenceId,
           line: LINE,
           memberId: member.id,
+          memberIds: [member.id],
           accidentYear: yearNumber,
           calendarYear,
           region: member.region,
           isCatastrophe: false,
           claimIds: [claimId],
+          peril: ATTRITIONAL,
+          // No intensity: an attritional loss has no hazard-intensity draw.
         });
         memberLoss += gross;
         grossUltimateLoss += gross;
