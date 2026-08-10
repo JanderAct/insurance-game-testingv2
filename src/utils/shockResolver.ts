@@ -171,3 +171,25 @@ export function resolveShocks(instance: GameInstance, yearNumber: number): Shock
   if (firings.length === 0) return undefined;
   return { byLine, paramOverrides, firings };
 }
+
+// ONE event's own frequency multipliers for ONE line, read back from the
+// catalog — deliberately NOT from the compounded LineShockEffects, which has
+// already lost track of which event contributed what.
+//
+// This exists for COST ATTRIBUTION. Each firing is measured against the
+// unshocked baseline using only its own effects, so two events compounding on
+// the same sub-coverage each report what they alone would add. Those figures do
+// not sum to the combined effect, and that is correct: the question is "what
+// did this event add", not "how should we split the interaction".
+export function ownFreqMultipliers(shockId: string, line: CoverageLine): Record<string, number> | undefined {
+  const def = SHOCK_CATALOG[shockId];
+  if (!def) return undefined;
+  let out: Record<string, number> | undefined;
+  for (const effect of def.effects) {
+    if (effect.kind !== 'freqMultiplier' || effect.line !== line) continue;
+    out = out ?? {};
+    const key = effect.sub ?? WHOLE_LINE;
+    out[key] = (out[key] ?? 1) * effect.factor;
+  }
+  return out;
+}

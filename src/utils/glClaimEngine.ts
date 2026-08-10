@@ -185,6 +185,17 @@ export interface ExpectedGlLossOptions {
   yearNumber?: number; // accepted for interface symmetry; GL frequency is flat
                        // and trend factors depend only on lag offsets, so the
                        // expectation is year-invariant.
+  // Shock frequency multipliers, for MEASURING a shock's expected cost —
+  // NEVER for pricing. The difference between this expectation with and without
+  // the multipliers IS the analytic expected addition, which is why it is
+  // computed here rather than reconstructed: reconstructing it would create a
+  // second definition of GL's expected loss, and the two would drift.
+  //
+  // ⚠ RISK CONTROL IS ABSENT FROM THIS EXPECTATION BY DESIGN (invariant 2), and
+  // so is the SHOCK when this option is omitted. Passing multipliers here does
+  // not make the shock part of the pricing basis — nothing that prices GL calls
+  // it with this set.
+  freqMultipliers?: Record<string, number>;
 }
 
 // The analytic expected GROSS loss (indemnity + ALAE, booked settlement-year
@@ -200,7 +211,8 @@ export function expectedGlGrossLoss(members: Member[], options: ExpectedGlLossOp
     const theta = thetaGl(rq);
 
     for (const sub of SINGLE_CLAIM_SUBS) {
-      const lambda = subBasePayroll(member, sub) * subWeight(member, sub) * M.ratePer1M[sub] * theta * kGl;
+      let lambda = subBasePayroll(member, sub) * subWeight(member, sub) * M.ratePer1M[sub] * theta * kGl;
+      if (options.freqMultipliers) lambda *= shockFactorFor(options.freqMultipliers, sub);
       if (lambda <= 0) continue;
       const spec = M.subCoverages[sub];
       const costPerClaim =
@@ -211,7 +223,8 @@ export function expectedGlGrossLoss(members: Member[], options: ExpectedGlLossOp
 
     // Abuse: incidents x truncated-mean claimants x per-claimant cost.
     {
-      const lambdaIncidents = subBasePayroll(member, 'abuse') * subWeight(member, 'abuse') * M.ratePer1M.abuse * theta * kGl;
+      let lambdaIncidents = subBasePayroll(member, 'abuse') * subWeight(member, 'abuse') * M.ratePer1M.abuse * theta * kGl;
+      if (options.freqMultipliers) lambdaIncidents *= shockFactorFor(options.freqMultipliers, 'abuse');
       if (lambdaIncidents > 0) {
         const spec = M.subCoverages.abuse;
         const costPerClaimant =
@@ -222,6 +235,13 @@ export function expectedGlGrossLoss(members: Member[], options: ExpectedGlLossOp
     }
   }
   return total;
+}
+
+// A shock frequency multiplier for one sub: the sub's own factor times any
+// whole-line factor. Both apply — an event targeting EPL and an event raising
+// all of GL are two independent causes, and a claim is subject to both.
+export function shockFactorFor(multipliers: Record<string, number>, sub: string): number {
+  return (multipliers[sub] ?? 1) * (multipliers['*'] ?? 1);
 }
 
 // --- exported: k_GL and the held pure premium ----------------------------------
@@ -257,6 +277,18 @@ export interface GlGenerationInputs {
   kGl: number;
   gPool: number;                    // the year's shared pool factor (from processYear)
   riskControlEffectiveness: number; // DRAW ONLY
+  // Shock-event frequency multipliers, sub-coverage key -> factor, with '*' for
+  // the whole line. DRAW ONLY, like risk control and for the same reason: a
+  // shock is a realized event, not a repricing, so it must move the loss ratio
+  // rather than cancel out of it.
+  //
+  // Absent when no shock is in force, and the apply site GUARDS rather than
+  // multiplying by a defaulted 1. x * 1 is exact in IEEE-754 so both are safe,
+  // but poisson() consumes a VARIABLE number of uniforms, so anything that
+  // touches lambda reshapes every subsequent draw in that stream. Making the
+  // no-shock path textually the original arithmetic removes the need to reason
+  // about it at all.
+  freqMultipliers?: Record<string, number>;
 }
 
 export interface GlGenerationResult {
@@ -270,6 +302,7 @@ export interface GlGenerationResult {
 
 export function generateGlClaims(inputs: GlGenerationInputs): GlGenerationResult {
   const { members, yearNumber, calendarYear, instanceSeed, kGl, gPool, riskControlEffectiveness } = inputs;
+  const freqMultipliers = inputs.freqMultipliers;
 
   const freqRng = deriveSubRng(instanceSeed, yearNumber, 'gl_freq');
   const gateRng = deriveSubRng(instanceSeed, yearNumber, 'gl_gate');
@@ -375,8 +408,9 @@ export function generateGlClaims(inputs: GlGenerationInputs): GlGenerationResult
 
     // Single-claim sub-coverages: one occurrence per claim.
     for (const sub of SINGLE_CLAIM_SUBS) {
-      const lambda = subBasePayroll(member, sub) * subWeight(member, sub) * M.ratePer1M[sub]
+      let lambda = subBasePayroll(member, sub) * subWeight(member, sub) * M.ratePer1M[sub]
         * theta * kGl * epsilon * gPool * rcFactor;
+      if (freqMultipliers) lambda *= shockFactorFor(freqMultipliers, sub);
       if (lambda <= 0) continue;
       const count = freqRng.poisson(lambda);
       for (let i = 0; i < count; i++) {
@@ -406,8 +440,9 @@ export function generateGlClaims(inputs: GlGenerationInputs): GlGenerationResult
     // one legal environment — that is what a revival statute does); stage,
     // gate and severity are per claimant.
     {
-      const lambdaIncidents = subBasePayroll(member, 'abuse') * subWeight(member, 'abuse') * M.ratePer1M.abuse
+      let lambdaIncidents = subBasePayroll(member, 'abuse') * subWeight(member, 'abuse') * M.ratePer1M.abuse
         * theta * kGl * epsilon * gPool * rcFactor;
+      if (freqMultipliers) lambdaIncidents *= shockFactorFor(freqMultipliers, 'abuse');
       const incidents = lambdaIncidents > 0 ? freqRng.poisson(lambdaIncidents) : 0;
       for (let inc = 0; inc < incidents; inc++) {
         claimCountsBySub.abuseIncidents += 1;

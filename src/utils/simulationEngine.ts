@@ -3,7 +3,7 @@
 
 import type { Claim, GameState, Occurrence, PoolState, DecisionSet, LinePoolState, LineDecisionSet, ResultSet, LineResultSet, ReserveCohort, Member, MemberLossResult, MembershipHistory, CoverageLine, GameInstance, AssetAllocation } from '../types/simulation';
 import type { LineShockEffects, ShockFiring, ShockRecord } from '../types/shocks';
-import { resolveShocks } from './shockResolver';
+import { resolveShocks, ownFreqMultipliers } from './shockResolver';
 
 // Collapse the per-line shock records into one row per EVENT for the pool
 // result, summing each cost across the lines that event touched and unioning
@@ -29,7 +29,7 @@ import { simulateMarketReturns, blendInvestmentReturn } from './investmentEngine
 import { simulateMemberMovement } from './membershipEngine';
 import { cloneMembershipHistory, openInterval, closeInterval } from './membershipHistory';
 import { computeKLine, deriveNeutralPurePremiumPer100, generateWcClaims } from './wcClaimEngine';
-import { computeKGl, deriveNeutralGlPurePremiumPer100, generateGlClaims } from './glClaimEngine';
+import { computeKGl, deriveNeutralGlPurePremiumPer100, expectedGlGrossLoss, generateGlClaims } from './glClaimEngine';
 import { generateNarrative } from './narrativeEngine';
 import { getMemberExposure } from './lineHelpers';
 import { getPredefinedMarketMembers } from '../data/memberCatalog';
@@ -373,6 +373,9 @@ export function processLineYear(
       gPool: ctx.gPool,
       // Risk control acts on the DRAW ONLY (finding 17), as in WC.
       riskControlEffectiveness: newRCEffectiveness,
+      // Shock frequency multipliers, also DRAW ONLY and for the same reason: a
+      // shock is a realized event, not a repricing.
+      freqMultipliers: ctx.shock?.freqMultipliers,
     });
     generatedClaims = generated.claims;
     generatedOccurrences = generated.occurrences;
@@ -382,6 +385,26 @@ export function processLineYear(
     // GL's shock event (ruled J11): any single occurrence whose gross total
     // (indemnity + ALAE, all claimants of an abuse batch combined) exceeds $1M.
     shockOccurred = generated.maxOccurrenceGross > 1_000_000;
+
+    // The EXPECTED cost of any frequency shock on this line, attributed per
+    // event. Computed as the difference between GL's own analytic expectation
+    // with and without the multipliers, rather than reconstructed — a second
+    // definition of GL's expected loss would drift from the first.
+    //
+    // PER EVENT INDEPENDENTLY: each firing is priced against the unshocked
+    // baseline using only its OWN effects. When two events compound on the same
+    // sub-coverage their individual figures therefore do not sum to the
+    // combined effect, which is correct — each answers "what did this event
+    // add", not "how do we split the interaction".
+    if (ctx.shock?.freqMultipliers && ctx.shockFirings?.length) {
+      const baseline = expectedGlGrossLoss(memberResult.activeMembers, { kGl });
+      for (const firing of ctx.shockFirings) {
+        const own = ownFreqMultipliers(firing.shockId, 'GL');
+        if (!own) continue;
+        shockExpectedAdded[firing.shockId] =
+          expectedGlGrossLoss(memberResult.activeMembers, { kGl, freqMultipliers: own }) - baseline;
+      }
+    }
   } else {
     shockOccurred = commonLossFactor > catastropheThreshold;
     memberLossResults = memberResult.activeMembers.map(member => {

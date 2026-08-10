@@ -30,7 +30,10 @@ import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
-import { resolveShocks } from '../../src/utils/shockResolver';
+import { resolveShocks, ownFreqMultipliers } from '../../src/utils/shockResolver';
+import { computeKGl, expectedGlGrossLoss, generateGlClaims } from '../../src/utils/glClaimEngine';
+import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
+import type { Member } from '../../src/types/simulation';
 import { SHOCK_CATALOG } from '../../src/data/shockCatalog';
 import { buildResultsWorkbook } from '../../src/utils/resultsExport';
 import { RESULT_METRICS } from '../../src/utils/resultMetrics';
@@ -65,6 +68,19 @@ function play(id: string, years: number, shocks?: ScheduledShock[]): ResultSet[]
     gs = { ...gs, currentYearNumber: y + 1, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result] };
   }
   return gs.lockedResults;
+}
+
+const fmt$ = (x: number) => `$${(x / 1e6).toFixed(2)}M`;
+
+// A REAL enrolled book for one line, taken from the game's own enrollment path
+// rather than reconstructed — the share is drawn per seed inside
+// STARTING_EXPOSURE_SHARE (25-35% of market exposure), so a hand-rolled subset
+// would drift from what the engine actually enrolls.
+function enrolledBook(instanceId: string, line: CoverageLine): Member[] {
+  const instance = generateGameInstance(instanceId, seedOf(instanceId));
+  const setup = { poolName: 'G', gameLength: 5, startingYear: 2026, instanceId, activeLines: [line] };
+  const { poolState } = runPriorHistory(instance, setup as never);
+  return poolState.lines[line].members.filter(m => m.status === 'active');
 }
 
 // Every finite numeric field on every line result AND the pool result, keyed
@@ -181,6 +197,64 @@ console.log('\n--- 4. recording surface ---');
   console.log(`  export sheets, shocked:  ${shocked.SheetNames.join(', ')}`);
   console.log(`  'Shock Events' sheet absent when clean: ${note(!clean.SheetNames.includes('Shock Events'), 'the shock sheet is emitted with no shocks — every export hash will move')}`);
   console.log(`  'Shock Events' sheet present when shocked: ${note(shocked.SheetNames.includes('Shock Events'), 'the shock sheet is missing when a shock fired')}`);
+}
+
+console.log('\n--- 5. #22 Employment Practices Surge — measured at both bases ---');
+{
+  // BOTH BASES, ALWAYS. Full market is what mu and the AAL targets are
+  // calibrated against; the enrolled pool is what a game actually pays. A
+  // treaty- or premium-facing figure quoted at full-market scale runs ~4x high,
+  // and this project has made that mistake more than once.
+  const roster = getPredefinedMarketMembers();
+  const kFull = computeKGl(roster);
+  const own = ownFreqMultipliers('#22', 'GL')!;
+  const fullBase = expectedGlGrossLoss(roster, { kGl: kFull });
+  const fullShocked = expectedGlGrossLoss(roster, { kGl: kFull, freqMultipliers: own });
+  console.log(`  effect: ${JSON.stringify(own)}`);
+  console.log(`  FULL MARKET   GL expected gross ${fmt$(fullBase)} -> ${fmt$(fullShocked)}   added ${fmt$(fullShocked - fullBase)} (+${((fullShocked / fullBase - 1) * 100).toFixed(1)}% of GL)`);
+
+  const pool = enrolledBook('MAMC6EA4', 'GL');
+  const kPool = computeKGl(pool);
+  const poolBase = expectedGlGrossLoss(pool, { kGl: kPool });
+  const poolShocked = expectedGlGrossLoss(pool, { kGl: kPool, freqMultipliers: own });
+  const share = pool.reduce((s, m) => s + (m.exposureByLine.GL ?? 0), 0) / roster.reduce((s, m) => s + (m.exposureByLine.GL ?? 0), 0);
+  console.log(`  ENROLLED POOL ${pool.length} members at ${(share * 100).toFixed(1)}% of market payroll`);
+  console.log(`                GL expected gross ${fmt$(poolBase)} -> ${fmt$(poolShocked)}   added ${fmt$(poolShocked - poolBase)} (+${((poolShocked / poolBase - 1) * 100).toFixed(1)}% of GL)`);
+  console.log(`  ⚠ ALAE IS INCURRED ON EVERY CLAIM, PAID OR NOT (design B3/B4), and a frequency multiplier`);
+  console.log(`    multiplies the GATE count — so the unpaid claims and their ALAE scale too. Counting only`);
+  console.log(`    paid claims understates this by ~43%.`);
+  console.log(`  CALIBRATION DEFERRED: this reports what the event costs and asserts nothing about whether`);
+  console.log(`    that is right for a Moderate band. Shocks must be sized against a pool that already has`);
+  console.log(`    two-sided risk (finding 24), which it does not yet have.`);
+
+  // The DRAW must move with the multiplier, and by about the analytic amount.
+  const YEARS = 400;
+  const drawn = (mult?: Record<string, number>) => {
+    let sum = 0, epl = 0, eplGross = 0;
+    for (let y = 1; y <= YEARS; y++) {
+      const g = generateGlClaims({
+        members: pool, yearNumber: y, calendarYear: 2025 + y, instanceSeed: 4242 + y * 7919,
+        kGl: kPool, gPool: 1, riskControlEffectiveness: 0, freqMultipliers: mult,
+      });
+      sum += g.grossUltimateLoss;
+      epl += g.claimCountsBySub.epl;
+      for (const c of g.claims) if (c.tier === 'epl') eplGross += c.grossUltimate;
+    }
+    return { gross: sum / YEARS, epl: epl / YEARS, eplGross: eplGross / YEARS };
+  };
+  const a = drawn(undefined), b = drawn(own);
+  console.log(`  drawn over ${YEARS} yrs: EPL claims ${a.epl.toFixed(1)}/yr -> ${b.epl.toFixed(1)}/yr (ratio ${(b.epl / a.epl).toFixed(3)}, expect ${own.epl})  ${note(Math.abs(b.epl / a.epl - own.epl) / own.epl < 0.05, `EPL claim count ratio ${(b.epl / a.epl).toFixed(3)} vs ${own.epl}`)}`);
+  console.log(`    EPL gross only  ${fmt$(a.eplGross)} -> ${fmt$(b.eplGross)}   added ${fmt$(b.eplGross - a.eplGross)} vs analytic ${fmt$(poolShocked - poolBase)}`);
+  console.log(`    WHOLE LINE      ${fmt$(a.gross)} -> ${fmt$(b.gross)}   added ${fmt$(b.gross - a.gross)}`);
+  console.log(`  ⚠ THE TWO RUNS ARE NOT PAIRED, THOUGH THEY SHARE SEEDS. poisson() consumes a VARIABLE number`);
+  console.log(`    of uniforms, so multiplying the EPL lambda reshapes everything drawn from gl_freq after it —`);
+  console.log(`    including abuse. The whole-line delta therefore carries the FULL independent-sample noise of`);
+  console.log(`    two heavy-tailed totals, and abuse alone is ~47% of GL gross. The EPL-only delta is the`);
+  console.log(`    tighter read; the claim-count ratio, being a stable statistic, is the assertable one.`);
+
+  // INVARIANT 2, the shock version: the multiplier must move the DRAW and stay
+  // out of the PRICING expectation. Nothing that prices GL passes it.
+  console.log(`  pricing expectation is shock-blind: ${fmt$(expectedGlGrossLoss(pool, { kGl: kPool }))} unchanged  ${note(expectedGlGrossLoss(pool, { kGl: kPool }) === poolBase, 'the priced expectation moved with the shock')}`);
 }
 
 console.log(problems.length === 0
