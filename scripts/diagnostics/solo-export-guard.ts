@@ -55,12 +55,18 @@
 //
 // See scripts/diagnostics/enrolment-independence-check.ts for both.
 //
-// STAYS AT v6 THROUGH THE MARKETPLACE-WIDE GENERATION CHANGE. That change
+// STAYED AT v6 THROUGH THE MARKETPLACE-WIDE GENERATION CHANGE. That change
 // generates claims for all 200 members, but per-member stream keying keeps every
 // enrolled draw identical and prospect losses never reach an exported figure, so
-// all 12 hashes are byte-identical. value-identity moved to v7 only to absorb 60
+// all 12 hashes were byte-identical. value-identity moved to v7 only to absorb 60
 // new kLineApplied fields, which are not exported. Recapturing here would have
-// written a duplicate file under a new name, so the version skew is deliberate.
+// written a duplicate file under a new name, so that version skew was deliberate.
+//
+// v7 retired here (moved to v8) by CLF-ONLY PRICING: the Rate Change decision
+// was deleted (removes an exported field on every line — a real shape change)
+// and the funding-confidence-level default moved 0.75 -> 0.60 (a real value
+// change on every remaining pricing/surplus/membership figure — confirmed by
+// isolation test in value-identity-check.ts's header). All 12 hashes moved.
 //
 // v4 was retired by roster v4
 // (TIV-only rescale, see roster_canonical_v4.csv), and v3 before that by the
@@ -91,7 +97,7 @@ import { RESULT_METRICS } from '../../src/utils/resultMetrics';
 import type { GameState, CoverageLine, ResultSet } from '../../src/types/simulation';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v6.json');
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v8.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

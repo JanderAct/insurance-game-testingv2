@@ -295,8 +295,12 @@ export interface GameSetupSettings {
 // processYear entry so the engine and each line's locked result snapshot keep
 // their existing per-line shape. The UI edits only the DecisionSet-level pair.
 export interface LineDecisionSet {
-  rateChange: number;             // -0.20 to +0.30 as decimal
-  fundingConfidenceLevel: number; // 0.50 to 0.95
+  // rateChange REMOVED — CLF-only pricing. Funding confidence is now the sole
+  // pricing lever (see SLIDER_RANGES.fundingConfidenceLevel and the funding
+  // consequence panel on DecisionsPage). Three read sites removed it
+  // deliberately, each commented: membershipEngine.ts's updateSatisfaction,
+  // calcRetentionProbability and calcExpectedNewMembers.
+  fundingConfidenceLevel: number; // 0.30 to 0.95
   dividendPct: number;            // 0.00 to 0.15 of premium
   assessmentPct: number;          // 0.00 to 0.25 of premium
   underwritingStrictness: number; // 0-10

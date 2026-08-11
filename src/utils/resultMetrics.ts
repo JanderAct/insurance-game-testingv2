@@ -25,13 +25,9 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
     },
 
     // Decisions
-    {
-      key: 'rateChange',
-      category: 'Decisions',
-      label: 'Rate Change',
-      value: r => formatPct(r.decisions.rateChange, 1),
-      csvValue: r => r.decisions.rateChange,
-    },
+    // 'rateChange' REMOVED — the decision field it exported is gone
+    // (CLF-only pricing). Removing an export field is a SHAPE change (the
+    // hash guard will move); it is not a value change on any remaining field.
     {
       key: 'fundingConfidenceLevel',
       category: 'Decisions',

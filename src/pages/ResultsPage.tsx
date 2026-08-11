@@ -226,17 +226,8 @@ export default function ResultsPage({ lockedResults, lineView }: ResultsPageProp
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <ResultCard title="Decision Summary" icon={<ClipboardList size={16} />}>
-              <Row
-                label="Rate Change"
-                value={formatPct(result.decisions.rateChange, 1)}
-                valueColor={
-                  result.decisions.rateChange > 0
-                    ? 'text-amber-600'
-                    : result.decisions.rateChange < 0
-                      ? 'text-blue-600'
-                      : 'text-gray-700'
-                }
-              />
+              {/* Rate Change REMOVED — CLF-only pricing; the decision field it
+                  displayed no longer exists. */}
               <Row label="Funding Confidence Level" value={formatPct(result.decisions.fundingConfidenceLevel, 0)} />
               <Row label="Dividend / Return of Pool Premium" value={formatPct(result.decisions.dividendPct, 1)} />
               <Row label="Assessment" value={formatPct(result.decisions.assessmentPct, 1)} />

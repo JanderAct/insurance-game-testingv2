@@ -22,6 +22,7 @@ import { processYear, applyLoanAuthorizations, type ProcessYearResult } from './
 import { runPriorHistory, toHistoricalYear } from './utils/priorHistoryEngine';
 import { defaultDecisionSet } from './utils/decisionDefaults';
 import { getMemberExposure, selectResultView } from './utils/lineHelpers';
+import { computeFundingConsequence } from './utils/fundingConsequence';
 import { LINE_FULL_NAME } from './utils/lineDisplay';
 import LoanPromptModal from './components/LoanPromptModal';
 import type { LineLoanInfo } from './pages/DecisionsPage';
@@ -284,11 +285,14 @@ export default function App() {
 
   // Decisions-page reinsurance preview estimates, scoped to the line currently
   // being edited (Stage 2.7). Uses that line's own exposure basis — payroll for
-  // WC/GL, TIV for Property — its own ratePer100 / purePremiumPer100, and its
-  // own rateChange. These are intentionally simple previews; the real premium
-  // is recomputed per line in simulationEngine.ts at lock.
+  // WC/GL, TIV for Property — and its own ratePer100 / purePremiumPer100.
+  // These are intentionally simple previews; the real premium is recomputed per
+  // line in simulationEngine.ts at lock.
+  //
+  // The (1 + rateChange) factor this used to carry is GONE — CLF-only pricing
+  // removed the Rate Change decision, so lineState.ratePer100 (last year's
+  // total member charge rate) is used directly.
   const decisionLine = effectiveLineView === 'pool' ? 'WC' : (effectiveLineView as CoverageLine);
-  const decisionLineRateChange = currentDecisions.byLine[decisionLine].rateChange;
 
   const estimatedPremium = React.useMemo(() => {
     if (!gameState) return 5_000_000;
@@ -298,8 +302,8 @@ export default function App() {
       .filter(m => m.status === 'active')
       .reduce((s, m) => s + getMemberExposure(m, decisionLine), 0);
 
-    return exposure * lineState.ratePer100 * (1 + decisionLineRateChange) * 10_000;
-  }, [gameState, decisionLine, decisionLineRateChange]);
+    return exposure * lineState.ratePer100 * 10_000;
+  }, [gameState, decisionLine]);
 
   const estimatedExpectedLoss = React.useMemo(() => {
     if (!gameState) return 3_500_000;
@@ -311,6 +315,42 @@ export default function App() {
 
     return exposure * lineState.purePremiumPer100 * 10_000;
   }, [gameState, decisionLine]);
+
+  // The last computed result for the line currently being edited — pool
+  // accounting fields the consequence panel surfaces are not carried on
+  // LinePoolState itself (excessCapitalRatio, capitalAdequacyStatus), only on
+  // the LineResultSet each processed year returns. Falls back to the last
+  // pre-game year when no year has been locked yet (mirrors lineLoanInfo's
+  // pattern, but that one only reads lockedResults since it does not need to
+  // cover the pre-Year-1 gap).
+  const lastLineResult = React.useMemo(() => {
+    if (!gameState) return undefined;
+    if (gameState.lockedResults.length > 0) {
+      return gameState.lockedResults[gameState.lockedResults.length - 1].byLine[decisionLine];
+    }
+    if (gameState.priorHistory.length > 0) {
+      return gameState.priorHistory[gameState.priorHistory.length - 1].byLine[decisionLine];
+    }
+    return undefined;
+  }, [gameState, decisionLine]);
+
+  // CLF-only pricing consequence panel (Decisions page). lineState.ratePer100
+  // is already last year's totalMemberChargeRatePer100 — the SAME field
+  // estimatedPremium above reads — so it doubles as the "vs last year" basis
+  // with no separate lookup. Narrow deps (not all of currentDecisions) so this
+  // does not recompute when an unrelated line's or pool decision changes.
+  const decisionLineFundingLevel = currentDecisions.byLine[decisionLine].fundingConfidenceLevel;
+  const decisionLineReinsuranceLevel = currentDecisions.byLine[decisionLine].reinsuranceLevel;
+  const fundingConsequence = React.useMemo(() => {
+    if (!gameState) return null;
+    const lineState = gameState.poolState.lines[decisionLine];
+    return computeFundingConsequence(
+      lineState.purePremiumPer100,
+      decisionLineFundingLevel,
+      decisionLineReinsuranceLevel,
+      lineState.ratePer100,
+    );
+  }, [gameState, decisionLine, decisionLineFundingLevel, decisionLineReinsuranceLevel]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -377,6 +417,8 @@ export default function App() {
             disabled={gameState.isComplete}
             lineView={effectiveLineView}
             lineLoanInfo={lineLoanInfo}
+            lastLineResult={lastLineResult}
+            fundingConsequence={fundingConsequence}
           />
         )}
 

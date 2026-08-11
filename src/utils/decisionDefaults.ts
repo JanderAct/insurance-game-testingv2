@@ -8,7 +8,6 @@ import type { DecisionSet, LineDecisionSet } from '../types/simulation';
 // Fresh object per call (allocation is nested, so lines must not share a reference).
 export function defaultLineDecisionSet(): LineDecisionSet {
   return {
-    rateChange: SLIDER_RANGES.rateChange.default,
     fundingConfidenceLevel: SLIDER_RANGES.fundingConfidenceLevel.default,
     dividendPct: SLIDER_RANGES.dividendPct.default,
     assessmentPct: SLIDER_RANGES.assessmentPct.default,

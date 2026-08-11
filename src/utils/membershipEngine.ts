@@ -52,7 +52,11 @@ function calcRetentionProbability(inputs: MemberMovementInputs): number {
   const financialImpact = Math.min(0.02, Math.max(-0.02, (surplusRatio - 0.6) / 30));
   const dividendImpact = decisions.dividendPct * 0.20;
   const assessmentPenalty = decisions.assessmentPct * 0.15;
-  const rateIncreasePenalty = Math.max(0, decisions.rateChange) * 0.12;
+  // rateIncreasePenalty REMOVED — the Rate Change decision it read is gone
+  // (CLF-only pricing). DELIBERATE: a bill-based replacement (reading the
+  // derived rate change the funding-consequence panel now shows) is pending,
+  // not a silent zeroing. W.rateIncreasePenalty (0.15 of the retention weight
+  // budget) currently contributes nothing.
   const poorResultPenalty = priorYearLossRatio
     ? Math.max(0, priorYearLossRatio - 0.85) * 0.05
     : 0;
@@ -63,7 +67,6 @@ function calcRetentionProbability(inputs: MemberMovementInputs): number {
     + W.financialStrength * financialImpact
     + W.dividend * dividendImpact
     - W.assessmentPenalty * assessmentPenalty
-    - W.rateIncreasePenalty * rateIncreasePenalty
     - poorResultPenalty;
 
   return Math.max(0.80, Math.min(0.99, BASE_RETENTION + adjustment));
@@ -74,11 +77,10 @@ function calcExpectedNewMembers(inputs: MemberMovementInputs): number {
 
   let expected = BASE_NEW_MEMBERS_PER_YEAR;
 
-  if (decisions.rateChange < -0.10) expected += 1.2;
-  else if (decisions.rateChange < -0.05) expected += 0.7;
-  else if (decisions.rateChange < 0) expected += 0.3;
-  else if (decisions.rateChange > 0.15) expected -= 0.6;
-  else if (decisions.rateChange > 0.08) expected -= 0.3;
+  // The five-branch rateChange ladder REMOVED — the Rate Change decision it
+  // read is gone (CLF-only pricing). DELIBERATE: a bill-based replacement is
+  // pending, not a silent zeroing. This channel currently contributes nothing
+  // to expected new members.
 
   if (decisions.underwritingStrictness <= 2) expected += 0.8;
   else if (decisions.underwritingStrictness <= 4) expected += 0.3;
@@ -104,9 +106,18 @@ function calcExpectedNewMembers(inputs: MemberMovementInputs): number {
 
 function updateSatisfaction(current: number, decisions: LineDecisionSet): number {
   let delta = 0;
-  delta -= decisions.rateChange * 5.0;
+  // The rateChange satisfaction term REMOVED — the Rate Change decision it
+  // read is gone (CLF-only pricing). DELIBERATE: a bill-based replacement is
+  // pending, not a silent zeroing. Already inert at the old default (0), so
+  // this removal changes nothing at defaults.
   delta += decisions.dividendPct * 10.0;
   delta -= decisions.assessmentPct * 8.0;
+  // NOTE — NOT REMOVED, BUT NO LONGER INERT AT DEFAULTS. This term zeroed at
+  // the old fundingConfidenceLevel default (0.75); the new default is 0.60
+  // (CLF-only pricing), so it now contributes -0.075 satisfaction/yr at
+  // defaults. Left as-is — untouched, not silently — since only the rateChange
+  // terms above were asked to be removed; this one is a genuine side effect of
+  // the default change, reported rather than "fixed" on my own judgment.
   delta += (decisions.fundingConfidenceLevel - 0.75) * 0.5;
   return Math.max(1.0, Math.min(10.0, parseFloat((current + delta).toFixed(1))));
 }

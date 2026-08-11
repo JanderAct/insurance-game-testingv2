@@ -160,9 +160,15 @@ export function processLineYear(
   const selectedFundingCLF = lookupCLF(selectedFundingConfidenceLevel);
 
   // --- Expected Actuarial Loss-Cost Rate ---
-  // Expected losses evolve independently from pricing decisions. The player's
-  // rate change affects the charged Pool Premium rate, not Pure Premium.
-  const newRateLevel = lineState.rateLevel * (1 + lineDecisions.rateChange);
+  // Expected losses evolve independently from pricing decisions.
+  //
+  // CLF-ONLY PRICING: the Rate Change decision was removed (funding confidence
+  // is now the sole pricing lever), so rateLevel no longer has anything to move
+  // it — it stays at its starting value forever and pricingAdjustment is
+  // therefore permanently 1. Both fields are kept (rateLevel is still stored
+  // and displayed) rather than deleted, since removing them was not requested
+  // and they remain harmlessly accurate: the rate level really is unchanged.
+  const newRateLevel = lineState.rateLevel;
   const pricingAdjustment = newRateLevel / 100;
 
   const lossTrend = instance.lossEnvironment.lossTrend;

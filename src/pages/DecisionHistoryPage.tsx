@@ -15,10 +15,6 @@ function pctDisplay(v: number, decimals = 1): string {
   return `${(v * 100).toFixed(decimals)}%`;
 }
 
-function rateDisplay(v: number): string {
-  return v >= 0 ? `+${(v * 100).toFixed(0)}%` : `${(v * 100).toFixed(0)}%`;
-}
-
 export default function DecisionHistoryPage({ lockedResults, lineView }: DecisionHistoryPageProps) {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const isPool = lineView === 'pool';
@@ -36,10 +32,12 @@ export default function DecisionHistoryPage({ lockedResults, lineView }: Decisio
   // Pool view: the two pool-wide decisions per year. Every line's locked
   // snapshot carries the identical projected values, so the pool aggregate's
   // decisions slice is the pool decision record.
+  // 'Rate Change' column REMOVED — CLF-only pricing; the decision it showed no
+  // longer exists.
   const headers = isPool
     ? ['Yr', 'Calendar', 'Cash %', 'Bonds %', 'Equities %', 'Risk Control %']
     : [
-        'Yr', 'Calendar', 'Rate Change', 'Funding Confidence', 'Dividend %', 'Assessment %',
+        'Yr', 'Calendar', 'Funding Confidence', 'Dividend %', 'Assessment %',
         'Underwriting Strictness', 'Reinsurance Level',
         ...(showLoanColumn ? ['Loan Repayment Aggressiveness'] : []),
       ];
@@ -96,9 +94,6 @@ export default function DecisionHistoryPage({ lockedResults, lineView }: Decisio
                       </>
                     ) : (
                       <>
-                        <td className={`px-4 py-3 font-medium ${r.decisions.rateChange > 0.05 ? 'text-amber-600' : r.decisions.rateChange < -0.05 ? 'text-blue-600' : 'text-gray-700'}`}>
-                          {rateDisplay(r.decisions.rateChange)}
-                        </td>
                         <td className="px-4 py-3">{pctDisplay(r.decisions.fundingConfidenceLevel, 0)}</td>
                         <td className="px-4 py-3">
                           {pctDisplay(r.decisions.dividendPct)}

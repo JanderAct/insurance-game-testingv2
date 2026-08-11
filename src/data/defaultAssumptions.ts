@@ -387,6 +387,15 @@ export const MAX_WITHDRAWN_PER_YEAR = 4;
 
 // Funding confidence level factor (CLF) table
 // Represents the multiplier applied to expected losses to set funding targets
+// ⚠ 0.60 IS 1.003 HERE, NOT THE 1.000 THE REFERENCE CHART GIVES. Reported, not
+// silently adjusted, per explicit instruction — see the CLF-only pricing work.
+// Design intent (stated by the source of the chart) is that 60% is EXACTLY
+// break-even (combined ratio 100.0% at the default reinsurance level), which
+// requires 1.000 here; at 1.003 the panel computes 99.8%, not exactly 100.0%.
+// 0.45/0.40/0.35/0.30 were ADDED (not previously present) to support the
+// funding-confidence slider's extended 30%-95% range; their values are taken
+// directly from that same reference chart, since there was no existing entry
+// to conflict with.
 export const FUNDING_CLF_TABLE: Record<number, number> = {
   0.95: 2.448,
   0.90: 1.951,
@@ -398,6 +407,10 @@ export const FUNDING_CLF_TABLE: Record<number, number> = {
   0.60: 1.003,
   0.55: 0.908,
   0.50: 0.827,
+  0.45: 0.745,
+  0.40: 0.666,
+  0.35: 0.590,
+  0.30: 0.516,
 };
 
 // Investment return assumptions by asset class. Conservative public-entity /
@@ -683,10 +696,18 @@ export const STARTING_FINANCIALS = {
 
 // Slider ranges (not player-editable in v1)
 export const SLIDER_RANGES = {
-  rateChange: { min: -0.20, max: 0.30, step: 0.01, default: 0 },
-  fundingConfidenceLevel: { min: 0.50, max: 0.95, step: 0.05, default: 0.75 },
+  // rateChange REMOVED (CLF-only pricing). Funding confidence is now the only
+  // pricing lever; its default moved from 0.75 to 0.60 (break-even) and its
+  // range extended down to 0.30 so underfunding is directly selectable rather
+  // than only reachable via the old rate-change discount.
+  fundingConfidenceLevel: { min: 0.30, max: 0.95, step: 0.05, default: 0.60 },
   dividendPct: { min: 0, max: 0.15, step: 0.005, default: 0 },
   assessmentPct: { min: 0, max: 0.25, step: 0.005, default: 0 },
+  // The combined dividend/assessment control's own range: zero at centre,
+  // dividends extend positive (to dividendPct.max), assessments extend
+  // negative (to -assessmentPct.max). dividendPct/assessmentPct above remain
+  // the fields the engine reads; this exists only for the collapsed input.
+  dividendAssessment: { min: -0.25, max: 0.15, step: 0.005, default: 0 },
   underwritingStrictness: { min: 0, max: 10, step: 1, default: 5 },
   riskControlPct: { min: 0, max: 0.08, step: 0.01, default: 0 },
   reinsuranceLevel: { min: 0, max: 4, step: 1, default: 2 },

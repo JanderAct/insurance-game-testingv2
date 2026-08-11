@@ -1163,10 +1163,10 @@ function buildAssumptionRows(): AuditRow[] {
     {
       metric: 'Slider Ranges',
       value:
-        `Rate Change: ${formatSliderPct(SLIDER_RANGES.rateChange)}\n` +
         `Funding Confidence Level: ${formatSliderPct(SLIDER_RANGES.fundingConfidenceLevel)}\n` +
-        `Dividend %: ${formatSliderPct(SLIDER_RANGES.dividendPct)}\n` +
-        `Assessment %: ${formatSliderPct(SLIDER_RANGES.assessmentPct)}\n` +
+        `Dividend / Assessment (combined, collapsed input): ${formatSliderPct(SLIDER_RANGES.dividendAssessment)}\n` +
+        `  Dividend % (engine field): ${formatSliderPct(SLIDER_RANGES.dividendPct)}\n` +
+        `  Assessment % (engine field): ${formatSliderPct(SLIDER_RANGES.assessmentPct)}\n` +
         `Underwriting Strictness: ${formatSliderNumber(SLIDER_RANGES.underwritingStrictness)}\n` +
         `Risk Control %: ${formatSliderPct(SLIDER_RANGES.riskControlPct)}\n` +
         `Reinsurance Level: ${formatSliderNumber(SLIDER_RANGES.reinsuranceLevel)}\n` +

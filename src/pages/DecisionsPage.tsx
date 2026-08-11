@@ -1,6 +1,6 @@
 import React from 'react';
-import { DollarSign, TrendingUp, BarChart2, Shield, RotateCcw } from 'lucide-react';
-import type { DecisionSet, LineDecisionSet, CoverageLine, LineView } from '../types/simulation';
+import { DollarSign, TrendingUp, BarChart2, Shield, RotateCcw, Lock, Info } from 'lucide-react';
+import type { DecisionSet, LineDecisionSet, CoverageLine, LineView, LineResultSet } from '../types/simulation';
 import SliderInput from '../components/SliderInput';
 import AllocationBar from '../components/AllocationBar';
 import { SLIDER_RANGES, REINSURANCE_PROGRAMS, ASSET_ALLOCATION_DEFAULT } from '../data/defaultAssumptions';
@@ -8,6 +8,8 @@ import { formatCurrency } from '../utils/formatters';
 import { getReinsuranceStructure } from '../utils/reinsuranceEngine';
 import { defaultLineDecisionSet } from '../utils/decisionDefaults';
 import { lineDisplayName } from '../utils/lineDisplay';
+import { lookupCLF } from '../utils/simulationEngine';
+import type { FundingConsequence } from '../utils/fundingConsequence';
 
 export interface LineLoanInfo {
   balance: number;
@@ -25,10 +27,23 @@ interface DecisionsPageProps {
   // control); each coverage line's tab edits that line's own decisions.
   lineView: LineView;
   lineLoanInfo: Record<CoverageLine, LineLoanInfo>;
+  // Last computed result for the line being edited — informational only
+  // (excessCapitalRatio / capitalAdequacyStatus for the consequence panel).
+  // Undefined only before the pre-game bootstrap has produced anything.
+  lastLineResult?: LineResultSet;
+  // Precomputed CLF-only pricing consequences for the line's CURRENTLY
+  // SELECTED funding confidence level and reinsurance level. Null only
+  // before a game exists.
+  fundingConsequence: FundingConsequence | null;
 }
 
+// 0.30-0.45 ADDED alongside the funding-confidence range's extension down from
+// 50%. 0.45 'Minimal' continues the existing descending scale; 0.40/0.35/0.30
+// are named to read as unmistakably underfunded, since that is the point of
+// making them selectable at all (see the consequence panel below).
 const FUNDING_LEVEL_LABELS: Record<number, string> = {
-  0.50: 'Very Low', 0.55: 'Low', 0.60: 'Below Average', 0.65: 'Moderate-Low', 0.70: 'Moderate', 0.75: 'Balanced', 0.80: 'Above Average', 0.85: 'High', 0.90: 'Very High', 0.95: 'Maximum',
+  0.95: 'Maximum', 0.90: 'Very High', 0.85: 'High', 0.80: 'Above Average', 0.75: 'Balanced', 0.70: 'Moderate', 0.65: 'Moderate-Low', 0.60: 'Below Average', 0.55: 'Low', 0.50: 'Very Low',
+  0.45: 'Minimal', 0.40: 'Deficient', 0.35: 'Severely Deficient', 0.30: 'Critical',
 };
 
 function getFundingLabel(v: number): string {
@@ -50,7 +65,7 @@ function resetLineToDefaults(decisions: DecisionSet, line: CoverageLine): Decisi
   };
 }
 
-export default function DecisionsPage({ decisions, onChange, yearNumber, estimatedPremium, estimatedExpectedLoss, disabled = false, lineView, lineLoanInfo }: DecisionsPageProps) {
+export default function DecisionsPage({ decisions, onChange, yearNumber, estimatedPremium, estimatedExpectedLoss, disabled = false, lineView, lineLoanInfo, lastLineResult, fundingConsequence }: DecisionsPageProps) {
   // Pool tab: the two pool-wide decisions. One allocation policy and one
   // risk-control intensity for the whole pool — each line applies them to its
   // OWN base (own segregated portfolio / own premium).
@@ -72,8 +87,36 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
   const reinsCostPct = prog ? (prog.costPctOfPremiumMin + prog.costPctOfPremiumMax) / 2 : 0;
   const reinsCost = estimatedPremium * reinsCostPct;
 
-  const rateDisplay = (v: number) => v >= 0 ? `+${(v * 100).toFixed(0)}%` : `${(v * 100).toFixed(0)}%`;
-  const pctDisplay = (v: number) => `${(v * 100).toFixed(1)}%`;
+  // COMBINED DIVIDEND/ASSESSMENT CONTROL (Part 1). One slider, zero at centre:
+  // positive is a dividend, negative is an assessment. dividendPct and
+  // assessmentPct stay separate engine fields — setting one always zeros the
+  // other, which is what makes both-in-one-year structurally impossible where
+  // the engine previously permitted it. Assessments remain OUTSIDE
+  // totalMemberCharge in the engine (unchanged) — folding them in would
+  // improve the loss ratio for the very members being billed.
+  const dividendAssessmentValue = d.dividendPct > 0 ? d.dividendPct : -d.assessmentPct;
+  const setDividendAssessment = (v: number) => {
+    onChange({
+      ...decisions,
+      byLine: {
+        ...decisions.byLine,
+        [selectedLine]: {
+          ...d,
+          dividendPct: v > 0 ? v : 0,
+          assessmentPct: v < 0 ? -v : 0,
+        },
+      },
+    });
+  };
+  const dividendAssessmentDisplay = (v: number) => {
+    if (v > 0.0001) return `Dividend ${(v * 100).toFixed(1)}%`;
+    if (v < -0.0001) return `Assessment ${(-v * 100).toFixed(1)}%`;
+    return 'None';
+  };
+  // Dividend side clamped to 0 while blocked (negative surplus carried in);
+  // the assessment side stays fully available, unlike disabling the whole
+  // control would allow.
+  const dividendAssessmentMax = selectedLoanInfo.dividendBlocked ? 0 : SLIDER_RANGES.dividendAssessment.max;
 
   return (
     <div className="max-w-screen-2xl mx-auto px-4 py-6 space-y-6">
@@ -91,17 +134,21 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <SectionCard title="Pricing & Funding" icon={<DollarSign size={16} />}>
-          <SliderInput label="Rate Change" value={d.rateChange} min={SLIDER_RANGES.rateChange.min} max={SLIDER_RANGES.rateChange.max} step={SLIDER_RANGES.rateChange.step} onChange={v => set('rateChange', v)} formatValue={rateDisplay} leftLabel="Decrease" rightLabel="Increase" valueColor={d.rateChange > 0.05 ? 'text-amber-600' : d.rateChange < -0.05 ? 'text-blue-600' : 'text-gray-700'} disabled={disabled} helpText="Higher rates improve premium adequacy but reduce member retention." />
-          <SliderInput label="Funding Confidence Level" value={d.fundingConfidenceLevel} min={SLIDER_RANGES.fundingConfidenceLevel.min} max={SLIDER_RANGES.fundingConfidenceLevel.max} step={SLIDER_RANGES.fundingConfidenceLevel.step} onChange={v => set('fundingConfidenceLevel', v)} formatValue={v => `${getFundingLabel(v)} (${(v * 100).toFixed(0)}%)`} leftLabel="Lower Confidence" rightLabel="Higher Confidence" disabled={disabled} helpText="Sets the reserve confidence level. Higher levels strengthen the balance sheet." />
-          <SliderInput label="Dividend / Return of Pool Premium" value={d.dividendPct} min={SLIDER_RANGES.dividendPct.min} max={SLIDER_RANGES.dividendPct.max} step={SLIDER_RANGES.dividendPct.step} onChange={v => set('dividendPct', v)} formatValue={pctDisplay} leftLabel="None" rightLabel="High" valueColor={d.dividendPct > 0 ? 'text-emerald-600' : 'text-gray-500'} disabled={disabled || selectedLoanInfo.dividendBlocked} helpText="Returns value to members." />
+          {/* Rate Change REMOVED — CLF-only pricing. Funding Confidence Level
+              is now the sole pricing lever; the consequence panel below
+              replaces the information the deleted lever used to carry. */}
+          <SliderInput label="Funding Confidence Level" value={d.fundingConfidenceLevel} min={SLIDER_RANGES.fundingConfidenceLevel.min} max={SLIDER_RANGES.fundingConfidenceLevel.max} step={SLIDER_RANGES.fundingConfidenceLevel.step} onChange={v => set('fundingConfidenceLevel', v)} formatValue={v => `${getFundingLabel(v)} (${(v * 100).toFixed(0)}%)`} leftLabel="Underfunded" rightLabel="Higher Confidence" valueColor={d.fundingConfidenceLevel < 0.60 ? 'text-red-600' : 'text-gray-700'} disabled={disabled} helpText="Sets the reserve confidence level, applied as a multiplier (CLF) on expected losses. 60% is break-even; below it the pool is charging less than expected losses by design." />
+          <FundingConsequencePanel c={fundingConsequence} lastLineResult={lastLineResult} />
+          <SliderInput label="Dividend / Assessment" value={dividendAssessmentValue} min={SLIDER_RANGES.dividendAssessment.min} max={dividendAssessmentMax} step={SLIDER_RANGES.dividendAssessment.step} onChange={setDividendAssessment} formatValue={dividendAssessmentDisplay} leftLabel="Assessment" rightLabel="Dividend" valueColor={dividendAssessmentValue > 0 ? 'text-emerald-600' : dividendAssessmentValue < 0 ? 'text-red-600' : 'text-gray-500'} disabled={disabled} helpText="One combined control: positive returns value to members as a dividend; negative calls additional funds beyond premium as an assessment. Exactly one may apply in a given year — this is structural, not a suggestion. Assessments are never counted toward the loss ratio of the members being billed." />
           {selectedLoanInfo.dividendBlocked && (
             <p className="text-xs text-red-600 -mt-3">Dividend blocked: this line carried a negative surplus in from last year.</p>
           )}
-          <SliderInput label="Assessment" value={d.assessmentPct} min={SLIDER_RANGES.assessmentPct.min} max={SLIDER_RANGES.assessmentPct.max} step={SLIDER_RANGES.assessmentPct.step} onChange={v => set('assessmentPct', v)} formatValue={pctDisplay} leftLabel="None" rightLabel="High" valueColor={d.assessmentPct > 0 ? 'text-red-600' : 'text-gray-500'} disabled={disabled} helpText="Additional calls on members beyond premium." />
         </SectionCard>
 
         <SectionCard title="Growth & Underwriting" icon={<TrendingUp size={16} />}>
           <SliderInput label="Underwriting Strictness" value={d.underwritingStrictness} min={SLIDER_RANGES.underwritingStrictness.min} max={SLIDER_RANGES.underwritingStrictness.max} step={SLIDER_RANGES.underwritingStrictness.step} onChange={v => set('underwritingStrictness', v)} formatValue={v => `${v}/10 — ${UW_LABELS[Math.round(v)]}`} leftLabel="Flexible" rightLabel="Strict" disabled={disabled} helpText="Strict underwriting improves risk quality." />
+          <RenewalUnderwritingPreview />
+          <NewBusinessAppetitePreview />
         </SectionCard>
 
         {outstandingLoanSlider(d, set, selectedLoanInfo, disabled)}
@@ -225,6 +272,145 @@ function outstandingLoanSlider(
         helpText="Share of this line's positive net income used to repay the loan before it flows to the line's own surplus."
       />
     </SectionCard>
+  );
+}
+
+// CLF-only pricing consequence panel (Part 2). Everything here is computed in
+// src/utils/fundingConsequence.ts from the SAME formulas simulationEngine.ts
+// actually prices with — this renders that object, it does not recompute it.
+function FundingConsequencePanel({ c, lastLineResult }: { c: FundingConsequence | null; lastLineResult?: LineResultSet }) {
+  if (!c) return null;
+  const pct1 = (v: number) => `${v.toFixed(1)}%`;
+  const signed = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
+  const reserveMarginCLF = lookupCLF(0.90);
+
+  return (
+    <div className="bg-gray-50 rounded-lg p-3 border border-gray-200 text-xs space-y-2 -mt-1">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+        <DataRow label="CLF Multiplier" value={`×${c.clf.toFixed(3)}`} />
+        <DataRow label="Pool Premium Rate / $100" value={`$${c.poolPremiumRatePer100.toFixed(2)}`} />
+        <DataRow label="Total Member Charge Rate / $100" value={`$${c.totalMemberChargeRatePer100.toFixed(2)}`} />
+        <DataRow label="The Load (charge ÷ expected loss)" value={`${c.load.toFixed(2)}×`} />
+        <DataRow label="Expected Combined Ratio" value={pct1(c.expectedCombinedRatio * 100)} />
+        <DataRow
+          label="Derived Rate Change vs Last Year"
+          value={c.derivedRateChangePct === null ? 'N/A (no prior year)' : signed(c.derivedRateChangePct)}
+        />
+        <DataRow
+          label="Marginal Cost of Next Step"
+          value={c.isAtMax ? 'At maximum (95%)' : `${signed(c.marginalCostPct ?? 0)} pool premium`}
+        />
+      </div>
+
+      <div className="border-t border-gray-200 pt-2 grid grid-cols-2 gap-x-4 gap-y-1.5">
+        <DataRow label="Reserve Margin Standard (fixed)" value={`90% confidence, CLF ${reserveMarginCLF.toFixed(3)}`} />
+        <DataRow
+          label="Excess Capital Ratio (as of last year)"
+          value={lastLineResult ? `${(lastLineResult.excessCapitalRatio ?? 0).toFixed(2)} (${lastLineResult.capitalAdequacyStatus})` : '—'}
+        />
+      </div>
+
+      {c.isAdequate ? (
+        <p className="text-blue-700 bg-blue-50 border border-blue-100 rounded-md px-2.5 py-1.5 leading-relaxed">
+          Adequate in ~{(c.confidenceLevel * 100).toFixed(0)}% of years; margin over expected {signed(c.marginPct)}.
+        </p>
+      ) : (
+        <p className="text-red-700 bg-red-50 border border-red-200 rounded-md px-2.5 py-1.5 leading-relaxed font-medium">
+          UNDERFUNDING — this funds only {pct1(c.fundedPct)} of expected losses; expected combined ratio {pct1(c.expectedCombinedRatio * 100)}.
+        </p>
+      )}
+    </div>
+  );
+}
+
+// Inactive marker (Part 3). Both new underwriting controls render but are
+// deliberately NOT wired to anything — see the module comment on why.
+function InactiveBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-gray-500 bg-gray-200 px-1.5 py-0.5 rounded">
+      <Lock size={10} /> Inactive
+    </span>
+  );
+}
+
+// Wrapper that visually greys out an inactive preview control and attaches
+// the "why" as persistent helper text, rather than only a hover tooltip — a
+// control that LOOKS live but is not is the failure this exists to prevent.
+function InactivePreview({ title, children }: { title: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/70 p-3 space-y-2 opacity-80">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-semibold text-gray-600">{title}</span>
+        <InactiveBadge />
+      </div>
+      <div className="pointer-events-none select-none grayscale-[35%]">{children}</div>
+      <p className="flex items-start gap-1 text-[11px] text-gray-500 leading-relaxed">
+        <Info size={12} className="mt-0.5 flex-shrink-0" />
+        Activates once member loss history exists (Stage 4 of the marketplace-generation work).
+      </p>
+    </div>
+  );
+}
+
+// RENEWAL UNDERWRITING (Part 3, top control) — inactive preview. Would screen
+// on the EXPERIENCE MODIFIER (actual ÷ expected loss at the member's own class,
+// exposure and risk quality), never a loss ratio: a prospect has no premium
+// with the pool, so a loss ratio is undefined for it, while actual-over-
+// expected is defined identically for members and prospects. Local,
+// unpersisted state only — this control is not wired to LineDecisionSet or to
+// anything else. Deliberately no threshold default: the sensible non-renew
+// level depends on the modifier's distribution, which Stage 4 will report.
+function RenewalUnderwritingPreview() {
+  const [mode, setMode] = React.useState<'renewAll' | 'nonRenewThreshold'>('renewAll');
+  return (
+    <InactivePreview title="Renewal Underwriting">
+      <div className="space-y-1.5">
+        <label className="flex items-center gap-2 text-xs text-gray-700">
+          <input type="radio" checked={mode === 'renewAll'} onChange={() => setMode('renewAll')} disabled />
+          Renew all existing members
+        </label>
+        <label className="flex items-center gap-2 text-xs text-gray-700">
+          <input type="radio" checked={mode === 'nonRenewThreshold'} onChange={() => setMode('nonRenewThreshold')} disabled />
+          Non-renew members above{' '}
+          <span className="inline-block px-1.5 py-0.5 rounded bg-gray-200 text-gray-500 font-mono text-[11px]">— ×</span>
+          {' '}experience modifier
+        </label>
+      </div>
+    </InactivePreview>
+  );
+}
+
+// NEW BUSINESS APPETITE (Part 3, below Renewal Underwriting) — inactive
+// preview. Same experience-modifier basis as above, once it exists.
+const APPETITE_OPTIONS = [
+  'Accept all applicants',
+  'Accept average or better',
+  'Maintain current appetite',
+  'Accept good experience only',
+  'Accept excellent experience only',
+] as const;
+
+function NewBusinessAppetitePreview() {
+  // 'Maintain current appetite' is the neutral middle option — a display
+  // choice only, since the control does nothing; it is not a calibrated
+  // default the way a real threshold would need to be.
+  const [selected, setSelected] = React.useState<number>(2);
+  return (
+    <InactivePreview title="New Business Appetite">
+      <div className="grid grid-cols-1 gap-1">
+        {APPETITE_OPTIONS.map((label, i) => (
+          <button
+            key={label}
+            type="button"
+            disabled
+            onClick={() => setSelected(i)}
+            className={`text-left text-xs px-2 py-1.5 rounded border ${i === selected ? 'bg-gray-200 border-gray-300 text-gray-700 font-medium' : 'bg-white border-gray-200 text-gray-500'}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </InactivePreview>
   );
 }
 

@@ -10,16 +10,9 @@ export function generateNarrative(result: ResultSet, _priorResult?: ResultSet): 
     newMembers, withdrawnMembers, shockLossIncurred,
     priorYearDevelopment, endingSurplus } = result;
 
-  // --- Rate Change ---
-  if (decisions.rateChange > 0.10) {
-    parts.push(`You implemented a significant rate increase of ${pct(decisions.rateChange)}, which improved premium adequacy. However, this level of increase puts competitive pressure on member retention.`);
-  } else if (decisions.rateChange > 0.03) {
-    parts.push(`A moderate rate increase of ${pct(decisions.rateChange)} was applied, helping maintain premium adequacy.`);
-  } else if (decisions.rateChange < -0.05) {
-    parts.push(`You chose to decrease rates by ${pct(Math.abs(decisions.rateChange))}, improving competitiveness.`);
-  } else if (Math.abs(decisions.rateChange) <= 0.03) {
-    parts.push(`Rates were held roughly flat.`);
-  }
+  // --- Rate Change --- REMOVED. The Rate Change decision it narrated is gone
+  // (CLF-only pricing); a narrative describing the funding-confidence-level
+  // decision instead is a pending replacement, not invented here.
 
   // --- Underwriting ---
   if (decisions.underwritingStrictness <= 2) {

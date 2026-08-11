@@ -79,10 +79,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // top of a 40-seed attribution run showing the enrolled drawn/expected ratio
 // unchanged to four decimals.
 //
-// NOTE THE DELIBERATE VERSION SKEW: solo-export-guard stays at v6 because its
-// hashes are byte-identical (kLineApplied is not exported), and recapturing it
-// would have produced a duplicate file under a new name.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v7.json');
+// v8: CLF-ONLY PRICING (decision-surface work). The Rate Change decision was
+// deleted and the funding-confidence-level default moved from 0.75 to 0.60 —
+// ISOLATED AND CONFIRMED SEPARATELY: with the default temporarily held at its
+// old 0.75 value, this check reads 0/14,910 changed, so the mechanical
+// deletion of the three now-dead rateChange terms (all already zero at
+// rateChange=0 defaults) moves nothing on its own. Every one of the 11,051
+// changed values at the real 0.60 default is downstream of that one
+// deliberate default change, not a side effect of the field removal.
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v8.json');
 
 function seedOf(id: string) {
   let h = 5381;
