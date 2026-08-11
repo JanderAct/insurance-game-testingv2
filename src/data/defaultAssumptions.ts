@@ -76,7 +76,9 @@ export type WcTier = (typeof WC_TIERS)[number];
 export const WC_LOSS_MODEL = {
   // --- A1 frequency -------------------------------------------------------
   // Claims per $1M of that class's payroll per year. Calibrated to the
-  // canonical roster: expected pool claim counts 75 / 511 / 79 / 144 = ~809.
+  // canonical roster: expected FULL-MARKET claim counts (200 members, $1,300M
+  // payroll) 77.3 / 428.7 / 164.6 / 167.7 = 838.2, the figure the harness
+  // asserts.
   rateClassPer1M: { clerical: 0.15, publicWorks: 0.80, police: 1.20, fire: 1.50 } as Record<WcClassKey, number>,
 
   // Workplace safety improves ~1.5%/yr. Applied as (1 + trend)^(yearNumber-1),
@@ -151,10 +153,9 @@ export const WC_LOSS_MODEL = {
   statutoryWeeklyCap: 1450,
 
   // --- A4 catastrophic tier (an inflating annuity, not a single draw) -----
-  // Frequency note: the design text says "~5-6/yr", but the tierProbabilities
-  // table above implies 2.97/yr on the canonical roster (0.04 clerical + 1.53
-  // publicWorks + 0.40 police + 1.01 fire). The table is the operative
-  // parameter; the "5-6" text is stale and is not asserted anywhere.
+  // Frequency note: the tierProbabilities table above implies 3.3214/yr on
+  // the canonical roster (0.039 clerical + 1.286 publicWorks + 0.823 police +
+  // 1.174 fire). The table is the operative parameter.
   catastrophic: {
     ageMin: 25,
     ageMax: 55,

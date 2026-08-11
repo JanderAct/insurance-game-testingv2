@@ -201,8 +201,30 @@ function catastrophicStream(
 // non-linear in age (the medical leg is a geometric sum), so this is a
 // deterministic midpoint quadrature rather than an evaluation at the mean age
 // — no RNG, and stable across runs.
+//
+// MEMOISED on (cls, regionMult): the only two inputs, since this function and
+// catastrophicStream both close over the module-level `M` (WC_LOSS_MODEL)
+// rather than any per-call params object. That closure is what makes the
+// cache safe — WC_OVERRIDABLE_PATHS (wcParams.ts) contains only
+// 'presumption.ratePer1MPoliceFire', so getWcParams THROWS before any
+// override reaches catastrophic.*, medicalTrend, indemnityTrend,
+// catastrophicDiscountRate, or classAnnualWage. If the allow-list is ever
+// widened to cover one of those paths AND this helper is refactored to accept
+// the resolved params (per the warning in wcParams.ts), the cache key below
+// must include a params fingerprint too, or a mid-game override would be
+// silently masked by a value cached from before it took effect.
+//
+// regionMult is a float reached only via a direct regionMultiplier() lookup
+// (never through arithmetic), but the key is built from a fixed-precision
+// string rather than the raw number so two calls that resolve to the same
+// value can never miss each other over a float-identity mismatch.
 const AGE_QUADRATURE_POINTS = 1000;
+const catastrophicSeverityCache = new Map<string, number>();
 function expectedCatastrophicSeverity(cls: WcClassKey, regionMult: number): number {
+  const key = `${cls}|${regionMult.toFixed(6)}`;
+  const cached = catastrophicSeverityCache.get(key);
+  if (cached !== undefined) return cached;
+
   const c = M.catastrophic;
   const width = (c.ageMax - c.ageMin) / AGE_QUADRATURE_POINTS;
   let sum = 0;
@@ -211,7 +233,9 @@ function expectedCatastrophicSeverity(cls: WcClassKey, regionMult: number): numb
     // Present value, matching what the draw books.
     sum += catastrophicStream(age, cls, regionMult).presentValue;
   }
-  return sum / AGE_QUADRATURE_POINTS;
+  const result = sum / AGE_QUADRATURE_POINTS;
+  catastrophicSeverityCache.set(key, result);
+  return result;
 }
 
 // E[trend factor over the presumption report lag]. The lag enters as an

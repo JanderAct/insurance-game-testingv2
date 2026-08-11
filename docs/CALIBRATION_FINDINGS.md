@@ -274,8 +274,11 @@ gross-derived 66.8% is the numerator-side twin of Correction 1's denominator mis
 WC's `newPurePremiumPer100` is now **derived once from the analytic expectation of the claim
 generator** (at RQ 5, over the full canonical roster) and held — so premium and losses share one
 basis by construction (see finding 17's "apply to the draw, not pure premium" constraint). Derived
-held WC pure premium: **$3.7269 per $100**. This is what makes the gross reconciliation land on
-target rather than by luck.
+held WC pure premium: **$4.2287 per $100** (re-derived 2026-08-11 against the roster-v4 canonical
+roster on `claims-distribution`). The $3.7269 previously recorded here was the roster-**v1** figure —
+`PROJECT_STATE_SUMMARY.md` already documents the v1-to-v2 correction to $4.2300, essentially matching
+this re-derivation; this note simply never picked up that update. This is what makes the gross
+reconciliation land on target rather than by luck.
 
 **Scope note:** this is fixed for **WC only**. GL and Property still price off the old
 `commonLossFactor` / constant-based path and still exhibit the original definitional artifacts. They
