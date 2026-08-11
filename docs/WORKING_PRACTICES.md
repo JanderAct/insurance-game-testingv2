@@ -60,6 +60,21 @@ Things that were discovered expensively and live only in conversation memory. Re
   tighter because counts and rates have bounded per-observation variance where heavy-tailed dollar
   sums do not. Write the division of labour into the harness, or a passing wide gate will later be
   mistaken for proof of exactness.
+- **Generator statistics are FULL-MARKET; treaty and portfolio statistics are ENROLLED. Any figure
+  quoted without saying which is suspect.** Generator harnesses run against all 200 canonical members,
+  because that is how a generator gets tested standalone. But the pool insures only ~25-35% of the
+  marketplace, so every treaty question — retention firing rates, occurrence exceedance, what a shock
+  costs — is a question about the enrolled book, not the market. The two differ by roughly 3-4x, and not
+  by exactly the TIV or payroll ratio either: breach counts are additive over locations, so the ratio
+  depends on which members the enrolment draw happened to include, and a fixed dollar threshold cuts a
+  different point of each book's size distribution. This has produced a wrong number four separate
+  times — the per-risk breach rate (asserted at 4.115/yr full-market against a band built for 1.78,
+  when the enrolled figure was 1.005), WC presumption expansion (+7.5 claims/yr quoted full-market when
+  the pool sees +2.0), the GL EPL surge (impact measured against EPL's own expected loss rather than
+  GL's), and the #15 mega-claim injection (a fixed claim COUNT, so identical dollars at either basis —
+  +30.8% of full-market WC but +126.2% of the enrolled book). Report BOTH bases side by side whenever a
+  figure could be read either way, and label them. Corollary: a treaty firing rate is a portfolio
+  property, not a generator property — it does not belong in a generator harness at all.
 - **Shock and no-shock runs on the same seed are NOT paired.** poisson() consumes a variable number of
   uniforms, so anything that changes a frequency — freqMultiplier, exposureChange, an injected claim
   that draws — reshapes every subsequent draw in that stream. A "with shock minus without shock" delta
