@@ -1075,3 +1075,91 @@ actuarially fair `E[ceded] x loading` price would NOT change pool surplus at all
 pass-through, so any fairness correction there is a MEMBER-VALUE issue, not a pool-profit issue. That
 belongs with finding 10 (reinsurance cost band), not here. This finding is about the double-funding of
 the ceded loss itself, which is what moves pool surplus.
+
+---
+
+## 26. Per-key RNG seed dispersion — a defect no within-stream validation could catch
+
+**Found while implementing per-member RNG streams** (the marketplace-generation work). Keying
+member-level streams per member is what makes a member's claim history independent of who else is
+enrolled. Doing it broke both live generators: Property's weather band drew **+62%** against its own
+analytic and four distributional checks failed, and WC's invariant 1 — draw vs analytic — broke by
+**5.02%** ($52.22M drawn vs $54.97M analytic). Nothing about the loss model had changed. Only the
+stream keys had.
+
+### The mechanism, end to end
+
+1. `deriveSubRng`'s string hash was `hash = hash * 31 + charCode`. The keys the generators use differ
+   in their trailing characters only — `'wc_freq:member-001'` vs `'...002'` — so the two final hashes
+   differed by **exactly 1**.
+2. An LCG's first output is affine in its seed. At `a = 1664525`, `m = 2^32`, seeds one apart give
+   first uniforms `a / m = 0.000388` apart. Measured spacing across 200 consecutive member keys:
+   `0.1957, 0.1961, 0.1965, 0.1969, ...` — **lag-1 correlation 0.9908**.
+3. `gamma()` uses the Marsaglia-Tsang small-shape boost `G(a) = G(a+1) x U^(1/a)`. At Property's
+   damage-ratio shape `a = 0.08` that is `U^12.5`. With `U` trapped near 0.196 the boosted leg
+   collapses to `~1.4e-9` on every draw, so `Beta = x/(x+y)` returned ~0 universally:
+   **mean 0.005639 against 0.040000 exact** — a 7x understatement.
+
+### Why it stayed latent, and the lesson that generalises
+
+Each label previously opened **one stream per year** and consumed a long orbit from it, so the LCG
+recovered within a few steps. Taking a handful of draws from each of 200 streams is what exposes seed
+**dispersion** — and the 5,000,000-draw `Beta(0.08, 1.92)` validation already recorded on
+`SeededRandom.beta` could not have caught it, because it ran on a single long stream.
+
+> **A validation that exercises one stream cannot detect a defect in how streams are seeded relative
+> to each other.**
+
+Those are two independent properties. The project had a strong test for the first and none for the
+second.
+
+### The fix, and the test that was missing
+
+Murmur3's 32-bit finalizer (`fmix32`) applied to the hash before seeding. It exists precisely to
+avalanche a one-bit input change across the whole output, which is the property that was absent.
+
+| | before | after |
+|---|---|---|
+| lag-1 correlation across 200 consecutive-id keys | **0.9908** | **-0.031** |
+| first-uniform mean over those keys | 0.4411 | 0.5120 |
+| `Beta(0.08,1.92)` mean, one draw per key | 0.005639 | 0.036290 (n=200, <0.5 SE of 0.04) |
+| WC invariant 1 | **5.02% error** | passes |
+| Property harness | **4 failures** | passes |
+
+A permanent regression test now asserts low lag-1 correlation and a sane first-uniform mean across
+~200 consecutive-id keys, in `scripts/diagnostics/enrolment-independence-check.ts`. It is cheap and it
+is the test whose absence allowed this. Note that the **correlation** check is the primary instrument:
+the `Beta` symptom is seed-dependent (one seed traps `U` near 0.196 and collapses, another traps near
+0.71 and barely moves), so pooled across seeds the unfinalized `Beta` mean reads only z = 2.66 and
+would not trip a 4-SE gate, while the correlation check caught all four seeds at once. **Gate the
+invariant, not the downstream symptom.**
+
+### Two harness checks were also found invalid, and corrected
+
+Both are instances of the same error — a **fixed or CLT-based band on a heavy-tailed sample mean**.
+
+- **Property's damage-ratio mean** used a fixed `+/-6%` band. `Beta(0.08, 1.92)` has CV 2.83, so the
+  SE at n = 4,424 is 4.25% of the mean: that band is `+/-1.4 SE` and **fails ~16% of the time on
+  correct code**. It duly fired on a correct generator. What identified the band rather than the model
+  as the defect: the harness read **+6.75% high** while an independent 400,000-draw test of the same
+  quantity read **~1% low** — both cannot be bias. Replaced with a 99% CI gate against its own
+  realized variance, and the harness now states what n buys what precision (n ~ 20,000 to detect a
+  genuine 5% bias; the 40-year run can only catch gross breakage).
+  **A warmup tuned to make the failing test pass was explicitly rejected** — that would have been
+  fitting the RNG to the harness.
+- **GL's `lawEnforcement` mean** was gated by a 99% CI. That check is invalid *by construction*, not
+  merely under-powered: severity is 95% lognormal + 5% Pareto with **alpha = 1.3**, so variance is
+  **infinite**, the CLT does not apply, the sample mean does not converge at `1/sqrt(n)`, and a CI
+  from realized variance is invalid at any n because the realized variance is itself unstable.
+  Demonstrated: across two runs of the same model that "99% CI" moved from `+/-7.01%` to `+/-4.70%` —
+  a 33% swing in the instrument. The narrow run read -5.89% and "failed"; the wide one read -1.17% and
+  "passed". Neither says anything about the model. The tail also dominates what it was gating:
+  `0.05 x $4.33M = $217k` of the `$297k` mean, so **73% of the mean comes from 5% of claims.**
+  Replaced with bounded-variance instruments — frequency, pay rate, and the Pareto-scale tail COUNT
+  against an exact binomial CI (a Bernoulli indicator has variance `p(1-p) <= 1/4` however heavy the
+  severity tail is) — with the mean and median REPORTED, not asserted. `abuse` is deliberately left on
+  its CI gate: it is tail-dominated but lognormal CV 2.0, so its variance is finite and the gate valid.
+
+**Standing practice this reinforces:** never gate a heavy-tailed sample mean, by fixed band or by CI.
+Gate counts, rates, quantiles and capped/truncated means — statistics with bounded per-observation
+variance — and report the rest.

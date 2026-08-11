@@ -446,11 +446,11 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
 
   // Purpose-keyed streams, distinct from the legacy 'losses' label so WC's
   // internals can be reordered without disturbing GL/Property.
-  const freqRng = deriveSubRng(instanceSeed, yearNumber, 'wc_freq');
-  const tierRng = deriveSubRng(instanceSeed, yearNumber, 'wc_tier');
-  const sevRng = deriveSubRng(instanceSeed, yearNumber, 'wc_sev');
-  const presumeRng = deriveSubRng(instanceSeed, yearNumber, 'wc_presume');
-
+  //
+  // ⚠ PER MEMBER, INSIDE THE LOOP — NOT ONE STREAM PER YEAR. See the block at
+  // the member loop below for why; moving these back out here would silently
+  // reintroduce the enrolment dependency the marketplace generator exists to
+  // remove.
   const trend = frequencyTrend(yearNumber);
   const rcFactor = Math.max(0, 1 - riskControlEffectiveness);
 
@@ -503,6 +503,24 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
   };
 
   for (const member of members) {
+    // PER-MEMBER STREAMS, KEYED ON member.id. deriveSubRng hashes the whole
+    // purpose string, so the key space is free.
+    //
+    // WHY NOT ONE STREAM PER YEAR consumed in member order: the marketplace
+    // generator draws for all 200 members, and a member's claim history must
+    // not depend on WHO ELSE is enrolled or on the iteration order. With a
+    // shared stream, inserting one extra member shifts every draw after it, so
+    // a prospect's loss history would change because of enrolment decisions
+    // made years earlier — which makes an underwriting screen incoherent.
+    //
+    // Keying per member makes each member's draws a pure function of
+    // (seed, year, memberId). That is asserted, not assumed: see
+    // scripts/diagnostics/enrolment-independence-check.ts.
+    const freqRng = deriveSubRng(instanceSeed, yearNumber, `wc_freq:${member.id}`);
+    const tierRng = deriveSubRng(instanceSeed, yearNumber, `wc_tier:${member.id}`);
+    const sevRng = deriveSubRng(instanceSeed, yearNumber, `wc_sev:${member.id}`);
+    const presumeRng = deriveSubRng(instanceSeed, yearNumber, `wc_presume:${member.id}`);
+
     const rq = member.riskQuality;
     const regionMult = regionMultiplier(member.region);
     const theta = thetaWc(rq);

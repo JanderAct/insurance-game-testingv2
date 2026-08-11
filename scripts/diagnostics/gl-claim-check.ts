@@ -276,13 +276,19 @@ console.log('\n--- 8. draw vs analytic expectation (invariant 1) ---');
   // Dedicated deeper sample for this section only.
   const perYear: Record<string, number[]> = { general: [], epl: [], lawEnforcement: [], abuse: [] };
   const fullPerYear: number[] = [];
+  const leIndemnity: number[] = [];
   for (let y = 1; y <= INV1_YEARS; y++) {
     const r = generateGlClaims({
       members: roster, yearNumber: y, calendarYear: 2025 + y,
       instanceSeed: 4242 + y * 7919, kGl, gPool: 1, riskControlEffectiveness: 0,
     });
     const bucket: Record<string, number> = { general: 0, epl: 0, lawEnforcement: 0, abuse: 0 };
-    for (const c of r.claims) bucket[c.tier] = (bucket[c.tier] ?? 0) + c.grossUltimate;
+    for (const c of r.claims) {
+      bucket[c.tier] = (bucket[c.tier] ?? 0) + c.grossUltimate;
+      // Paid law-enforcement indemnities, for the bounded-variance instruments
+      // that replace the (invalid) CI gate on this sub's mean. See below.
+      if (c.tier === 'lawEnforcement' && (c.indemnity ?? 0) > 0) leIndemnity.push(c.indemnity ?? 0);
+    }
     for (const k of Object.keys(perYear)) perYear[k].push(bucket[k] ?? 0);
     fullPerYear.push(r.grossUltimateLoss);
   }
@@ -324,11 +330,67 @@ console.log('\n--- 8. draw vs analytic expectation (invariant 1) ---');
       lightDrawn += drawn[sub]; lightAnalytic += analytic[sub];
       for (let i = 0; i < INV1_YEARS; i++) lightPerYear[i] += perYear[sub][i];
       console.log(`${line}  strict ${note(Math.abs(rel) < 0.03, `${sub} draw vs analytic ${(rel * 100).toFixed(1)}% exceeds the 3% light-tailed bar`)}  CI ${note(inCI, `${sub} outside its 99% CI of the analytic`)}`);
+    } else if (sub === 'lawEnforcement') {
+      // ⚠ NO GATE ON THIS MEAN — AND IT CANNOT BE REPAIRED BY WIDENING OR BY
+      // MORE SAMPLES. lawEnforcement severity is 95% lognormal plus 5%
+      // Pareto(x_m $1M, ALPHA 1.3). Alpha below 2 means INFINITE VARIANCE:
+      //   - the central limit theorem does not apply,
+      //   - the sample mean does not converge at 1/sqrt(n),
+      //   - and a CI computed from realized variance is not valid at ANY n,
+      //     because the realized variance is itself an unstable statistic.
+      // Observed directly: across two runs of the SAME model this sub's "99%
+      // CI" moved from +/-7.01% to +/-4.70% — a 33% swing in the instrument,
+      // which is what an invalid CI looks like. The narrower run then read
+      // -5.89% and "failed"; the wider one read -1.17% and "passed". Neither
+      // says anything about the model.
+      // The tail also dominates the mean it would be gating: 0.05 x $4.33M =
+      // $217k of the $297k mean, so 73% OF THE MEAN COMES FROM 5% OF CLAIMS.
+      // This sub is gated instead by FREQUENCY, PAY RATE (both above, bounded
+      // per-observation variance) and the Pareto-scale tail COUNT below.
+      console.log(`${line}  REPORTED, NOT GATED (Pareto alpha 1.3: infinite variance, no valid CI at any n — gated by frequency, pay rate and tail count instead)`);
     } else {
-      // abuse and lawEnforcement: tail-dominated, CI gate only.
-      console.log(`${line}  CI ${note(inCI, `${sub} outside its 99% CI of the analytic — gross-error signal, investigate`)}  (tail-dominated: CI gate only)`);
+      // abuse: tail-dominated but FINITE variance (lognormal CV 2.0), so the CI
+      // gate is valid here. Do not lump it in with lawEnforcement.
+      console.log(`${line}  CI ${note(inCI, `${sub} outside its 99% CI of the analytic — gross-error signal, investigate`)}  (tail-dominated, finite variance: CI gate only)`);
     }
   }
+  // --- lawEnforcement, gated by BOUNDED-VARIANCE instruments ----------------
+  //
+  // The replacement for the invalid mean CI. A Bernoulli indicator has variance
+  // p(1-p) <= 1/4 whatever the underlying severity distribution does, so this
+  // gate is valid where the mean's is not — the heavy tail cannot destabilise a
+  // count.
+  {
+    const spec = Mdl.subCoverages.lawEnforcement;
+    const p = spec.paretoTail!;
+    // A Pareto draw is >= x_m by construction, and trending only raises it, so
+    // every Pareto-branch claim lands at or above x_m. The lognormal body also
+    // contributes a little above x_m: P(LN > x_m) at mean 85k / CV 1.5.
+    const { mu, sigma } = lognormalParams(spec.indemnity.mean, spec.indemnity.cv);
+    const lnExceed = 1 - normalCdf((Math.log(p.xm) - mu) / sigma);
+    const expectedFrac = p.weight + (1 - p.weight) * lnExceed;
+    const observedFrac = leIndemnity.filter(x => x >= p.xm).length / Math.max(1, leIndemnity.length);
+    // Exact binomial SE — bounded, unlike the severity's.
+    const binSe = Math.sqrt(expectedFrac * (1 - expectedFrac) / Math.max(1, leIndemnity.length));
+    const binHalf = Z99 * binSe;
+    // Trending inflates indemnity between accident and settlement year, which
+    // pushes a few more lognormal claims above x_m. That is one-sided, so the
+    // gate allows it explicitly rather than pretending the bound is symmetric.
+    const trendAllow = 0.004;
+    const lo = expectedFrac - binHalf;
+    const hi = expectedFrac + binHalf + trendAllow;
+    console.log(`  lawEnforcement Pareto-scale tail: ${(observedFrac * 100).toFixed(3)}% of ${leIndemnity.length} paid claims >= $${(p.xm / 1e6).toFixed(1)}M`
+      + ` vs expected ${(expectedFrac * 100).toFixed(3)}% (weight ${(p.weight * 100).toFixed(1)}% + lognormal exceedance ${(lnExceed * 100).toFixed(3)}%)`
+      + `, 99% binomial CI [${(lo * 100).toFixed(3)}%, ${(hi * 100).toFixed(3)}%]`
+      + `  ${note(observedFrac >= lo && observedFrac <= hi, `lawEnforcement Pareto-scale tail fraction ${(observedFrac * 100).toFixed(3)}% outside [${(lo * 100).toFixed(3)}%, ${(hi * 100).toFixed(3)}%] — the tail WEIGHT or the branch draw is wrong`)}`);
+    // The mean is reported here too, so the reader can see why it is not gated.
+    const leMean = mean(leIndemnity);
+    const paretoShare = p.weight * (p.xm * p.alpha / (p.alpha - 1)) / glInternals.meanIndemnityWhenPaid('lawEnforcement');
+    console.log(`    paid indemnity: median $${(leIndemnity.slice().sort((a, b) => a - b)[Math.floor(leIndemnity.length / 2)] / 1e3).toFixed(1)}k`
+      + `  mean $${(leMean / 1e3).toFixed(1)}k  — REPORTED. The Pareto branch supplies ${(paretoShare * 100).toFixed(0)}% of the analytic mean from ${(p.weight * 100).toFixed(0)}% of claims,`
+      + ` so the median is the stable location statistic and the mean is not.`);
+  }
+
   const relLight = (lightDrawn - lightAnalytic) / lightAnalytic;
   const lightInCI = Math.abs(lightDrawn - lightAnalytic) <= ciHalfWidth(lightPerYear);
   console.log(`  light-tailed total (general+epl): drawn ${fmt$(lightDrawn)} vs analytic ${fmt$(lightAnalytic)} (${(relLight * 100).toFixed(2)}%, 99% CI +/-${(ciHalfWidth(lightPerYear) / lightAnalytic * 100).toFixed(2)}%)  strict ${note(Math.abs(relLight) < 0.03, `light-tailed total ${(relLight * 100).toFixed(1)}%`)}  CI ${note(lightInCI, 'light-tailed total outside its 99% CI')}`);

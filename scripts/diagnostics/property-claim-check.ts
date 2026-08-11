@@ -49,7 +49,6 @@ import {
   WEATHER_BOOKED_TREND_FACTOR,
 } from '../../src/utils/propertyClaimEngine';
 import { lognormalPartialMoment, normalCdf } from '../../src/utils/claimMath';
-import { deriveSubRng } from '../../src/utils/random';
 import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import type { CoverageLine, Member } from '../../src/types/simulation';
@@ -186,7 +185,32 @@ console.log('\n--- 3. severity: the insured-value cap and the damage ratio ---')
   const drs = all.map(c => c.damageRatio ?? 0).sort((a, b) => a - b);
   const q = (p: number) => drs[Math.floor(p * drs.length)];
   const dm = mean(drs);
-  console.log(`  damage ratio: mean ${dm.toFixed(4)} vs closed form ${M.damageRatio.mean.toFixed(4)}  ${note(Math.abs(dm - M.damageRatio.mean) / M.damageRatio.mean < 0.06, `damage ratio mean ${dm.toFixed(4)}`)}`);
+  // CI GATE AGAINST ITS OWN REALIZED VARIANCE, NOT A FIXED PERCENTAGE BAND.
+  //
+  // This check used to assert |mean - 0.04| / 0.04 < 0.06 — a fixed +/-6% band.
+  // That is invalid on this statistic: Beta(0.08, 1.92) has sd 0.11314 against a
+  // mean of 0.04, i.e. CV 2.83, so the SE of the sample mean is 4.25% of the
+  // mean at n = 4,424. A +/-6% band is therefore only +/-1.4 SE and FAILS ABOUT
+  // 16% OF THE TIME ON CORRECT CODE. It duly fired on a correct generator, while
+  // an independent 400,000-draw test of the same quantity read ~1% LOW — the two
+  // signs disagreed, which is what identified the band rather than the model as
+  // the defect. (Fourth instance in this project of a fixed percentage applied to
+  // a heavy-tailed sample mean; see the standing practice note.)
+  //
+  // WHAT n BUYS, at CV 2.83 (half-width of the 99% CI, as a % of the mean):
+  //     n =   4,400  ->  +/-11.0%
+  //     n =  20,000  ->  +/- 5.2%
+  //     n = 100,000  ->  +/- 2.3%
+  //     n = 500,000  ->  +/- 1.0%
+  // So detecting a genuine 5% bias with this instrument needs n ~ 20,000+, which
+  // is ~180 draw-years rather than the 40 run here. The 40-year run can only
+  // catch gross breakage (the unfinalized-hash defect showed as +26.5%).
+  const drSd = Math.sqrt(drs.reduce((s, x) => s + (x - dm) ** 2, 0) / Math.max(1, drs.length - 1));
+  const drHalfWidth = 2.576 * drSd / Math.sqrt(drs.length);
+  const drOff = Math.abs(dm - M.damageRatio.mean);
+  console.log(`  damage ratio: mean ${dm.toFixed(4)} vs closed form ${M.damageRatio.mean.toFixed(4)}`
+    + ` (${((dm / M.damageRatio.mean - 1) * 100).toFixed(2)}%, 99% CI +/-${(drHalfWidth / M.damageRatio.mean * 100).toFixed(2)}%, n=${drs.length}, CV ${(drSd / dm).toFixed(2)})`
+    + `  ${note(drOff <= drHalfWidth, `damage ratio mean ${dm.toFixed(4)} outside its 99% CI of ${M.damageRatio.mean.toFixed(4)}`)}`);
   console.log(`    median ${q(0.5).toFixed(5)}  p75 ${q(0.75).toFixed(4)}  p90 ${q(0.90).toFixed(4)}  p99 ${q(0.99).toFixed(4)}  max ${drs[drs.length - 1].toFixed(4)}`);
   console.log(`    J-shaped (median << mean): ${note(q(0.5) < dm / 3, 'damage ratio not J-shaped')}`);
   console.log(`    tail: P(dr>0.10) ${(drs.filter(x => x > 0.10).length / drs.length * 100).toFixed(2)}%  P(dr>0.40) ${(drs.filter(x => x > 0.40).length / drs.length * 100).toFixed(2)}% — REPORTED`);
@@ -493,7 +517,7 @@ console.log('\n--- 9. weather frequency and event structure (NC2.1) ---');
   const ctx = {
     membersByZone: groupMembersByZone(roster),
     yearNumber: 1, calendarYear: 2026,
-    hitRng: deriveSubRng(1, 1, 'pr_wx_hit'), sevRng: deriveSubRng(1, 1, 'pr_wx_sev'),
+    instanceSeed: 1,
   };
   const empty = generateWeatherEvent(ctx, 'North', 1e-9, 'FORCED-EMPTY');
   console.log(`  forced intensity 1e-9: ${empty.claims.length} claims, occurrence ${empty.occurrence === null ? 'null' : 'PRESENT'}  ${note(empty.occurrence === null && empty.claims.length === 0 && empty.gross === 0, 'a zero-footprint event still produced an occurrence')}`);

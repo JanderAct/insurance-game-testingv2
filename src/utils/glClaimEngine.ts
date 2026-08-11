@@ -298,13 +298,24 @@ export function generateGlClaims(inputs: GlGenerationInputs): GlGenerationResult
   const { members, yearNumber, calendarYear, instanceSeed, kGl, gPool, riskControlEffectiveness } = inputs;
   const freqMultipliers = inputs.freqMultipliers;
 
-  const freqRng = deriveSubRng(instanceSeed, yearNumber, 'gl_freq');
-  const gateRng = deriveSubRng(instanceSeed, yearNumber, 'gl_gate');
-  const sevRng = deriveSubRng(instanceSeed, yearNumber, 'gl_sev');
-  const stageRng = deriveSubRng(instanceSeed, yearNumber, 'gl_stage');
-  const lagRng = deriveSubRng(instanceSeed, yearNumber, 'gl_lag');
-  const abuseRng = deriveSubRng(instanceSeed, yearNumber, 'gl_abuse');
-  const legalRng = deriveSubRng(instanceSeed, yearNumber, 'gl_legal');
+  // PER-MEMBER STREAMS, keyed on member.id and REASSIGNED at the top of the
+  // member loop below. See that block for why per-member rather than one
+  // stream per year.
+  //
+  // ⚠ THEY ARE `let`, NOT `const`, AND THAT IS LOAD-BEARING. gateIndemnity and
+  // emit are closures defined below but outside the loop; they capture these
+  // BINDINGS, so reassigning per member is what makes them draw from the
+  // current member's streams. Consequently NEITHER CLOSURE MAY BE CALLED FROM
+  // OUTSIDE THE MEMBER LOOP — it would silently draw from whichever member
+  // happened to be last. All three call sites are inside it today; keep them
+  // there, or pass the streams explicitly instead.
+  let freqRng = deriveSubRng(instanceSeed, yearNumber, 'gl_freq');
+  let gateRng = deriveSubRng(instanceSeed, yearNumber, 'gl_gate');
+  let sevRng = deriveSubRng(instanceSeed, yearNumber, 'gl_sev');
+  let stageRng = deriveSubRng(instanceSeed, yearNumber, 'gl_stage');
+  let lagRng = deriveSubRng(instanceSeed, yearNumber, 'gl_lag');
+  let abuseRng = deriveSubRng(instanceSeed, yearNumber, 'gl_abuse');
+  let legalRng = deriveSubRng(instanceSeed, yearNumber, 'gl_legal');
 
   const rcFactor = Math.max(0, 1 - riskControlEffectiveness);
 
@@ -393,6 +404,27 @@ export function generateGlClaims(inputs: GlGenerationInputs): GlGenerationResult
   };
 
   for (const member of members) {
+    // PER-MEMBER STREAMS, KEYED ON member.id. deriveSubRng hashes the whole
+    // purpose string, so the key space is free.
+    //
+    // WHY NOT ONE STREAM PER YEAR consumed in member order: the marketplace
+    // generator draws for all 200 members, and a member's claim history must
+    // not depend on WHO ELSE is enrolled or on the iteration order. With a
+    // shared stream, inserting one extra member shifts every draw after it, so
+    // a prospect's loss history would change because of enrolment decisions
+    // made years earlier — which makes an underwriting screen incoherent.
+    //
+    // Keying per member makes each member's draws a pure function of
+    // (seed, year, memberId). That is asserted, not assumed: see
+    // scripts/diagnostics/enrolment-independence-check.ts.
+    freqRng = deriveSubRng(instanceSeed, yearNumber, `gl_freq:${member.id}`);
+    gateRng = deriveSubRng(instanceSeed, yearNumber, `gl_gate:${member.id}`);
+    sevRng = deriveSubRng(instanceSeed, yearNumber, `gl_sev:${member.id}`);
+    stageRng = deriveSubRng(instanceSeed, yearNumber, `gl_stage:${member.id}`);
+    lagRng = deriveSubRng(instanceSeed, yearNumber, `gl_lag:${member.id}`);
+    abuseRng = deriveSubRng(instanceSeed, yearNumber, `gl_abuse:${member.id}`);
+    legalRng = deriveSubRng(instanceSeed, yearNumber, `gl_legal:${member.id}`);
+
     const rq = member.riskQuality;
     const theta = thetaGl(rq);
     // ONE frequency-noise draw per member-year, shared across the four subs

@@ -154,6 +154,23 @@ export class SeededRandom {
   // 0.999999463791, so 1-u = 5.4e-7 and u^12.5 reaches 0.999993. Truncation
   // would require 1-u around 1e-3. An 8% right-tail deficit would have shown
   // as z ~ -70 at t = 0.40.
+  //
+  // ⚠ SCOPE OF THAT VALIDATION: WITHIN-STREAM QUALITY ONLY. Those 5,000,000
+  // draws came from ONE long stream, so they establish that a single stream's
+  // orbit is sound. They say NOTHING about how streams are SEEDED RELATIVE TO
+  // EACH OTHER, which is an independent property and needs its own test.
+  //
+  // That gap was real, not hypothetical. When member-level streams became keyed
+  // per member ('pr_sev:member-001', ':member-002', ...), the generators began
+  // taking a handful of draws from each of 200 streams instead of a long orbit
+  // from one — and the unfinalized hash gave those 200 seeds a lag-1
+  // correlation of 0.9908, which u^12.5 turned into a mean of 0.005639 against
+  // 0.040000 exact. See the finalizer note on deriveSubRng below, and the
+  // permanent per-key dispersion regression test in
+  // scripts/diagnostics/enrolment-independence-check.ts.
+  //
+  // A VALIDATION THAT EXERCISES ONE STREAM CANNOT DETECT A DEFECT IN HOW
+  // STREAMS ARE SEEDED RELATIVE TO EACH OTHER.
   beta(a: number, b: number): number {
     if (!(a > 0) || !(b > 0)) return 0;
     const x = this.gamma(a, 1);
@@ -183,12 +200,56 @@ export function deriveYearRng(baseSeed: number, yearNumber: number): SeededRando
   return new SeededRandom(mixed);
 }
 
-// Derive a sub-RNG for a specific purpose within a year
+// Murmur3's 32-bit finalizer. AVALANCHE: a one-bit change anywhere in the
+// input flips about half the output bits.
+//
+// ⚠ THIS IS LOAD-BEARING, NOT DECORATION. See deriveSubRng below.
+function fmix32(h: number): number {
+  h = h >>> 0;
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x85ebca6b) >>> 0;
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35) >>> 0;
+  h ^= h >>> 16;
+  return h >>> 0;
+}
+
+// Derive a sub-RNG for a specific purpose within a year.
+//
+// ⚠ WHY THE FINALIZER EXISTS — DO NOT REMOVE IT.
+//
+// `hash * 31 + charCode` is a weak multiplicative string hash: keys that differ
+// only in their trailing characters produce seeds that differ by a small
+// increment. An LCG's FIRST output is a near-affine function of its seed, so
+// nearby seeds give nearly identical first draws.
+//
+// That was harmless while every label opened ONE stream per year and consumed a
+// long orbit from it. It stopped being harmless when member-level streams became
+// keyed per member ('pr_sev:member-001', 'pr_sev:member-002', ...), because the
+// generators then take only a HANDFUL of draws from each of 200 streams — i.e.
+// they sample the first few outputs of 200 nearly-identical LCGs.
+//
+// Measured on the unfinalized hash, 200 member keys at one seed and year:
+//   first uniforms 0.1957, 0.1961, 0.1965, 0.1969, ...  (an arithmetic run)
+//   lag-1 correlation across consecutive member ids: 0.9908
+//   mean of one Beta(0.08, 1.92) draw per member: 0.005639 vs 0.040000 exact
+// The Beta blowup is the SeededRandom.beta warning made real: Marsaglia-Tsang's
+// small-shape boost computes u^(1/0.08) = u^12.5, which amplifies any weakness
+// in the uniform's bits. Property's damage ratio runs exactly that shape, and
+// the property harness failed four distributional checks because of it — drawn
+// weather gross ran +62% against its analytic.
+//
+// With fmix32 the same measurements read: first-mean 0.5120, lag-1 correlation
+// -0.0306, Beta mean 0.036290 (n = 200, well inside one SE of 0.040000).
+//
+// The validation recorded on SeededRandom.beta was performed on ONE long stream,
+// which is why it did not catch this: the weakness is in seed DISPERSION across
+// keys, not in the orbit of any single stream.
 export function deriveSubRng(baseSeed: number, yearNumber: number, purpose: string): SeededRandom {
   let hash = (baseSeed * 2654435761) >>> 0;
   hash = (hash ^ (yearNumber * 40503)) >>> 0;
   for (let i = 0; i < purpose.length; i++) {
     hash = (hash * 31 + purpose.charCodeAt(i)) >>> 0;
   }
-  return new SeededRandom(hash);
+  return new SeededRandom(fmix32(hash));
 }

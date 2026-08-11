@@ -220,11 +220,11 @@ export function generatePropertyClaims(inputs: PropertyGenerationInputs): Proper
   const { members, yearNumber, calendarYear, instanceSeed, kPr, gPool, riskControlEffectiveness } = inputs;
 
   // Purpose-keyed streams; new labels, so nothing existing is disturbed.
-  const freqRng = deriveSubRng(instanceSeed, yearNumber, 'pr_freq');
-  const epsRng = deriveSubRng(instanceSeed, yearNumber, 'pr_eps');
-  const locRng = deriveSubRng(instanceSeed, yearNumber, 'pr_loc');
-  const sevRng = deriveSubRng(instanceSeed, yearNumber, 'pr_sev');
-
+  //
+  // ⚠ PER MEMBER, INSIDE THE LOOP — NOT ONE STREAM PER YEAR. See the block at
+  // the member loop below for why; moving these back out here would silently
+  // reintroduce the enrolment dependency the marketplace generator exists to
+  // remove.
   const rcFactor = Math.max(0, 1 - riskControlEffectiveness);
 
   const claims: Claim[] = [];
@@ -236,6 +236,24 @@ export function generatePropertyClaims(inputs: PropertyGenerationInputs): Proper
   let perRiskBreaches = 0;
 
   for (const member of members) {
+    // PER-MEMBER STREAMS, KEYED ON member.id. deriveSubRng hashes the whole
+    // purpose string, so the key space is free.
+    //
+    // WHY NOT ONE STREAM PER YEAR consumed in member order: the marketplace
+    // generator draws for all 200 members, and a member's claim history must
+    // not depend on WHO ELSE is enrolled or on the iteration order. With a
+    // shared stream, inserting one extra member shifts every draw after it, so
+    // a prospect's loss history would change because of enrolment decisions
+    // made years earlier — which makes an underwriting screen incoherent.
+    //
+    // Keying per member makes each member's draws a pure function of
+    // (seed, year, memberId). That is asserted, not assumed: see
+    // scripts/diagnostics/enrolment-independence-check.ts.
+    const freqRng = deriveSubRng(instanceSeed, yearNumber, `pr_freq:${member.id}`);
+    const epsRng = deriveSubRng(instanceSeed, yearNumber, `pr_eps:${member.id}`);
+    const locRng = deriveSubRng(instanceSeed, yearNumber, `pr_loc:${member.id}`);
+    const sevRng = deriveSubRng(instanceSeed, yearNumber, `pr_sev:${member.id}`);
+
     const tiv = member.exposureByLine.Property ?? 0;
     const n = locationCount(member);
     let memberLoss = 0;
@@ -526,15 +544,20 @@ export interface WeatherGenerationResult {
   events: WeatherEventSummary[];      // one row per event DRAWN
 }
 
-// The per-zone member index plus the streams an event consumes. Built once a
-// year by generateWeatherEvents; also the argument a harness builds directly
-// when it wants to force events at chosen intensities.
+// The per-zone member index plus what an event needs to DERIVE its streams.
+// Built once a year by generateWeatherEvents; also the argument a harness
+// builds directly when it wants to force events at chosen intensities.
+//
+// ⚠ CARRIES instanceSeed, NOT hitRng/sevRng. The within-event draws are keyed
+// per (event, member) inside generateWeatherEvent — see the block there. It
+// used to hold two year-level streams shared across every member and location
+// in the zone, which made each member's footprint depend on the draws of
+// whoever preceded it in the zone list.
 export interface WeatherEventContext {
   membersByZone: Map<Region, Member[]>;
   yearNumber: number;
   calendarYear: number;
-  hitRng: SeededRandom;
-  sevRng: SeededRandom;
+  instanceSeed: number;
 }
 
 export function groupMembersByZone(members: Member[]): Map<Region, Member[]> {
@@ -570,6 +593,35 @@ export function generateWeatherEvent(
   let maxClaimGross = 0;
 
   for (const member of ctx.membersByZone.get(region) ?? []) {
+    // WITHIN-EVENT STREAMS, KEYED PER (EVENT, MEMBER).
+    //
+    // The event itself stays shared and pool-level — one storm, one zone, one
+    // intensity, drawn from pr_wx_freq / pr_wx_intensity in
+    // generateWeatherEvents. What is keyed per member is only the FOOTPRINT and
+    // the DAMAGE RATIO within that one storm.
+    //
+    // WHY THIS CANNOT BE FIXED BY AN ITERATION-ORDER CONVENTION: sevRng.beta()
+    // calls gamma() twice, and gamma() is a Marsaglia-Tsang REJECTION loop, so
+    // the number of uniforms a single damage-ratio draw consumes is VARIABLE.
+    // With one stream shared across the zone, every member's footprint and
+    // severity therefore depend on how many rejections earlier members happened
+    // to incur — an invisible, order-sensitive coupling that no amount of
+    // stable sorting removes. Keying per (event, member) eliminates it
+    // structurally.
+    //
+    // Per-member is also SUFFICIENT: within a member the draws run over that
+    // member's own locations in index order, and locationCount(member) is
+    // authored per member, so consumption is a function of that member alone.
+    // Per-location streams would add ~1,866 derivations per event for no
+    // additional independence.
+    //
+    // eventId already encodes (year, zone, index) and is itself
+    // enrolment-independent: the zone count comes from a constant lambda over
+    // the fixed WEATHER_ZONES list and the intensity is drawn per event, so
+    // neither reads the member list.
+    const hitRng = deriveSubRng(ctx.instanceSeed, ctx.yearNumber, `pr_wx_hit:${eventId}:${member.id}`);
+    const sevRng = deriveSubRng(ctx.instanceSeed, ctx.yearNumber, `pr_wx_sev:${eventId}:${member.id}`);
+
     const n = locationCount(member);
     locationsExposed += n;
 
@@ -584,11 +636,11 @@ export function generateWeatherEvent(
       // set is made of ACTUAL locations carrying their ACTUAL TIVs, so
       // within-member concentration (Primary Asset Share) flows through to
       // event severity instead of being averaged away.
-      if (!ctx.hitRng.chance(hitRate)) continue;
+      if (!hitRng.chance(hitRate)) continue;
       affectedLocations++;
 
       const hitTiv = locationTivAt(member, index);
-      const damageRatio = ctx.sevRng.beta(a, b);
+      const damageRatio = sevRng.beta(a, b);
       const accidentYearSeverity = damageRatio * hitTiv * 1e6;   // TIV is $M
       const claimGross = accidentYearSeverity * WEATHER_PAYOUT_TREND_FACTOR;
 
@@ -666,8 +718,7 @@ export function generateWeatherEvents(inputs: WeatherGenerationInputs): WeatherG
     membersByZone: groupMembersByZone(members),
     yearNumber,
     calendarYear,
-    hitRng: deriveSubRng(instanceSeed, yearNumber, 'pr_wx_hit'),
-    sevRng: deriveSubRng(instanceSeed, yearNumber, 'pr_wx_sev'),
+    instanceSeed,
   };
 
   const claims: Claim[] = [];

@@ -36,7 +36,25 @@
 //   npx tsx scripts/diagnostics/solo-export-guard.ts            # compare to baseline
 //   npx tsx scripts/diagnostics/solo-export-guard.ts --write    # re-capture baseline
 //
-// Baseline: baselines/SOLO_EXPORT_GUARD_v5.json. v4 was retired by roster v4
+// Baseline: baselines/SOLO_EXPORT_GUARD_v6.json. v5 was retired by TWO changes
+// landing together, and the order matters for reading the movement:
+//
+//   1. PER-MEMBER RNG STREAMS. Member-level streams moved from one stream per
+//      purpose per year (consumed in member order) to one keyed per member, so
+//      a member's claims stop depending on who else is enrolled. On its own
+//      this reset WC-solo, GL-solo and tri on all three seeds and left PR-solo
+//      BYTE-IDENTICAL — Property is not on the claim-generator path, so that
+//      invariance was an ASSERTION that no WC/GL stream had leaked into it, and
+//      it held.
+//   2. THE deriveSubRng FINALIZER (fmix32), which change 1 proved necessary —
+//      see finding 26. This one changes seed derivation for EVERY label, so it
+//      necessarily moves Property too, including its legacy aggregate path.
+//      PR-solo therefore DOES differ from v5 in this baseline. That is expected
+//      and is not a leak: the leak check is the one in step 1, and the standing
+//      per-key dispersion regression test now guards the finalizer.
+//
+// See scripts/diagnostics/enrolment-independence-check.ts for both.
+// v4 was retired by roster v4
 // (TIV-only rescale, see roster_canonical_v4.csv), and v3 before that by the
 // expected-combined-ratio fix, which added one exported metric, corrected two
 // values and renamed six labels — a legitimate export-shape change with no
@@ -65,7 +83,7 @@ import { RESULT_METRICS } from '../../src/utils/resultMetrics';
 import type { GameState, CoverageLine, ResultSet } from '../../src/types/simulation';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v5.json');
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v6.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

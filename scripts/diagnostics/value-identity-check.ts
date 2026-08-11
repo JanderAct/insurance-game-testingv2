@@ -52,7 +52,24 @@ import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import type { CoverageLine, GameState, LineResultSet, ResultSet } from '../../src/types/simulation';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v5.json');
+// v6: retired v5 at the per-member RNG stream change plus the deriveSubRng
+// finalizer that change proved necessary (finding 26).
+//
+// Measured for the PER-MEMBER KEYING ALONE, which is the diagnostically useful
+// decomposition: 6,404 of 14,850 fields moved across WC-solo/GL-solo/tri, and
+// PR-solo moved 0 of 2,970 — Property is not on the claim-generator path, so
+// that was the no-leak assertion, and it held. Field count stayed at 14,850
+// with 0 added and 0 removed. Within the three moved scopes the ONLY field
+// names that did not move are the same 28 structurally invariant ones in each:
+// the HELD purePremium/purePremiumPer100 and the rate/CLF figures derived from
+// it, decision inputs at defaults, and fields that are constant or identically
+// zero (commonLossFactor and catastropheFactor are the legacy aggregate-path
+// fields WC and GL no longer read). That is what a TOTAL move looks like — 43%
+// of all fields reads as partial until it is partitioned by scope.
+//
+// The finalizer then moved everything again, Property included, because it
+// changes seed derivation for every label. This baseline reflects both.
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v6.json');
 
 function seedOf(id: string) {
   let h = 5381;
