@@ -68,8 +68,21 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // of all fields reads as partial until it is partitioned by scope.
 //
 // The finalizer then moved everything again, Property included, because it
-// changes seed derivation for every label. This baseline reflects both.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v6.json');
+// changes seed derivation for every label. v6 reflected both.
+//
+// v7: MARKETPLACE-WIDE GENERATION, and it is an ADDITIVE SHAPE CHANGE ONLY —
+// 0 of 14,850 values moved. Claims are now generated for all 200 canonical
+// members, but per-member stream keying means a prospect's draws come from that
+// prospect's own stream and cannot touch an enrolled member's, so every pool
+// figure is bit-identical to v6. The only difference is 60 new kLineApplied
+// fields. That zero-movement result IS the containment proof for stage 2, on
+// top of a 40-seed attribution run showing the enrolled drawn/expected ratio
+// unchanged to four decimals.
+//
+// NOTE THE DELIBERATE VERSION SKEW: solo-export-guard stays at v6 because its
+// hashes are byte-identical (kLineApplied is not exported), and recapturing it
+// would have produced a duplicate file under a new name.
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v7.json');
 
 function seedOf(id: string) {
   let h = 5381;

@@ -408,7 +408,35 @@ export interface ResultSet {
   dividends: number;
 
   // Losses
+  // The roster/risk-quality-mix correction ACTUALLY APPLIED to this line's draw
+  // this year — k_line for WC, k_GL for GL. Absent on the aggregate (Property)
+  // path, which has no such correction.
+  //
+  // EXPOSED SO THE ENROLLED-BOOK RULE CAN BE ASSERTED RATHER THAN REVIEWED. It
+  // must equal computeKLine/computeKGl of the ENROLLED book. Marketplace-wide
+  // generation makes it easy to pass the 200-member roster here by accident,
+  // which would drive the correction to ~1 and silently disable it — and on the
+  // canonical roster the two values differ by only ~0.4% (0.9820 vs 0.9781),
+  // far too little to notice in any downstream figure. Asserted in
+  // scripts/diagnostics/marketplace-generation-check.ts.
+  kLineApplied?: number;
+  // ENROLLED MEMBERS ONLY. This is the pool-accounting list: aggregateMemberLoss,
+  // grossUltimateLoss, reserves and reinsurance all derive from it.
   memberLossResults: MemberLossResult[];
+  // ALL 200 CANONICAL MEMBERS, enrolled and prospect alike — loss HISTORY only,
+  // never pool accounting. Claims are generated marketplace-wide so that a
+  // prospect arrives with a readable loss record instead of a blank one, which
+  // is what lets an underwriting screen read experience rather than a hidden
+  // risk-quality score.
+  //
+  // ⚠ DO NOT SUM THIS INTO ANY POOL FIGURE. Prospects pay no premium and cede
+  // nothing; their losses are not the pool's. The enrolled entries here are the
+  // same objects as memberLossResults above, so the two are consistent by
+  // construction rather than by a second computation.
+  //
+  // Optional for the same reason claims? is: the aggregate (Property) path does
+  // not produce it, and it is in-memory only.
+  marketMemberLossResults?: MemberLossResult[];
   aggregateMemberLoss: number;
   commonLossFactor: number;
   catastropheFactor: number;

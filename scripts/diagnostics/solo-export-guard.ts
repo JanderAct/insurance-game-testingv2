@@ -54,6 +54,14 @@
 //      per-key dispersion regression test now guards the finalizer.
 //
 // See scripts/diagnostics/enrolment-independence-check.ts for both.
+//
+// STAYS AT v6 THROUGH THE MARKETPLACE-WIDE GENERATION CHANGE. That change
+// generates claims for all 200 members, but per-member stream keying keeps every
+// enrolled draw identical and prospect losses never reach an exported figure, so
+// all 12 hashes are byte-identical. value-identity moved to v7 only to absorb 60
+// new kLineApplied fields, which are not exported. Recapturing here would have
+// written a duplicate file under a new name, so the version skew is deliberate.
+//
 // v4 was retired by roster v4
 // (TIV-only rescale, see roster_canonical_v4.csv), and v3 before that by the
 // expected-combined-ratio fix, which added one exported metric, corrected two

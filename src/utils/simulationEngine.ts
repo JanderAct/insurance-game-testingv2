@@ -318,7 +318,35 @@ export function processLineYear(
   let glCountsBySub: Record<string, number> | undefined;
   let memberLossResults: MemberLossResult[];
   let aggregateMemberLoss: number;
+  let marketMemberLossResults: MemberLossResult[] | undefined;
+  // The mix correction actually applied to the draw — see LineResultSet.kLineApplied.
+  let kLineApplied: number | undefined;
   let shockOccurred: boolean;
+
+  // --- MARKETPLACE-WIDE GENERATION -------------------------------------------
+  //
+  // Claims are generated for ALL 200 canonical members every year. Only the
+  // ENROLLED subset feeds pool losses, premium, reserves and reinsurance;
+  // prospect claims exist solely as loss HISTORY, so that a prospect arrives
+  // with a readable record instead of a blank one and adverse selection becomes
+  // something the player can actually read.
+  //
+  // TWO GENERATOR CALLS, NOT ONE OVER 200, AND THAT IS THE POINT. k_line and
+  // riskControlEffectiveness are properties of POOL MEMBERSHIP — k_line is the
+  // enrolled book's risk-quality-mix correction, and risk control is a service
+  // members buy. Applying either to a prospect would be wrong twice over: it
+  // would give non-members free safety consulting, and it would make a
+  // prospect's loss history depend on the enrolled book's RQ mix, which is
+  // exactly the incoherence the per-member stream keying removed. So prospects
+  // generate at kLine/kGl = 1 and rc = 0.
+  //
+  // Splitting the call costs nothing in draw terms: since stage 1, every
+  // member-level stream is keyed on (seed, year, memberId), so a member's claims
+  // are identical whether generated alone, with the pool, or with the whole
+  // marketplace. Enrolment independence is what makes the split free —
+  // asserted in scripts/diagnostics/enrolment-independence-check.ts.
+  const enrolledMemberIds = new Set(memberResult.activeMembers.map(m => m.id));
+  const marketplaceProspects = ctx.allMarketMembers.filter(m => !enrolledMemberIds.has(m.id));
 
   // Shock cost, accumulated per shockId by the effect application below and
   // read once at result assembly. Empty when no shock is in force.
@@ -337,6 +365,10 @@ export function processLineYear(
     // k_line is recomputed against the CURRENTLY ENROLLED book, after member
     // movement — it is the roster/risk-quality-mix correction, and the reason
     // purePremiumPer100 can be held constant instead of chasing enrollment.
+    //
+    // ⚠ ENROLLED BOOK, NOT THE FULL ROSTER. Marketplace-wide generation makes it
+    // tempting to hand the 200-member roster to everything below; doing it here
+    // would drive k_line to ~1 permanently and silently disable the correction.
     const kLine = computeKLine(memberResult.activeMembers, ctx.paramOverrides);
     const generated = generateWcClaims({
       members: memberResult.activeMembers,
@@ -364,12 +396,36 @@ export function processLineYear(
       riskControlEffectiveness: newRCEffectiveness,
       injections: ctx.shock?.injections,
     });
+    // PROSPECTS: the rest of the 200-member marketplace, generated at kLine = 1
+    // and rc = 0. See the marketplaceProspects note above for why those two are
+    // withheld and why this is a SECOND CALL rather than one call over 200.
+    const prospectGenerated = marketplaceProspects.length > 0
+      ? generateWcClaims({
+        members: marketplaceProspects,
+        yearNumber,
+        calendarYear,
+        instanceSeed: instance.seed,
+        kLine: 1,
+        riskControlEffectiveness: 0,
+        // Market-wide conditions DO reach prospects: a statutory change or a bad
+        // year is not a pool membership benefit. Pool-specific claim injections
+        // do NOT — those are events landing on the pool's own book.
+        paramOverrides: ctx.paramOverrides,
+        freqMultipliers: ctx.shock?.freqMultipliers,
+        gPool: ctx.gPool,
+      })
+      : undefined;
     generatedClaims = generated.claims;
     generatedOccurrences = generated.occurrences;
     wcCountsByClass = generated.claimCountsByClass;
     wcCountsByTier = generated.claimCountsByTier;
     memberLossResults = generated.memberLossResults;
     aggregateMemberLoss = generated.grossUltimateLoss;
+    marketMemberLossResults = [
+      ...generated.memberLossResults,
+      ...(prospectGenerated?.memberLossResults ?? []),
+    ];
+    kLineApplied = kLine;
     // A catastrophic-tier claim is WC's shock event, replacing the old
     // "aggregate factor exceeded a threshold" definition.
     shockOccurred = (generated.claimCountsByTier.catastrophic ?? 0) > 0;
@@ -405,6 +461,7 @@ export function processLineYear(
     // Same discipline as WC: k_GL is the per-year roster/risk-quality-mix
     // correction against the currently enrolled book; the pure premium itself
     // is held (step 6b) rather than chasing enrollment.
+    // ⚠ ENROLLED BOOK, NOT THE FULL ROSTER — same trap as WC's k_line above.
     const kGl = computeKGl(memberResult.activeMembers);
     const generated = generateGlClaims({
       members: memberResult.activeMembers,
@@ -419,11 +476,29 @@ export function processLineYear(
       // shock is a realized event, not a repricing.
       freqMultipliers: ctx.shock?.freqMultipliers,
     });
+    // PROSPECTS at kGl = 1, rc = 0 — see the marketplaceProspects note above.
+    const prospectGenerated = marketplaceProspects.length > 0
+      ? generateGlClaims({
+        members: marketplaceProspects,
+        yearNumber,
+        calendarYear,
+        instanceSeed: instance.seed,
+        kGl: 1,
+        riskControlEffectiveness: 0,
+        freqMultipliers: ctx.shock?.freqMultipliers,
+        gPool: ctx.gPool,
+      })
+      : undefined;
     generatedClaims = generated.claims;
     generatedOccurrences = generated.occurrences;
     glCountsBySub = generated.claimCountsBySub;
     memberLossResults = generated.memberLossResults;
     aggregateMemberLoss = generated.grossUltimateLoss;
+    marketMemberLossResults = [
+      ...generated.memberLossResults,
+      ...(prospectGenerated?.memberLossResults ?? []),
+    ];
+    kLineApplied = kGl;
     // GL's shock event (ruled J11): any single occurrence whose gross total
     // (indemnity + ALAE, all claimants of an abuse batch combined) exceeds $1M.
     shockOccurred = generated.maxOccurrenceGross > 1_000_000;
@@ -789,8 +864,10 @@ export function processLineYear(
     assessments,
     dividends,
 
+    kLineApplied,
     memberLossResults,
     aggregateMemberLoss,
+    marketMemberLossResults,
     claims: generatedClaims,
     occurrences: generatedOccurrences,
     claimCountsByClass: wcCountsByClass,
