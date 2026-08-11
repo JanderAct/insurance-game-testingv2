@@ -68,6 +68,15 @@
 // change on every remaining pricing/surplus/membership figure — confirmed by
 // isolation test in value-identity-check.ts's header). All 12 hashes moved.
 //
+// v8 retired here (moved to v9) by two corrections to that same work, each
+// isolated separately in value-identity-check.ts's header: the
+// fundingConfidenceLevel satisfaction term neutralised (it had gone live and
+// backwards at the new 0.60 default) and FUNDING_CLF_TABLE[0.60] aligned to
+// the reference chart's 1.000 (was 1.003). Both touch every line via the
+// shared membershipEngine.ts / lookupCLF paths, so all 12 hashes moved again,
+// PR-solo included — expected here, unlike the per-member-stream work above
+// where PR-solo staying still was the specific leak check.
+//
 // v4 was retired by roster v4
 // (TIV-only rescale, see roster_canonical_v4.csv), and v3 before that by the
 // expected-combined-ratio fix, which added one exported metric, corrected two
@@ -97,7 +106,7 @@ import { RESULT_METRICS } from '../../src/utils/resultMetrics';
 import type { GameState, CoverageLine, ResultSet } from '../../src/types/simulation';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v8.json');
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v9.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

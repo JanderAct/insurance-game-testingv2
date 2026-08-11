@@ -112,13 +112,17 @@ function updateSatisfaction(current: number, decisions: LineDecisionSet): number
   // this removal changes nothing at defaults.
   delta += decisions.dividendPct * 10.0;
   delta -= decisions.assessmentPct * 8.0;
-  // NOTE — NOT REMOVED, BUT NO LONGER INERT AT DEFAULTS. This term zeroed at
+  // NEUTRALISED — coefficient set to 0, not sign-flipped. This term zeroed at
   // the old fundingConfidenceLevel default (0.75); the new default is 0.60
-  // (CLF-only pricing), so it now contributes -0.075 satisfaction/yr at
-  // defaults. Left as-is — untouched, not silently — since only the rateChange
-  // terms above were asked to be removed; this one is a genuine side effect of
-  // the default change, reported rather than "fixed" on my own judgment.
-  delta += (decisions.fundingConfidenceLevel - 0.75) * 0.5;
+  // (CLF-only pricing), so it started contributing -0.075 satisfaction/yr at
+  // defaults (-0.225/yr at the 30% floor) — and backwards: charging members
+  // LESS was making them UNHAPPIER. Two reasons it goes to 0 rather than
+  // getting its sign corrected: the 0.75 reference point is now arbitrary
+  // since the default moved to 0.60, and this whole term is being replaced by
+  // bill-based satisfaction (Economics Step 1 / Stage 2.5). A term with an
+  // arbitrary anchor and an uncalibrated magnitude is better dormant than
+  // wrong.
+  delta += (decisions.fundingConfidenceLevel - 0.75) * 0;
   return Math.max(1.0, Math.min(10.0, parseFloat((current + delta).toFixed(1))));
 }
 

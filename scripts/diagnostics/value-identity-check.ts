@@ -82,12 +82,33 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // v8: CLF-ONLY PRICING (decision-surface work). The Rate Change decision was
 // deleted and the funding-confidence-level default moved from 0.75 to 0.60 —
 // ISOLATED AND CONFIRMED SEPARATELY: with the default temporarily held at its
-// old 0.75 value, this check reads 0/14,910 changed, so the mechanical
+// old 0.75 value, this check read 0/14,910 changed, so the mechanical
 // deletion of the three now-dead rateChange terms (all already zero at
-// rateChange=0 defaults) moves nothing on its own. Every one of the 11,051
-// changed values at the real 0.60 default is downstream of that one
+// rateChange=0 defaults) moved nothing on its own. Every one of the 11,051
+// changed values at the real 0.60 default was downstream of that one
 // deliberate default change, not a side effect of the field removal.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v8.json');
+//
+// v9: TWO CORRECTIONS TO THE v8 WORK, EACH ISOLATED THE SAME WAY.
+//   (1) updateSatisfaction's (fundingConfidenceLevel - 0.75) term went from
+//       inert (zero at the old 0.75 default) to live AND BACKWARDS at the new
+//       0.60 default — charging members less was making them unhappier.
+//       Neutralised to coefficient 0 rather than sign-corrected: the 0.75
+//       anchor is now arbitrary, and the whole term is slated for replacement
+//       by bill-based satisfaction (Stage 2.5). Isolated with fix (2) held
+//       back (CLF still 1.003): 2,302 changed across 71 fields, led by
+//       memberSatisfaction itself (150 instances, e.g. 7 -> 7.4 — moving UP,
+//       i.e. the wrong-signed drag being removed) and its retention/surplus
+//       cascade.
+//   (2) FUNDING_CLF_TABLE[0.60] moved from 1.003 to the reference chart's
+//       1.000 — the chart is the authority. Isolated with fix (1) held back
+//       (satisfaction coefficient still 0.5): 7,256 changed across 76 fields,
+//       led by selectedFundingCLF itself (150 instances, 1.003 -> 1) and the
+//       entire pricing/premium/reserve cascade at the 60% default.
+// Combined (both fixes, the real shipped state): 8,135 changed across 77
+// fields — NOT the sum of the two isolated runs (2,302 + 7,256 = 9,558),
+// because the two channels interact nonlinearly (satisfaction feeds
+// retention feeds exposure feeds premium, which the CLF fix also moves).
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v9.json');
 
 function seedOf(id: string) {
   let h = 5381;

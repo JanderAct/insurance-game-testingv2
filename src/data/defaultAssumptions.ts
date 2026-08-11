@@ -387,15 +387,13 @@ export const MAX_WITHDRAWN_PER_YEAR = 4;
 
 // Funding confidence level factor (CLF) table
 // Represents the multiplier applied to expected losses to set funding targets
-// ⚠ 0.60 IS 1.003 HERE, NOT THE 1.000 THE REFERENCE CHART GIVES. Reported, not
-// silently adjusted, per explicit instruction — see the CLF-only pricing work.
-// Design intent (stated by the source of the chart) is that 60% is EXACTLY
-// break-even (combined ratio 100.0% at the default reinsurance level), which
-// requires 1.000 here; at 1.003 the panel computes 99.8%, not exactly 100.0%.
-// 0.45/0.40/0.35/0.30 were ADDED (not previously present) to support the
-// funding-confidence slider's extended 30%-95% range; their values are taken
-// directly from that same reference chart, since there was no existing entry
-// to conflict with.
+// 0.60 ALIGNED TO 1.000, matching the reference chart — the chart is the
+// authority. Was 1.003 in code; that made the funding-consequence panel read
+// 99.8% at the "expected" 60% setting instead of exactly 100.0%, when exactly
+// break-even is the entire point of that label. 0.45/0.40/0.35/0.30 were ADDED
+// (not previously present) to support the funding-confidence slider's
+// extended 30%-95% range; their values are taken directly from that same
+// reference chart, since there was no existing entry to conflict with.
 export const FUNDING_CLF_TABLE: Record<number, number> = {
   0.95: 2.448,
   0.90: 1.951,
@@ -404,7 +402,7 @@ export const FUNDING_CLF_TABLE: Record<number, number> = {
   0.75: 1.346,
   0.70: 1.217,
   0.65: 1.105,
-  0.60: 1.003,
+  0.60: 1.000,
   0.55: 0.908,
   0.50: 0.827,
   0.45: 0.745,
