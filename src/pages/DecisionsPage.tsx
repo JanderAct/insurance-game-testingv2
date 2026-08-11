@@ -160,18 +160,8 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
             This is the current, active mechanism. It will be replaced by Renewal Underwriting and New Business Appetite (below) once member loss history exists.
           </p>
           <RenewalUnderwritingPreview />
-        </SectionCard>
-
-        {/* Full width — matches the Reinsurance Level box pattern below it, and
-            full width is what guarantees five boxes stay on one row rather than
-            cramming into a half-width column. (Reinsurance Program itself is
-            currently ALSO half-width, not full-page as might be assumed from a
-            glance at the rendered page — measured at 674px, identical to
-            Growth & Underwriting's column. This card is given full width on its
-            own merits, not by matching what Reinsurance currently does.) */}
-        <div className="lg:col-span-2">
           <NewBusinessAppetitePreview />
-        </div>
+        </SectionCard>
 
         {outstandingLoanSlider(d, set, selectedLoanInfo, disabled)}
 
@@ -375,22 +365,22 @@ function InactivePreview({ title, children }: { title: React.ReactNode; children
 }
 
 // Shared box-selection styling for both inactive previews below — the SAME
-// visual pattern Reinsurance Level uses (bold title, short description
-// beneath, selected box highlighted), rendered in a MUTED GREY palette
-// instead of Reinsurance's blue. That palette difference is deliberate and is
-// what keeps a highlighted box from reading as a live selection next to
-// Reinsurance's real blue one: grey can never be mistaken for "currently
-// chosen and in effect," which blue would be.
+// classes as the Reinsurance Level boxes (bold title, description beneath
+// allowed to wrap, selected box filled blue with reversed-out text), so a
+// selected preview box reads as "chosen" rather than "disabled." The
+// distinction from a live Reinsurance box is carried entirely by the
+// InactivePreview wrapper around these (dashed border, grayscale filter,
+// opacity, pointer-events-none, INACTIVE badge) — not by a different color.
 function PreviewBox({ title, description, selected }: { title: string; description: string; selected: boolean }) {
   return (
     <button
       type="button"
       disabled
       tabIndex={-1}
-      className={`flex flex-col items-center p-2 rounded-lg border text-center transition-all text-xs cursor-not-allowed ${selected ? 'bg-gray-300 border-gray-400 text-gray-800 shadow-sm' : 'bg-white border-gray-200 text-gray-500'}`}
+      className={`w-full h-full flex flex-col items-center justify-center p-2 rounded-lg border text-center transition-all text-xs cursor-not-allowed ${selected ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white text-gray-600 border-gray-200'}`}
     >
       <span className="font-bold">{title}</span>
-      <span className="text-xs opacity-75 mt-0.5 leading-tight hidden sm:block">{description}</span>
+      <span className="text-xs opacity-75 mt-0.5 leading-tight">{description}</span>
     </button>
   );
 }
@@ -406,7 +396,8 @@ function PreviewBox({ title, description, selected }: { title: string; descripti
 // the threshold input below reveals with no value and no placeholder number
 // for the same reason, only when the second box is picked.
 function RenewalUnderwritingPreview() {
-  const [mode, setMode] = React.useState<'renewAll' | 'nonRenewThreshold'>('renewAll');
+  // Starts unselected — an inactive control has no active choice to show.
+  const [mode, setMode] = React.useState<'renewAll' | 'nonRenewThreshold' | null>(null);
   return (
     <InactivePreview title="Renewal Underwriting">
       <div className="grid grid-cols-2 gap-1">
@@ -433,10 +424,13 @@ function RenewalUnderwritingPreview() {
 }
 
 // NEW BUSINESS APPETITE (Part 3) — inactive preview, same experience-modifier
-// basis as Renewal Underwriting above. FULL WIDTH (see the call site): five
-// boxes need more room than the half-width Growth & Underwriting column gives
-// comfortably, and full width is what guarantees they stay on one row rather
-// than wrapping, which would break the left-to-right selectivity reading.
+// basis as Renewal Underwriting above, and rendered directly beneath it in
+// the same Growth & Underwriting card: both are one decision about pool
+// membership (existing members vs. applicants) and belong in one place. Five
+// boxes across a half-width column means each is roughly 120px with
+// multi-line wrapped descriptions — deliberately not reduced to fewer
+// columns or shortened text, since the left-to-right selectivity ordering is
+// what makes the control readable.
 const APPETITE_OPTIONS = [
   { title: 'Open', description: 'Accept all applicants' },
   { title: 'Broad', description: 'Accept average or better' },
