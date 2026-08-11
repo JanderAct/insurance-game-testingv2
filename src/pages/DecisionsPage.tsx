@@ -41,8 +41,16 @@ interface DecisionsPageProps {
 // 50%. 0.45 'Minimal' continues the existing descending scale; 0.40/0.35/0.30
 // are named to read as unmistakably underfunded, since that is the point of
 // making them selectable at all (see the consequence panel below).
+// 0.60 is labeled 'Expected', not a rung on the confidence ladder like its
+// neighbors — it is BOTH the default and the exact break-even/expected-loss
+// funding point (CLF 1.000), so 'Below Average' made the intended setting
+// read as a compromise rather than as the anchor it is. Sequence either side
+// still reads sensibly: ...Moderate-Low (65%) -> Expected (60%) -> Low
+// (55%)... — 'Expected' names a distinct concept (the funding-equals-expected
+// point), not a step in the same relative gradation as its neighbors, so it
+// does not need to fit that gradation.
 const FUNDING_LEVEL_LABELS: Record<number, string> = {
-  0.95: 'Maximum', 0.90: 'Very High', 0.85: 'High', 0.80: 'Above Average', 0.75: 'Balanced', 0.70: 'Moderate', 0.65: 'Moderate-Low', 0.60: 'Below Average', 0.55: 'Low', 0.50: 'Very Low',
+  0.95: 'Maximum', 0.90: 'Very High', 0.85: 'High', 0.80: 'Above Average', 0.75: 'Balanced', 0.70: 'Moderate', 0.65: 'Moderate-Low', 0.60: 'Expected', 0.55: 'Low', 0.50: 'Very Low',
   0.45: 'Minimal', 0.40: 'Deficient', 0.35: 'Severely Deficient', 0.30: 'Critical',
 };
 
@@ -147,9 +155,23 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
 
         <SectionCard title="Growth & Underwriting" icon={<TrendingUp size={16} />}>
           <SliderInput label="Underwriting Strictness" value={d.underwritingStrictness} min={SLIDER_RANGES.underwritingStrictness.min} max={SLIDER_RANGES.underwritingStrictness.max} step={SLIDER_RANGES.underwritingStrictness.step} onChange={v => set('underwritingStrictness', v)} formatValue={v => `${v}/10 — ${UW_LABELS[Math.round(v)]}`} leftLabel="Flexible" rightLabel="Strict" disabled={disabled} helpText="Strict underwriting improves risk quality." />
+          <p className="flex items-start gap-1 text-[11px] text-gray-500 leading-relaxed -mt-3">
+            <Info size={12} className="mt-0.5 flex-shrink-0" />
+            This is the current, active mechanism. It will be replaced by Renewal Underwriting and New Business Appetite (below) once member loss history exists.
+          </p>
           <RenewalUnderwritingPreview />
-          <NewBusinessAppetitePreview />
         </SectionCard>
+
+        {/* Full width — matches the Reinsurance Level box pattern below it, and
+            full width is what guarantees five boxes stay on one row rather than
+            cramming into a half-width column. (Reinsurance Program itself is
+            currently ALSO half-width, not full-page as might be assumed from a
+            glance at the rendered page — measured at 674px, identical to
+            Growth & Underwriting's column. This card is given full width on its
+            own merits, not by matching what Reinsurance currently does.) */}
+        <div className="lg:col-span-2">
+          <NewBusinessAppetitePreview />
+        </div>
 
         {outstandingLoanSlider(d, set, selectedLoanInfo, disabled)}
 
@@ -352,6 +374,27 @@ function InactivePreview({ title, children }: { title: React.ReactNode; children
   );
 }
 
+// Shared box-selection styling for both inactive previews below — the SAME
+// visual pattern Reinsurance Level uses (bold title, short description
+// beneath, selected box highlighted), rendered in a MUTED GREY palette
+// instead of Reinsurance's blue. That palette difference is deliberate and is
+// what keeps a highlighted box from reading as a live selection next to
+// Reinsurance's real blue one: grey can never be mistaken for "currently
+// chosen and in effect," which blue would be.
+function PreviewBox({ title, description, selected }: { title: string; description: string; selected: boolean }) {
+  return (
+    <button
+      type="button"
+      disabled
+      tabIndex={-1}
+      className={`flex flex-col items-center p-2 rounded-lg border text-center transition-all text-xs cursor-not-allowed ${selected ? 'bg-gray-300 border-gray-400 text-gray-800 shadow-sm' : 'bg-white border-gray-200 text-gray-500'}`}
+    >
+      <span className="font-bold">{title}</span>
+      <span className="text-xs opacity-75 mt-0.5 leading-tight hidden sm:block">{description}</span>
+    </button>
+  );
+}
+
 // RENEWAL UNDERWRITING (Part 3, top control) — inactive preview. Would screen
 // on the EXPERIENCE MODIFIER (actual ÷ expected loss at the member's own class,
 // exposure and risk quality), never a loss ratio: a prospect has no premium
@@ -359,55 +402,61 @@ function InactivePreview({ title, children }: { title: React.ReactNode; children
 // expected is defined identically for members and prospects. Local,
 // unpersisted state only — this control is not wired to LineDecisionSet or to
 // anything else. Deliberately no threshold default: the sensible non-renew
-// level depends on the modifier's distribution, which Stage 4 will report.
+// level depends on the modifier's distribution, which Stage 4 will report —
+// the threshold input below reveals with no value and no placeholder number
+// for the same reason, only when the second box is picked.
 function RenewalUnderwritingPreview() {
   const [mode, setMode] = React.useState<'renewAll' | 'nonRenewThreshold'>('renewAll');
   return (
     <InactivePreview title="Renewal Underwriting">
-      <div className="space-y-1.5">
-        <label className="flex items-center gap-2 text-xs text-gray-700">
-          <input type="radio" checked={mode === 'renewAll'} onChange={() => setMode('renewAll')} disabled />
-          Renew all existing members
-        </label>
-        <label className="flex items-center gap-2 text-xs text-gray-700">
-          <input type="radio" checked={mode === 'nonRenewThreshold'} onChange={() => setMode('nonRenewThreshold')} disabled />
-          Non-renew members above{' '}
-          <span className="inline-block px-1.5 py-0.5 rounded bg-gray-200 text-gray-500 font-mono text-[11px]">— ×</span>
-          {' '}experience modifier
-        </label>
+      <div className="grid grid-cols-2 gap-1">
+        <div onClick={() => setMode('renewAll')}>
+          <PreviewBox title="Renew All" description="Renew all existing members" selected={mode === 'renewAll'} />
+        </div>
+        <div onClick={() => setMode('nonRenewThreshold')}>
+          <PreviewBox title="Non-renew above" description="Decline members above a threshold experience modifier" selected={mode === 'nonRenewThreshold'} />
+        </div>
       </div>
+      {mode === 'nonRenewThreshold' && (
+        <div className="flex items-center gap-2 pt-1">
+          <span className="text-[11px] text-gray-500">Threshold (experience modifier):</span>
+          <input
+            type="text"
+            disabled
+            placeholder="not yet calibrated"
+            className="flex-1 text-[11px] px-2 py-1 rounded border border-gray-200 bg-white text-gray-400 placeholder:text-gray-400 cursor-not-allowed"
+          />
+        </div>
+      )}
     </InactivePreview>
   );
 }
 
-// NEW BUSINESS APPETITE (Part 3, below Renewal Underwriting) — inactive
-// preview. Same experience-modifier basis as above, once it exists.
+// NEW BUSINESS APPETITE (Part 3) — inactive preview, same experience-modifier
+// basis as Renewal Underwriting above. FULL WIDTH (see the call site): five
+// boxes need more room than the half-width Growth & Underwriting column gives
+// comfortably, and full width is what guarantees they stay on one row rather
+// than wrapping, which would break the left-to-right selectivity reading.
 const APPETITE_OPTIONS = [
-  'Accept all applicants',
-  'Accept average or better',
-  'Maintain current appetite',
-  'Accept good experience only',
-  'Accept excellent experience only',
+  { title: 'Open', description: 'Accept all applicants' },
+  { title: 'Broad', description: 'Accept average or better' },
+  { title: 'Unchanged', description: 'Maintain current appetite' },
+  { title: 'Selective', description: 'Accept good experience only' },
+  { title: 'Strict', description: 'Accept excellent experience only' },
 ] as const;
 
 function NewBusinessAppetitePreview() {
-  // 'Maintain current appetite' is the neutral middle option — a display
-  // choice only, since the control does nothing; it is not a calibrated
-  // default the way a real threshold would need to be.
+  // 'Unchanged' is the neutral middle option — a display choice only, since
+  // the control does nothing; it is not a calibrated default the way a real
+  // threshold would need to be.
   const [selected, setSelected] = React.useState<number>(2);
   return (
     <InactivePreview title="New Business Appetite">
-      <div className="grid grid-cols-1 gap-1">
-        {APPETITE_OPTIONS.map((label, i) => (
-          <button
-            key={label}
-            type="button"
-            disabled
-            onClick={() => setSelected(i)}
-            className={`text-left text-xs px-2 py-1.5 rounded border ${i === selected ? 'bg-gray-200 border-gray-300 text-gray-700 font-medium' : 'bg-white border-gray-200 text-gray-500'}`}
-          >
-            {label}
-          </button>
+      <div className="grid grid-cols-5 gap-1">
+        {APPETITE_OPTIONS.map((opt, i) => (
+          <div key={opt.title} onClick={() => setSelected(i)}>
+            <PreviewBox title={opt.title} description={opt.description} selected={i === selected} />
+          </div>
         ))}
       </div>
     </InactivePreview>
