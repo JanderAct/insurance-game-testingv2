@@ -218,17 +218,6 @@ export default function FinancialsPage({ lockedResults, priorResults, lineView }
                 </p>
               </StatementCard>
             )}
-
-            <StatementCard title="Reinsurance Detail">
-              <MetricRow label="Protection Level" value={`${statement.reinsuranceDetail.level} — ${statement.reinsuranceDetail.levelLabel}`} />
-              <MetricRow label="Attachment Point" value={formatCurrency(statement.reinsuranceDetail.attachment)} />
-              <MetricRow label="Reinsurance Cost" value={formatCurrency(statement.reinsuranceDetail.reinsuranceCost)} />
-              <MetricRow label="Gross Ultimate Loss + LAE" value={formatCurrency(statement.reinsuranceDetail.grossLoss)} />
-              <MetricRow label="Reinsurance Losses" value={formatCurrency(statement.reinsuranceDetail.reinsuranceRecovery)} />
-              <MetricRow label="Net Ultimate Loss + LAE" value={formatCurrency(statement.reinsuranceDetail.netLoss)} />
-              <MetricRow label="Cession Ratio" value={formatPct(statement.reinsuranceDetail.cessionRatio)} />
-              <p className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded p-2 mt-2">Reinsurance losses reduce net retained losses but do not reduce gross losses.</p>
-            </StatementCard>
           </div>
         </div>
       )}
