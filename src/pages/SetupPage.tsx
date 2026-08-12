@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Shield, Shuffle } from 'lucide-react';
+import { Shuffle } from 'lucide-react';
 import type { GameSetupSettings, CoverageLine } from '../types/simulation';
+import RippleLogo from '../assets/RippleLogo';
 
 interface SetupPageProps {
   onStart: (settings: GameSetupSettings) => void;
@@ -57,10 +58,9 @@ export default function SetupPage({ onStart }: SetupPageProps) {
       <div className="w-full max-w-[840px]">
         {/* Hero */}
         <div className="text-center mb-12">
-          <div className="inline-flex items-center justify-center w-20 h-20 bg-blue-600 rounded-2xl shadow-lg mb-5">
-            <Shield size={40} className="text-white" />
+          <div className="flex items-center justify-center mb-5">
+            <RippleLogo />
           </div>
-          <h1 className="text-4xl font-bold text-gray-900 mb-3">Ripple</h1>
           <p className="text-gray-500 max-w-lg mx-auto text-base leading-relaxed">
             Manage a public entity risk pool over multiple years. Make pricing, underwriting, investment, and reinsurance decisions to grow surplus and serve your members.
           </p>
