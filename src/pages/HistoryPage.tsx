@@ -7,8 +7,6 @@ interface HistoryPageProps {
   // Stage 2.10: real simulated pre-game years (already filtered to the current
   // view — pool aggregate or a single line — and adapted for display).
   historicalYears: HistoricalYear[];
-  scenarioId: string;
-  startingYear: number;
   lineView: LineView;
 }
 
@@ -18,7 +16,7 @@ interface HistoryRow {
   className?: (year: HistoricalYear) => string;
 }
 
-export default function HistoryPage({ historicalYears, scenarioId, startingYear, lineView }: HistoryPageProps) {
+export default function HistoryPage({ historicalYears, lineView }: HistoryPageProps) {
   if (historicalYears.length === 0) return null;
 
   const first = historicalYears[0];
@@ -82,19 +80,7 @@ export default function HistoryPage({ historicalYears, scenarioId, startingYear,
 
   return (
     <div className="max-w-screen-2xl mx-auto px-4 py-6 space-y-6">
-      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-2">
-        <div>
-          <h2 className="text-xl font-bold text-gray-900">Three-Year {lineDisplayName(lineView)} History</h2>
-          <p className="text-sm text-gray-500 mt-1">
-            Simulated pre-game years for scenario <span className="font-mono font-semibold text-gray-700">{scenarioId}</span>,
-            {' '}run through the same engine as live years at default decisions.
-            {' '}The {startingYear - 1} closing position IS the Year 1 opening position.
-          </p>
-        </div>
-        <div className="text-xs text-gray-500 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
-          Same scenario code = same history and loss environment
-        </div>
-      </div>
+      <h2 className="text-xl font-bold text-gray-900">Three-Year {lineDisplayName(lineView)} History</h2>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <SummaryCard

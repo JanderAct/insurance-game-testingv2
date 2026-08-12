@@ -410,8 +410,6 @@ export default function App() {
         {activeTab === 'history' && gameState && startingFinancials && (
           <HistoryPage
             historicalYears={historicalYears}
-            scenarioId={gameState.setup.instanceId}
-            startingYear={gameState.setup.startingYear}
             lineView={lineView}
           />
         )}
