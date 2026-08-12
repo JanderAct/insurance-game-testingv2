@@ -377,7 +377,7 @@ function PreviewBox({ title, description, selected }: { title: string; descripti
       type="button"
       disabled
       tabIndex={-1}
-      className={`w-full h-full flex flex-col items-center justify-center p-2 rounded-lg border text-center transition-all text-xs cursor-not-allowed ${selected ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white text-gray-600 border-gray-200'}`}
+      className={`w-full h-full flex flex-col items-center p-2 rounded-lg border text-center transition-all text-xs cursor-not-allowed ${selected ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white text-gray-600 border-gray-200'}`}
     >
       <span className="font-bold">{title}</span>
       <span className="text-xs opacity-75 mt-0.5 leading-tight">{description}</span>
@@ -400,7 +400,10 @@ function RenewalUnderwritingPreview() {
   const [mode, setMode] = React.useState<'renewAll' | 'nonRenewThreshold' | null>(null);
   return (
     <InactivePreview title="Renewal Underwriting">
-      <div className="grid grid-cols-2 gap-1">
+      {/* min-h matches New Business Appetite's row below (measured 66px) —
+          Renewal's two boxes are wider so their descriptions wrap less and
+          would otherwise sit shorter than that row on their own content. */}
+      <div className="grid grid-cols-2 gap-1 min-h-[66px]">
         <div onClick={() => setMode('renewAll')}>
           <PreviewBox title="Renew All" description="Renew all existing members" selected={mode === 'renewAll'} />
         </div>
@@ -440,10 +443,10 @@ const APPETITE_OPTIONS = [
 ] as const;
 
 function NewBusinessAppetitePreview() {
-  // 'Unchanged' is the neutral middle option — a display choice only, since
-  // the control does nothing; it is not a calibrated default the way a real
-  // threshold would need to be.
-  const [selected, setSelected] = React.useState<number>(2);
+  // Starts unselected, matching Renewal Underwriting above it — an inactive
+  // control has no active choice to show, and the sensible default depends
+  // on the modifier distribution Stage 4 will report.
+  const [selected, setSelected] = React.useState<number | null>(null);
   return (
     <InactivePreview title="New Business Appetite">
       <div className="grid grid-cols-5 gap-1">
