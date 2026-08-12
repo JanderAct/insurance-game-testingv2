@@ -1,6 +1,7 @@
-import { Shield, RefreshCw, ChevronRight, AlertCircle } from 'lucide-react';
+import { RefreshCw, ChevronRight, AlertCircle } from 'lucide-react';
 import type { GameState } from '../types/simulation';
 import { formatCurrency, formatPct } from '../utils/formatters';
+import { RippleMark } from '../assets/RippleLogo';
 
 interface HeaderProps {
   gameState: GameState | null;
@@ -31,21 +32,18 @@ export default function Header({ gameState, startingFinancials, onNewGame, onAdv
         <div className="flex items-center justify-between gap-4 flex-wrap">
           {/* Left: branding */}
           <div className="flex items-center gap-3 min-w-0">
-            <div className="bg-blue-600 rounded-lg p-2 flex-shrink-0">
-              <Shield size={20} />
-            </div>
-            <div className="min-w-0">
-              <div className="font-bold text-lg leading-tight truncate">Ripple</div>
-              {/* Same slot, two occupants that never overlap: the tagline
-                  before a game exists, the SIMULATED pool's own name once one
-                  does. The pool-name branch is untouched — it names the game
-                  in progress, not the product, and stays that way on rename. */}
-              {isStarted ? (
-                <div className="text-slate-400 text-xs truncate">{poolName}</div>
-              ) : (
-                <div className="text-slate-400 text-xs truncate">Every decision creates impact.</div>
-              )}
-            </div>
+            <RippleMark size={32} className="flex-shrink-0" />
+            <span className="font-bold text-lg leading-none text-white flex-shrink-0">RIPPLE</span>
+            <span className="text-slate-600 flex-shrink-0">|</span>
+            {/* Same slot, two occupants that never overlap: the tagline
+                before a game exists, the SIMULATED pool's own name once one
+                does. The pool-name branch is untouched — it names the game
+                in progress, not the product, and stays that way on rename. */}
+            {isStarted ? (
+              <span className="text-slate-300 text-sm truncate min-w-0">{poolName}</span>
+            ) : (
+              <span className="text-slate-400 text-sm truncate min-w-0">Every decision creates impact.</span>
+            )}
           </div>
 
           {/* Center: game state chips */}
