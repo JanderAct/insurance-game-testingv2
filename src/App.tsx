@@ -106,6 +106,15 @@ export default function App() {
           if (gs.poolState && !gs.poolState.membershipHistory) {
             gs.poolState.membershipHistory = {};
           }
+          // Same for the rolling loss record (stage 3). Defaulted rather than
+          // bumping the save key: the field is purely additive, so an old save
+          // stays playable and simply starts accumulating history from the next
+          // processed year. The experience modifier reads a short window, so it
+          // recovers on its own within a few turns — whereas discarding the save
+          // would throw away the whole game to gain the same thing.
+          if (gs.poolState && !gs.poolState.memberLossHistory) {
+            gs.poolState.memberLossHistory = {};
+          }
           setGameState(gs);
           setStartingFinancials(sf);
           setInitialMembers(im ?? []);

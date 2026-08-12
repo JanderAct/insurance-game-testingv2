@@ -28,6 +28,7 @@ import { getReinsuranceStructure, calculateReinsuranceCost, calculateReinsurance
 import { simulateMarketReturns, blendInvestmentReturn } from './investmentEngine';
 import { simulateMemberMovement } from './membershipEngine';
 import { cloneMembershipHistory, openInterval, closeInterval } from './membershipHistory';
+import { cloneMemberLossHistory, recordMemberLossYear } from './memberLossHistory';
 import { computeKLine, deriveNeutralPurePremiumPer100, expectedWcGrossLoss, generateWcClaims } from './wcClaimEngine';
 import { computeKGl, deriveNeutralGlPurePremiumPer100, expectedGlGrossLoss, generateGlClaims } from './glClaimEngine';
 import { generateNarrative } from './narrativeEngine';
@@ -1127,6 +1128,9 @@ export function processYear(
   // mechanics — a member withdrawn and re-recruited within the same year
   // never leaves the active roster and correctly records no transition.
   const membershipHistory = cloneMembershipHistory(poolState.membershipHistory);
+  // Working clone, same contract as the ledger above. Defaulted for saves and
+  // bootstrap states that predate stage 3.
+  const memberLossHistory = cloneMemberLossHistory(poolState.memberLossHistory ?? {});
 
   let currentAllMarketMembers = poolState.allMarketMembers;
   const lineResults: Array<{ line: CoverageLine; result: LineResultSet }> = [];
@@ -1239,6 +1243,31 @@ export function processYear(
       }
     }
 
+    // Rolling loss history for this line — stage 3. Recorded HERE, after
+    // processLineYear has returned, reading only the finished result: this is
+    // downstream of every draw, so it cannot consume randomness or move a value.
+    // That is what keeps both export gates green.
+    //
+    // MARKETPLACE-WIDE where the line has it. marketMemberLossResults carries
+    // all 200 members (enrolled + prospects) for the claim-level lines; it is
+    // undefined for Property, which still runs the legacy aggregate path and
+    // therefore only produces per-member figures for its ENROLLED book. Falling
+    // back to memberLossResults means Property gets real enrolled history now
+    // and gains marketplace coverage automatically when its generator cuts over
+    // — rather than being silently absent from the store, or forcing a special
+    // case here that would have to be removed later.
+    //
+    // Both legs are read straight off the result. See memberLossHistory.ts for
+    // why `expected` includes k_line and excludes risk control, and why that
+    // asymmetry is held by invariant 2 rather than by convention.
+    for (const mlr of result.marketMemberLossResults ?? result.memberLossResults) {
+      recordMemberLossYear(memberLossHistory, mlr.memberId, line, {
+        yearNumber,
+        actual: mlr.simulatedLoss,
+        expected: mlr.expectedLoss,
+      });
+    }
+
     // --- Inter-line loan repayment pass (existing loans only) ---
     const loan = interLineLoans.find(l => l.borrowingLine === line);
     if (loan) {
@@ -1326,6 +1355,7 @@ export function processYear(
     },
     interLineLoans,
     membershipHistory,
+    memberLossHistory,
   };
 
   // Detect deficient lines that don't already carry a loan — these become

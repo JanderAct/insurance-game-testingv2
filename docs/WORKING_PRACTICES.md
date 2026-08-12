@@ -104,6 +104,13 @@ Things that were discovered expensively and live only in conversation memory. Re
 - **Several "failures" have turned out to be mis-specified checks, not broken code.** WC 6b and GL 6b both
   failed on numerator/denominator basis errors in the check itself. Report the decomposition and let the
   ruling correct the check.
+- **`git fetch` BEFORE checking a ruling's premises, not after.** A stale checkout makes the premise
+  check itself unreliable, and it fails in the most misleading possible direction: `git log --all`
+  searches the LOCAL refs, so it reports "this work does not exist anywhere" with total confidence
+  while the commits sit on the remote. Twice now a whole stage has been declared missing on that
+  basis — once seven commits behind on `claims-distribution`, once on `main` at `116b96d`. The
+  refusal was correct given what was visible both times, which is exactly what makes this dangerous:
+  the reasoning is sound and the conclusion is wrong. Fetch first, then grep.
 - **Verify that a ruling's premises exist in the code before acting on it.** A ruling that cites
   specific code paths, measurements, or prior reports can be wrong about all of them — planning-side
   context can drift from the repo (empty document transfers, stale clones, conflated conversation

@@ -34,6 +34,7 @@ import type {
   LinePoolState,
   Member,
   MembershipHistory,
+  MemberLossHistory,
   PoolState,
   ResultSet,
   StartingFinancials,
@@ -65,6 +66,7 @@ interface LinePreGame {
   unearnedPremium: number;
   members: Member[];              // this line's ending roster
   membershipHistory: MembershipHistory; // this line's pre-game enrollment ledger
+  memberLossHistory: MemberLossHistory; // this line's pre-game marketplace loss record
   attempt: number;
 }
 
@@ -168,6 +170,7 @@ function finalizeLine(
     unearnedPremium: c.poolState.unearnedPremium,
     members: c.poolState.lines[line].members,
     membershipHistory: c.poolState.membershipHistory,
+    memberLossHistory: c.poolState.memberLossHistory ?? {},
     attempt,
   };
 }
@@ -226,6 +229,30 @@ export function runPriorHistory(
     }
   }
 
+  // Merge the per-line pre-game LOSS records the same way, and for the same
+  // reason: each solo pre-game ran with one line active, so recordMemberLossYear
+  // only ever wrote that line's key. A disjoint per-line union.
+  //
+  // This is what gives members THREE YEARS OF HISTORY AT YEAR 1 instead of a
+  // blank record on turn one — including prospects, since stage 2 generates
+  // marketplace-wide in the pre-game years too (they run through the same
+  // processYear).
+  //
+  // Only the ACCEPTED attempt's record survives. runLinePreGame re-simulates
+  // rejected candidates, but each attempt builds its own poolState from
+  // scratch, so a rejected attempt's losses are discarded with it rather than
+  // accumulating — which is why recordMemberLossYear replaces same-year entries
+  // rather than appending.
+  const memberLossHistory: MemberLossHistory = {};
+  for (const pg of perLine) {
+    for (const [memberId, byLine] of Object.entries(pg.memberLossHistory)) {
+      const years = byLine[pg.line];
+      if (!years || years.length === 0) continue;
+      const target = (memberLossHistory[memberId] ??= {});
+      target[pg.line] = years.map(y => ({ ...y }));
+    }
+  }
+
   const poolState: PoolState = {
     cash: perLine.reduce((s, p) => s + p.cash, 0),
     unearnedPremium: perLine.reduce((s, p) => s + p.unearnedPremium, 0),
@@ -233,6 +260,7 @@ export function runPriorHistory(
     lines,
     interLineLoans: [],
     membershipHistory,
+    memberLossHistory,
   };
 
   // Pool-level pre-game history = per-year aggregate across the active lines.

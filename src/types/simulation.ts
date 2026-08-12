@@ -650,6 +650,25 @@ export interface EnrollmentInterval {
 // (see membershipHistory.ts).
 export type MembershipHistory = Record<string, Partial<Record<CoverageLine, EnrollmentInterval[]>>>;
 
+// One member-line-year of loss experience. See src/utils/memberLossHistory.ts
+// for what each leg includes and — importantly — what it deliberately does not.
+export interface MemberLossYear {
+  yearNumber: number;   // pre-game years negative, matching every other yearNumber here
+  actual: number;       // that year's drawn gross ultimate loss for this member
+  expected: number;     // the analytic expectation AS IT STOOD THAT YEAR (not recomputed later)
+}
+
+// Rolling per-member, per-line loss history, keyed memberId -> line -> years.
+//
+// KEYED PER (MEMBER, LINE) because enrolment is per line — a member can be in WC
+// and not GL, and their experience differs accordingly.
+//
+// PLAIN JSON-SERIALISABLE, AND THAT IS A HARD REQUIREMENT, NOT A PREFERENCE.
+// The whole GameState goes through JSON.stringify in App.tsx, where a Map
+// serialises to {} SILENTLY — no error, no warning, just an empty object on the
+// next load. Records and arrays only. Same constraint as MembershipHistory.
+export type MemberLossHistory = Record<string, Partial<Record<CoverageLine, MemberLossYear[]>>>;
+
 // Pool ongoing state: fields shared across all lines, plus one LinePoolState per
 // line. Investments are NOT here — each line holds its own portfolio (Stage 2.9);
 // cash remains shared and is split by contribution share.
@@ -660,6 +679,20 @@ export interface PoolState {
   lines: Record<CoverageLine, LinePoolState>;
   interLineLoans: InterLineLoan[]; // pool-level ledger of outstanding inter-line loans
   membershipHistory: MembershipHistory; // authoritative per-line enrollment intervals
+  // Rolling per-member, per-line actual/expected loss record — the input the
+  // experience modifier (stage 4) reads. Maintained marketplace-wide, so
+  // prospects carry history too.
+  //
+  // ON PoolState, NOT ON Member, deliberately. Member is a generated,
+  // seed-independent catalog entry (memberCatalog.ts) shared by every game;
+  // hanging per-game simulation state off it would make the catalog stateful and
+  // would mean two concurrent games mutate each other's members.
+  //
+  // OPTIONAL because saves predating stage 3 lack it. App.tsx defaults it to {}
+  // on load rather than bumping the save key — same precedent as
+  // membershipHistory, and discarding a save over an additive field would be a
+  // worse trade.
+  memberLossHistory?: MemberLossHistory;
 }
 
 // Top-level game state

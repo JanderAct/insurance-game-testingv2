@@ -435,6 +435,11 @@ export function generateStartingPoolState(
     },
     interLineLoans: [],
     membershipHistory,
+    // Empty at bootstrap by construction: no year has been simulated yet, so
+    // there is nothing to record. The three pre-game years fill it as they run
+    // through processYear (see priorHistoryEngine), which is why members carry
+    // history at Year 1 rather than starting blank.
+    memberLossHistory: {},
   };
 
   const startingFinancials: StartingFinancials = {
