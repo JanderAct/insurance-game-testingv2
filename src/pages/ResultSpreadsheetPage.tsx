@@ -5,6 +5,7 @@ import type { CoverageLine, ResultSet } from '../types/simulation';
 import { formatCurrency, formatPct } from '../utils/formatters';
 import { getMemberExposure } from '../utils/lineHelpers';
 import { type SpreadsheetMetric, buildResultsWorkbook, buildExportFilename } from '../utils/resultsExport';
+import { buildClaimsWorkbook, buildClaimsExportFilename } from '../utils/claimsExport';
 import { RESULT_METRICS } from '../utils/resultMetrics';
 
 interface ResultSpreadsheetPageProps {
@@ -63,6 +64,7 @@ export default function ResultSpreadsheetPage({ lockedResults, activeLines, inst
 
   const memberCsv = buildMemberCsv(selectedResult);
   const exportFilename = buildExportFilename(instanceId, activeLines, lockedResults);
+  const claimsExportFilename = buildClaimsExportFilename(instanceId, activeLines, lockedResults);
 
   return (
     <div className="max-w-screen-2xl mx-auto px-4 py-6 space-y-6">
@@ -97,6 +99,21 @@ export default function ResultSpreadsheetPage({ lockedResults, activeLines, inst
           >
             <Download size={16} />
             Download Results (.xlsx)
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              // A SEPARATE workbook, deliberately — see claimsExport.ts. The
+              // results workbook above is a per-metric summary; claim-level
+              // detail is thousands of rows and does not belong bolted onto it.
+              const wb = buildClaimsWorkbook(lockedResults, activeLines);
+              XLSX.writeFile(wb, claimsExportFilename);
+            }}
+            className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+          >
+            <Download size={16} />
+            Download Claims (.xlsx)
           </button>
 
           <button
