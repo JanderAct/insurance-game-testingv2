@@ -106,6 +106,15 @@ export const WC_LOSS_MODEL = {
 
   // --- A2 tier mix --------------------------------------------------------
   // [medOnly, temp, perm, catastrophic] per rating class.
+  //
+  // clerical sums to 0.9995, not 1.0 (the other three classes sum exactly).
+  // HARMLESS, NOT A GAP: tierProbabilities() in wcClaimEngine.ts never reads
+  // these four numbers as final probabilities — it holds catastrophic fixed
+  // and RENORMALISES medOnly/temp/perm to sum to exactly (1 - catastrophic),
+  // whatever they summed to here. No claim falls through the tier draw; the
+  // 0.0005 shortfall is absorbed by the renormalisation, not left as a gap.
+  // Left uncorrected deliberately, so a future edit to this table doesn't
+  // waste effort re-balancing a sum the code was never going to use directly.
   tierProbabilities: {
     clerical:    { medOnly: 0.78, temp: 0.20, perm: 0.019, catastrophic: 0.0005 },
     publicWorks: { medOnly: 0.68, temp: 0.26, perm: 0.057, catastrophic: 0.003 },
@@ -176,7 +185,13 @@ export const WC_LOSS_MODEL = {
   // legislative shock. theta_WC(RQ) is deliberately NOT applied — presumption
   // exposure is statutory, not a function of how well the member is run.
   presumption: {
-    ratePer1MPoliceFire: 0.06, // ~10 claims/yr pool-wide on the canonical roster
+    // 0.06 x $248.9M police+fire payroll on the canonical roster = ~14.9
+    // claims/yr FULL-MARKET, not pool-wide — the pool enrolls only a subset of
+    // the market, so this is what the whole 200-member roster would produce,
+    // not what any one pool actually sees. Full-market vs enrolled is its own
+    // recurring error class in this project; label it explicitly rather than
+    // let "pool-wide" imply the smaller, treaty-facing number.
+    ratePer1MPoliceFire: 0.06,
     reportLagYearsMean: 8,
     reportLagYearsCv: 0.8,
     // The lag distribution is TRUNCATED AND RENORMALISED here — mandatory, not
@@ -266,11 +281,17 @@ export const GL_LOSS_MODEL = {
   // No frequency trend — flat by design (WC's -1.5%/yr is WC-specific safety
   // improvement; GL frequency is not trending, its SEVERITY is, above).
   //
-  // Full-market expected claims on the canonical roster: general ~897,
-  // epl ~108, lawEnforcement ~13.3, abuse ~3.4 incidents. The design doc's
-  // "~832 general" assumed a payroll-weighted mean relativity of 1.0; the
-  // roster's actual mean is ~1.08, so 897 is the operative roster-derived
-  // figure and 832 is a stale reference (ruled: rates verbatim, assert 897).
+  // Full-market expected claims on the canonical roster, at neutral RQ and
+  // k_GL = 1 (basePayroll x weight x rate, summed over members): general
+  // 881.2, epl 111.5, lawEnforcement 28.4, abuse 3.2 incidents. The design
+  // doc's "~832 general" assumed a payroll-weighted mean relativity of 1.0;
+  // the roster's actual mean is ~1.06, so 881.2 is the operative roster-derived
+  // figure and 832 is a stale reference (ruled: rates verbatim, assert 881.2).
+  // Verified against gl-claim-check.ts's own analytic and reference targets
+  // (v3 881.2 / ~111.5 / ~28.4 / ~3.2), which already had it right — only this
+  // comment was stale. lawEnforcement in particular had drifted furthest:
+  // police payroll weighted by the LE relativity is $135.4M, and
+  // $135.4M x 0.21 = 28.4, not the ~13.3 this comment used to claim.
   ratePer1M: { general: 0.64, epl: 0.084, lawEnforcement: 0.21, abuse: 0.003 } as Record<GlSubKey, number>,
 
   // Per member-year frequency noise, mean 1 (SD ~0.35) — ONE draw per member
@@ -787,12 +808,26 @@ export const PROPERTY_LOSS_MODEL = {
   // convention.
   severityTrendPerYear: 0.04,
 
-  // Per-risk XoL retention. Confirmed at v3 by four independent simulations
-  // (1.77 / 1.78 / 1.78 / 1.77 breaches per year, 1.58% of attritional claims).
+  // Per-risk XoL retention. The figures below are v4 (roster v4 doubled TIV
+  // while this $2M threshold stayed fixed in dollars, so the v3 figures this
+  // comment used to cite — 1.77/1.78/1.78/1.77 breaches/yr, largest location
+  // $93.5M — are stale by roughly 2x and have been replaced).
+  //
+  // Measured at v4 by property-claim-check.ts, BOTH BASES, because the treaty
+  // responds to the POOL's claims, not the market's, and every per-risk figure
+  // in this project's history that was quoted full-market alone has read
+  // roughly 3.7x too high:
+  //   full-market breaches/yr   ~3.92, ~3.6% of attritional claims
+  //   enrolled-pool breaches/yr ~1.05 — the treaty-facing basis
+  // The retention itself has NOT been revisited at v4 and may want to be: a
+  // fixed $2M threshold against a roster whose TIV doubled is a materially
+  // looser retention in real terms than it was at v3.
+  //
   // The treaty is alive ONLY through within-member concentration: at a flat
-  // ~$3.75M average location almost no damage ratio breaches $2M, but Primary
-  // Asset Share concentrates each member's TIV into one dominant site (largest
-  // single location $93.5M). Flatten Primary Asset Share and the treaty dies.
+  // ~$7.67M average location (v4, $14,303.6M / 1,866 locations) almost no
+  // damage ratio breaches $2M, but Primary Asset Share concentrates each
+  // member's TIV into one dominant site (largest single location $187.0M, v4).
+  // Flatten Primary Asset Share and the treaty dies.
   perRiskRetention: 2_000_000,
 };
 
