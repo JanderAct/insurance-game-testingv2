@@ -304,6 +304,114 @@ console.log('\n=== 9. DETERMINISM AND CLAIM INTEGRITY ===');
   console.log(`  roster-weighted region mean ${rosterRegionMean.toFixed(4)} (72/61/67 split, so near but not exactly 1)`);
 }
 
+console.log('\n=== 10. PAYOUT DECOMPOSITION (medical / indemnity / impairment) ===');
+{
+  // The parameter-level invariant first: the perm split is only a
+  // decomposition if the two periods still sum to the modelled duration.
+  const p = WC_LOSS_MODEL.severity.perm;
+  console.log(`  perm healing ${p.healingWeeks}wk + award ${p.awardWeeks}wk === durationWeeksMean ${p.durationWeeksMean}wk: ` +
+    `${note(p.healingWeeks + p.awardWeeks === p.durationWeeksMean, `perm healing+award (${p.healingWeeks + p.awardWeeks}) != durationWeeksMean (${p.durationWeeksMean})`)}`);
+
+  // THE ANCHOR: a decomposition must not move the priced loss cost. Asserted
+  // CLASS-ONLY (includePresumption: false) because that is the figure the
+  // class rates are calibrated to; the all-in figure including presumption is
+  // 4.2287 and is reported in section 8.
+  const payrollUnits = roster.reduce((s, m) => s + (m.exposureByLine.WC ?? 0), 0) * 10_000;
+  const classOnlyPer100 =
+    expectedWcGrossLoss(roster, { riskQualityOverride: 5, kLine: 1, yearNumber: 1, includePresumption: false }) / payrollUnits;
+  console.log(`  payroll-weighted WC loss cost, CLASS-ONLY = ${classOnlyPer100.toFixed(4)} per $100 (must stay 3.5478): ` +
+    `${note(Math.abs(classOnlyPer100 - 3.5478) < 5e-5, `class-only loss cost moved to ${classOnlyPer100.toFixed(4)}, expected 3.5478`)}`);
+
+  const runs = runYears(roster, YEARS);
+  const all = runs.flatMap(r => r.claims);
+
+  // THE HARD CONSTRAINT: a pure decomposition. Every claim, to the cent.
+  // Tolerance is $1e-6, four orders of magnitude tighter than a cent.
+  const worst = all.reduce((w, c) => {
+    const d = Math.abs((c.medical ?? 0) + (c.indemnity ?? 0) + (c.impairment ?? 0) - c.grossUltimate);
+    return d > w ? d : w;
+  }, 0);
+  console.log(`  medical + indemnity + impairment === grossUltimate on all ${all.length} claims ` +
+    `(worst residual $${worst.toExponential(2)}): ${note(worst < 1e-6, `decomposition off by $${worst} on some claim`)}`);
+  const negative = all.filter(c => (c.medical ?? -1) < 0 || (c.indemnity ?? -1) < 0 || (c.impairment ?? -1) < 0);
+  console.log(`  no negative components: ${note(negative.length === 0, `${negative.length} claims carry a negative component`)}`);
+  const unset = all.filter(c => c.medical === undefined || c.indemnity === undefined || c.impairment === undefined);
+  console.log(`  every claim populates all three: ${note(unset.length === 0, `${unset.length} claims missing a component`)}`);
+
+  // Which tiers are allowed to carry an impairment award. perm only:
+  // catastrophic is lifetime wage replacement, not a scheduled award.
+  const impairmentTiers = new Set(all.filter(c => (c.impairment ?? 0) > 0).map(c => c.tier));
+  console.log(`  impairment appears on perm only (saw: ${[...impairmentTiers].join(', ') || 'none'}): ` +
+    `${note(impairmentTiers.size === 1 && impairmentTiers.has('perm'), `impairment on unexpected tiers: ${[...impairmentTiers].join(', ')}`)}`);
+  const medOnlyWrong = all.filter(c => c.tier === 'medOnly' && (c.indemnity ?? 0) + (c.impairment ?? 0) !== 0);
+  console.log(`  medOnly is 100% medical: ${note(medOnlyWrong.length === 0, `${medOnlyWrong.length} medOnly claims carry a wage component`)}`);
+  const presumpWrong = all.filter(c => c.tier === 'presumption' && (c.indemnity ?? 0) + (c.impairment ?? 0) !== 0);
+  console.log(`  presumption is 100% medical (matches its medicalTrend-only vintage conversion): ` +
+    `${note(presumpWrong.length === 0, `${presumpWrong.length} presumption claims carry a wage component`)}`);
+
+  // THE BLENDED EFFECTIVE TREND, the figure that was previously invisible.
+  // A component mix implies a single trend: medShare x 6.0% + wageShare x 3.5%.
+  const mt = WC_LOSS_MODEL.medicalTrend, it = WC_LOSS_MODEL.indemnityTrend;
+  const splitOf = (cs: typeof all) => {
+    const med = cs.reduce((s, c) => s + (c.medical ?? 0), 0);
+    const ind = cs.reduce((s, c) => s + (c.indemnity ?? 0), 0);
+    const imp = cs.reduce((s, c) => s + (c.impairment ?? 0), 0);
+    const tot = med + ind + imp;
+    return { med, ind, imp, tot, medPct: med / tot, indPct: ind / tot, impPct: imp / tot,
+             effTrend: (med / tot) * mt + ((ind + imp) / tot) * it };
+  };
+  const book = splitOf(all);
+  const classOnly = splitOf(all.filter(c => c.tier !== 'presumption'));
+
+  // ⚠ READ THE ALL-IN FIGURE WITH THE YEAR COUNTER IN HAND. This block walks
+  // yearNumber 1..YEARS, and the class frequency trend is (1 - 0.015)^(y-1)
+  // while PRESUMPTION IS DELIBERATELY UNTRENDED (statutory, see A5). So the
+  // longer the run, the more the class tiers decay away and the more of the
+  // all-in book presumption becomes — at YEARS=400 presumption reaches 52% of
+  // dollars, which is an artifact of the counter, not a property of the book.
+  // Measured at fixed year 1 over 400 seeds it is 16.7%.
+  //
+  // CLASS-ONLY IS THE STABLE BASIS and the one to quote: it is invariant to the
+  // frequency trend (which scales every class and tier uniformly, so the ratios
+  // survive) and it is the same basis as the $3.5478 loss cost above. Per-tier
+  // and per-class splits below are decay-invariant for the same reason.
+  console.log(`\n  CLASS-ONLY (excl. presumption — the stable basis, matches the 3.5478 anchor):`);
+  console.log(`    medical ${(classOnly.medPct * 100).toFixed(1)}%  indemnity ${(classOnly.indPct * 100).toFixed(1)}%  impairment ${(classOnly.impPct * 100).toFixed(1)}%` +
+    `   -> effective trend ${(classOnly.effTrend * 100).toFixed(2)}%`);
+  console.log(`  ALL-IN (incl. presumption, ${YEARS}-yr counter — see the caveat above, NOT a book statistic):`);
+  console.log(`    medical ${(book.medPct * 100).toFixed(1)}%  indemnity ${(book.indPct * 100).toFixed(1)}%  impairment ${(book.impPct * 100).toFixed(1)}%` +
+    `   -> effective trend ${(book.effTrend * 100).toFixed(2)}%   (${all.length} claims, $${(book.tot / 1e6).toFixed(1)}M)`);
+  // Sanity, not calibration: the blend must lie strictly between the two rates
+  // it blends. Outside that range means a component was trended at neither.
+  for (const [label, s] of [['class-only', classOnly], ['all-in', book]] as const) {
+    console.log(`    ${label} blend lies between indemnityTrend ${(it * 100).toFixed(1)}% and medicalTrend ${(mt * 100).toFixed(1)}%: ` +
+      `${note(s.effTrend > it && s.effTrend < mt, `${label} effective trend ${(s.effTrend * 100).toFixed(2)}% outside [3.5%, 6.0%]`)}`);
+  }
+
+  console.log('\n  BY TIER:');
+  for (const tier of ['medOnly', 'temp', 'perm', 'catastrophic', 'presumption']) {
+    const cs = all.filter(c => c.tier === tier);
+    if (!cs.length) continue;
+    const s = splitOf(cs);
+    console.log(`    ${tier.padEnd(13)} n=${String(cs.length).padStart(5)}  med ${(s.medPct * 100).toFixed(1).padStart(5)}%  ` +
+      `indem ${(s.indPct * 100).toFixed(1).padStart(5)}%  impair ${(s.impPct * 100).toFixed(1).padStart(5)}%  ` +
+      `eff trend ${(s.effTrend * 100).toFixed(2)}%`);
+  }
+  // medOnly must be exactly the medical rate — it has no other leg.
+  const medOnlySplit = splitOf(all.filter(c => c.tier === 'medOnly'));
+  console.log(`    medOnly effective trend is exactly medicalTrend: ${note(Math.abs(medOnlySplit.effTrend - mt) < 1e-12, `medOnly effective trend ${medOnlySplit.effTrend} != medicalTrend ${mt}`)}`);
+
+  console.log('\n  BY RATING CLASS (police/fire carry the perm-heavy mix):');
+  for (const cls of WC_CLASS_KEYS) {
+    const cs = all.filter(c => c.ratingClass === cls);
+    if (!cs.length) continue;
+    const s = splitOf(cs);
+    console.log(`    ${cls.padEnd(13)} n=${String(cs.length).padStart(5)}  med ${(s.medPct * 100).toFixed(1).padStart(5)}%  ` +
+      `indem ${(s.indPct * 100).toFixed(1).padStart(5)}%  impair ${(s.impPct * 100).toFixed(1).padStart(5)}%  ` +
+      `eff trend ${(s.effTrend * 100).toFixed(2)}%`);
+  }
+}
+
 console.log(problems.length === 0
   ? '\nALL WC GENERATOR CHECKS PASS.'
   : `\n${problems.length} PROBLEMS:\n  ${problems.join('\n  ')}`);

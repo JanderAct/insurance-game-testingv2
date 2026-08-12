@@ -180,11 +180,43 @@ export interface Claim {
   // Absent on catastrophic claims, which carry `annuity` instead.
   paymentPattern?: number[];
   annuity?: ClaimAnnuity;
+  // --- WC payout components (medical / indemnity / impairment) -------------
+  // A PURE DECOMPOSITION of grossUltimate: the three sum to it to the cent on
+  // every WC claim. Stored rather than recomputed because the engine already
+  // derives medical and indemnity separately and TRENDS THEM AT DIFFERENT
+  // RATES (medicalTrend 6.0% vs indemnityTrend 3.5%) — collapsing them into
+  // one figure threw away the mix that produced the claim, so the book's
+  // blended effective trend could not be verified from its own output.
+  //
+  // `medical` is care cost. `indemnity` is WAGE REPLACEMENT while the worker
+  // is off work. `impairment` is the scheduled award for residual permanent
+  // impairment — a distinct payment with its own statutory basis, which is
+  // why it is not folded into indemnity.
+  //
+  // Which tiers populate which component:
+  //   medOnly       medical only.
+  //   temp          medical + indemnity.
+  //   perm          medical + indemnity (healing period) + impairment (award).
+  //   catastrophic  medical + indemnity. impairment is 0 — permanent TOTAL
+  //                 disability is lifetime wage replacement, not a scheduled
+  //                 award for a residual rating.
+  //   presumption   medical only, matching the fact that the engine trends
+  //                 the whole claim at medicalTrend.
+  medical?: number;
+  impairment?: number;
   // --- GL claim-level fields (Part B) ---
   // Indemnity/ALAE split of grossUltimate. Kept separately because the
   // statutory cap applies to INDEMNITY ONLY (caps bound damages, not defense
   // costs), while the $1M occurrence retention applies to the combined total
   // — a capped state-law claim can still pierce retention via defense costs.
+  //
+  // NOTE ON THE SHARED `indemnity` FIELD: WC and GL both populate it, and in
+  // both it means "the loss payment proper", but they decompose grossUltimate
+  // over DIFFERENT partitions — WC over (medical, indemnity, impairment), GL
+  // over (indemnity, alae). Read it with the claim's `line` in hand; a check
+  // that sums indemnity+alae, or medical+indemnity+impairment, is only valid
+  // within its own line. Both partitions are asserted per line in that line's
+  // harness, never across lines.
   indemnity?: number;
   alae?: number;
   // stateLaw claims are capped at GL_STATUTORY_CAP in the waterfall;

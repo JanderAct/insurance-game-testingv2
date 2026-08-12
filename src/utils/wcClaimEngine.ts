@@ -65,6 +65,30 @@ const M = WC_LOSS_MODEL;
 const LINE: CoverageLine = 'WC';
 const NEUTRAL_RQ = 5;
 
+// The three-way payout decomposition stored on every WC claim, in the SAME
+// dollars as grossUltimate (settlement-year for the short-tail tiers, present
+// value for catastrophic). Required at every emit site; must sum to
+// grossUltimate to the cent.
+//
+// WHICH TREND EACH COMPONENT CARRIES — this is a decomposition of amounts the
+// engine ALREADY trended per leg, not a new trending decision:
+//   medical      medicalTrend (6.0%)
+//   indemnity    indemnityTrend (3.5%) — wage-linked
+//   impairment   indemnityTrend (3.5%), because a scheduled award is computed
+//                off the weekly benefit rate, which tracks wages
+//
+// IMPAIRMENT DELIBERATELY HAS NO RATE OF ITS OWN YET. A statutory-schedule
+// trend is the natural home for shock events 20 and 37 (damage cap removal,
+// tort reform): awards move in LEGISLATIVE STEPS when a schedule is amended,
+// not smoothly with wages. Adding a third rate here would move values, so it
+// belongs in its own commit — this one only makes the component visible so
+// such a rate has somewhere to attach.
+interface WcPayoutComponents {
+  medical: number;
+  indemnity: number;
+  impairment: number;
+}
+
 // --- small shared helpers ---------------------------------------------------
 
 // trendToSettlement, patternTrendFactor, the lognormal helpers and the
@@ -170,7 +194,17 @@ function catastrophicStream(
   age: number,
   cls: WcClassKey,
   regionMult: number,
-): { annuity: ClaimAnnuity; nominalTotal: number; presentValue: number } {
+): {
+  annuity: ClaimAnnuity;
+  nominalTotal: number;
+  presentValue: number;
+  // The two PV legs the total is built from, returned so the claim's stored
+  // medical/indemnity components ARE the legs rather than a re-derivation of
+  // them. presentValue is still `pvMedical + pvIndemnity` by the same
+  // expression as before, so the booked figure is bit-identical.
+  presentValueMedical: number;
+  presentValueIndemnity: number;
+} {
   const c = M.catastrophic;
   const medicalYears = Math.max(0, (c.lifeExpectancyAge - age) * c.disabilityAdjustment);
   const indemnityYears = Math.max(0, c.retirementAge - age);
@@ -190,11 +224,13 @@ function catastrophicStream(
     nominalSumOfStream(medicalFirstYearPayment, M.medicalTrend, medicalYears) +
     nominalSumOfStream(indemnityAnnualPayment, M.indemnityTrend, indemnityYears);
 
-  const presentValue =
-    presentValueOfStream(medicalFirstYearPayment, M.medicalTrend, M.catastrophicDiscountRate, medicalYears) +
+  const presentValueMedical =
+    presentValueOfStream(medicalFirstYearPayment, M.medicalTrend, M.catastrophicDiscountRate, medicalYears);
+  const presentValueIndemnity =
     presentValueOfStream(indemnityAnnualPayment, M.indemnityTrend, M.catastrophicDiscountRate, indemnityYears);
+  const presentValue = presentValueMedical + presentValueIndemnity;
 
-  return { annuity, nominalTotal, presentValue };
+  return { annuity, nominalTotal, presentValue, presentValueMedical, presentValueIndemnity };
 }
 
 // E[catastrophic severity] over age ~ Uniform(ageMin, ageMax). The stream is
@@ -461,12 +497,16 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
   const claimCountsByTier: Record<string, number> = { medOnly: 0, temp: 0, perm: 0, catastrophic: 0, presumption: 0 };
 
   let sequence = 0;
+  // `components` is a REQUIRED parameter, not part of the optional `extras`
+  // bag, so a new emit site cannot compile without deciding how its claim
+  // decomposes. The decomposition is only trustworthy if it is total.
   const emit = (
     member: Member,
     cls: WcClassKey,
     tier: string,
     grossUltimate: number,
     reportedYear: number,
+    components: WcPayoutComponents,
     extras: { annuity?: ClaimAnnuity; paymentPattern?: number[] },
   ) => {
     sequence++;
@@ -496,6 +536,9 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
       status: 'open',
       reportedYear,
       grossUltimate,
+      medical: components.medical,
+      indemnity: components.indemnity,
+      impairment: components.impairment,
       paidToDate: 0,
       caseReserve: grossUltimate,
       ...extras,
@@ -558,20 +601,55 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
           const accidentYearAmount = drawLognormal(sevRng, M.severity.medOnly.mean, M.severity.medOnly.cv) * regionMult;
           const pattern = M.payoutPatterns.medOnly;
           const amount = accidentYearAmount * patternTrendFactor(pattern, M.medicalTrend, yearNumber);
-          emit(member, cls, tier, amount, yearNumber, { paymentPattern: pattern });
+          // Single leg, so the decomposition is the amount itself.
+          emit(member, cls, tier, amount, yearNumber,
+            { medical: amount, indemnity: 0, impairment: 0 },
+            { paymentPattern: pattern });
         } else if (tier === 'temp' || tier === 'perm') {
           const spec = tier === 'temp' ? M.severity.temp : M.severity.perm;
           const pattern = M.payoutPatterns[tier];
           const weeks = drawLognormal(sevRng, spec.durationWeeksMean, spec.durationWeeksCv) * dur;
-          const indemnity = weeklyBenefit(cls) * weeks * patternTrendFactor(pattern, M.indemnityTrend, yearNumber);
+          // Renamed from `indemnity` to `wageLeg`: for perm this quantity is no
+          // longer all indemnity, it is the wage-linked total that indemnity and
+          // impairment divide. The EXPRESSION for `amount` is untouched.
+          const wageLeg = weeklyBenefit(cls) * weeks * patternTrendFactor(pattern, M.indemnityTrend, yearNumber);
           const medical = drawLognormal(sevRng, spec.medicalMean, spec.medicalCv) * patternTrendFactor(pattern, M.medicalTrend, yearNumber);
-          const amount = (indemnity + medical) * regionMult;
-          emit(member, cls, tier, amount, yearNumber, { paymentPattern: pattern });
+          const amount = (wageLeg + medical) * regionMult;
+
+          // Decomposition. Taking the wage total as the REMAINDER of `amount`
+          // (rather than wageLeg * regionMult) keeps the three components
+          // summing to the booked figure exactly rather than within an ULP of
+          // it — a * r + b * r need not equal (a + b) * r in binary floating
+          // point, and "sums to the cent" is an assertion this file must hold.
+          const medicalComponent = medical * regionMult;
+          const wageComponent = amount - medicalComponent;
+          let indemnityComponent = wageComponent;
+          let impairmentComponent = 0;
+          if (tier === 'perm') {
+            // A permanent partial claim is two payments, not one: temporary wage
+            // replacement over the healing period, then a scheduled award for
+            // the residual impairment. Split PROPORTIONALLY over the drawn
+            // duration — subtracting a fixed healingWeeks would book a negative
+            // award on any claim drawing a shorter duration than that.
+            const p = M.severity.perm;
+            const healingShare = p.healingWeeks / (p.healingWeeks + p.awardWeeks);
+            indemnityComponent = wageComponent * healingShare;
+            impairmentComponent = wageComponent - indemnityComponent;
+          }
+          emit(member, cls, tier, amount, yearNumber,
+            { medical: medicalComponent, indemnity: indemnityComponent, impairment: impairmentComponent },
+            { paymentPattern: pattern });
         } else {
           const age = sevRng.range(M.catastrophic.ageMin, M.catastrophic.ageMax);
-          const { annuity, presentValue } = catastrophicStream(age, cls, regionMult);
+          const { annuity, presentValue, presentValueMedical, presentValueIndemnity } =
+            catastrophicStream(age, cls, regionMult);
           // Books PV; the nominal schedule rides along on `annuity` for Phase 3.
-          emit(member, cls, tier, presentValue, yearNumber, { annuity });
+          // impairment is 0 BY NATURE, not by omission: permanent TOTAL
+          // disability pays lifetime wage replacement (the indemnity annuity to
+          // retirement), never a scheduled award for a residual rating.
+          emit(member, cls, tier, presentValue, yearNumber,
+            { medical: presentValueMedical, indemnity: presentValueIndemnity, impairment: 0 },
+            { annuity });
         }
       }
     }
@@ -607,9 +685,16 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
         const reportedYear = yearNumber + Math.round(lag);
         const amount = trendToSettlement(accidentYearAmount, M.medicalTrend, yearNumber, reportedYear);
         const cls: WcClassKey = classPayroll(member, 'fire') >= classPayroll(member, 'police') ? 'fire' : 'police';
-        emit(member, cls, 'presumption', amount, reportedYear, {
-          paymentPattern: M.payoutPatterns.perm,
-        });
+        // BOOKED 100% MEDICAL, which is the only assignment consistent with how
+        // this claim is trended: the whole severity is carried over the report
+        // lag at medicalTrend above, so calling any part of it wage-linked would
+        // contradict the vintage conversion actually applied (invariant 4). Real
+        // occupational-disease claims do carry indemnity, so if this tier ever
+        // gains an indemnity leg it must gain it in the TREND first and here
+        // second — not the other way round.
+        emit(member, cls, 'presumption', amount, reportedYear,
+          { medical: amount, indemnity: 0, impairment: 0 },
+          { paymentPattern: M.payoutPatterns.perm });
       }
     }
 
@@ -683,8 +768,14 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
 
         const regionMult = regionMultiplier(pick.member.region);
         const age = injRng.range(M.catastrophic.ageMin, M.catastrophic.ageMax);
-        const { annuity, presentValue } = catastrophicStream(age, pick.cls, regionMult);
-        emit(pick.member, pick.cls, 'catastrophic', presentValue, yearNumber, { annuity });
+        const { annuity, presentValue, presentValueMedical, presentValueIndemnity } =
+          catastrophicStream(age, pick.cls, regionMult);
+        // Same decomposition as a naturally drawn catastrophic claim, because it
+        // comes from the same stream helper — an injected claim stays
+        // indistinguishable from a drawn one, components included.
+        emit(pick.member, pick.cls, 'catastrophic', presentValue, yearNumber,
+          { medical: presentValueMedical, indemnity: presentValueIndemnity, impairment: 0 },
+          { annuity });
         claimCountsByClass[pick.cls] += 1;
         claimCountsByTier.catastrophic += 1;
         injectedByMember.set(pick.member.id, (injectedByMember.get(pick.member.id) ?? 0) + presentValue);

@@ -107,8 +107,6 @@ const SHARED_HEADER = [
   'Claim ID', 'Occurrence ID', 'Member ID', 'Member Name', 'Member Type',
   'Accident Year', 'Calendar Year',
 ];
-const SHARED_TAIL_HEADER = ['Status', 'Gross Incurred', 'Gross Paid', 'Reported Year', 'Enrolled'];
-
 function sharedCells(row: LineClaimRow): Row {
   const { claim, member } = row;
   return [
@@ -117,19 +115,32 @@ function sharedCells(row: LineClaimRow): Row {
   ];
 }
 
-function sharedTailCells(row: LineClaimRow): Row {
-  const { claim, enrolled } = row;
-  return [claim.status, roundOrBlank(claim.grossUltimate), roundOrBlank(claim.paidToDate), claim.reportedYear, enrolled ? 'Yes' : 'No'];
-}
+// Medical / Indemnity / Impairment sit immediately after Gross Incurred: they
+// are a decomposition OF it and sum back to it per row, so adjacency is what
+// makes that checkable by eye in the sheet. Rounded to whole dollars like every
+// other money column, so a row can be off by up to 1 from rounding alone —
+// the to-the-cent assertion lives in wc-claim-check.ts, on the unrounded values.
+const WC_COMPONENT_NOTE =
+  'Medical + Indemnity + Impairment = Gross Incurred on every row (each rounded to whole dollars, ' +
+  'so a row may differ by $1 from rounding). Medical is care cost, Indemnity is wage replacement, ' +
+  'Impairment is the scheduled permanent-impairment award. Only perm claims carry Impairment; ' +
+  'medOnly and presumption are all Medical; catastrophic is Medical + lifetime Indemnity. ' +
+  'Medical trends at 6.0%/yr, Indemnity and Impairment at 3.5%.';
 
 function buildWcSheetRows(rows: LineClaimRow[]): Row[] {
-  const header = [...SHARED_HEADER, 'Rating Class', 'Tier', ...SHARED_TAIL_HEADER];
+  const header = [
+    ...SHARED_HEADER, 'Rating Class', 'Tier', 'Status', 'Gross Incurred',
+    'Medical', 'Indemnity', 'Impairment',
+    'Gross Paid', 'Reported Year', 'Enrolled',
+  ];
   const body = sortClaimRows(rows).map(row => [
     ...sharedCells(row),
     safeStr(row.claim.ratingClass), row.claim.tier,
-    ...sharedTailCells(row),
+    row.claim.status, roundOrBlank(row.claim.grossUltimate),
+    roundOrBlank(row.claim.medical), roundOrBlank(row.claim.indemnity), roundOrBlank(row.claim.impairment),
+    roundOrBlank(row.claim.paidToDate), row.claim.reportedYear, row.enrolled ? 'Yes' : 'No',
   ]);
-  return [[`WC claims. ${ENROLLED_NOTE}`], header, ...body];
+  return [[`WC claims. ${WC_COMPONENT_NOTE} ${ENROLLED_NOTE}`], header, ...body];
 }
 
 function buildGlSheetRows(rows: LineClaimRow[]): Row[] {

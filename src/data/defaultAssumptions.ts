@@ -148,7 +148,32 @@ export const WC_LOSS_MODEL = {
   severity: {
     medOnly: { mean: 1800, cv: 1.0 },
     temp: { durationWeeksMean: 9, durationWeeksCv: 1.2, medicalMean: 16000, medicalCv: 1.5 },
-    perm: { durationWeeksMean: 45, durationWeeksCv: 1.0, medicalMean: 65000, medicalCv: 1.8 },
+    // healingWeeks + awardWeeks MUST equal durationWeeksMean. The perm wage
+    // leg is split into a healing period (temporary wage replacement while the
+    // injury stabilises, booked as `indemnity`) and a scheduled award for the
+    // residual rating (booked as `impairment`). Asserted in wc-claim-check.ts,
+    // because the split is only a decomposition if the parts still sum to the
+    // whole.
+    //
+    // THE 15/30 SPLIT IS A JUDGMENT CALL, not a calibrated figure. Real TTD
+    // duration on a PPD claim runs 10-20 weeks, so 15 sits mid-range; awards
+    // vary far more widely with the impairment rating than a single number can
+    // express, and 30 is simply the residual.
+    //
+    // Expressed as ABSOLUTE WEEKS rather than a share on purpose. The pending
+    // WC class cost rebuild moves durationWeeksMean 45 -> 70; a stored share
+    // would silently rescale the healing period to ~23 weeks, outside the real
+    // 10-20 range, whereas absolute weeks trip the sum assertion and force the
+    // rebuild to decide deliberately (most likely healing stays ~15 and the
+    // award absorbs the increase).
+    //
+    // The split is applied PROPORTIONALLY to each claim's DRAWN duration, not
+    // by subtracting a fixed 15 weeks — a claim that draws 8 weeks total must
+    // not book a negative award.
+    perm: {
+      durationWeeksMean: 45, durationWeeksCv: 1.0, medicalMean: 65000, medicalCv: 1.8,
+      healingWeeks: 15, awardWeeks: 30,
+    },
   },
 
   // Average annual wage by class; the weekly indemnity benefit is
