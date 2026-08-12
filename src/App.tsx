@@ -92,6 +92,15 @@ export default function App() {
   const [lineViewRaw, setLineView] = useState<LineView>('pool');
 
   // Load persisted game from localStorage if available
+  //
+  // THE KEY STAYS 'riskpool_gamestate_v10' ACROSS THE RIPPLE RENAME, on
+  // purpose. It is a persisted identifier, not a display string — renaming it
+  // to match the new product name would orphan every existing saved game
+  // (a fresh key means `localStorage.getItem` finds nothing, indistinguishable
+  // from never having played). The four sites using this literal (the load
+  // here, its two removeItem cleanup paths below, and persistState's setItem)
+  // must all keep using the same string. A version bump belongs to a real save
+  // schema change, not to the app's name.
   React.useEffect(() => {
     try {
       const saved = localStorage.getItem('riskpool_gamestate_v10');

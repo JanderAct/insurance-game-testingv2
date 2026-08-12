@@ -35,9 +35,15 @@ export default function Header({ gameState, startingFinancials, onNewGame, onAdv
               <Shield size={20} />
             </div>
             <div className="min-w-0">
-              <div className="font-bold text-lg leading-tight truncate">Risk Pool Simulation</div>
-              {isStarted && (
+              <div className="font-bold text-lg leading-tight truncate">Ripple</div>
+              {/* Same slot, two occupants that never overlap: the tagline
+                  before a game exists, the SIMULATED pool's own name once one
+                  does. The pool-name branch is untouched — it names the game
+                  in progress, not the product, and stays that way on rename. */}
+              {isStarted ? (
                 <div className="text-slate-400 text-xs truncate">{poolName}</div>
+              ) : (
+                <div className="text-slate-400 text-xs truncate">Every decision creates impact.</div>
               )}
             </div>
           </div>

@@ -1,4 +1,4 @@
-# Project State Summary — Pool Risk Management Game
+# Project State Summary — Ripple
 **Purpose:** compact reference of everything decided, built, and pending as of this point. Serves as a
 standalone catch-up document (or a seed file for a fresh working session). Detailed reasoning lives in
 the conversation and in the companion docs listed at the end.

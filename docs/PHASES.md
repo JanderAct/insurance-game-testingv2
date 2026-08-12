@@ -1,4 +1,4 @@
-# Pool Risk Management Game — Development Spec (v2)
+# Ripple — Development Spec (v2)
 
 This replaces the original single-pass phase plan. Same destination, but broken into small
 stages that can each be built, tested, and confirmed working before moving to the next —

@@ -1,4 +1,4 @@
-# Claude Code Playbook — Building the Pool Risk Game Phases
+# Claude Code Playbook — Building the Ripple Phases
 
 A session-by-session guide for implementing the phase plan with Claude Code. Written assuming
 you're still getting comfortable with Claude Code and haven't settled on a git workflow — so the

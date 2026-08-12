@@ -1,4 +1,4 @@
-# Pool Risk Game — Non-Cat Property Distribution (v3 canonical)
+# Ripple — Non-Cat Property Distribution (v3 canonical)
 
 ## Attritional (All-Risk) band · Non-Cat Weather band · Per-Risk reinsurance
 

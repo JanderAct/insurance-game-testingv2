@@ -60,7 +60,7 @@ export default function SetupPage({ onStart }: SetupPageProps) {
           <div className="inline-flex items-center justify-center w-20 h-20 bg-blue-600 rounded-2xl shadow-lg mb-5">
             <Shield size={40} className="text-white" />
           </div>
-          <h1 className="text-4xl font-bold text-gray-900 mb-3">Risk Pool Simulation</h1>
+          <h1 className="text-4xl font-bold text-gray-900 mb-3">Ripple</h1>
           <p className="text-gray-500 max-w-lg mx-auto text-base leading-relaxed">
             Manage a public entity risk pool over multiple years. Make pricing, underwriting, investment, and reinsurance decisions to grow surplus and serve your members.
           </p>

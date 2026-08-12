@@ -1,4 +1,4 @@
-# Pool Risk Game — Property Catastrophe Engine (v3 canonical)
+# Ripple — Property Catastrophe Engine (v3 canonical)
 
 ## Flood · Wildfire · Earthquake — three engines, two-layer reinsurance
 
