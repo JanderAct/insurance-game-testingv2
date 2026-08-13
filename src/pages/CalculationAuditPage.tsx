@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { resultUsesTower } from '../utils/reinsuranceDisplay';
 import {
   Calculator,
   ClipboardList,
@@ -194,9 +195,12 @@ function factorTerm(value: number, label?: string): FormulaTerm {
 // the statement card's "Premiums for transferred risk" and the supporting
 // Losses and Reinsurance card's "Reinsurance Cost", so both rows can never
 // silently drift apart on how the rate is computed.
+// PROPERTY'S PRODUCT ONLY. WC and GL price per layer off measured expected ceded
+// loss, not as a percentage of premium, so there is no "rate" to compute for
+// them — callers must check resultUsesTower first.
 function computeReinsRate(x: LineResultSet, competitivePressure: number) {
   const prog = REINSURANCE_PROGRAMS[x.decisions.reinsuranceLevel];
-  if (x.decisions.reinsuranceLevel === 0) return { pct: 0, prog, spread: 0 };
+  if (resultUsesTower(x) || x.decisions.reinsuranceLevel === 0) return { pct: 0, prog, spread: 0 };
   const spread = prog.costPctOfPremiumMax - prog.costPctOfPremiumMin;
   return { pct: prog.costPctOfPremiumMax - competitivePressure * spread, prog, spread };
 }
@@ -1169,7 +1173,7 @@ function buildAssumptionRows(): AuditRow[] {
         `  Assessment % (engine field): ${formatSliderPct(SLIDER_RANGES.assessmentPct)}\n` +
         `Underwriting Strictness: ${formatSliderNumber(SLIDER_RANGES.underwritingStrictness)}\n` +
         `Risk Control %: ${formatSliderPct(SLIDER_RANGES.riskControlPct)}\n` +
-        `Reinsurance Level: ${formatSliderNumber(SLIDER_RANGES.reinsuranceLevel)}\n` +
+        `Reinsurance Level (Property only — WC/GL use the layer tower): ${formatSliderNumber(SLIDER_RANGES.reinsuranceLevel)}\n` +
         `Asset Allocation Default: Cash ${ASSET_ALLOCATION_DEFAULT.cashPct}% / Bonds ${ASSET_ALLOCATION_DEFAULT.bondsPct}% / Equities ${ASSET_ALLOCATION_DEFAULT.equitiesPct}%`,
       formula: 'Player decision slider configuration.',
       note:
@@ -1518,7 +1522,12 @@ export function buildSupportingRows(
       metric: 'Reinsurance Recovery',
       value: formatCurrency(result.reinsuranceRecovery),
       numericValue: result.reinsuranceRecovery,
-      formula: result.decisions.reinsuranceLevel === 0
+      formula: resultUsesTower(result)
+        // The tower is a SUM OVER LAYERS of per-occurrence cessions plus WC's
+        // aggregate — not a quota share of an annual excess, so the old
+        // two-factor product would misdescribe it entirely.
+        ? { kind: 'echo', value: result.reinsuranceRecovery, text: `Per-occurrence tower: ${(result.cededByLayer ?? []).filter(v => v > 0).length} layer(s) paid${(result.aggregateRecovery ?? 0) > 0 ? ' + aggregate stop-loss' : ''}` }
+        : result.decisions.reinsuranceLevel === 0
         ? { kind: 'echo', value: 0, text: 'Self Fund — no external reinsurance, nothing to recover' }
         : { kind: 'product', factors: [curTerm(result.excessLosses, 'losses above attachment'), pctTerm(REINSURANCE_PROGRAMS[result.decisions.reinsuranceLevel].recoveryPct, 'quota share')] },
     },
@@ -1986,13 +1995,15 @@ export function buildRevExpRows(
           value: `(${formatCurrency(result.reinsuranceRecovery)})`,
           numericValue: result.reinsuranceRecovery,
           formula: scoped(
-            () => ({
+            () => resultUsesTower(result)
+              ? { kind: 'echo' as const, value: result.reinsuranceRecovery, text: 'Per-occurrence tower — sum of layer cessions' }
+              : {
               kind: 'product' as const,
               factors: [
                 cur(result.excessLosses, 'losses above attachment'),
                 { value: REINSURANCE_PROGRAMS[result.decisions.reinsuranceLevel].recoveryPct, format: 'pct' as const, label: 'quota share' },
               ],
-            }),
+            },
             x => x.reinsuranceRecovery
           ),
           indent: 2 as const,

@@ -1,6 +1,8 @@
 // Financial Statement engine for Risk Pool Simulation v1
 
 import type { LineResultSet } from '../types/simulation';
+import { placementSummary, resultUsesTower } from './reinsuranceDisplay';
+import type { CoverageLine } from '../types/simulation';
 
 export interface IncomeStatement {
   poolPremium: number;
@@ -48,8 +50,15 @@ export interface SurplusRollforward {
 }
 
 export interface ReinsuranceDetail {
+  // `level` / `levelLabel` are PROPERTY'S product. On WC and GL they are set to
+  // -1 / the tower's placement summary, because those lines have no level — see
+  // reinsuranceDisplay.ts. Read `usesTower` before showing a level anywhere.
+  usesTower: boolean;
   level: number;
   levelLabel: string;
+  // Retained above the top of the tower — unreinsurable at any price. 0 on
+  // Property, which has no tower.
+  retainedAboveTower: number;
   attachment: number;
   limit: number;
   recoveryPct: number;
@@ -147,10 +156,16 @@ export function deriveAnnualStatement(result: LineResultSet): AnnualFinancialSta
 
   const reinsLabels = ['Self Fund', 'Low', 'Moderate', 'High', 'Full Transfer'];
   const reinsLevel = result.decisions.reinsuranceLevel;
+  const tower = resultUsesTower(result);
+  const towerLine: CoverageLine = (result.cededByLayer?.length ?? 0) >= 4 ? 'WC' : 'GL';
 
   const reinsuranceDetail: ReinsuranceDetail = {
-    level: reinsLevel,
-    levelLabel: reinsLabels[reinsLevel] ?? 'Unknown',
+    usesTower: tower,
+    retainedAboveTower: result.retainedAboveTower ?? 0,
+    // -1 is deliberate and load-bearing: it makes a level read as ABSENT rather
+    // than as level 0 ("Self Fund"), which is a real program a tower line is not on.
+    level: tower ? -1 : reinsLevel,
+    levelLabel: tower ? placementSummary(towerLine, result.decisions) : (reinsLabels[reinsLevel] ?? 'Unknown'),
     attachment: result.attachment,
     limit: Infinity,
     recoveryPct: result.excessLosses > 0 ? result.reinsuranceRecovery / result.excessLosses : 0,

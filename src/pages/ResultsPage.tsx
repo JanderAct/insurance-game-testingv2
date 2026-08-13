@@ -18,7 +18,7 @@ import {
   colorForNetIncome,
   colorForSurplus,
 } from '../utils/formatters';
-import { REINSURANCE_PROGRAMS } from '../data/defaultAssumptions';
+import { placementSummary, usesTower, towerTopLabel, RETAINED_ABOVE_TOWER_CAVEAT } from '../utils/reinsuranceDisplay';
 import { lineDisplayName } from '../utils/lineDisplay';
 
 interface ResultsPageProps {
@@ -233,10 +233,29 @@ export default function ResultsPage({ lockedResults, lineView }: ResultsPageProp
               <Row label="Assessment" value={formatPct(result.decisions.assessmentPct, 1)} />
               <Row label="Underwriting Strictness" value={`${result.decisions.underwritingStrictness} / 10`} />
               <Row label="Risk Control Investment" value={formatPct(result.decisions.riskControlPct, 1)} />
+              {/* TWO PRODUCTS ARE LIVE. WC/GL run the per-occurrence tower and have
+                  no "level"; Property still runs the aggregate quota share. At POOL
+                  scope three different programs are in force at once, so a single
+                  value would be a fiction — say so and point at the line tabs. */}
               <Row
-                label="Reinsurance Level"
-                value={`${result.decisions.reinsuranceLevel} — ${REINSURANCE_PROGRAMS[result.decisions.reinsuranceLevel]?.label ?? ''}`}
+                label={lineView === 'pool' ? 'Reinsurance' : usesTower(lineView) ? 'Reinsurance Program' : 'Reinsurance Level'}
+                value={lineView === 'pool'
+                  ? 'Varies by line — select a line tab'
+                  : placementSummary(lineView, result.decisions)}
               />
+              {/* THE POOL'S LARGEST SINGLE EXPOSURE, and until now invisible. On GL
+                  this band exceeds the top layer the pool actually buys and cannot be
+                  transferred at any price, so it is what surplus stands behind. */}
+              {(result.retainedAboveTower ?? 0) > 0 && (
+                <Row
+                  label={`Retained Above Tower (${towerTopLabel(lineView === 'pool' ? 'GL' : lineView)}+)`}
+                  value={formatCurrency(result.retainedAboveTower)}
+                  valueColor="text-red-600"
+                />
+              )}
+              {(result.retainedAboveTower ?? 0) > 0 && (
+                <p className="text-xs text-gray-500 italic leading-relaxed pt-1">{RETAINED_ABOVE_TOWER_CAVEAT}</p>
+              )}
               <Row label="Asset Allocation (pool-wide)" value={`Cash ${result.assetAllocation.cashPct.toFixed(0)}% / Bonds ${result.assetAllocation.bondsPct.toFixed(0)}% / Equities ${result.assetAllocation.equitiesPct.toFixed(0)}%`} />
             </ResultCard>
 

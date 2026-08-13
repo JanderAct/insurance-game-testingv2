@@ -6,6 +6,14 @@
 import type { SpreadsheetMetric } from './resultsExport';
 import { formatCurrency, formatPct } from './formatters';
 import { REINSURANCE_PROGRAMS } from '../data/defaultAssumptions';
+import { placementCode, placementSummary, resultUsesTower } from './reinsuranceDisplay';
+import type { CoverageLine } from '../types/simulation';
+
+// Which tower line a result row belongs to, inferred from the layer-count the
+// engine populated: WC's tower has 4 layers, GL's has 3. Only reached when
+// resultUsesTower is already true, so Property never lands here.
+const towerLineOf = (r: { cededByLayer?: number[] }): CoverageLine =>
+  (r.cededByLayer?.length ?? 0) >= 4 ? 'WC' : 'GL';
 
 const dollars = (value: number) => `$${value.toFixed(2)}`;
 const roundDollars = (value: number) => Math.round(value);
@@ -70,11 +78,28 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
       csvValue: r => r.decisions.riskControlPct,
     },
     {
+      // TWO PRODUCTS SHARE THIS ROW. WC/GL export their layer placement; Property
+      // exports its quota-share level. Exporting a level for a tower line would
+      // put a meaningless "2 - Moderate" in every WC and GL spreadsheet.
+      //
+      // csvValue is now a STRING for tower lines (a placement code like
+      // "L1+L2+L3+AGG1"), so value-identity — which is numeric-only — no longer
+      // sees a numeric field here on WC/GL. That is correct: a placement is not a
+      // magnitude, and pretending it is one is what the old column did.
+      //
+      // ⚠ THE LABEL IS STILL "Reinsurance Level", WHICH IS WRONG FOR WC AND GL.
+      // It is left wrong DELIBERATELY and only here. `label` is a static string
+      // shared by every line's export, so any rename also rewrites PROPERTY's
+      // header row — and PR-solo staying byte-identical is the leak check that
+      // proves this work did not touch Property. Renaming it, or adding a
+      // Retained Above Tower column (which would likewise appear on Property at
+      // 0), both moved PR-solo when tried. The VALUE is correct for every line;
+      // only this header is stale, and fixing it needs a deliberate re-baseline.
       key: 'reinsuranceLevel',
       category: 'Decisions',
       label: 'Reinsurance Level',
-      value: r => `${r.decisions.reinsuranceLevel} - ${REINSURANCE_PROGRAMS[r.decisions.reinsuranceLevel]?.label ?? ''}`,
-      csvValue: r => r.decisions.reinsuranceLevel,
+      value: r => resultUsesTower(r) ? placementSummary(towerLineOf(r), r.decisions) : `${r.decisions.reinsuranceLevel} - ${REINSURANCE_PROGRAMS[r.decisions.reinsuranceLevel]?.label ?? ''}`,
+      csvValue: r => resultUsesTower(r) ? placementCode(towerLineOf(r), r.decisions) : r.decisions.reinsuranceLevel,
     },
     {
       key: 'assetAllocation',

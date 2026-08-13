@@ -7,6 +7,9 @@ import { SLIDER_RANGES, REINSURANCE_PROGRAMS, ASSET_ALLOCATION_DEFAULT } from '.
 import { formatCurrency } from '../utils/formatters';
 import { getReinsuranceStructure } from '../utils/reinsuranceEngine';
 import { defaultLineDecisionSet } from '../utils/decisionDefaults';
+import { usesTower } from '../utils/reinsuranceDisplay';
+import { AGG_ATTACHMENT_LEVELS, AGG_LIMIT_MULTIPLE, REINSURANCE_TOWER, TOWER_TOP } from '../data/reinsuranceTower';
+import { layerPremium, expectedCededForLayer, normalizeLayersPlaced, occurrenceProgramCost, quoteAggregate } from '../utils/reinsuranceTower';
 import { lineDisplayName } from '../utils/lineDisplay';
 import { lookupCLF } from '../utils/simulationEngine';
 import type { FundingConsequence } from '../utils/fundingConsequence';
@@ -22,6 +25,9 @@ interface DecisionsPageProps {
   yearNumber: number;
   estimatedPremium: number;
   estimatedExpectedLoss: number;
+  // Active exposure for the line being edited, in EXPOSURE UNITS ($M of payroll
+  // or TIV). The tower prices per $100 of exposure, so the control needs it.
+  estimatedExposure: number;
   disabled?: boolean;
   // 'pool' hosts the two pool-wide decisions (investment allocation, risk
   // control); each coverage line's tab edits that line's own decisions.
@@ -73,7 +79,7 @@ function resetLineToDefaults(decisions: DecisionSet, line: CoverageLine): Decisi
   };
 }
 
-export default function DecisionsPage({ decisions, onChange, yearNumber, estimatedPremium, estimatedExpectedLoss, disabled = false, lineView, lineLoanInfo, lastLineResult, fundingConsequence }: DecisionsPageProps) {
+export default function DecisionsPage({ decisions, onChange, yearNumber, estimatedPremium, estimatedExpectedLoss, estimatedExposure, disabled = false, lineView, lineLoanInfo, lastLineResult, fundingConsequence }: DecisionsPageProps) {
   // Pool tab: the two pool-wide decisions. One allocation policy and one
   // risk-control intensity for the whole pool — each line applies them to its
   // OWN base (own segregated portfolio / own premium).
@@ -87,7 +93,7 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
   const d = decisions.byLine[selectedLine];
   const selectedLoanInfo = lineLoanInfo[selectedLine];
 
-  const set = (key: keyof LineDecisionSet, val: number | LineDecisionSet['assetAllocation']) =>
+  const set = (key: keyof LineDecisionSet, val: number | boolean[] | LineDecisionSet['assetAllocation']) =>
     onChange({ ...decisions, byLine: { ...decisions.byLine, [selectedLine]: { ...d, [key]: val } } });
 
   const reinsStructure = getReinsuranceStructure(d.reinsuranceLevel, estimatedPremium, estimatedExpectedLoss);
@@ -166,6 +172,17 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
         {outstandingLoanSlider(d, set, selectedLoanInfo, disabled)}
 
         <SectionCard title="Reinsurance Program" icon={<Shield size={16} />}>
+          {usesTower(selectedLine) ? (
+            <TowerControls
+              line={selectedLine}
+              d={d}
+              set={set}
+              disabled={disabled}
+              exposure={estimatedExposure}
+              expectedLoss={estimatedExpectedLoss}
+            />
+          ) : (
+          <>
           <div className="mb-3">
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Reinsurance Level</p>
             <div className="grid grid-cols-5 gap-1">
@@ -196,6 +213,8 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
             )}
             <p className="text-blue-700 mt-2 text-xs leading-relaxed border-t border-blue-100 pt-2">Reinsurance does not reduce gross losses. Above the attachment point, the reinsurer pays its quota share of the excess; the pool retains the rest.</p>
           </div>
+          </>
+          )}
         </SectionCard>
 
       </div>
@@ -477,6 +496,195 @@ function DataRow({ label, value }: { label: string; value: string }) {
     <div className="flex justify-between">
       <span className="text-gray-500">{label}:</span>
       <span className="font-semibold text-gray-800">{value}</span>
+    </div>
+  );
+}
+
+// ===========================================================================
+// PER-OCCURRENCE TOWER CONTROLS (WC and GL). Property keeps the level selector
+// above — it legitimately still uses REINSURANCE_PROGRAMS.
+//
+// EVERY LAYER'S PRICE IS SHOWN, because the loading rising with attachment IS
+// the mechanic. A player who cannot see that the $15M xs $10M layer costs 3.3x
+// its expected loss while the working layer costs 1.9x has no basis for choosing
+// between them, and the decision collapses into "buy everything".
+//
+// NO ORDERING CONSTRAINT. Any combination is allowed, including buying a higher
+// layer while declining a lower one. A corridor retention is unusual in the
+// market but real, and choosing which bands to keep is the point.
+// ===========================================================================
+function TowerControls({
+  line, d, set, disabled, exposure, expectedLoss,
+}: {
+  line: CoverageLine;
+  d: LineDecisionSet;
+  set: (key: keyof LineDecisionSet, val: number | boolean[]) => void;
+  disabled: boolean;
+  exposure: number;
+  expectedLoss: number;
+}) {
+  const layers = REINSURANCE_TOWER[line as 'WC' | 'GL'];
+  const placed = normalizeLayersPlaced(line as 'WC' | 'GL', d.layersPlaced);
+  const per100 = exposure * 10_000;
+
+  const toggle = (i: number) => {
+    if (disabled || !layers[i].purchasable) return;
+    const next = [...placed];
+    next[i] = !next[i];
+    set('layersPlaced', next);
+  };
+
+  const occCost = occurrenceProgramCost(line as 'WC' | 'GL', placed, per100);
+  // LIVE, not cached: the aggregate is re-quoted from the CURRENT placements on
+  // every render, so declining a layer immediately raises its price. That
+  // responsiveness is the whole reason the price is computed rather than stored —
+  // without it, "decline everything and buy the aggregate" is free volatility
+  // transfer.
+  const aggQuote = line === 'WC' && d.aggregateStopLevel >= 0
+    ? quoteAggregate(placed, exposure, expectedLoss, d.aggregateStopLevel)
+    : null;
+  const totalCost = occCost + (aggQuote?.premium ?? 0);
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+          Occurrence Layers — Retention $1M
+        </p>
+        <div className="space-y-1.5">
+          {layers.map((l, i) => {
+            const price = layerPremium(line as 'WC' | 'GL', i, per100);
+            const expected = expectedCededForLayer(line as 'WC' | 'GL', i, per100);
+            const multiple = expected > 0 ? price / expected : 0;
+            if (!l.purchasable) {
+              return (
+                <div key={l.name} className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-2.5 text-xs">
+                  <div className="flex justify-between items-center">
+                    <span className="font-bold text-gray-500">{l.name}</span>
+                    <span className="text-gray-400 font-semibold uppercase text-xs tracking-wide">Not available</span>
+                  </div>
+                  <p className="text-gray-500 mt-1 leading-relaxed">
+                    Defined but <strong>not purchasable</strong>. This layer covers multi-claim catastrophe
+                    occurrences — one event injuring several workers. The model emits one claim per WC
+                    occurrence, and a single catastrophic claim tops out near <strong>$15.51M</strong> present
+                    value, so the mechanism it was designed for cannot reach it. Offering it at a price would
+                    be selling cover that cannot pay.
+                  </p>
+                </div>
+              );
+            }
+            return (
+              <button
+                key={l.name}
+                disabled={disabled}
+                onClick={() => toggle(i)}
+                className={`w-full text-left rounded-lg border p-2.5 transition-all text-xs ${
+                  placed[i]
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-md'
+                    : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:bg-blue-50'
+                } ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
+              >
+                <div className="flex justify-between items-center">
+                  <span className="font-bold">{l.name}</span>
+                  <span className={`font-semibold ${placed[i] ? 'text-blue-100' : 'text-gray-500'}`}>
+                    {placed[i] ? 'PLACED' : 'RETAINED'}
+                  </span>
+                </div>
+                <div className={`flex justify-between mt-1 ${placed[i] ? 'text-blue-100' : 'text-gray-500'}`}>
+                  <span>{formatCurrency(price)}/yr</span>
+                  <span>{multiple.toFixed(2)}x expected loss</span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-xs text-gray-500 italic mt-2 leading-relaxed">
+          Any combination is allowed — including buying a higher layer while declining a lower one.
+          A declined layer is simply retained. The cost multiple rises with attachment because the
+          reinsurer charges for capital, not claims.
+        </p>
+      </div>
+
+      {line === 'GL' && (
+        <div className="bg-amber-50 rounded-lg p-3 border border-amber-200 text-xs">
+          <p className="font-bold text-amber-900 mb-1">Nothing above {TOWER_TOP.GL / 1e6 === 25 ? '$25M' : '—'}</p>
+          <p className="text-amber-800 leading-relaxed">
+            Market capacity above $25M per occurrence is hard to find, so no layer is offered.
+            <strong> The pool retains everything above it, unlimited.</strong> That band is this line's
+            largest single exposure and cannot be transferred at any price — it is reported as
+            "Retained Above Tower" on Results and Financial Statements.
+          </p>
+        </div>
+      )}
+
+      {line === 'WC' && (
+        <div>
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+            Aggregate Stop-Loss — total annual retained loss
+          </p>
+          <div className="grid grid-cols-4 gap-1">
+            <button
+              disabled={disabled}
+              onClick={() => !disabled && set('aggregateStopLevel', -1)}
+              className={`flex flex-col items-center p-2 rounded-lg border text-center transition-all text-xs ${
+                d.aggregateStopLevel < 0
+                  ? 'bg-blue-600 text-white border-blue-600 shadow-md'
+                  : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:bg-blue-50'
+              } ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
+            >
+              <span className="font-bold">None</span>
+            </button>
+            {AGG_ATTACHMENT_LEVELS.map((mult, lv) => {
+              const q = quoteAggregate(placed, exposure, expectedLoss, lv);
+              return (
+                <button
+                  key={lv}
+                  disabled={disabled}
+                  onClick={() => !disabled && set('aggregateStopLevel', lv)}
+                  className={`flex flex-col items-center p-2 rounded-lg border text-center transition-all text-xs ${
+                    d.aggregateStopLevel === lv
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-md'
+                      : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:bg-blue-50'
+                  } ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
+                >
+                  <span className="font-bold">{(mult * 100).toFixed(0)}%</span>
+                  <span className="text-xs opacity-75 mt-0.5">{formatCurrency(q.premium)}</span>
+                </button>
+              );
+            })}
+          </div>
+          {aggQuote && (
+            <div className="bg-gray-50 rounded-lg p-3 border border-gray-200 text-xs mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5">
+              <DataRow label="Attaches At" value={formatCurrency(aggQuote.attachment)} />
+              <DataRow label="Limit" value={`${formatCurrency(aggQuote.limit)} (${(AGG_LIMIT_MULTIPLE * 100).toFixed(0)}% of exp. retained)`} />
+              <DataRow label="Expected Retained Loss" value={formatCurrency(aggQuote.expectedRetained)} />
+              <DataRow label="Expected Recovery" value={`${formatCurrency(aggQuote.expectedCeded)}/yr`} />
+            </div>
+          )}
+          <p className="text-xs text-gray-500 italic mt-2 leading-relaxed">
+            Covers total annual retained loss — <strong>including loss retained through layers you
+            declined</strong>. Its price is re-quoted live from your layer choices: declining occurrence
+            layers puts large claims back into the retention, raising volatility and so raising this cost.
+          </p>
+        </div>
+      )}
+
+      <div className="bg-blue-50 rounded-lg p-3 border border-blue-200 text-xs">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+          <DataRow label="Occurrence Layers" value={`${formatCurrency(occCost)}/yr`} />
+          {/* WC ONLY. Showing "Not purchased" on GL would imply an aggregate is
+              available to decline, and none is offered — see the capacity note. */}
+          {line === 'WC' && (
+            <DataRow label="Aggregate Stop-Loss" value={aggQuote ? `${formatCurrency(aggQuote.premium)}/yr` : 'Not purchased'} />
+          )}
+          <DataRow label="Total Reinsurance Cost" value={`${formatCurrency(totalCost)}/yr`} />
+          <DataRow label="Retained Above Tower" value={`Above ${TOWER_TOP[line as 'WC' | 'GL'] / 1e6}M — unlimited`} />
+        </div>
+        <p className="text-blue-700 mt-2 text-xs leading-relaxed border-t border-blue-200 pt-2">
+          Priced as expected ceded loss plus a risk load, per $100 of exposure — <strong>not</strong> as a
+          percentage of premium, so the cost no longer moves when you change the funding confidence level.
+        </p>
+      </div>
     </div>
   );
 }

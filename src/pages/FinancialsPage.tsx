@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { FileText, Target } from 'lucide-react';
 import type { CoverageLine, LineResultSet, LineView, ResultSet } from '../types/simulation';
 import { deriveAnnualStatement } from '../utils/financialStatementEngine';
+import { RETAINED_ABOVE_TOWER_CAVEAT } from '../utils/reinsuranceDisplay';
 import { formatCurrency, formatPct, colorForNetIncome } from '../utils/formatters';
 import { lineDisplayName } from '../utils/lineDisplay';
 import { LINE_RESERVE_PAYDOWN_PCT } from '../data/defaultAssumptions';
@@ -92,12 +93,27 @@ export default function FinancialsPage({ lockedResults, priorResults, lineView }
                     {is.reinsuranceRecovery !== 0 && (
                       <ISLine label="Less: reinsurance recoveries" value={`(${formatCurrency(is.reinsuranceRecovery)})`} indent2 />
                     )}
+                    {/* DISCLOSED, NOT DEDUCTED. This band sits ABOVE the top of the
+                        tower: no recovery exists against it at any price, so it is
+                        already inside "Current year claims" above and must not be
+                        subtracted again. It is shown because it is the pool's largest
+                        single exposure and was previously invisible. */}
+                    {statement.reinsuranceDetail.retainedAboveTower > 0 && (
+                      <ISLine
+                        label="  of which retained above tower (unreinsurable)"
+                        value={formatCurrency(statement.reinsuranceDetail.retainedAboveTower)}
+                        indent2
+                      />
+                    )}
                     <ISLine label="Prior year claims" value={formatCurrency(priorYearClaims)} indent2 />
                     <ISLine label="Provision for claims, net" value={formatCurrency(is.netIncurredLoss)} indent2 />
                     <ISLine label="General administrative services" value={formatCurrency(is.operatingExpense)} indent />
                     <ISLine label="Loss prevention expenses" value={formatCurrency(is.riskControlInvestment)} indent />
                     <ISLine label="Member dividends & returned premium" value={formatCurrency(is.dividends)} indent />
                     <ISLine label="Total operating expenses" value={formatCurrency(totalOperatingExpenses)} bold />
+                    {statement.reinsuranceDetail.retainedAboveTower > 0 && (
+                      <p className="text-xs text-gray-500 italic leading-relaxed pt-2">{RETAINED_ABOVE_TOWER_CAVEAT}</p>
+                    )}
 
                     <div className="border-t border-gray-200 my-2" />
                     <ISLine label="Operating income (loss)" value={formatCurrency(is.underwritingIncome)} bold valueColor={colorForNetIncome(is.underwritingIncome)} />

@@ -1,7 +1,7 @@
+import { placementSummary } from '../utils/reinsuranceDisplay';
 import { useState } from 'react';
 import { ScrollText, ArrowUpDown } from 'lucide-react';
 import type { LineResultSet, LineView } from '../types/simulation';
-import { REINSURANCE_PROGRAMS } from '../data/defaultAssumptions';
 import { lineDisplayName } from '../utils/lineDisplay';
 
 interface DecisionHistoryPageProps {
@@ -102,7 +102,7 @@ export default function DecisionHistoryPage({ lockedResults, lineView }: Decisio
                         <td className="px-4 py-3">{pctDisplay(r.decisions.assessmentPct)}</td>
                         <td className="px-4 py-3">{r.decisions.underwritingStrictness} / 10</td>
                         <td className="px-4 py-3">
-                          {r.decisions.reinsuranceLevel} — {REINSURANCE_PROGRAMS[r.decisions.reinsuranceLevel]?.label ?? ''}
+                          {isPool ? 'Varies by line' : placementSummary(lineView, r.decisions)}
                         </td>
                         {showLoanColumn && (
                           <td className="px-4 py-3">

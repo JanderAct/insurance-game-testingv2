@@ -343,6 +343,17 @@ export default function App() {
     return exposure * lineState.ratePer100 * 10_000;
   }, [gameState, decisionLine]);
 
+  // Active exposure for the line being edited. The reinsurance tower prices per
+  // $100 of exposure, so the decision control needs the exposure itself rather
+  // than a premium or a loss figure derived from it.
+  const estimatedExposure = React.useMemo(() => {
+    if (!gameState) return 0;
+    const lineState = gameState.poolState.lines[decisionLine];
+    return lineState.members
+      .filter(m => m.status === 'active')
+      .reduce((s, m) => s + getMemberExposure(m, decisionLine), 0);
+  }, [gameState, decisionLine]);
+
   const estimatedExpectedLoss = React.useMemo(() => {
     if (!gameState) return 3_500_000;
 
@@ -450,6 +461,7 @@ export default function App() {
             yearNumber={gameState.currentYearNumber}
             estimatedPremium={estimatedPremium}
             estimatedExpectedLoss={estimatedExpectedLoss}
+            estimatedExposure={estimatedExposure}
             disabled={gameState.isComplete}
             lineView={effectiveLineView}
             lineLoanInfo={lineLoanInfo}

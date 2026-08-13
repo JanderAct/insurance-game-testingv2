@@ -1,3 +1,4 @@
+import { resultUsesTower } from './reinsuranceDisplay';
 // Rule-based narrative explanation engine for Risk Pool Simulation v1
 
 import type { ResultSet } from '../types/simulation';
@@ -42,7 +43,23 @@ export function generateNarrative(result: ResultSet, _priorResult?: ResultSet): 
   }
 
   // --- Reinsurance ---
-  if (decisions.reinsuranceLevel === 0) {
+  // TWO PRODUCTS. `reinsuranceLevel` is Property's; WC and GL run the tower and
+  // their level is meaningless, so it must not be narrated for them.
+  if (resultUsesTower(result)) {
+    const anyPlaced = (result.cededByLayer ?? []).length > 0
+      && (result.decisions.layersPlaced ?? []).some(Boolean);
+    if (reinsuranceRecovery > 0) {
+      parts.push(`The reinsurance tower recovered $${fmt(reinsuranceRecovery)}, reducing net losses.`);
+    } else if (anyPlaced) {
+      parts.push(`Occurrence layers were placed but no single loss reached the $1M retention.`);
+    } else {
+      parts.push(`No occurrence layers were placed — the pool retained every loss in full.`);
+    }
+    const above = result.retainedAboveTower ?? 0;
+    if (above > 0) {
+      parts.push(`$${fmt(above)} fell ABOVE the top of the tower and could not be reinsured at any price.`);
+    }
+  } else if (decisions.reinsuranceLevel === 0) {
     parts.push(`The pool self-funded rather than buying external reinsurance, retaining that budget in cash and investments.`);
   } else if (reinsuranceRecovery > 0) {
     parts.push(`Reinsurance generated $${fmt(reinsuranceRecovery)} in recoveries, reducing net losses.`);
