@@ -1068,6 +1068,46 @@ cover only raises cost, because premium is blind to how much is ceded.
 pricing requires knowing, at pricing time, what the retention structure actually cedes — which is
 exactly the reinsuranceLevel-to-retention mapping J10 already blocks on. Design them together.
 
+### UPDATE — the per-occurrence tower makes this ~2.2x worse, and ships anyway
+
+**The base was re-measured and it had already moved.** The 7.6-7.8 points recorded above predate the
+WC class-cost rebuild, which changed the loss distribution underneath them. Re-measured at today's
+parameters over 40 games x 5 years at default decisions, WC+GL:
+
+| scope | mean gap | median gap |
+|---|---|---|
+| pool | **11.3 pts** | 15.4 pts |
+| WC | 7.2 pts | 9.9 pts |
+| GL | 13.9 pts | 23.6 pts |
+
+Do not quote 7.6-7.8 again. The mean/median divergence is itself informative: the gap is *smaller*
+in bad years, so the distribution is skewed and the median is the better central measure.
+
+**The tower roughly doubles the double-funded slice.** The structural profit term IS `E[ceded]`, and
+replacing the aggregate quota share with a per-occurrence tower raises it, measured on the same
+enrolled book:
+
+| | WC | GL | pool |
+|---|---|---|---|
+| aggregate quota share (old) | $0.84M (6.6% of gross) | $4.05M (15.7%) | **$4.89M — 12.7%** |
+| per-occurrence tower (new) | $2.41M (18.8%) | $8.14M (31.5%) | **$10.55M — 27.3%** |
+| ratio | x2.85 | x2.01 | **x2.16** |
+
+**THE x2.16 RATIO IS THE ROBUST STATEMENT.** The conversion to combined-ratio points is approximate
+(it depends on the denominator convention and on a skewed distribution), so treat "roughly 24 points
+on the mean" as an order-of-magnitude consequence rather than a measured figure.
+
+**The tower commit ships this knowingly.** It was shipped separately, and separately was the right
+call for one reason: net-basis pricing changes premium, which changes membership, which changes
+everything, while the tower changes only the ceded/net split. Shipping both at once means a moved
+value cannot be attributed to either, and this project's entire gate discipline rests on that
+isolation. "Design them together" — which this finding asked for — was honoured at DESIGN time; the
+tower's plan derived the net-basis consequence before a line was written.
+
+**NET-BASIS PRICING IS THE IMMEDIATELY FOLLOWING COMMIT. Not a deferral, not a queue item.** The
+game is measurably easier until it lands: the pool collects premium funding losses it does not pay
+and keeps the recovery. Nothing else should be started first.
+
 **A separate, smaller issue — do NOT conflate with this finding.** The reinsurance COST ITSELF may
 also be mispriced relative to what it actually recovers (members pay ~0.376 x expected loss for ~0.18
 x expected loss of recovery, roughly $5.4M/yr of overpayment at current scale). Fixing the cost to an

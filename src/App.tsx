@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+import { DEFAULT_LAYERS_PLACED } from './data/reinsuranceTower';
 import {
   LayoutDashboard,
   ClipboardList,
@@ -123,6 +124,25 @@ export default function App() {
           // would throw away the whole game to gain the same thing.
           if (gs.poolState && !gs.poolState.memberLossHistory) {
             gs.poolState.memberLossHistory = {};
+          }
+          // PER-OCCURRENCE TOWER: saves written before it carry only
+          // `reinsuranceLevel`, and there is NO honest mapping from a quota-share
+          // level to a set of layer placements — they are different products, not
+          // two settings of one. So the default is every purchasable layer placed
+          // and no aggregate, and an old save silently adopts that rather than
+          // pretending its old program survived the change. The save KEY is
+          // unchanged; only this defaulting is new.
+          // Patch the LIVE decision set (`cd`), which is what the next turn
+          // reads. lockedResults keep their own historical decisions untouched —
+          // those are a record of what was played, not an input.
+          const byLine = (cd as DecisionSet | undefined)?.byLine as
+            Record<string, { layersPlaced?: boolean[]; aggregateStopLevel?: number }> | undefined;
+          if (byLine) {
+            for (const ld of Object.values(byLine)) {
+              if (!ld) continue;
+              if (!Array.isArray(ld.layersPlaced)) ld.layersPlaced = [...DEFAULT_LAYERS_PLACED];
+              if (typeof ld.aggregateStopLevel !== 'number') ld.aggregateStopLevel = -1;
+            }
           }
           setGameState(gs);
           setStartingFinancials(sf);

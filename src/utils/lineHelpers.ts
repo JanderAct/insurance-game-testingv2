@@ -1,3 +1,4 @@
+import { DEFAULT_LAYERS_PLACED } from '../data/reinsuranceTower';
 import type { CoverageLine, LineDecisionSet, LinePoolState, LineResultSet, LineView, Member, ResultSet } from '../types/simulation';
 import { ASSET_ALLOCATION_DEFAULT } from '../data/defaultAssumptions';
 
@@ -40,6 +41,8 @@ export function emptyLineDecisionSet(): LineDecisionSet {
     underwritingStrictness: 5,
     riskControlPct: 0,
     reinsuranceLevel: 0,
+    layersPlaced: DEFAULT_LAYERS_PLACED,
+    aggregateStopLevel: -1,
     assetAllocation: { ...ASSET_ALLOCATION_DEFAULT },
     loanRepaymentAggressiveness: 0.5,
   };

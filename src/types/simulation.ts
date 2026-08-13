@@ -259,6 +259,14 @@ export interface HistoricalYear {
   excessLosses: number;        // max(0, grossUltimateLoss - attachment) — the layer above attachment
   quotaShareLosses: number;    // pool's retained share of Excess Losses = (1 - quota%) x excessLosses
   reinsuranceRecovery: number; // reinsurer's paid share of Excess Losses = quota% x excessLosses
+  // Per-occurrence tower outputs. OPTIONAL HERE ONLY: the pre-game bootstrap
+  // predates the tower decision, so seeded history carries no placement. The
+  // LIVE result types require these.
+  cededByLayer?: number[];
+  retainedAboveTower?: number;
+  aggregateRecovery?: number;
+  aggregatePremium?: number;
+  aggregateAttachment?: number;
   netUltimateLoss: number;
   netPaidLosses: number;
   endingNetReserve: number;
@@ -337,7 +345,23 @@ export interface LineDecisionSet {
   assessmentPct: number;          // 0.00 to 0.25 of premium
   underwritingStrictness: number; // 0-10
   riskControlPct: number;         // 0.00 to 0.08 of premium (projected from DecisionSet.riskControlPct)
-  reinsuranceLevel: number;       // 0-4
+  // ⚠ PROPERTY ONLY as of the per-occurrence tower. Property still runs the
+  // legacy aggregate loss path and constructs no Claim/Occurrence objects, so
+  // there is nothing to layer and REINSURANCE_PROGRAMS remains its product.
+  // WC and GL IGNORE THIS FIELD and read layersPlaced / aggregateStopLevel
+  // instead. Not deleted, because Property genuinely needs it.
+  reinsuranceLevel: number;       // 0-4 — Property only
+  // Per-occurrence tower placement, index-aligned to REINSURANCE_TOWER[line].
+  // false = that band is RETAINED. ANY COMBINATION IS PERMITTED, including a
+  // corridor retention (buying $15M xs $10M while declining $5M xs $5M) — that
+  // is unusual in the market but real, and choosing which bands to keep is the
+  // point of the decision. Unread for Property.
+  layersPlaced: boolean[];
+  // WC AGGREGATE STOP-LOSS on total annual retained loss: index into
+  // AGG_ATTACHMENT_LEVELS, or -1 for not purchased. WC ONLY — GL is
+  // occurrence-only (market capacity, and the pricing model's lognormal fit is
+  // not valid at GL's retained-loss CV; see reinsuranceTower.ts).
+  aggregateStopLevel: number;
   assetAllocation: AssetAllocation;    // projected from DecisionSet.assetAllocation
   loanRepaymentAggressiveness: number; // 0.00 to 1.00 — share of positive net income used to
                                        // repay an outstanding inter-line loan first; only
@@ -506,6 +530,18 @@ export interface ResultSet {
   excessLosses: number;        // max(0, grossUltimateLoss - attachment) — the layer above attachment
   quotaShareLosses: number;    // pool's retained share of Excess Losses = (1 - quota%) x excessLosses
   reinsuranceRecovery: number; // reinsurer's paid share of Excess Losses = quota% x excessLosses
+  // --- per-occurrence tower outputs (WC/GL only; zero/empty on Property) ---
+  // Ceded by layer, index-aligned to REINSURANCE_TOWER[line]. Empty on Property.
+  cededByLayer: number[];
+  // What the pool keeps ABOVE THE TOP OF THE TOWER. On GL this is the band no
+  // market will write and it EXCEEDS the top layer the pool buys, so it is
+  // displayed rather than left implicit. Mean is indicative only — the band is
+  // unbounded (GL severity is Pareto alpha 1.3) and has no valid CI.
+  retainedAboveTower: number;
+  // WC aggregate stop-loss on total annual retained loss. 0 when not purchased.
+  aggregateRecovery: number;
+  aggregatePremium: number;
+  aggregateAttachment: number;
   netUltimateLoss: number;
   netIncurredLoss: number;      // netUltimateLoss adjusted for prior-year reserve development
 

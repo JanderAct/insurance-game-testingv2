@@ -1,3 +1,4 @@
+import { DEFAULT_LAYERS_PLACED } from '../data/reinsuranceTower';
 // Single source of truth for default decisions. Used by the App (new game /
 // next year), the Decisions page (per-line reset), and the Stage 2.10 pre-game
 // history simulation — so the "steadily managed before the player took over"
@@ -14,6 +15,10 @@ export function defaultLineDecisionSet(): LineDecisionSet {
     underwritingStrictness: SLIDER_RANGES.underwritingStrictness.default,
     riskControlPct: SLIDER_RANGES.riskControlPct.default,
     reinsuranceLevel: SLIDER_RANGES.reinsuranceLevel.default,
+    // Default: every purchasable occurrence layer placed, no aggregate. Matches
+    // the default-on-load rule for saves that predate the tower.
+    layersPlaced: DEFAULT_LAYERS_PLACED,
+    aggregateStopLevel: -1,
     assetAllocation: { ...ASSET_ALLOCATION_DEFAULT },
     loanRepaymentAggressiveness: 0.5,
   };

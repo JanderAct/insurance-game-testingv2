@@ -25,6 +25,15 @@ function mergeShockRecords(lineResults: LineResultSet[]): ShockRecord[] | undefi
 import { SeededRandom, deriveSubRng } from './random';
 import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, MEMBER_LOSS_VOLATILITY, RISK_CONTROL_PARAMS, LINE_RESERVE_PAYDOWN_PCT, OPERATING_CASH_PCT_OF_PREMIUM, WC_LOSS_MODEL } from '../data/defaultAssumptions';
 import { getReinsuranceStructure, calculateReinsuranceCost, calculateReinsuranceRecovery } from './reinsuranceEngine';
+import { REINSURANCE_TOWER, type TowerLine } from '../data/reinsuranceTower';
+import {
+  aggregateRecovery,
+  cedeOccurrences,
+  normalizeLayersPlaced,
+  occurrenceProgramCost,
+  occurrenceTotals,
+  quoteAggregate,
+} from './reinsuranceTower';
 import { simulateMarketReturns, blendInvestmentReturn } from './investmentEngine';
 import { simulateMemberMovement } from './membershipEngine';
 import { cloneMembershipHistory, openInterval, closeInterval } from './membershipHistory';
@@ -276,17 +285,46 @@ export function processLineYear(
   const adminRatePer100 = newPurePremiumPer100 * ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM;
   const poolPremiumAndAdminExpense = poolPremium + adminExpense;
 
+  // Hoisted above the pricing block: these are pure derivations from `line` and
+  // the reinsurance COST now branches on them, which happens before the loss
+  // simulation where they used to be declared.
+  const isWcClaimLine = line === 'WC';
+  const isGlClaimLine = line === 'GL';
+  const isClaimLine = isWcClaimLine || isGlClaimLine;
+
   const reinsStructure = getReinsuranceStructure(
     lineDecisions.reinsuranceLevel,
     poolPremium,
     expectedLoss
   );
 
-  const reinsuranceCost = calculateReinsuranceCost(
-    lineDecisions.reinsuranceLevel,
-    poolPremium,
-    instance.marketEnvironment.competitivePressure
-  );
+  // REINSURANCE COST — two products, same seam as the recovery below.
+  //
+  // WC/GL: sum of the PLACED occurrence layers' premiums, each priced as
+  // E[ceded] + lambda x SD[ceded] off the measured per-$100-of-exposure
+  // constants, PLUS the WC aggregate's runtime-computed premium. This replaces a
+  // flat 37.5% of pool premium, which scaled with the CLF and therefore charged
+  // 69% more at 85% confidence than at 60% for IDENTICAL cover — a price with no
+  // connection to the risk transferred.
+  //
+  // Property: unchanged, still a percentage of premium off REINSURANCE_PROGRAMS.
+  let reinsuranceCost: number;
+  if (isClaimLine && (isWcClaimLine || isGlClaimLine)) {
+    const towerLine = line as TowerLine;
+    const placedForCost = normalizeLayersPlaced(towerLine, lineDecisions.layersPlaced);
+    reinsuranceCost = occurrenceProgramCost(towerLine, placedForCost, activeExposure * 10_000);
+    if (towerLine === 'WC' && lineDecisions.aggregateStopLevel >= 0) {
+      reinsuranceCost += quoteAggregate(
+        placedForCost, activeExposure, expectedLoss, lineDecisions.aggregateStopLevel,
+      ).premium;
+    }
+  } else {
+    reinsuranceCost = calculateReinsuranceCost(
+      lineDecisions.reinsuranceLevel,
+      poolPremium,
+      instance.marketEnvironment.competitivePressure
+    );
+  }
 
   const totalMemberCharge = poolPremiumAndAdminExpense + reinsuranceCost;
   const totalMemberRatePer100 = totalMemberCharge / Math.max(activeExposure * 10_000, 1);
@@ -299,9 +337,6 @@ export function processLineYear(
   // --- Loss Simulation ---
   // WC and GL generate individual claims (design doc Parts A and B); Property
   // still draws the aggregate member-Gamma below until its generator exists.
-  const isWcClaimLine = line === 'WC';
-  const isGlClaimLine = line === 'GL';
-  const isClaimLine = isWcClaimLine || isGlClaimLine;
 
   const lossRng = deriveSubRng(instance.seed, yearNumber, lineRngLabel('losses', line));
 
@@ -570,16 +605,56 @@ export function processLineYear(
 
   grossUltimateLoss = Math.max(0, grossUltimateLoss);
 
-  const reinsuranceRecovery = calculateReinsuranceRecovery(
-    grossUltimateLoss,
-    reinsStructure
-  );
+  // --- REINSURANCE: two products, split at the isClaimLine seam -------------
+  //
+  // WC and GL run the PER-OCCURRENCE TOWER (cap -> retention -> layers, then WC's
+  // aggregate stop-loss on what remains retained). Property runs the LEGACY
+  // AGGREGATE QUOTA SHARE, untouched, because it has no Claim/Occurrence objects
+  // to layer — it still draws the aggregate member-Gamma above. That is why
+  // `reinsuranceLevel` and REINSURANCE_PROGRAMS are still live: they are
+  // Property's product now, not dead code.
+  let reinsuranceRecovery: number;
+  let cededByLayer: number[] = [];
+  let retainedAboveTower = 0;
+  let aggregateRecoveryAmount = 0;
+  let aggregatePremium = 0;
+  let aggregateAttachment = 0;
+  let attachment: number;
+
+  if (isClaimLine && (isWcClaimLine || isGlClaimLine)) {
+    const towerLine = line as TowerLine;
+    const placed = normalizeLayersPlaced(towerLine, lineDecisions.layersPlaced);
+    const totals = occurrenceTotals(generatedClaims ?? [], generatedOccurrences ?? [], towerLine);
+    const cession = cedeOccurrences(towerLine, totals, placed);
+    cededByLayer = cession.cededByLayer;
+    retainedAboveTower = cession.retainedAboveTower;
+
+    // The aggregate sits on RETAINED loss, so it applies AFTER the occurrence
+    // layers — including loss retained through layers the player DECLINED. That
+    // scope is what makes the aggregate respond to the layer selection at all.
+    if (towerLine === 'WC' && lineDecisions.aggregateStopLevel >= 0) {
+      const quote = quoteAggregate(
+        placed,
+        activeExposure,
+        expectedLoss,
+        lineDecisions.aggregateStopLevel,
+      );
+      aggregatePremium = quote.premium;
+      aggregateAttachment = quote.attachment;
+      aggregateRecoveryAmount = aggregateRecovery(cession.retained, quote);
+    }
+
+    reinsuranceRecovery = cession.totalCeded + aggregateRecoveryAmount;
+    // The tower's own retention, for the Pool/Excess display split.
+    attachment = REINSURANCE_TOWER[towerLine][0].attachment;
+  } else {
+    reinsuranceRecovery = calculateReinsuranceRecovery(grossUltimateLoss, reinsStructure);
+    // Pool Losses / Excess Losses split uses each level's real attachment point
+    // (125% of expected loss for Self Fund/Low/Moderate/High, 100% for Full Transfer).
+    attachment = reinsStructure.attachment;
+  }
 
   const netUltimateLoss = grossUltimateLoss - reinsuranceRecovery;
-
-  // Pool Losses / Excess Losses split uses each level's real attachment point
-  // (125% of expected loss for Self Fund/Low/Moderate/High, 100% for Full Transfer).
-  const attachment = reinsStructure.attachment;
   const poolLosses = Math.min(grossUltimateLoss, attachment);
   const excessLosses = Math.max(0, grossUltimateLoss - attachment);
   const quotaShareLosses = excessLosses - reinsuranceRecovery;
@@ -899,6 +974,11 @@ export function processLineYear(
     excessLosses,
     quotaShareLosses,
     reinsuranceRecovery,
+    cededByLayer,
+    retainedAboveTower,
+    aggregateRecovery: aggregateRecoveryAmount,
+    aggregatePremium,
+    aggregateAttachment,
     netUltimateLoss,
     netIncurredLoss,
 
@@ -1614,6 +1694,22 @@ export function aggregateLineResults(
     attachment: sum('attachment'),
     poolLosses: sum('poolLosses'),
     excessLosses: sum('excessLosses'),
+    // Tower outputs pooled across lines. cededByLayer is summed ELEMENTWISE and
+    // is only meaningful because WC and GL share identical attachments and limits
+    // on their first three layers; WC's fourth has no GL counterpart and simply
+    // carries WC's own figure. At pool scope this is a display convenience — the
+    // per-line arrays are the authoritative ones.
+    cededByLayer: (() => {
+      const width = Math.max(0, ...lineResults.map(r => r.result.cededByLayer.length));
+      const out = new Array(width).fill(0);
+      for (const { result } of lineResults)
+        result.cededByLayer.forEach((v, i) => { out[i] += v; });
+      return out;
+    })(),
+    retainedAboveTower: sum('retainedAboveTower'),
+    aggregateRecovery: sum('aggregateRecovery'),
+    aggregatePremium: sum('aggregatePremium'),
+    aggregateAttachment: sum('aggregateAttachment'),
     quotaShareLosses: sum('quotaShareLosses'),
     reinsuranceRecovery: sum('reinsuranceRecovery'),
     netUltimateLoss: sum('netUltimateLoss'),
