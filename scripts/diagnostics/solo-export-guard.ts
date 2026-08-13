@@ -77,6 +77,20 @@
 // PR-solo included — expected here, unlike the per-member-stream work above
 // where PR-solo staying still was the specific leak check.
 //
+// v9 retired here (moved to v10) by the WC CLASS COST REBUILD: every WC class
+// frequency, every per-class tier mix, and the temp/perm severity parameters
+// re-anchored to WCIRB advisory pure premium rates for public-entity
+// classifications. Class claim counts move 838.2 -> 1825.6/yr and the
+// catastrophic tier drops 3.3214 -> 0.8935/yr.
+//
+// EXACTLY 6 OF 12 HASHES MOVED — WC-solo and tri on all three seeds. GL-solo
+// AND PR-SOLO STAYED BYTE-IDENTICAL, which is the point: this change touches
+// only WC_LOSS_MODEL, and neither of the other two lines reads it. That
+// invariance is the leak check, exactly as it was for the per-member-stream
+// work above, and it is a stronger scope statement than value-identity can
+// make (value-identity aggregates across configs, so WC's movement shows up
+// there as 4,395 changed fields with 0 added and 0 removed).
+//
 // v4 was retired by roster v4
 // (TIV-only rescale, see roster_canonical_v4.csv), and v3 before that by the
 // expected-combined-ratio fix, which added one exported metric, corrected two
@@ -106,7 +120,7 @@ import { RESULT_METRICS } from '../../src/utils/resultMetrics';
 import type { GameState, CoverageLine, ResultSet } from '../../src/types/simulation';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v9.json');
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v10.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

@@ -321,7 +321,13 @@ function expectedTierSeverity(tier: WcTier, cls: WcClassKey, riskQuality: number
 }
 
 // Expected severity of a single claim from this class, across the tier mix.
-function expectedClaimSeverity(cls: WcClassKey, riskQuality: number, regionMult: number): number {
+// EXPORTED for the class-cost harness, which checks each rating class against
+// its WCIRB advisory rate. That check needs a per-class expected severity; the
+// alternative was recomputing the tier mix and severities inside the harness,
+// which would be a SECOND DEFINITION of claim severity, free to drift from this
+// one. Same reasoning as the shock-injection path reusing `emit` rather than
+// synthesising its own catastrophic claim.
+export function expectedClaimSeverity(cls: WcClassKey, riskQuality: number, regionMult: number): number {
   const probs = tierProbabilities(cls, riskQuality);
   let total = 0;
   for (const tier of ['medOnly', 'temp', 'perm', 'catastrophic'] as WcTier[]) {

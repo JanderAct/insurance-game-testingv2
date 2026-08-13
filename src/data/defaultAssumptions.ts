@@ -75,11 +75,22 @@ export type WcTier = (typeof WC_TIERS)[number];
 
 export const WC_LOSS_MODEL = {
   // --- A1 frequency -------------------------------------------------------
-  // Claims per $1M of that class's payroll per year. Calibrated to the
-  // canonical roster: expected FULL-MARKET claim counts (200 members, $1,300M
-  // payroll) 77.3 / 428.7 / 164.6 / 167.7 = 838.2, the figure the harness
-  // asserts.
-  rateClassPer1M: { clerical: 0.15, publicWorks: 0.80, police: 1.20, fire: 1.50 } as Record<WcClassKey, number>,
+  // Claims per $1M of that class's payroll per year. Set from a per-100-FTE
+  // frequency (rate = claims-per-100-FTE x 10,000 / classAnnualWage), then the
+  // tier mix below is solved to hit that class's WCIRB rate. Expected
+  // FULL-MARKET claim counts on the canonical roster (200 members, $1,300M
+  // payroll): 332.4 / 1108.6 / 193.7 / 190.8 = 1825.5, the figure the harness
+  // asserts. Was 838.2 before the WCIRB class-cost rebuild.
+  //
+  // Per-100-FTE: clerical 4.0, publicWorks 12.0, police 12.0, fire 14.0.
+  //
+  // ⚠ THE PER-100-FTE ENVELOPES ARE UNSOURCED. The ranges this project has
+  // been quoting (clerical 1-2, publicWorks 6-9, police 8-12, fire 10-15) are
+  // recollection, never sourced. Clerical at 4.0 sits above that band, and the
+  // right reading is that THE ENVELOPE IS WRONG, not the value: clerical
+  // cannot reach its WCIRB rate of $0.690 at 2.0/100 FTE by any severity this
+  // model can defend. Displaced by a sourced public-entity frequency table.
+  rateClassPer1M: { clerical: 0.6452, publicWorks: 2.0690, police: 1.4118, fire: 1.7073 } as Record<WcClassKey, number>,
 
   // Workplace safety improves ~1.5%/yr. Applied as (1 + trend)^(yearNumber-1),
   // so live Year 1 is the reference (factor 1.0) and the pre-game years carry
@@ -107,19 +118,46 @@ export const WC_LOSS_MODEL = {
   // --- A2 tier mix --------------------------------------------------------
   // [medOnly, temp, perm, catastrophic] per rating class.
   //
-  // clerical sums to 0.9995, not 1.0 (the other three classes sum exactly).
-  // HARMLESS, NOT A GAP: tierProbabilities() in wcClaimEngine.ts never reads
-  // these four numbers as final probabilities — it holds catastrophic fixed
-  // and RENORMALISES medOnly/temp/perm to sum to exactly (1 - catastrophic),
-  // whatever they summed to here. No claim falls through the tier draw; the
-  // 0.0005 shortfall is absorbed by the renormalisation, not left as a gap.
-  // Left uncorrected deliberately, so a future edit to this table doesn't
-  // waste effort re-balancing a sum the code was never going to use directly.
+  // medOnly/temp/perm now sum to exactly 1.0 in every class (they used to be
+  // read as raw weights, and clerical summed to 0.9995). tierProbabilities()
+  // in wcClaimEngine.ts still RENORMALISES them to (1 - catastrophic) and holds
+  // catastrophic fixed, so the sum was never load-bearing — but writing them as
+  // true shares makes the perm rates below directly readable as "share of
+  // non-catastrophic claims", which is how they were solved.
+  //
+  // THE PERM RATES CARRY THE ENTIRE CLASS DIFFERENTIAL. They are SOLVED to hit
+  // each class's WCIRB advisory pure premium rate (loss-only), not observed:
+  //   clerical    9410 Municipal non-manual   $0.82 filed -> $0.690 loss-only
+  //   publicWorks 9420 Municipal all other    $8.95 filed -> $6.733 loss-only
+  //   police      7720 Police/Sheriffs        $2.75 filed -> $3.010 model basis
+  //   fire        7710 Firefighters           NOT SOURCED -> $4.396 model basis
+  // See CALIBRATION_FINDINGS.md for why tier mix has to absorb the whole
+  // differential (medical severity is one shared value across all four classes)
+  // and for the per-class severity multiplier that would be the structurally
+  // correct fix instead.
+  //
+  // ⚠ publicWorks.perm 0.2780 IS THE LARGEST SINGLE MOVE IN THIS CHANGE —
+  // 4.9x its previous 0.057, and the number most likely to be wrong. It is
+  // SOLVED-TO-TARGET, NOT OBSERVED: it is whatever value makes public works
+  // reach $6.733, given everything else held. Real permanent-partial rates run
+  // roughly 8% of claims overall, and while public works (laborers, mechanics,
+  // park and landscape maintenance) is genuinely the highest-PPD class — which
+  // is why WCIRB prices 9420 as the most expensive public-entity class — 27.8%
+  // is well above any directly observed figure.
+  // DISPLACED BY: a public-entity PPD rate by class from actual claim counts,
+  // or a per-class medical severity multiplier (which would let severity carry
+  // part of the differential and pull this back toward ~8%).
+  //
+  // Catastrophic probabilities are likewise ANCHORED, not costed: solved
+  // alongside the perm rates and then scaled so the book lands at 0.049% of
+  // claims — the floor of the 0.05-0.15% PTD incidence range. Ordering stays
+  // hazard-correct (fire > police > publicWorks > clerical), which an earlier
+  // solve did NOT achieve and which is the check that this one is sane.
   tierProbabilities: {
-    clerical:    { medOnly: 0.78, temp: 0.20, perm: 0.019, catastrophic: 0.0005 },
-    publicWorks: { medOnly: 0.68, temp: 0.26, perm: 0.057, catastrophic: 0.003 },
-    police:      { medOnly: 0.60, temp: 0.30, perm: 0.095, catastrophic: 0.005 },
-    fire:        { medOnly: 0.58, temp: 0.30, perm: 0.113, catastrophic: 0.007 },
+    clerical:    { medOnly: 0.7511, temp: 0.2002, perm: 0.0487, catastrophic: 0.00012 },
+    publicWorks: { medOnly: 0.4612, temp: 0.2608, perm: 0.2780, catastrophic: 0.00048 },
+    police:      { medOnly: 0.6446, temp: 0.3015, perm: 0.0539, catastrophic: 0.00072 },
+    fire:        { medOnly: 0.6183, temp: 0.3021, perm: 0.0796, catastrophic: 0.00096 },
   } as Record<WcClassKey, Record<WcTier, number>>,
 
   // Severity-ordering scores for the risk-quality tier tilt: worse risk
@@ -147,7 +185,18 @@ export const WC_LOSS_MODEL = {
   // --- A3 severity (accident-year dollars; lognormal mean + CV) -----------
   severity: {
     medOnly: { mean: 1800, cv: 1.0 },
-    temp: { durationWeeksMean: 9, durationWeeksCv: 1.2, medicalMean: 16000, medicalCv: 1.5 },
+    // medicalMean 16,000 -> 8,000: the old figure made medical 1.6x the wage
+    // payment on a lost-time claim, which is inverted — a temporary-disability
+    // claim pays more in wages than in treatment.
+    //
+    // ⚠ durationWeeksMean 9 -> 16 IS THE WEAKEST NUMBER IN THIS CHANGE. It is
+    // ABOVE typical temporary-disability duration, and it was not chosen from
+    // duration data: it is the lever that pulls the book's indemnity share up
+    // into the 22-25% target band, and 16 is where that lands. Treat it as a
+    // fitted value wearing a duration's clothes.
+    // DISPLACED BY: any sourced TTD duration distribution for public entities,
+    // which should be preferred over this even if it moves the mix off target.
+    temp: { durationWeeksMean: 16, durationWeeksCv: 1.2, medicalMean: 8000, medicalCv: 1.5 },
     // healingWeeks + awardWeeks MUST equal durationWeeksMean. The perm wage
     // leg is split into a healing period (temporary wage replacement while the
     // injury stabilises, booked as `indemnity`) and a scheduled award for the
@@ -160,18 +209,22 @@ export const WC_LOSS_MODEL = {
     // vary far more widely with the impairment rating than a single number can
     // express, and 30 is simply the residual.
     //
-    // Expressed as ABSOLUTE WEEKS rather than a share on purpose. The pending
-    // WC class cost rebuild moves durationWeeksMean 45 -> 70; a stored share
-    // would silently rescale the healing period to ~23 weeks, outside the real
-    // 10-20 range, whereas absolute weeks trip the sum assertion and force the
-    // rebuild to decide deliberately (most likely healing stays ~15 and the
-    // award absorbs the increase).
+    // Expressed as ABSOLUTE WEEKS rather than a share on purpose, so a change
+    // to perm duration trips the sum assertion instead of silently rescaling
+    // the healing period out of its real 10-20 week range.
+    //
+    // THE WCIRB CLASS-COST REBUILD LEFT BOTH AT THEIR ORIGINAL VALUES. An
+    // earlier plan had duration going 45 -> 70; that turned out to be
+    // unnecessary once the per-class PERM RATES carry the class differential,
+    // and 45 (15 healing + 30 award) is what puts impairment inside its 13-16%
+    // target. medicalMean 65,000 -> 40,000 because real permanent-partial is
+    // award-dominated — the scheduled payment is the headline figure.
     //
     // The split is applied PROPORTIONALLY to each claim's DRAWN duration, not
     // by subtracting a fixed 15 weeks — a claim that draws 8 weeks total must
     // not book a negative award.
     perm: {
-      durationWeeksMean: 45, durationWeeksCv: 1.0, medicalMean: 65000, medicalCv: 1.8,
+      durationWeeksMean: 45, durationWeeksCv: 1.0, medicalMean: 40000, medicalCv: 1.8,
       healingWeeks: 15, awardWeeks: 30,
     },
   },
@@ -187,9 +240,18 @@ export const WC_LOSS_MODEL = {
   statutoryWeeklyCap: 1450,
 
   // --- A4 catastrophic tier (an inflating annuity, not a single draw) -----
-  // Frequency note: the tierProbabilities table above implies 3.3214/yr on
-  // the canonical roster (0.039 clerical + 1.286 publicWorks + 0.823 police +
-  // 1.174 fire). The table is the operative parameter.
+  // Frequency note: the tierProbabilities table above implies 0.8935/yr on the
+  // canonical roster (0.040 clerical + 0.532 publicWorks + 0.139 police +
+  // 0.183 fire) — 0.049% of class claims, the floor of the 0.05-0.15% PTD
+  // incidence range. Was 3.3214/yr before the WCIRB class-cost rebuild. The
+  // table is the operative parameter.
+  //
+  // THE COSTING BELOW IS UNCHANGED AND DELIBERATELY SO. $180,000/yr of
+  // attendant care x a PV factor of ~48 is a defensible cost build-up; the
+  // catastrophic share was corrected on PROBABILITY, never by cutting this.
+  // An earlier attempt that cut severity to hit a share target produced a
+  // lifetime medical figure of $12,663/yr, which is how that failure is
+  // recognised if it recurs.
   catastrophic: {
     ageMin: 25,
     ageMax: 55,

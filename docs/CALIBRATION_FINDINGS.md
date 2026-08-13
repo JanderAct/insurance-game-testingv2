@@ -1163,3 +1163,105 @@ Both are instances of the same error — a **fixed or CLT-based band on a heavy-
 **Standing practice this reinforces:** never gate a heavy-tailed sample mean, by fixed band or by CI.
 Gate counts, rates, quantiles and capped/truncated means — statistics with bounded per-observation
 variance — and report the rest.
+
+---
+
+## 27. Medical severity is one shared value, so tier mix is forced to carry the whole class differential
+
+**Status:** ⚠️ STRUCTURAL LIMITATION, documented not fixed. The WCIRB class-cost rebuild was
+implemented *around* it, and the working fix is described below so the next attempt does not
+rediscover it by exhausting the tier mix again.
+
+WC severity is built from parameters that are **shared across all four rating classes**:
+`severity.medOnly.mean`, `severity.temp.medicalMean`, `severity.perm.medicalMean`, and the
+catastrophic annuity's `medicalFirstYear`. Only three things differ by class:
+
+1. **frequency** (`rateClassPer1M`),
+2. **tier mix** (`tierProbabilities`),
+3. **wage** (`classAnnualWage`, which drives the indemnity legs and nothing else).
+
+Medical severity per claim of a given tier is therefore **identical for a clerk and a firefighter**.
+So when an external target says class A must cost 10.9x class B per payroll dollar, the model can
+only deliver that through frequency, tier mix, or wage — and wage is anchored to real salaries and
+only touches indemnity. **Tier mix ends up absorbing the entire class differential**, whether or not
+tier mix is where the real difference lives.
+
+That is why `publicWorks.perm` had to go to **0.278** — 4.9x its previous 0.057, against a real-world
+PPD rate of roughly 8% of claims. Nothing is wrong with public works being the highest-PPD class
+(it is, and WCIRB prices 9420 as the most expensive public-entity classification). What is wrong is
+that 27.8% is doing work that a **severity** difference should be doing.
+
+**The structurally correct fix, NOT built:** a per-class medical severity multiplier. Holding tier
+mix at its pre-rebuild values, the multipliers that would hit the same WCIRB targets are roughly:
+
+| class | multiplier on medical severity |
+|---|---|
+| clerical | ~3.3x |
+| publicWorks | ~2.1x |
+| police | ~0.36x |
+| fire | ~0.5x (depends entirely on the unsourced 7710 estimate) |
+
+Note these run in the *opposite* direction to intuition for police: the model's police severity is
+already too high, driven by the wage-linked indemnity legs, not by medical. A per-class multiplier
+would let frequency and tier mix return to observed values and let severity carry the differential
+where it actually belongs.
+
+**Why it was not built here:** it changes the shape of the severity model rather than its values,
+touches the analytic/draw matched pair (invariant 1) at every tier, and would have made an already
+large recalibration unreviewable. It is the right next move if the class costs are revisited.
+
+---
+
+## 28. The $115k perm medical figure was FORCED by the level constraint, not chosen
+
+A prior plan proposed raising `severity.perm.medicalMean` from $65,000 to $115,000, and a later
+variant of that plan observed that doing so "silently cancelled the catastrophic reduction on the
+medical/indemnity mix." The arithmetic shows the cancellation was not an accident and the $115k was
+never a free parameter.
+
+Holding the class-only loss cost at its then-anchor of $3.5478 while cutting catastrophic
+probability removes ~$25M of ~$46M from the book. If that level is restored **through the medical
+severities alone** — the only severities that are free, since the indemnity legs are wage-anchored —
+they must rise by **x2.82 to x3.21**. At x2.82 that lands `permMed` at **$112,800**, essentially the
+proposed $115k, and drives the three-way mix to **75.7 / 14.0 / 10.3** against a 60-65 / 22-25 /
+13-16 target.
+
+So $115k *is* what the level constraint forces when restoration is routed through medical, and the
+mix damage is the mechanical consequence of that routing, not a separate error. The lesson is about
+**stating every target**: with only "catastrophic share" and "level" named, medical severity was the
+free variable and it absorbed the whole adjustment invisibly.
+
+**Related failure in the same family:** an earlier attempt to hit the catastrophic share by cutting
+**severity** instead of probability produced a lifetime medical figure of **$12,663/yr** for a
+permanently and totally disabled worker. That is the recognisable signature of binding a share target
+on the wrong lever, and the reason `catastrophic.medicalFirstYear` now carries a comment saying so.
+
+---
+
+## 29. Provenance of every input to the WC class-cost rebuild — one sourced, five not
+
+Recorded because WC's parameters were authored as domain-judgment estimates and have repeatedly been
+mistaken for data. **Exactly one input to this rebuild is sourced.**
+
+| input | provenance | note |
+|---|---|---|
+| WCIRB advisory pure premium rates — 9410 $0.82, 9420 $8.95, 7720 $2.75, 9101 $3.80, 8868 $0.53 | **SOURCED** | 2023 filing, public-entity classifications, via PRISM. The only external anchor in the rebuild. |
+| LAE divisor 1.29 | **UNSOURCED** — derived | WCIRB rates include loss adjustment expense; ours are loss-only. Derived from aggregate CY2025 ratios (LAE ~18% of premium, losses ~62%). Moves the level ~25% across plausible values, so the level is reported as a **band (3.56-3.85)**, not a point. Independent check: holding the level with a *positive* fire rate requires LAE >= ~1.25, which brackets 1.29 from below. |
+| CA Labor Code 4850 safety gross-up | **UNSOURCED** — inferred | 4850 gives police/fire full salary continuation up to a year, paid by the employer and not booked as WC indemnity; industrial disability retirement moves PTD to pension. If true, the WCIRB safety rate corresponds to our *medical + impairment*, not full severity. Without it, police can only hit its target with PPD ~0.2%, which is indefensible. This assumption is load-bearing. |
+| 7710 Firefighters rate | **UNSOURCED** — estimated | Not found in the repo, uploads, or any rate memo. Estimated at 1.5x police. Fire is 8.6% of payroll; across 1.0x-2.0x police the blended level moves only ±2.6%, so no conclusion depends on it — but fire's own perm rate does. |
+| PTD incidence 0.05-0.15% of all claims | **UNSOURCED** — recollection | Used to bind the catastrophic probability. The book sits at its **floor** (0.049%). |
+| per-100-FTE frequency envelopes (clerical 1-2, publicWorks 6-9, police 8-12, fire 10-15) | **UNSOURCED** — recollection | **Treat the envelope as the wrong thing, not the value.** Clerical is set at 4.0/100 FTE, above the quoted band, because it cannot reach its WCIRB rate of $0.690 at 2.0/100 FTE under any severity this model can defend. A sourced public-entity frequency table would displace both. |
+| WCIRB reserve basis — discounted or not? | **UNSOURCED** — undetermined | WCIRB pure premium rates derive from developed incurred losses, and WC reserves are typically **not** discounted for statutory reporting. We book catastrophic at **present value** (~$9.8M against ~$21.8M nominal). If WCIRB carries PTD nominal and we carry PV, they are different quantities and the correction would **widen** the police gap, not narrow it. Potentially worth a factor of two on the police target. Sits alongside 4850 and 7710 as the third load-bearing assumption. |
+
+**Withdrawn by this work:** the reading that County's rate-table relativity of 1.221 reflected a
+large-account or experience credit. That conclusion depended on public works being cheap; once the
+class costs are corrected, County moves from +33% to -48% against its target, and the credit reading
+is an artifact of the old class costs rather than a finding. The binding artifact is
+`WC_CLASS_MIX` — see finding 27 and the Low Safety / School ratio below.
+
+**Also measured, not targeted:** the Low Safety / School loss-cost ratio caps at ~1.75 against a
+real pool's 4.23. Recomputing it with real WCIRB class rates gives 1.74 — two independent routes to
+the same number. The cause is the mix table, not the class costs: School District is 70% clerical by
+payroll but ~75% public works **by cost**, because clerical is ~17x cheaper per payroll dollar, so
+School and Low Safety share the same dominant cost driver and the public-works channel caps the
+achievable ratio at 1.90.

@@ -12,10 +12,11 @@
 // to be checked only at runtime, on whichever path a given execution exercised.
 
 import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
-import { WC_CLASS_KEYS, WC_LOSS_MODEL } from '../../src/data/defaultAssumptions';
+import { WC_CLASS_KEYS, WC_CLASS_MIX, WC_LOSS_MODEL } from '../../src/data/defaultAssumptions';
 import {
   computeKLine,
   deriveNeutralPurePremiumPer100,
+  expectedClaimSeverity,
   expectedWcGrossLoss,
   generateWcClaims,
   regionMultiplier,
@@ -62,7 +63,10 @@ console.log('=== 1. FULL-MARKET AGGREGATES (all 200 members, gPool=1, RQ actual,
   const presump = runs.map(r => r.claimCountsByClass.presumption);
   const gross = runs.map(r => r.grossUltimateLoss);
 
-  console.log(`  four-class claims/yr : ${mean(coreCounts).toFixed(1)} raw, ${mean(deTrended).toFixed(1)} de-trended (target ~838.2)  ${note(Math.abs(mean(deTrended) - 838.2) < 30, `four-class claims ${mean(deTrended).toFixed(1)} vs 838.2`)}`);
+  // 1825.6 after the WCIRB class-cost rebuild (was 838.2). Tolerance is now
+  // PROPORTIONAL rather than the old absolute +/-30, which was ~3.6% of the old
+  // book and would be ~1.6% of this one — tighter than the draw's own noise.
+  console.log(`  four-class claims/yr : ${mean(coreCounts).toFixed(1)} raw, ${mean(deTrended).toFixed(1)} de-trended (target ~1825.6)  ${note(Math.abs(mean(deTrended) - 1825.6) / 1825.6 < 0.04, `four-class claims ${mean(deTrended).toFixed(1)} vs 1825.6`)}`);
   console.log(`  presumption claims/yr: ${mean(presump).toFixed(2)} (target ~14.9)  ${note(Math.abs(mean(presump) - 14.9) < 1.5, `presumption ${mean(presump).toFixed(2)} vs ~14.9`)}`);
   // REPORTED, NOT ASSERTED. The design's "$19-20M combined" figure predates the
   // A4 annuity model and is known-stale; book scale is an open cross-line
@@ -70,7 +74,8 @@ console.log('=== 1. FULL-MARKET AGGREGATES (all 200 members, gPool=1, RQ actual,
   console.log(`  gross loss/yr        : ${fmt$(mean(gross))} de-trended ${fmt$(mean(gross.map((g, i) => g / trend(i + 1))))} — REPORTED (the "$19-20M" design figure is known-stale, predates the annuity model)`);
 
   console.log('  per-class counts (de-trended mean vs target):');
-  const targets: Record<string, number> = { clerical: 77.3, publicWorks: 428.7, police: 164.6, fire: 167.7 };
+  // Payroll x rateClassPer1M at neutral RQ. Was 77.3 / 428.7 / 164.6 / 167.7.
+  const targets: Record<string, number> = { clerical: 332.4, publicWorks: 1108.6, police: 193.7, fire: 190.9 };
   for (const c of WC_CLASS_KEYS) {
     const m = mean(runs.map((r, i) => r.claimCountsByClass[c] / trend(i + 1)));
     const t = targets[c];
@@ -85,12 +90,29 @@ console.log('=== 1. FULL-MARKET AGGREGATES (all 200 members, gPool=1, RQ actual,
   for (const t of ['medOnly', 'temp', 'perm', 'catastrophic']) {
     console.log(`    ${t.padEnd(14)} ${((tierTotals[t] / tierSum) * 100).toFixed(3)}%`);
   }
-  // Compared against the count the SUPPLIED tier probabilities actually imply
-  // (sum over classes of expected claims x p_catastrophic = 2.97), not against
-  // the design's stated "~5-6/yr" — those two are inconsistent with each other
-  // and the probabilities are the operative parameter. See the report.
+  // TWO CHECKS, deliberately split. The TABLE-IMPLIED count is deterministic
+  // (payroll x rate x p_catastrophic, no draw), so it is asserted TIGHTLY — it
+  // is a statement about the parameters. The DRAWN count is now a rare event
+  // (~0.9/yr against ~1825 claims), so over 50 years it carries real Poisson
+  // noise and is asserted LOOSELY. Conflating the two would either make the
+  // parameter check useless or make the draw check flap.
+  //
+  // The old "2.97" written here was STALE — it predated a tier-probability
+  // change and the true implied figure was 3.3214. That stale number then
+  // propagated into a downstream hand-calculation. Computing it from the table
+  // rather than hardcoding it is the fix.
+  const impliedCat = WC_CLASS_KEYS.reduce((s, c) =>
+    s + roster.reduce((p, m) => p + (m.exposureByLine.WC ?? 0) * (WC_CLASS_MIX[m.type]?.[c] ?? 0), 0)
+        * WC_LOSS_MODEL.rateClassPer1M[c] * WC_LOSS_MODEL.tierProbabilities[c].catastrophic, 0);
+  const impliedClass = WC_CLASS_KEYS.reduce((s, c) =>
+    s + roster.reduce((p, m) => p + (m.exposureByLine.WC ?? 0) * (WC_CLASS_MIX[m.type]?.[c] ?? 0), 0)
+        * WC_LOSS_MODEL.rateClassPer1M[c], 0);
   const catPerYear = mean(runs.map((r, i) => r.claimCountsByTier.catastrophic / trend(i + 1)));
-  console.log(`  catastrophic claims/yr: ${catPerYear.toFixed(2)} de-trended (tier probs imply 2.97; design text says ~5-6)  ${note(Math.abs(catPerYear - 2.97) / 2.97 < 0.25, `catastrophic ${catPerYear.toFixed(2)} vs implied 2.97`)}`);
+  console.log(`  catastrophic/yr TABLE-IMPLIED: ${impliedCat.toFixed(4)} = ${(impliedCat / impliedClass * 100).toFixed(4)}% of class claims  ${note(Math.abs(impliedCat - 0.8935) / 0.8935 < 0.02, `table-implied catastrophic ${impliedCat.toFixed(4)} vs 0.8935`)}`);
+  console.log(`     PTD incidence anchor is 0.05-0.15% of all claims — this sits at its FLOOR, deliberately:`);
+  console.log(`     the share-of-loss anchor (20-30%) and the frequency anchor disagree at the corrected`);
+  console.log(`     relativities, and frequency is the more directly observable of the two.`);
+  console.log(`  catastrophic/yr DRAWN (${YEARS}yr): ${catPerYear.toFixed(2)} de-trended — small-count, loose bound  ${note(Math.abs(catPerYear - impliedCat) / impliedCat < 0.60, `drawn catastrophic ${catPerYear.toFixed(2)} vs implied ${impliedCat.toFixed(4)}`)}`);
 
   console.log('  mean severity by tier:');
   const bySev: Record<string, number[]> = {};
@@ -149,7 +171,7 @@ console.log('\n=== 2. ENROLLED SUBSET SCALES PROPORTIONALLY (~30% of the market)
   const counts = mean(runs.map((r, i) => WC_CLASS_KEYS.reduce((s, c) => s + r.claimCountsByClass[c], 0) / trend(i + 1)));
   const gross = mean(runs.map((r, i) => r.grossUltimateLoss / trend(i + 1)));
   console.log(`  subset payroll share : ${(share * 100).toFixed(1)}% of market`);
-  console.log(`  claims/yr            : ${counts.toFixed(1)} de-trended (proportional target ~${(838.2 * share).toFixed(0)})  ${note(Math.abs(counts - 838.2 * share) / (838.2 * share) < 0.15, `subset claims ${counts.toFixed(1)} vs proportional ${(838.2 * share).toFixed(0)}`)}`);
+  console.log(`  claims/yr            : ${counts.toFixed(1)} de-trended (proportional target ~${(1825.6 * share).toFixed(0)})  ${note(Math.abs(counts - 1825.6 * share) / (1825.6 * share) < 0.15, `subset claims ${counts.toFixed(1)} vs proportional ${(1825.6 * share).toFixed(0)}`)}`);
   console.log(`  gross loss/yr        : ${fmt$(gross)} de-trended (proportional to full-market book)`);
 }
 
@@ -312,15 +334,24 @@ console.log('\n=== 10. PAYOUT DECOMPOSITION (medical / indemnity / impairment) =
   console.log(`  perm healing ${p.healingWeeks}wk + award ${p.awardWeeks}wk === durationWeeksMean ${p.durationWeeksMean}wk: ` +
     `${note(p.healingWeeks + p.awardWeeks === p.durationWeeksMean, `perm healing+award (${p.healingWeeks + p.awardWeeks}) != durationWeeksMean (${p.durationWeeksMean})`)}`);
 
-  // THE ANCHOR: a decomposition must not move the priced loss cost. Asserted
-  // CLASS-ONLY (includePresumption: false) because that is the figure the
-  // class rates are calibrated to; the all-in figure including presumption is
-  // 4.2287 and is reported in section 8.
+  // THE LEVEL. Asserted CLASS-ONLY (includePresumption: false) because that is
+  // the basis the class rates are calibrated to; the all-in figure is reported
+  // in section 8.
+  //
+  // REPORTED AS A RANGE, NOT A POINT. The level is now anchored to WCIRB
+  // advisory pure premium rates, which INCLUDE loss adjustment expense; the
+  // conversion to loss-only divides by ~1.29, and that divisor is a derivation
+  // from aggregate ratios, not a published figure. Plausible LAE loadings of
+  // 1.25-1.35 move the implied level across roughly 3.56-3.85, so quoting a
+  // single number overstates the precision. The pre-rebuild 3.5478 sits just
+  // below that band's floor — a +5.1% move, well inside the LAE uncertainty
+  // rather than a level change the model chose.
   const payrollUnits = roster.reduce((s, m) => s + (m.exposureByLine.WC ?? 0), 0) * 10_000;
   const classOnlyPer100 =
     expectedWcGrossLoss(roster, { riskQualityOverride: 5, kLine: 1, yearNumber: 1, includePresumption: false }) / payrollUnits;
-  console.log(`  payroll-weighted WC loss cost, CLASS-ONLY = ${classOnlyPer100.toFixed(4)} per $100 (must stay 3.5478): ` +
-    `${note(Math.abs(classOnlyPer100 - 3.5478) < 5e-5, `class-only loss cost moved to ${classOnlyPer100.toFixed(4)}, expected 3.5478`)}`);
+  console.log(`  payroll-weighted WC loss cost, CLASS-ONLY = ${classOnlyPer100.toFixed(4)} per $100`);
+  console.log(`     LAE-implied band 3.56-3.85 (LAE 1.35-1.25); pre-rebuild anchor was 3.5478 (${((classOnlyPer100 / 3.5478 - 1) * 100).toFixed(1)}%)  ` +
+    `${note(classOnlyPer100 > 3.56 && classOnlyPer100 < 3.85, `class-only loss cost ${classOnlyPer100.toFixed(4)} outside the LAE band 3.56-3.85`)}`);
 
   const runs = runYears(roster, YEARS);
   const all = runs.flatMap(r => r.claims);
@@ -410,6 +441,122 @@ console.log('\n=== 10. PAYOUT DECOMPOSITION (medical / indemnity / impairment) =
       `indem ${(s.indPct * 100).toFixed(1).padStart(5)}%  impair ${(s.impPct * 100).toFixed(1).padStart(5)}%  ` +
       `eff trend ${(s.effTrend * 100).toFixed(2)}%`);
   }
+}
+
+console.log('\n=== 11. WCIRB CLASS COST ANCHOR (the primary external target) ===');
+{
+  // WCIRB advisory pure premium rates for public-entity classifications, 2023
+  // filing (via PRISM). THE ONLY SOURCED INPUT IN THIS SECTION — everything
+  // that converts them to a model-comparable number is an assumption, listed
+  // below and in CALIBRATION_FINDINGS.md.
+  //
+  //   9410 Municipal non-manual  $0.82   -> clerical
+  //   9420 Municipal all other   $8.95   -> publicWorks
+  //   7720 Police/Sheriffs       $2.75   -> police
+  //   7710 Firefighters          NOT SOURCED
+  //
+  // Model-basis targets below fold in three UNSOURCED adjustments:
+  //   (1) LAE /1.29 — WCIRB rates include loss adjustment expense; ours are
+  //       loss-only. Derived from aggregate ratios, not published.
+  //   (2) A safety gross-up for CA Labor Code 4850 (full salary continuation
+  //       for safety members, not booked as WC indemnity) plus industrial
+  //       disability retirement moving PTD to pension. Inferred, not sourced.
+  //   (3) Fire estimated at 1.5x police.
+  const WCIRB_MODEL_BASIS: Record<string, number> = { clerical: 0.690, publicWorks: 6.733, police: 3.010, fire: 4.396 };
+
+  const runs = runYears(roster, YEARS);
+  const trend = (y: number) => Math.pow(1 + WC_LOSS_MODEL.frequencyTrendPerYear, y - 1);
+  const clsPay: Record<string, number> = {};
+  for (const c of WC_CLASS_KEYS)
+    clsPay[c] = roster.reduce((s, m) => s + (m.exposureByLine.WC ?? 0) * (WC_CLASS_MIX[m.type]?.[c] ?? 0), 0);
+
+  // GATED ON THE ANALYTIC, REPORTED FROM THE DRAW — finding 26's standing rule,
+  // and this is a textbook case of it. A class's loss cost is a HEAVY-TAILED
+  // sample mean: catastrophic severity is ~$10M against a clerical book of
+  // ~$3.6M/yr, so ONE catastrophic claim is nearly three years of that class's
+  // entire loss, and clerical draws one roughly every 25 years. Gating the drawn
+  // figure produced swings of +23% / -15% across classes whose parameters are
+  // correct to 0.6%. The analytic is deterministic — it is a statement about the
+  // parameters, which is what the WCIRB anchor is actually about.
+  //
+  // expectedClaimSeverity comes from the ENGINE, not recomputed here, so this
+  // check cannot pass against a severity definition the generator has moved off.
+  console.log('  ANALYTIC class loss cost per $100 of that class\'s payroll (neutral RQ) — GATED:');
+  console.log('    class        analytic   WCIRB target   residual');
+  for (const c of WC_CLASS_KEYS) {
+    let sevNum = 0;
+    for (const m of roster) {
+      const p = (m.exposureByLine.WC ?? 0) * (WC_CLASS_MIX[m.type]?.[c] ?? 0);
+      if (p > 0) sevNum += p * expectedClaimSeverity(c, 5, regionMultiplier(m.region));
+    }
+    const lc = WC_LOSS_MODEL.rateClassPer1M[c] * (sevNum / clsPay[c]) / 10_000;
+    const t = WCIRB_MODEL_BASIS[c];
+    console.log(`    ${c.padEnd(12)} ${lc.toFixed(4).padStart(8)}   ${t.toFixed(3).padStart(12)}   ${((lc / t - 1) * 100).toFixed(2).padStart(7)}%  ` +
+      `${note(Math.abs(lc / t - 1) < 0.02, `${c} analytic loss cost ${lc.toFixed(4)} vs WCIRB target ${t.toFixed(3)}`)}`);
+  }
+  console.log('  drawn equivalent (REPORTED ONLY — heavy-tailed, do not gate):');
+  for (const c of WC_CLASS_KEYS) {
+    const loss = mean(runs.map((r, i) =>
+      r.claims.filter(x => x.ratingClass === c && x.tier !== 'presumption')
+        .reduce((s, x) => s + x.grossUltimate, 0) / trend(i + 1)));
+    console.log(`    ${c.padEnd(12)} ${(loss / (clsPay[c] * 10_000)).toFixed(3).padStart(8)}   (${YEARS}-yr draw)`);
+  }
+
+  console.log('\n  per-100-FTE claim rate by class (rate x classAnnualWage / 10,000):');
+  console.log('    ⚠ THE ENVELOPES THIS PROJECT HAS QUOTED (clerical 1-2, publicWorks 6-9, police');
+  console.log('      8-12, fire 10-15) ARE UNSOURCED RECOLLECTION. Clerical at 4.0 sits above that');
+  console.log('      band; the right reading is that the envelope is wrong, not the value — clerical');
+  console.log('      cannot reach $0.690 at 2.0/100 FTE under any severity this model can defend.');
+  for (const c of WC_CLASS_KEYS) {
+    const p100 = WC_LOSS_MODEL.rateClassPer1M[c] * WC_LOSS_MODEL.classAnnualWage[c] / 10_000;
+    console.log(`    ${c.padEnd(12)} ${p100.toFixed(2).padStart(6)} /100 FTE  ${note(p100 > 0 && p100 < 40, `${c} per-100-FTE ${p100.toFixed(2)} implausible`)}`);
+  }
+
+  console.log('\n  per-class perm (PPD) rate, drawn share of that class\'s claims:');
+  console.log('    publicWorks is the largest single move in the rebuild (0.057 -> 0.278) and is');
+  console.log('    SOLVED-TO-TARGET, not observed — see the warning at the parameter site.');
+  const allC = runs.flatMap(r => r.claims).filter(c => c.tier !== 'presumption');
+  for (const c of WC_CLASS_KEYS) {
+    const kk = allC.filter(x => x.ratingClass === c);
+    const permPct = kk.filter(x => x.tier === 'perm').length / kk.length * 100;
+    const tgt = WC_LOSS_MODEL.tierProbabilities[c].perm * 100;
+    // police PPD >= 5% is the constraint that decided the catastrophic level:
+    // presumption law and industrial disability retirement exist BECAUSE safety
+    // members have high permanent disability rates.
+    const floorOk = (c !== 'police' && c !== 'fire') || permPct >= 5;
+    console.log(`    ${c.padEnd(12)} drawn ${permPct.toFixed(2).padStart(5)}%  table ${tgt.toFixed(2).padStart(5)}%  ` +
+      `${note(Math.abs(permPct - tgt) / tgt < 0.10, `${c} perm ${permPct.toFixed(2)}% vs table ${tgt.toFixed(2)}%`)}` +
+      `${(c === 'police' || c === 'fire') ? `  safety-PPD floor >=5%: ${note(floorOk, `${c} PPD ${permPct.toFixed(2)}% below the 5% defensibility floor`)}` : ''}`);
+  }
+
+  // Catastrophic on BOTH denominators — they answer different questions and
+  // were conflated in an earlier round.
+  const cat = allC.filter(c => c.tier === 'catastrophic');
+  const pres = runs.flatMap(r => r.claims).filter(c => c.tier === 'presumption');
+  const sum = (xs: typeof allC) => xs.reduce((s, c) => s + c.grossUltimate, 0);
+  const coLoss = sum(allC), aiLoss = coLoss + sum(pres);
+  console.log('\n  catastrophic, on both denominators:');
+  console.log(`    share of CLAIMS : ${(cat.length / allC.length * 100).toFixed(4)}%  (PTD incidence anchor 0.05-0.15%)  ` +
+    `${note(cat.length / allC.length >= 0.0004 && cat.length / allC.length <= 0.0018, `catastrophic ${(cat.length / allC.length * 100).toFixed(4)}% of claims outside the PTD anchor`)}`);
+  console.log(`    share of LOSS   : ${(sum(cat) / aiLoss * 100).toFixed(1)}% all-in / ${(sum(cat) / coLoss * 100).toFixed(1)}% class-only`);
+  console.log(`    the 20-30% share target was RETIRED: at the corrected relativities it cannot hold`);
+  console.log(`    without driving police PPD to ~2.8%, and the frequency anchor is the observable one.`);
+
+  // Mix on both bases, with the trap stated.
+  const S = (xs: typeof allC) => {
+    const m = xs.reduce((s, c) => s + (c.medical ?? 0), 0);
+    const i = xs.reduce((s, c) => s + (c.indemnity ?? 0), 0);
+    const p = xs.reduce((s, c) => s + (c.impairment ?? 0), 0);
+    const t = m + i + p; return { m: m / t * 100, i: i / t * 100, p: p / t * 100 };
+  };
+  const co = S(allC), ai = S([...allC, ...pres]);
+  console.log('\n  three-way mix, BOTH bases (target 60-65 / 22-25 / 13-16, class-only):');
+  console.log(`    class-only : ${co.m.toFixed(1)} / ${co.i.toFixed(1)} / ${co.p.toFixed(1)}  ` +
+    `${note(co.m >= 57 && co.m <= 66 && co.i >= 21 && co.i <= 26 && co.p >= 12 && co.p <= 18, `class-only mix ${co.m.toFixed(1)}/${co.i.toFixed(1)}/${co.p.toFixed(1)} outside tolerance`)}`);
+  console.log(`    all-in     : ${ai.m.toFixed(1)} / ${ai.i.toFixed(1)} / ${ai.p.toFixed(1)}`);
+  console.log('    ⚠ BASIS TRAP: presumption is booked 100% medical AND is untrended while class');
+  console.log('      frequency decays at -1.5%/yr, so the ALL-IN mix drifts toward medical the longer');
+  console.log('      a run goes. Quote CLASS-ONLY; it is invariant to the frequency trend.');
 }
 
 console.log(problems.length === 0

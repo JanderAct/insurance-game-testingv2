@@ -108,7 +108,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // fields — NOT the sum of the two isolated runs (2,302 + 7,256 = 9,558),
 // because the two channels interact nonlinearly (satisfaction feeds
 // retention feeds exposure feeds premium, which the CLF fix also moves).
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v9.json');
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v10.json');
 
 function seedOf(id: string) {
   let h = 5381;
