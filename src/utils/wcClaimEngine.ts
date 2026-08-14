@@ -91,7 +91,9 @@ export function regionMultiplier(region: Region): number {
 }
 
 // Risk-quality frequency factor. RQ 10 (best) draws fewer claims, RQ 1 more.
-function thetaWc(riskQuality: number): number {
+// EXPORTED so wcLossDistribution's cumulant derivation reads the exact same
+// formula the draw uses, rather than a second copy that could drift from it.
+export function thetaWc(riskQuality: number): number {
   return Math.exp(-M.rqFrequencyBeta * (riskQuality - NEUTRAL_RQ));
 }
 

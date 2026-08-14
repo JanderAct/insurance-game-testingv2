@@ -861,12 +861,37 @@ export const STARTING_FINANCIALS = {
   startingSurplus: { min: 3_000_000, max: 7_000_000 },
 };
 
+// WC's funding-confidence range, post finding-38 (WC's own derived loss
+// distribution replaces FUNDING_CLF_TABLE for WC — see wcClfGrid.ts). NOT a
+// {min,max,step} triple: WC's derived curve spans 10%-99% at non-uniform
+// stops (a uniform 5-point grid from 10 to 95, plus 97.5 and 99 — going from
+// 95% to 99% costs meaningfully more than one more 5-point step would, so it
+// is kept as its own stop rather than rounded into the grid or dropped).
+// EVERY STOP USES ITS OWN EXACT PERCENTILE'S MULTIPLIER — no stop is snapped
+// onto a nearby one, which is exactly the mislabelling finding 38 removed
+// (the old table's 0.60 stop silently meant the ROUNDED 60%, not the
+// computed 65% where WC's mean actually falls; see wcClfGrid.ts).
+//
+// DATA ONLY. GL and Property keep SLIDER_RANGES.fundingConfidenceLevel above,
+// unmodified. Consuming this for WC's actual slider widget (rendering the
+// non-uniform stops, and marking where drawn/expected = 1.000 falls between
+// stops) is UI work for ui/decision-surface — not built here.
+export const WC_FUNDING_CONFIDENCE_RANGE = {
+  min: 0.10,
+  max: 0.99,
+  default: 0.60,
+  stops: [0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 0.975, 0.99],
+};
+
 // Slider ranges (not player-editable in v1)
 export const SLIDER_RANGES = {
   // rateChange REMOVED (CLF-only pricing). Funding confidence is now the only
   // pricing lever; its default moved from 0.75 to 0.60 (break-even) and its
   // range extended down to 0.30 so underfunding is directly selectable rather
   // than only reachable via the old rate-change discount.
+  // GL and Property only, post finding-38: WC reads WC_FUNDING_CONFIDENCE_RANGE
+  // below instead, since its own derived curve covers a wider span at
+  // non-uniform stops that this {min,max,step} shape cannot express.
   fundingConfidenceLevel: { min: 0.30, max: 0.95, step: 0.05, default: 0.60 },
   dividendPct: { min: 0, max: 0.15, step: 0.005, default: 0 },
   assessmentPct: { min: 0, max: 0.25, step: 0.005, default: 0 },

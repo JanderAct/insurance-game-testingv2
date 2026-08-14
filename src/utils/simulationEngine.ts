@@ -40,6 +40,7 @@ import { cloneMembershipHistory, openInterval, closeInterval } from './membershi
 import { cloneMemberLossHistory, recordMemberLossYear } from './memberLossHistory';
 import { computeKLine, deriveNeutralPurePremiumPer100, expectedWcGrossLossForPricing, generateWcClaims, wcFrequencyTrend } from './wcClaimEngine';
 import { dollarWeightedPDelayed, ldfToUltimate, wcIbnrBalance } from './wcIbnr';
+import { computeWcClf } from './wcLossDistribution';
 import { computeKGl, deriveNeutralGlPurePremiumPer100, expectedGlGrossLoss, generateGlClaims } from './glClaimEngine';
 import { generateNarrative } from './narrativeEngine';
 import { getMemberExposure } from './lineHelpers';
@@ -161,10 +162,32 @@ export function processLineYear(
     ? priorResult.grossUltimateLoss / Math.max(priorResult.grossPremium, 1)
     : undefined;
 
+  // Moved ahead of the CLF lookup below (was declared just before member
+  // movement) — WC's own CLF now needs the book BEFORE it can price, and this
+  // is the only book available at that point: last year's ending enrolled
+  // members, before this year's movement is computed. Real underwriting has
+  // the same constraint (you price off the book you have, not one that
+  // hasn't been determined yet); the "preliminary vs final" split already
+  // used for estimatedExposure/estimatedPremium below is the same tolerance.
+  const currentActiveMembers = lineState.members.filter(m => m.status === 'active');
+
   // --- Selected Funding Confidence ---
   // CLF is selected by the player and applied after the expected actuarial loss-cost rate is calculated.
+  //
+  // WC READS ITS OWN DERIVED DISTRIBUTION, NOT FUNDING_CLF_TABLE (finding 38).
+  // FUNDING_CLF_TABLE is the real pool's measured curve at $20-30B of payroll,
+  // where process risk gives an annual CV near 0.063 against the table's
+  // implied ~0.80 — the table is measuring parameter/trend uncertainty this
+  // model has no channel for, not claim variance, and cannot validate this
+  // model's own distribution (see src/data/wcClfGrid.ts). GL and Property are
+  // unaffected: GL's severity is Pareto (infinite variance, no finite-cumulant
+  // treatment applies) and gets its own derivation in a later commit;
+  // Property has no Claim/Occurrence objects and was never in scope.
   const selectedFundingConfidenceLevel = lineDecisions.fundingConfidenceLevel;
-  const selectedFundingCLF = lookupCLF(selectedFundingConfidenceLevel);
+  const wcClfBookKLine = line === 'WC' ? computeKLine(currentActiveMembers) : 1;
+  const selectedFundingCLF = line === 'WC'
+    ? computeWcClf(selectedFundingConfidenceLevel, currentActiveMembers, wcClfBookKLine, yearNumber)
+    : lookupCLF(selectedFundingConfidenceLevel);
 
   // --- Expected Actuarial Loss-Cost Rate ---
   // Expected losses evolve independently from pricing decisions.
@@ -240,7 +263,7 @@ export function processLineYear(
 
   // Preliminary contribution estimate used only for member movement.
   // Final premium is recalculated after member movement because exposure changes.
-  const currentActiveMembers = lineState.members.filter(m => m.status === 'active');
+  // (currentActiveMembers is now declared above, ahead of the CLF lookup.)
   const estimatedExposure = currentActiveMembers.reduce((s, m) => s + getMemberExposure(m, line), 0);
 
   const estimatedRateAtConfidenceLevelPer100 =
@@ -967,8 +990,13 @@ export function processLineYear(
   const indicatedNetReserveAtConfidenceLevel = netFundingTarget;
 
   // Required reserve margin is always measured at the 90% CLF, independent of
-  // the player's selected annual pricing confidence level.
-  const reserveMarginCLF = lookupCLF(0.90);
+  // the player's selected annual pricing confidence level. WC uses its own
+  // derived distribution here too, for the same reason as selectedFundingCLF
+  // above — leaving this on FUNDING_CLF_TABLE while pricing used the derived
+  // curve would silently misstate WC's own reserve confidence view.
+  const reserveMarginCLF = line === 'WC'
+    ? computeWcClf(0.90, currentActiveMembers, wcClfBookKLine, yearNumber)
+    : lookupCLF(0.90);
   const reserveRiskMarginNeeded = Math.max(
     0,
     expectedNetUnpaidLoss * (reserveMarginCLF - 1)
