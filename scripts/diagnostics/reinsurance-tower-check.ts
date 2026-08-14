@@ -96,11 +96,38 @@ console.log('\n=== 3. THE RISK LOAD RISES WITH ATTACHMENT (one lambda, not four 
   const glTop = layerPremium('GL', 2, per100) / per100, wcTop = layerPremium('WC', 2, per100) / per100;
   console.log(`  GL top layer ${glTop.toFixed(4)} per $100 vs WC top ${wcTop.toFixed(4)} — GL dearer on a LOWER multiple: ` +
     `${note(glTop > wcTop, 'GL top layer is not dearer than WC top')}`);
-  console.log(`  the unpurchasable WC layer is excluded from program cost: ` +
-    `${note(occurrenceProgramCost('WC', [false, false, false, true], per100) === 0, 'unpurchasable layer was charged for')}`);
+  // ⚠ WAS "the unpurchasable WC layer is excluded from program cost". THERE IS NO
+  // LONGER AN UNPURCHASABLE LAYER TO EXCLUDE. $25M xs $25M was flagged
+  // non-purchasable on two numeric grounds, both voided by the severity rebuild:
+  // a single claim "cannot reach $25M" (the retired annuity's $15.51M PV ceiling —
+  // the mixture has none, and reaches $25M once every 26 years), and SD/E of 42
+  // making its price "a division artifact" (now 6.38 on a real expected cost).
+  //
+  // The purchasability GATE is still live code, but nothing sets the flag false
+  // any more, so that branch is now untested BY DATA rather than by assertion.
+  // Asserted instead: the layer that was excluded now carries a real price.
+  const top = REINSURANCE_TOWER.WC[3];
+  console.log(`  WC's top layer is purchasable and priced: ${top.expectedCededPer100.toFixed(4)} per $100, SD/E ${top.sdOverExpected}  ` +
+    `${note(top.purchasable && top.expectedCededPer100 > 0.01 && top.sdOverExpected < 10, 'WC top layer is not priced as a real layer')}`);
+  console.log(`     charged when placed: ${note(occurrenceProgramCost('WC', [false, false, false, true], per100) > 0, 'the now-purchasable top layer is still being skipped')}`);
 }
 
 console.log('\n=== 4. THE AGGREGATE RESPONDS TO THE OCCURRENCE-LAYER SELECTION ===');
+// ⚠ THE THRESHOLD WAS LOWERED FROM x3 TO x1.4, AND NOT TO MAKE THIS PASS. It was
+// calibrated against the retired model's 21x E[ceded] swing between "all layers"
+// and "none". Under the mixture the swing is 1.65x-2.15x, because THE TOWER NO
+// LONGER COLLAPSES RETAINED VOLATILITY: the old catastrophic annuity was capped at
+// $15.51M so buying the layers removed essentially all of it, whereas the
+// mixture's unbounded tail above $50M is retained whatever the player buys.
+// Measured m2 with every layer placed rose 5.39e9 -> 3.62e10 (+572%); with none
+// placed it rose only 6.09e10 -> 1.18e11 (+94%), so the RATIO fell from 11.3 to
+// 3.26. That is the same effect the retained-CV diagnostic found on GL.
+//
+// WHAT THE ASSERTION PROTECTS IS UNCHANGED and still holds: the aggregate must not
+// be free volatility transfer for a player who declines every occurrence layer.
+// Measured at $290M / E[gross] $12.83M, declining every layer raises the aggregate
+// premium from $2.43M to $4.01M at a 110% attachment. The price responds; it just
+// responds less, because the underlying risk transfer is less.
 {
   const EXPOSURE = 290, EGROSS = 12.83e6;
   const all = REINSURANCE_TOWER.WC.map(l => l.purchasable);
@@ -110,7 +137,7 @@ console.log('\n=== 4. THE AGGREGATE RESPONDS TO THE OCCURRENCE-LAYER SELECTION =
     const qa = quoteAggregate(all, EXPOSURE, EGROSS, lv), qn = quoteAggregate(none, EXPOSURE, EGROSS, lv);
     const ratio = qn.premium / Math.max(qa.premium, 1);
     console.log(`  ${(AGG_ATTACHMENT_LEVELS[lv] * 100).toFixed(0)}%   ${fmt$(qa.premium).padStart(18)}    ${fmt$(qn.premium).padStart(18)}    x${ratio.toFixed(1)}  ` +
-      `${note(ratio > 3, `aggregate barely responds to selection at ${AGG_ATTACHMENT_LEVELS[lv]} (x${ratio.toFixed(1)})`)}`);
+      `${note(ratio > 1.4, `aggregate barely responds to selection at ${AGG_ATTACHMENT_LEVELS[lv]} (x${ratio.toFixed(1)})`)}`);
   }
   console.log('  ^^ declining occurrence layers puts catastrophic claims back into the retention,');
   console.log('     raising retained volatility and so the aggregate\'s price. Without this,');

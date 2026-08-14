@@ -1472,3 +1472,61 @@ distinguishes a report lag from state leaking somewhere.
 The same logic retired `gl-cutover-check`'s "WC and GL share commonLossFactor" assertion. gPool was the
 model's only cross-line correlation and it is gone from WC, so the check now asserts the DECOUPLING:
 WC reports exactly 1, GL still varies.
+
+---
+
+## 35. The tower re-derivation: the top layer became real, and the aggregate got weaker
+
+Measured over 12,000 full-market years with `scripts/diagnostics/wc-tower-rederive.ts`.
+
+**Prices are the CLOSED FORM, not the simulation.** Layer expectation over a lognormal mixture has an
+exact solution, so the constant carries no sampling error; the simulation agreed to within 4% on every
+layer and 0.1% on the top one, and the residual is 12,000 years being short of a sigma-2.0 tail rather
+than the analytic being wrong. `sdOverExpected` has no convenient closed form and is the measured value.
+
+| WC layer | was | now | |
+|---|---|---|---|
+| $4M xs $1M | 0.4662 | **0.6902** | +48% — more claims pierce $1M |
+| $5M xs $5M | 0.2697 | **0.1539** | −43% — the retired annuity clustered here |
+| $15M xs $10M | 0.0866 | **0.1079** | +25% |
+| $25M xs $25M | 0.0007 | **0.0366** | +52x |
+| `AGG_OCC_FREQ_PER_1M` | 1.4310 | **1.3733** | |
+
+**Basis changed too**, and it is worth knowing: the old constants were taken on one seed's enrolled
+book, the new ones on the canonical 200. Per-$100 cost is linear in exposure but **not invariant to
+rating-group mix** — High Safety's heavy-component weight is 0.4113 against Low Safety's 0.2637 — so a
+safety-heavy book is under-charged. Measured spread on a 50-member subset was 3–11% by layer.
+Enrollment's expected mix is the market's, so full-market is the reproducible central estimate.
+
+### $25M xs $25M is now purchasable
+
+Its non-purchasable flag rested on two numeric claims and the rebuild voided both. "A single
+catastrophic claim cannot reach $25M: the present value ceiling is $15.51M" was a property of the
+retired annuity; the mixture has no ceiling and reaches $25M **once every 26 years** by exactly the
+one-claim-per-occurrence mechanism the comment said could not reach it. And SD/E of 42, which made the
+risk load "not a price, a division artifact", is now 6.38 on a real expected cost.
+
+Leaving it non-purchasable would force the pool to retain a band it can genuinely be hit in with no way
+to buy cover, and show `retainedAboveTower` carrying 0.0227 per $100 that a market would in fact write.
+Deleting it would make the same band retained and invisible. It is offered at its measured price; a
+player may decline it. Note this also changes the DEFAULT placement, which is derived from the flag —
+WC now buys four layers by default rather than three.
+
+### The aggregate's response to layer selection weakened, and that is real
+
+`reinsurance-tower-check` asserted that declining every occurrence layer raises the aggregate premium
+more than 3x. It now raises it **1.65x–2.15x**, and the threshold was lowered to 1.4 — not to make the
+check pass, but because the underlying economics changed and the old number described the retired model.
+
+**The tower no longer collapses retained volatility.** The old catastrophic claim was capped at $15.51M,
+so buying the layers removed essentially all of the retained tail. The mixture's tail above $50M is
+retained whatever the player buys. Measured second moment with every layer placed rose 5.39e9 → 3.62e10
+(+572%); with none placed it rose only 6.09e10 → 1.18e11 (+94%), so the ratio fell from 11.3 to 3.26.
+
+**This is the same effect the retained-CV diagnostic found on GL** — the tower cedes the middle of the
+distribution and leaves the extreme tail retained. WC now behaves the way GL already did. The design
+intent the assertion protects still holds: at $290M exposure, declining every layer takes the aggregate
+from $2.43M to $4.01M at a 110% attachment, so it is not free volatility transfer.
+
+Also: masks 8–15 of `WC_RETAINED_SECOND_MOMENT` are no longer near-duplicates of 0–7. They used to be
+because the top layer was never penetrated; it now attaches once every 26 years, so bit 3 matters.

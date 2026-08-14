@@ -111,33 +111,69 @@ export interface TowerLayer {
 // ============================================================================
 
 export const REINSURANCE_TOWER: Record<TowerLine, TowerLayer[]> = {
+  // ⚠ RE-DERIVED FOR THE WC SEVERITY REBUILD (scripts/diagnostics/wc-tower-rederive.ts).
+  //
+  // THE PRICES ARE THE CLOSED FORM, NOT THE SIMULATION. Layer expectation over a
+  // lognormal mixture has an exact solution (limitedExpectedValue on each
+  // component, differenced across the layer bounds), so the constant carries no
+  // sampling error. 12,000 full-market years of simulation agreed to within 4% on
+  // every layer and 0.1% on the top one; the residual is the simulation being
+  // short of a sigma-2.0 tail, not the analytic being wrong. sdOverExpected has no
+  // convenient closed form and IS the measured figure.
+  //
+  // MEASURED FULL-MARKET, a change of basis from the old constants (one seed's
+  // enrolled book). Per-$100 cost is linear in EXPOSURE but not invariant to
+  // RATING-GROUP MIX — High Safety carries a 0.4113 heavy-component weight against
+  // Low Safety's 0.2637 — and enrollment's expected mix is the market's, so the
+  // canonical 200 is the reproducible basis. A book that is unusually safety-heavy
+  // is under-charged by these constants; measured spread on a 50-member subset was
+  // 3-11% by layer.
+  //
+  // WHAT MOVED, AND IT IS NOT ONE DIRECTION. The retired catastrophic annuity had
+  // a HARD CEILING of $15.51M present value; the mixture has none.
+  //   $4M xs $1M     0.4662 -> 0.6902   +48%   more claims pierce $1M
+  //   $5M xs $5M     0.2697 -> 0.1539   -43%   the old annuity clustered here
+  //   $15M xs $10M   0.0866 -> 0.1079   +25%
+  //   $25M xs $25M   0.0007 -> 0.0366   +52x   was unreachable, now 1-in-26-years
   WC: [
-    { name: '$4M xs $1M', attachment: 1e6, limit: 4e6, expectedCededPer100: 0.4662, sdOverExpected: 1.54, purchasable: true },
-    { name: '$5M xs $5M', attachment: 5e6, limit: 5e6, expectedCededPer100: 0.2697, sdOverExpected: 2.32, purchasable: true },
-    { name: '$15M xs $10M', attachment: 10e6, limit: 15e6, expectedCededPer100: 0.0866, sdOverExpected: 3.87, purchasable: true },
-    // ⚠ DEFINED BUT NOT PURCHASABLE — "unreachable by the mechanism it was
-    // designed for". This layer is for MULTI-CLAIM CATASTROPHE occurrences: a
-    // collapse or explosion injuring several workers as ONE occurrence.
+    { name: '$4M xs $1M', attachment: 1e6, limit: 4e6, expectedCededPer100: 0.6902, sdOverExpected: 0.54, purchasable: true },
+    { name: '$5M xs $5M', attachment: 5e6, limit: 5e6, expectedCededPer100: 0.1539, sdOverExpected: 1.44, purchasable: true },
+    { name: '$15M xs $10M', attachment: 10e6, limit: 15e6, expectedCededPer100: 0.1079, sdOverExpected: 2.85, purchasable: true },
+    // ⚠⚠ MADE PURCHASABLE BY THE WC SEVERITY REBUILD. ITS OLD JUSTIFICATION WAS
+    // VOIDED, NOT WEAKENED, AND THE COMMENT IS KEPT HERE SO THE REVERSAL IS
+    // READABLE RATHER THAN LOOKING LIKE DRIFT.
     //
-    // WC emits exactly ONE claim per occurrence today, and a single catastrophic
-    // claim cannot reach $25M: the present value ceiling is $15.51M (police, the
-    // youngest injury age of 25, highest weekly benefit), or $19.39M before the
-    // 0.85 disability adjustment. So the designed mechanism cannot trigger it.
+    // IT USED TO SAY: "WC emits exactly ONE claim per occurrence today, and a
+    // single catastrophic claim cannot reach $25M: the present value ceiling is
+    // $15.51M (police, the youngest injury age of 25, highest weekly benefit), or
+    // $19.39M before the 0.85 disability adjustment. So the designed mechanism
+    // cannot trigger it." It was for MULTI-CLAIM CATASTROPHE occurrences — a
+    // collapse or explosion injuring several workers as one occurrence — and
+    // those are still not built.
     //
-    // It is not strictly unreachable — the diagnostic penetrated it twice in
-    // 3,000 full-market years, 100% PRESUMPTION, where a high severity draw
-    // trended over a 40-year report lag at 6% (up to 10.3x) clears $25M. Enrolled
-    // penetration is 0.0003/yr, one event per ~3,300 years, and it never paid in
-    // 100 five-year games.
+    // THAT CEILING WAS A PROPERTY OF THE RETIRED CATASTROPHIC ANNUITY. The
+    // mixture has no ceiling: the heavy component is lognormal(9.4776, 2.00), so
+    // a SINGLE claim reaches $25M at 0.0388/yr full-market — ONE EVERY 26 YEARS,
+    // measured over 12,000 years — by exactly the one-claim-per-occurrence
+    // mechanism the old comment said could not reach it. Multi-claim occurrences
+    // are no longer needed to make the layer real.
     //
-    // NOT PURCHASABLE because its measured SD/E is 42 — the risk-load formula
-    // returns a 26x multiple on an expected loss of essentially zero, which is
-    // not a price, it is a division artifact. Selling a player cover that has
-    // never paid, at a fabricated premium, is a trap.
+    // The second reason was also numeric and has also gone: SD/E was 42, so the
+    // risk load returned a 26x multiple on an expected loss of essentially zero —
+    // "not a price, a division artifact". SD/E is now 6.38 on a real expected
+    // cost, which the same formula prices without difficulty.
     //
-    // PREREQUISITES for making it real: multi-claim WC occurrences, and a
-    // death-benefit outcome. NEITHER IS BUILT. Do not build them from here.
-    { name: '$25M xs $25M', attachment: 25e6, limit: 25e6, expectedCededPer100: 0.0007, sdOverExpected: 42.0, purchasable: false },
+    // ⚠ THE PLAYER-FACING CONSEQUENCE IS THE POINT. Left non-purchasable, the
+    // pool would be forced to retain a band it can now genuinely be hit in, with
+    // no way to buy cover — and `retainedAboveTower` would show WC carrying
+    // 0.0227 per $100 of unreinsurable exposure that a market would in fact write.
+    // The alternative was deleting the layer, which would have made the same band
+    // retained and invisible. Offering it at its measured price is the honest
+    // option; a player may still decline it.
+    //
+    // Still NOT built, and still not prerequisites for this layer: multi-claim WC
+    // occurrences and a death-benefit outcome. Do not build them from here.
+    { name: '$25M xs $25M', attachment: 25e6, limit: 25e6, expectedCededPer100: 0.0366, sdOverExpected: 6.38, purchasable: true },
   ],
   GL: [
     { name: '$4M xs $1M', attachment: 1e6, limit: 4e6, expectedCededPer100: 0.9050, sdOverExpected: 0.97, purchasable: true },
@@ -232,7 +268,10 @@ export const RISK_LOAD_LAMBDA = 0.60;
 // pool. m2 below was back-solved through this same factor, so the round trip
 // reproduces the measured SD exactly at the reference exposure and scales as
 // 1/sqrt(exposure) away from it.
-export const AGG_OCC_FREQ_PER_1M = 1.4310;   // WC occurrences per $1M enrolled exposure
+// RE-DERIVED: 1.4310 -> 1.3733. Measured FULL-MARKET now (1,785.3 occurrences/yr
+// over $1,300M) rather than on one seed's enrolled book; the name keeps
+// "PER_1M" because it is still applied to enrolled exposure at the call site.
+export const AGG_OCC_FREQ_PER_1M = 1.3733;   // WC occurrences per $1M of exposure
 export const AGG_OVERDISPERSION = 1.05;
 
 // Per-occurrence RETAINED second moment, indexed by the occurrence-layer
@@ -241,13 +280,20 @@ export const AGG_OVERDISPERSION = 1.05;
 // (E[gross] - sum of placed E[ceded]) / lambda, from the constants above, so the
 // two cannot drift apart.
 //
-// Masks 8-15 barely differ from 0-7 because the $25M xs $25M layer is almost
-// never penetrated; they are stored anyway so the index is total.
+// RE-DERIVED over 12,000 full-market years. Every mask rose — the retired
+// annuity's $15.51M ceiling capped the retained second moment, and the mixture's
+// unbounded tail does not. The rise is largest where the tower cedes most
+// (mask 15, every layer placed: 5.39e9 -> 3.62e10, +572%), because what the old
+// model left retained above the layers was nearly nothing and now is not.
+//
+// ⚠ MASKS 8-15 ARE NO LONGER NEAR-DUPLICATES OF 0-7. They used to be, because the
+// $25M xs $25M layer was almost never penetrated. It now attaches once every 26
+// years, so bit 3 genuinely changes the retained moment and the pairs differ.
 export const WC_RETAINED_SECOND_MOMENT: number[] = [
-  6.0908e10, 2.5954e10, 2.9679e10, 8.8477e9,
-  4.6995e10, 1.6722e10, 2.1536e10, 5.4011e9,
-  6.0839e10, 2.5894e10, 2.9615e10, 8.7950e9,
-  4.6954e10, 1.6710e10, 2.1522e10, 5.3942e9,
+  1.1792e11, 7.7680e10, 9.0537e10, 5.9075e10,
+  8.1251e10, 4.7156e10, 6.1548e10, 3.6229e10,
+  1.1792e11, 7.7680e10, 9.0537e10, 5.9075e10,
+  8.1251e10, 4.7156e10, 6.1548e10, 3.6229e10,
 ];
 
 // ATTACHMENT SET, as a multiple of EXPECTED RETAINED LOSS — recalculated from
