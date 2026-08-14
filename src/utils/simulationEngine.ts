@@ -1033,6 +1033,7 @@ export function processLineYear(
   const result: LineResultSet = {
     yearNumber,
     calendarYear,
+    line,
     decisions: lineDecisions,
     assetAllocation: ctx.assetAllocation,
 

@@ -454,6 +454,19 @@ export interface ReserveCohort {
 export interface ResultSet {
   yearNumber: number;
   calendarYear: number;
+  // WHICH LINE THIS ROW IS. Absent on the POOL row, which is an aggregate of all
+  // of them.
+  //
+  // ⚠ ADDED BECAUSE A COUNT WAS BEING USED AS AN IDENTITY. resultMetrics inferred
+  // the line from `cededByLayer.length >= 4 ? 'WC' : 'GL'`, which worked only
+  // while WC's tower had four layers and GL's had three. Merging WC's top two
+  // layers made both three, and that test would have silently labelled every WC
+  // row 'GL' — compiling, rendering, and printing GL's layer names on a WC
+  // result. A row carries its own identity now.
+  //
+  // A STRING, so value-identity-check (numeric fields only) is blind to it by
+  // construction, and it is not a spreadsheet metric so no export hash moves.
+  line?: CoverageLine;
 
   // Decisions echoed
   decisions: LineDecisionSet;

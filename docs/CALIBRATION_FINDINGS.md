@@ -1530,3 +1530,70 @@ from $2.43M to $4.01M at a 110% attachment, so it is not free volatility transfe
 
 Also: masks 8–15 of `WC_RETAINED_SECOND_MOMENT` are no longer near-duplicates of 0–7. They used to be
 because the top layer was never penetrated; it now attaches once every 26 years, so bit 3 matters.
+
+---
+
+## 36. Merging WC's top two layers, and three things a layer-count change broke
+
+`$15M xs $10M` and `$25M xs $25M` are now one `$40M xs $10M` band over the same $10M–$50M. WC and GL
+both carry three occurrence layers; retention stays $1M.
+
+The actuarial reason, beyond one fewer decision: `$25M xs $25M` fired **once per 26 years**, which is
+too thin to be a purchase decision — a player would never see it pay inside a game. The merged band
+fires **once every 4.6 years**.
+
+### Re-derived, and the targets' basis was recoverable from the residuals
+
+| layer | E[ceded] | target | residual | SD/E | multiple | pierces |
+|---|---|---|---|---|---|---|
+| $4M xs $1M | **0.6620** | 0.6591 | +0.44% | 0.54 | 1.32x | 7.17/yr |
+| $5M xs $5M | **0.1474** | 0.1475 | −0.06% | 1.44 | 1.86x | 1 per 1.4 yrs |
+| $40M xs $10M | **0.1383** | 0.1387 | −0.28% | 3.38 | 3.03x | 1 per 4.6 yrs |
+| retained >$50M | 0.0252 | 0.0252 | — | — | — | 1 per 109 yrs |
+
+Total ceded 0.9477 per $100, split **70 / 16 / 15** — the stated split exactly. The loading rises
+monotonically and still **emerges from SD/E** rather than being chosen, which is the property that had
+to survive the restructure: the merged band spans further out than the `$15M xs $10M` it absorbs, so
+its SD/E rises and its multiple rises with it.
+
+**The residuals identified a basis difference worth recording.** Computed at each member's ACTUAL risk
+quality the layers come out 4.26% dearer; at NEUTRAL they match the targets to within 0.44%. The
+constants now use **neutral RQ**, a change from the previous commit. A per-$100 rate card should not
+carry one roster's risk-quality mix — the same reason it is measured full-market rather than on one
+seed's enrolled book, and the basis `deriveNeutralPurePremiumPer100` already uses.
+
+### Three things the layer-count change broke, two of them silently
+
+1. **`resultMetrics` inferred the coverage line from the layer count** — `cededByLayer.length >= 4 ?
+   'WC' : 'GL'`. With both towers at three, every WC row would have been labelled GL: still compiling,
+   still rendering, printing GL's layer names on a WC placement summary. **A count is not an identity.**
+   `ResultSet` now carries `line`.
+2. **`WC_RETAINED_SECOND_MOMENT` is indexed 2^layers**, so the table halved from 16 entries to 8. An
+   out-of-range mask falls back to entry 0 — no layers placed — which would have priced *every*
+   selection as full retention.
+3. **Two tower-check assertions were pinned to four layers.** One indexed `REINSURANCE_TOWER.WC[3]` and
+   threw, which is the right failure. The other, `layerMask([true,false,true,true]) === 13` labelled
+   "16 entries for 4 layers", **kept passing** — `layerMask` doesn't know how many layers exist, so a
+   4-element input still returns 13 while the label described a tower that no longer existed. Both are
+   sized off the array now, and the check asserts WC and GL have *equal* layer counts precisely so the
+   count-as-identity mistake cannot come back.
+
+### The aggregate's response ROSE
+
+Reported, not tuned. Declining every occurrence layer now raises the aggregate premium **2.1x / 2.6x /
+3.8x** across the three attachments, against **1.65x / 1.82x / 2.15x** before the merge. Fewer, wider
+layers means declining them puts more back into the retention, so the price responds harder. The
+threshold stays at 1.4 — it was lowered last commit for a real change in the economics, and this moves
+back the other way without being touched.
+
+### A fourth trap, same family as findings 26 and 33
+
+`wc-cutover-check` failed at `19d04e7` — not from this merge; the tower re-derivation caused it and
+**I did not re-run the harness after applying those constants.** The check gated
+`|realized − analytic| <= 1.96σ/√n` on WC's gross loss ratio, while the comment three lines above it
+said "REPORTED, not gated". Both the contradiction and the failure are the now-familiar shape: a
+normal-theory CI on a mean carried by sigma-2.0 draws under-covers, so the realized figure sits below
+the analytic (−9.0% here, −4.1% measured directly full-market) until the tail arrives. It is now
+genuinely reported. Draw-versus-expectation remains gated where it can be — the **$1M-capped** mean in
+`wc-severity-rebuild-check`. The header's claim that `wc-claim-check.ts` covered it was stale; that
+harness was deleted with the tier model.

@@ -110,8 +110,9 @@ console.log(`  WIDE basis (as displayed, denominator includes reinsuranceCost): 
 const above = wcNarrowLR.filter(r => r >= 0.668).length;
 console.log(`  line-years at/above 66.8%: ${above}/${wcNarrowLR.length} (${(above / wcNarrowLR.length * 100).toFixed(0)}%) — centred means ~half`);
 // --- the two-part 6b check (same decomposition GL uses) --------------------
-// (a) draw == analytic expectation is asserted by wc-claim-check.ts at
-// full-market scale; (b) the ANALYTIC gross-basis ratio == 66.8% is asserted
+// (a) draw == analytic expectation is asserted by wc-severity-rebuild-check.ts,
+// on the $1M-CAPPED basis, at full-market scale (wc-claim-check.ts was deleted
+// with the tier model); (b) the ANALYTIC gross-basis ratio == 66.8% is asserted
 // here, deterministic given the roster. Together they imply realized ~ 66.8%
 // in expectation. The realized mean is REPORTED, not gated: WC's catastrophic
 // annuity tier is lumpy enough that a +/-2pp band around it is noise-limited.
@@ -126,8 +127,28 @@ if (MODE === '6b') {
 }
 console.log(`  [2] REALIZED gross basis (reported, not gated — catastrophic annuity lumpiness)`);
 console.log(`      mean ${(mg * 100).toFixed(2)}%   95% CI +/-${(cig * 100).toFixed(2)}pp across ${perSeedGross.length} seeds`);
-const wcWithinCI = Math.abs(mg - ma) <= cig;
-console.log(`      realized within its own CI of the analytic: ${wcWithinCI ? 'YES' : 'NO'}  ${note(wcWithinCI, `WC realized ${(mg * 100).toFixed(2)}% OUTSIDE its CI (+/-${(cig * 100).toFixed(2)}pp) of analytic ${(ma * 100).toFixed(2)}% — draw/expectation divergence`)}`);
+// ⚠ THIS IS NOW GENUINELY REPORTED, MATCHING THE COMMENT ABOVE IT. It used to
+// call note() on `|realized - analytic| <= 1.96 sigma / sqrt(seeds)`, so the block
+// said "reported, not gated" while the line below it gated — the same
+// comment/code contradiction this harness's own header warns about elsewhere.
+//
+// AND THE GATE FAILED ON CORRECT CODE. A normal-theory CI assumes the sample mean
+// is normal at this sample size. WC severity is a lognormal mixture whose heavy
+// component has sigma 2.0, so the mean is carried by draws rarer than the sample
+// contains and the realized figure sits BELOW the analytic until the tail shows
+// up — measured at -9.0% here, and -4.1% directly on the full-market book in
+// wc-severity-rebuild-check. 1.96 sigma systematically under-covers that, so the
+// check reported a "draw/expectation divergence" that is ordinary sampling.
+//
+// DRAW-VS-EXPECTATION IS STILL ASSERTED, just not here and not on this quantity:
+// wc-severity-rebuild-check gates the $1M-CAPPED mean against its analytic, which
+// is a well-behaved variable (finding 26's rule: gate counts, rates, quantiles and
+// capped means; never a heavy-tailed sample mean). The header's claim that
+// wc-claim-check.ts covers it is stale — that harness was deleted with the tier
+// model it tested.
+const gap = (mg - ma) / ma;
+console.log(`      realized is ${(gap * 100).toFixed(1)}% of analytic, against a +/-${(cig * 100).toFixed(2)}pp normal CI — REPORTED, NOT GATED`);
+console.log(`      (a normal CI under-covers a sigma-2.0 mixture mean; see wc-severity-rebuild-check for the gated capped-basis test)`);
 console.log(`  [3] NET narrow basis (reported): ${(m * 100).toFixed(2)}% — below gross because reinsurance recovery is active`);
 
 console.log('\n--- cross-line scale (enrolled books, mean per line-year) ---');

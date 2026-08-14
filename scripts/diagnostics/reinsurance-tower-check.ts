@@ -10,7 +10,7 @@
 
 import { GL_STATUTORY_CAP } from '../../src/data/defaultAssumptions';
 import {
-  AGG_ATTACHMENT_LEVELS, REINSURANCE_TOWER, RISK_LOAD_LAMBDA, TOWER_TOP,
+  AGG_ATTACHMENT_LEVELS, REINSURANCE_TOWER, RISK_LOAD_LAMBDA, TOWER_TOP, WC_RETAINED_SECOND_MOMENT,
 } from '../../src/data/reinsuranceTower';
 import {
   cedeOccurrences, claimContribution, layerMask, layerPremium,
@@ -96,20 +96,27 @@ console.log('\n=== 3. THE RISK LOAD RISES WITH ATTACHMENT (one lambda, not four 
   const glTop = layerPremium('GL', 2, per100) / per100, wcTop = layerPremium('WC', 2, per100) / per100;
   console.log(`  GL top layer ${glTop.toFixed(4)} per $100 vs WC top ${wcTop.toFixed(4)} — GL dearer on a LOWER multiple: ` +
     `${note(glTop > wcTop, 'GL top layer is not dearer than WC top')}`);
-  // ⚠ WAS "the unpurchasable WC layer is excluded from program cost". THERE IS NO
-  // LONGER AN UNPURCHASABLE LAYER TO EXCLUDE. $25M xs $25M was flagged
-  // non-purchasable on two numeric grounds, both voided by the severity rebuild:
-  // a single claim "cannot reach $25M" (the retired annuity's $15.51M PV ceiling —
-  // the mixture has none, and reaches $25M once every 26 years), and SD/E of 42
-  // making its price "a division artifact" (now 6.38 on a real expected cost).
+  // ⚠ WAS "the unpurchasable WC layer is excluded from program cost", then "WC's
+  // top layer is purchasable and priced". Both were about `$25M xs $25M`, which
+  // NO LONGER EXISTS — it was merged into `$40M xs $10M`. The second version
+  // indexed REINSURANCE_TOWER.WC[3] and THREW once the array shortened, which is
+  // the loud failure a hardcoded layer index should give.
   //
-  // The purchasability GATE is still live code, but nothing sets the flag false
-  // any more, so that branch is now untested BY DATA rather than by assertion.
-  // Asserted instead: the layer that was excluded now carries a real price.
-  const top = REINSURANCE_TOWER.WC[3];
-  console.log(`  WC's top layer is purchasable and priced: ${top.expectedCededPer100.toFixed(4)} per $100, SD/E ${top.sdOverExpected}  ` +
-    `${note(top.purchasable && top.expectedCededPer100 > 0.01 && top.sdOverExpected < 10, 'WC top layer is not priced as a real layer')}`);
-  console.log(`     charged when placed: ${note(occurrenceProgramCost('WC', [false, false, false, true], per100) > 0, 'the now-purchasable top layer is still being skipped')}`);
+  // Nothing sets `purchasable: false` on either line now, so that branch is
+  // untested by data. Asserted instead: WC and GL carry the SAME NUMBER OF
+  // LAYERS, which is exactly what broke a downstream discriminator this commit —
+  // resultMetrics inferred the line from `cededByLayer.length >= 4`.
+  const wcCount = REINSURANCE_TOWER.WC.length, glCount = REINSURANCE_TOWER.GL.length;
+  console.log(`  WC ${wcCount} layers, GL ${glCount} — EQUAL, so layer count cannot identify a line: ` +
+    `${note(wcCount === glCount, `WC has ${wcCount} layers and GL ${glCount}; if that diverges again, do NOT reintroduce a count-based line test`)}`);
+  console.log(`  every WC layer purchasable: ${note(REINSURANCE_TOWER.WC.every(l => l.purchasable), 'a WC layer is flagged non-purchasable without a stated reason')}`);
+  console.log(`  merged top band spans $10M-$50M: ${note(REINSURANCE_TOWER.WC[2].attachment === 10e6 && REINSURANCE_TOWER.WC[2].limit === 40e6, 'the merged WC top layer is not $40M xs $10M')}`);
+  console.log(`  and it is charged when placed: ${note(occurrenceProgramCost('WC', [false, false, true], per100) > 0, 'the merged top layer is not being charged')}`);
+  // THE MASK TABLE IS INDEXED 2^layers. Merging halved it; an out-of-range index
+  // silently falls back to mask 0 (no layers placed), pricing every selection as
+  // full retention.
+  console.log(`  WC_RETAINED_SECOND_MOMENT has 2^${wcCount} = ${1 << wcCount} entries: ${WC_RETAINED_SECOND_MOMENT.length}  ` +
+    `${note(WC_RETAINED_SECOND_MOMENT.length === (1 << wcCount), `mask table has ${WC_RETAINED_SECOND_MOMENT.length} entries for ${wcCount} layers — quoteAggregate would fall back to mask 0 and price every selection as full retention`)}`)
 }
 
 console.log('\n=== 4. THE AGGREGATE RESPONDS TO THE OCCURRENCE-LAYER SELECTION ===');
@@ -147,7 +154,14 @@ console.log('\n=== 4. THE AGGREGATE RESPONDS TO THE OCCURRENCE-LAYER SELECTION =
   const rs = small.premium / (145e6 / 100), rb = big.premium / (580e6 / 100);
   console.log(`  premium per $100 at $145M exposure ${rs.toFixed(4)} vs $580M ${rb.toFixed(4)} — FALLS as the book grows: ` +
     `${note(rb < rs, 'aggregate price per $100 did not fall with exposure — linearity bug')}`);
-  console.log(`  mask indexing is total (16 entries for 4 layers): ${note(layerMask([true, false, true, true]) === 13, 'layerMask wrong')}`);
+  // ⚠ WAS `layerMask([true, false, true, true]) === 13` with the label "16 entries
+  // for 4 layers". Both were hardcoded to the four-layer tower. The 4-element
+  // input still produced 13 after the merge — layerMask does not know how many
+  // layers exist — so the check kept PASSING while describing a tower that no
+  // longer existed, and the label was simply false. Sized off the array now.
+  const nWc = REINSURANCE_TOWER.WC.length;
+  console.log(`  mask indexing is total (${1 << nWc} entries for ${nWc} layers): ` +
+    `${note(layerMask([true, false, true]) === 5 && WC_RETAINED_SECOND_MOMENT.length === (1 << nWc), 'layerMask or the mask table is not sized to the tower')}`);
 }
 
 console.log('\n=== 5. PRICE IS NO LONGER A FUNCTION OF THE FUNDING CONFIDENCE LEVEL ===');
@@ -185,8 +199,20 @@ console.log('\n=== 6. LIVE GAME: ceded reconciles, and GL above-tower exceeds th
     console.log(`     retained above tower ${fmt$(above)}`);
     console.log(`     ceded is a strict subset of gross: ${note(ceded <= gross + 1, `${line} ceded exceeds gross`)}`);
     if (line === 'WC') {
-      const wcTop = byLayer[3];
-      console.log(`     WC's unpurchasable top layer ceded nothing: ${note(wcTop === 0, 'unpurchasable WC layer paid')}`);
+      // ⚠ WAS `note(byLayer[3] === 0, 'unpurchasable WC layer paid')`. Index 3 no
+      // longer exists, and the layer that occupied it is now purchasable and
+      // expected to pay — the assertion would have inverted from "must never pay"
+      // to "must sometimes pay" without anyone noticing, because byLayer[3] reads
+      // undefined and `undefined === 0` is false only after the array shortened.
+      //
+      // The merged band fires once per 4.6 years, so a 5-year window paying zero
+      // is ORDINARY and must not be a failure. What is asserted is the structural
+      // relation that holds every year: WC retains nothing above its own tower top
+      // unless the merged layer is exhausted, because the tower reaches $50M.
+      const wcTop = byLayer[2];
+      console.log(`     merged $40M xs $10M ceded ${fmt$(wcTop)} in this 5-yr window (fires ~1 per 4.6 yrs, so 0 is ordinary)`);
+      console.log(`     retained above $50M only if the merged layer is exhausted: ` +
+        `${note(above === 0 || wcTop >= REINSURANCE_TOWER.WC[2].limit - 1, 'WC retained above the tower while its top layer had unused limit')}`);
     }
   }
   // Property must be untouched by all of this.

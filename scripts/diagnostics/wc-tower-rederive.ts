@@ -13,6 +13,9 @@
 // by layer, and at the top of the tower they price genuine catastrophe cover at
 // almost nothing. Shipping a playable build in between would let a pool buy that.
 //
+// UPDATED FOR THE THREE-LAYER MERGE: `$15M xs $10M` + `$25M xs $25M` -> a single
+// `$40M xs $10M`. The mask set therefore halves, from 16 to 8.
+//
 // ⚠ THE $5M FREQUENCY THAT MOTIVATED THIS ORDERING WAS ITSELF A STALE FIGURE.
 // The rebuild spec said claims over $5M arrive "roughly once per 41 years" and
 // concluded the upper layers would be massively OVER-priced. That figure came
@@ -119,29 +122,70 @@ for (let i = 0; i < LAYERS.length; i++) {
     `${(((per100 / stored.expectedCededPer100) - 1) * 100).toFixed(0).padStart(8)}%   ${stored.sdOverExpected.toFixed(2).padStart(11)} ${sdOverE.toFixed(2).padStart(10)}`);
 }
 
-// CLOSED-FORM CROSS-CHECK. The layer expectation is available analytically from
-// the mixture, so the simulation is checked against it rather than trusted.
-console.log('\n  closed-form cross-check (analytic layer expectation from the mixture):');
-for (let i = 0; i < LAYERS.length; i++) {
+// CLOSED-FORM CROSS-CHECK, ON BOTH RISK-QUALITY BASES.
+//
+// ⚠ THE BASIS IS THE WHOLE DIFFERENCE BETWEEN THE TWO COLUMNS, and it is worth
+// several percent. NEUTRAL prices the layer as a rate card — no theta, no severity
+// tilt — which is seed-independent and reproducible. ACTUAL embeds this roster's
+// own risk-quality mix, which is ~3.9% dearer on the canonical 200 and a different
+// number on any enrolled subset. The shipped constants use NEUTRAL, for the same
+// reason they are measured full-market rather than on one seed's book.
+function analyticLayer(i: number, basis: 'neutral' | 'actual'): number {
   const l = LAYERS[i];
-  let analytic = 0;
+  let total = 0;
   for (const m of roster) {
     const group = ratingGroupOf(m);
     const spec = M.ratingGroups[group];
     const rm = regionMultiplier(m.region);
-    const w = tiltedWeights(group, m.riskQuality);
-    const lambda = (m.exposureByLine.WC ?? 0) * spec.ratePer1M * Math.exp(-M.rqFrequencyBeta * (m.riskQuality - 5));
+    const rq = basis === 'neutral' ? 5 : m.riskQuality;
+    const w = tiltedWeights(group, rq);
+    const lambda = (m.exposureByLine.WC ?? 0) * spec.ratePer1M * Math.exp(-M.rqFrequencyBeta * (rq - 5));
     spec.mix.forEach(({ component }, j) => {
       const c = WC_SEVERITY_COMPONENTS[component];
       const mu = c.mu + Math.log(rm);
-      analytic += lambda * w[j] * (limitedExpectedValue(mu, c.sigma, l.attachment + l.limit) - limitedExpectedValue(mu, c.sigma, l.attachment));
+      total += lambda * w[j] * (limitedExpectedValue(mu, c.sigma, l.attachment + l.limit) - limitedExpectedValue(mu, c.sigma, l.attachment));
     });
   }
-  const a100 = analytic / exposureUnits;
-  const diff = (newLayers[i].expectedCededPer100 / a100 - 1) * 100;
-  console.log(`  ${l.name.padEnd(14)} simulated ${newLayers[i].expectedCededPer100.toFixed(4)}  analytic ${a100.toFixed(4)}  (${diff.toFixed(1)}%)` +
-    `${Math.abs(diff) < 8 ? '' : '   <-- CHECK'}`);
+  return total / exposureUnits;
 }
+console.log('\n  closed-form, both bases (per $100), against the stated targets:');
+console.log('  layer            NEUTRAL   ACTUAL   neutral vs target   simulated');
+const TARGETS: Record<string, number> = { '$4M xs $1M': 0.6591, '$5M xs $5M': 0.1475, '$40M xs $10M': 0.1387 };
+const neutral: number[] = [];
+for (let i = 0; i < LAYERS.length; i++) {
+  const n = analyticLayer(i, 'neutral'), a = analyticLayer(i, 'actual');
+  neutral.push(n);
+  const t = TARGETS[LAYERS[i].name];
+  const resid = t ? ((n / t - 1) * 100).toFixed(2) + '%' : 'n/a';
+  console.log(`  ${LAYERS[i].name.padEnd(14)} ${n.toFixed(4).padStart(7)} ${a.toFixed(4).padStart(8)}   ${resid.padStart(17)}   ${newLayers[i].expectedCededPer100.toFixed(4).padStart(9)}`);
+}
+console.log(`  actual/neutral ratio: ${(analyticLayer(0, 'actual') / analyticLayer(0, 'neutral')).toFixed(4)} — the roster's own risk-quality mix.`);
+
+// PIERCE FREQUENCY per layer — what makes a layer a live purchase decision
+// rather than a line item. $25M xs $25M fired once per 27 years, which is why
+// it was merged.
+console.log('\n  how often each band is pierced (FULL MARKET, measured):');
+for (const l of LAYERS) {
+  const hits = years.reduce((s2, y) => s2 + y.totals.filter(t => t > l.attachment).length, 0);
+  const perYear = hits / YEARS;
+  console.log(`  ${l.name.padEnd(14)} ${perYear.toFixed(2)}/yr` +
+    (perYear < 1 ? `  (1 per ${(1 / perYear).toFixed(1)} yrs)` : ''));
+}
+const over50 = years.reduce((s2, y) => s2 + y.totals.filter(t => t > 50e6).length, 0) / YEARS;
+console.log(`  above the tower ($50M+)  ${over50.toFixed(4)}/yr  (1 per ${(1 / over50).toFixed(0)} yrs)`);
+
+// THE RISK LOAD MUST STILL RISE MONOTONICALLY WITH ATTACHMENT, and it must do so
+// because SD/E rises — not because anyone chose the multiples.
+console.log('\n  risk-load multiples, 1 + lambda x SD/E (lambda 0.60):');
+let rising = true;
+for (let i = 0; i < LAYERS.length; i++) {
+  const mult = 1 + 0.60 * newLayers[i].sdOverExpected;
+  if (i > 0 && mult <= 1 + 0.60 * newLayers[i - 1].sdOverExpected) rising = false;
+  console.log(`  ${LAYERS[i].name.padEnd(14)} SD/E ${newLayers[i].sdOverExpected.toFixed(2)} -> ${mult.toFixed(2)}x   premium ${(neutral[i] * mult).toFixed(4)} per $100`);
+}
+console.log(`  monotonically rising: ${rising ? 'YES' : 'NO — INVESTIGATE'}`);
+console.log(`  total ceded ${neutral.reduce((a, b) => a + b, 0).toFixed(4)} per $100, split ` +
+  neutral.map(n => `${((n / neutral.reduce((a, b) => a + b, 0)) * 100).toFixed(0)}%`).join(' / '));
 
 // LINEARITY IN EXPOSURE — the property that lets these constants be frozen.
 console.log('\n  linearity in exposure (the property that lets these be constants):');
@@ -167,7 +211,8 @@ console.log(`  occurrences/yr ${occPerYear.toFixed(1)} over $${fullExposure.toFi
 // --- 3. retained second moment by bitmask ------------------------------------
 console.log('\n--- 3. WC_RETAINED_SECOND_MOMENT, by occurrence-layer bitmask ---');
 const m2: number[] = [];
-for (let mask = 0; mask < 16; mask++) {
+const MASKS = 1 << LAYERS.length;
+for (let mask = 0; mask < MASKS; mask++) {
   const placed = LAYERS.map((_, i) => (mask & (1 << i)) !== 0);
   let sumSq = 0, n = 0;
   for (const y of years) {
@@ -178,15 +223,11 @@ for (let mask = 0; mask < 16; mask++) {
   }
   m2.push(sumSq / n);
 }
-console.log('  mask  new m2        stored m2     change');
-const storedM2 = [
-  6.0908e10, 2.5954e10, 2.9679e10, 8.8477e9,
-  4.6995e10, 1.6722e10, 2.1536e10, 5.4011e9,
-  6.0839e10, 2.5894e10, 2.9615e10, 8.7950e9,
-  4.6954e10, 1.6710e10, 2.1522e10, 5.3942e9,
-];
-for (let i = 0; i < 16; i++) {
-  console.log(`  ${String(i).padStart(4)}  ${m2[i].toExponential(4)}   ${storedM2[i].toExponential(4)}   ${(((m2[i] / storedM2[i]) - 1) * 100).toFixed(0).padStart(6)}%`);
+console.log('  mask  bits  m2');
+console.log(`  ${MASKS} masks (2^${LAYERS.length} layers), down from 16 when WC had four.`);
+for (let i = 0; i < MASKS; i++) {
+  const bits = LAYERS.map((_, b) => ((i & (1 << b)) ? '1' : '0')).join('');
+  console.log(`  ${String(i).padStart(4)}  ${bits}  ${m2[i].toExponential(4)}`);
 }
 
 // --- 4. is the top layer reachable now? --------------------------------------
@@ -207,13 +248,13 @@ console.log('  WC: [');
 for (let i = 0; i < LAYERS.length; i++) {
   const l = LAYERS[i];
   console.log(`    { name: '${l.name}', attachment: ${l.attachment}, limit: ${l.limit}, ` +
-    `expectedCededPer100: ${newLayers[i].expectedCededPer100.toFixed(4)}, sdOverExpected: ${newLayers[i].sdOverExpected.toFixed(2)}, purchasable: ??? },`);
+    `expectedCededPer100: ${neutral[i].toFixed(4)}, sdOverExpected: ${newLayers[i].sdOverExpected.toFixed(2)}, purchasable: true },`);
 }
 console.log('  ],');
 console.log(`  export const AGG_OCC_FREQ_PER_1M = ${freqPer1M.toFixed(4)};`);
 console.log(`  export const AGG_OVERDISPERSION = ${AGG_OVERDISPERSION};  // unchanged: still Gamma(16,1/16) member noise`);
 console.log('  export const WC_RETAINED_SECOND_MOMENT: number[] = [');
-for (let r = 0; r < 4; r++) {
+for (let r = 0; r < MASKS / 4; r++) {
   console.log('    ' + m2.slice(r * 4, r * 4 + 4).map(x => x.toExponential(4).replace('e+', 'e')).join(', ') + ',');
 }
 console.log('  ];');

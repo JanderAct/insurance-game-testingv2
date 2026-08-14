@@ -9,11 +9,19 @@ import { REINSURANCE_PROGRAMS } from '../data/defaultAssumptions';
 import { placementCode, placementSummary, resultUsesTower } from './reinsuranceDisplay';
 import type { CoverageLine } from '../types/simulation';
 
-// Which tower line a result row belongs to, inferred from the layer-count the
-// engine populated: WC's tower has 4 layers, GL's has 3. Only reached when
-// resultUsesTower is already true, so Property never lands here.
-const towerLineOf = (r: { cededByLayer?: number[] }): CoverageLine =>
-  (r.cededByLayer?.length ?? 0) >= 4 ? 'WC' : 'GL';
+// Which tower line a result row belongs to.
+//
+// ⚠ THIS USED TO INFER IT FROM THE LAYER COUNT (`>= 4 ? 'WC' : 'GL'`), on the
+// grounds that "WC's tower has 4 layers, GL's has 3". THE MERGE OF WC's TOP TWO
+// LAYERS MADE BOTH THREE, so that test would have silently labelled every WC row
+// 'GL' — and it would still have compiled, still have rendered, and produced a
+// placement summary naming GL's layers on a WC result.
+//
+// A count is not an identity. The row carries its line now (ResultSet.line), so
+// read that. Falls back to GL only for the pool row, which has no single line and
+// never reaches here anyway — resultUsesTower gates the call.
+const towerLineOf = (r: { line?: CoverageLine }): CoverageLine =>
+  r.line === 'WC' ? 'WC' : 'GL';
 
 const dollars = (value: number) => `$${value.toFixed(2)}`;
 const roundDollars = (value: number) => Math.round(value);

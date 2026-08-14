@@ -111,69 +111,59 @@ export interface TowerLayer {
 // ============================================================================
 
 export const REINSURANCE_TOWER: Record<TowerLine, TowerLayer[]> = {
-  // ⚠ RE-DERIVED FOR THE WC SEVERITY REBUILD (scripts/diagnostics/wc-tower-rederive.ts).
+  // ⚠ RE-DERIVED FOR THE WC SEVERITY REBUILD, THEN RESTRUCTURED TO THREE LAYERS
+  // (scripts/diagnostics/wc-tower-rederive.ts).
+  //
+  // THE TOP TWO LAYERS ARE MERGED. `$15M xs $10M` and `$25M xs $25M` are now one
+  // `$40M xs $10M` band covering the same $10M-$50M. Two reasons, and the second
+  // is the actuarial one:
+  //
+  //   1. FOUR BUYABLE LAYERS IS ONE DECISION TOO MANY. WC and GL now carry the
+  //      same three-layer shape.
+  //   2. $25M xs $25M FIRED ONCE PER 27 YEARS, which is too thin to be a real
+  //      purchase decision — a player would never see it pay inside a game.
+  //      Merged, the band fires ONCE EVERY 4.7 YEARS.
   //
   // THE PRICES ARE THE CLOSED FORM, NOT THE SIMULATION. Layer expectation over a
   // lognormal mixture has an exact solution (limitedExpectedValue on each
   // component, differenced across the layer bounds), so the constant carries no
-  // sampling error. 12,000 full-market years of simulation agreed to within 4% on
-  // every layer and 0.1% on the top one; the residual is the simulation being
-  // short of a sigma-2.0 tail, not the analytic being wrong. sdOverExpected has no
-  // convenient closed form and IS the measured figure.
+  // sampling error. Simulation over 12,000 full-market years agrees within ~4%;
+  // the residual is the simulation being short of a sigma-2.0 tail, not the
+  // analytic being wrong. sdOverExpected has no convenient closed form and IS
+  // the measured figure.
   //
-  // MEASURED FULL-MARKET, a change of basis from the old constants (one seed's
-  // enrolled book). Per-$100 cost is linear in EXPOSURE but not invariant to
-  // RATING-GROUP MIX — High Safety carries a 0.4113 heavy-component weight against
-  // Low Safety's 0.2637 — and enrollment's expected mix is the market's, so the
-  // canonical 200 is the reproducible basis. A book that is unusually safety-heavy
-  // is under-charged by these constants; measured spread on a 50-member subset was
-  // 3-11% by layer.
+  // ⚠ NEUTRAL-RISK-QUALITY BASIS, AND THIS CHANGED AT THE MERGE. The previous
+  // values were computed at each member's ACTUAL risk quality, which embeds both
+  // the frequency theta and the severity tilt of one particular roster — 3.9%
+  // above neutral on the canonical 200, and a different number on any enrolled
+  // subset. A per-$100 rate card should not carry one book's risk-quality mix, for
+  // the same reason it is measured full-market rather than on one seed's enrolled
+  // book: the constant has to be reproducible. Neutral RQ is also the basis
+  // deriveNeutralPurePremiumPer100 already uses for the pure premium pick.
   //
-  // WHAT MOVED, AND IT IS NOT ONE DIRECTION. The retired catastrophic annuity had
-  // a HARD CEILING of $15.51M present value; the mixture has none.
-  //   $4M xs $1M     0.4662 -> 0.6902   +48%   more claims pierce $1M
-  //   $5M xs $5M     0.2697 -> 0.1539   -43%   the old annuity clustered here
-  //   $15M xs $10M   0.0866 -> 0.1079   +25%
-  //   $25M xs $25M   0.0007 -> 0.0366   +52x   was unreachable, now 1-in-26-years
+  // WHAT MOVED FROM THE RETIRED FOUR-TIER MODEL. That model's catastrophic annuity
+  // had a HARD CEILING of $15.51M present value; the mixture has none.
+  //   $4M xs $1M     0.4662 -> 0.6620   +42%   more claims pierce $1M
+  //   $5M xs $5M     0.2697 -> 0.1474   -45%   the old annuity clustered here
+  //   $40M xs $10M   0.0873 -> 0.1383   +58%   (vs the two old layers summed)
+  //
+  // THE LOADING MULTIPLE STILL RISES MONOTONICALLY WITH ATTACHMENT — 1.32x, 1.83x,
+  // 3.00x — and it EMERGES from SD/E rather than being chosen. That is the whole
+  // point of the SD risk load, and it had to survive the restructure: a merged
+  // layer spanning $10M-$50M is more remote than the $15M xs $10M it absorbs, so
+  // its SD/E and therefore its multiple both rise. Asserted in
+  // reinsurance-tower-check.
   WC: [
-    { name: '$4M xs $1M', attachment: 1e6, limit: 4e6, expectedCededPer100: 0.6902, sdOverExpected: 0.54, purchasable: true },
-    { name: '$5M xs $5M', attachment: 5e6, limit: 5e6, expectedCededPer100: 0.1539, sdOverExpected: 1.44, purchasable: true },
-    { name: '$15M xs $10M', attachment: 10e6, limit: 15e6, expectedCededPer100: 0.1079, sdOverExpected: 2.85, purchasable: true },
-    // ⚠⚠ MADE PURCHASABLE BY THE WC SEVERITY REBUILD. ITS OLD JUSTIFICATION WAS
-    // VOIDED, NOT WEAKENED, AND THE COMMENT IS KEPT HERE SO THE REVERSAL IS
-    // READABLE RATHER THAN LOOKING LIKE DRIFT.
+    { name: '$4M xs $1M', attachment: 1e6, limit: 4e6, expectedCededPer100: 0.6620, sdOverExpected: 0.54, purchasable: true },
+    { name: '$5M xs $5M', attachment: 5e6, limit: 5e6, expectedCededPer100: 0.1474, sdOverExpected: 1.44, purchasable: true },
+    // THE MERGED BAND, $10M-$50M. Absorbs the retired `$15M xs $10M` and
+    // `$25M xs $25M`. Pierced 0.22/yr — once every 4.6 years, against the
+    // 1-per-26-years of the `$25M xs $25M` layer it swallowed, which is what
+    // makes it a real purchase decision rather than a line item.
     //
-    // IT USED TO SAY: "WC emits exactly ONE claim per occurrence today, and a
-    // single catastrophic claim cannot reach $25M: the present value ceiling is
-    // $15.51M (police, the youngest injury age of 25, highest weekly benefit), or
-    // $19.39M before the 0.85 disability adjustment. So the designed mechanism
-    // cannot trigger it." It was for MULTI-CLAIM CATASTROPHE occurrences — a
-    // collapse or explosion injuring several workers as one occurrence — and
-    // those are still not built.
-    //
-    // THAT CEILING WAS A PROPERTY OF THE RETIRED CATASTROPHIC ANNUITY. The
-    // mixture has no ceiling: the heavy component is lognormal(9.4776, 2.00), so
-    // a SINGLE claim reaches $25M at 0.0388/yr full-market — ONE EVERY 26 YEARS,
-    // measured over 12,000 years — by exactly the one-claim-per-occurrence
-    // mechanism the old comment said could not reach it. Multi-claim occurrences
-    // are no longer needed to make the layer real.
-    //
-    // The second reason was also numeric and has also gone: SD/E was 42, so the
-    // risk load returned a 26x multiple on an expected loss of essentially zero —
-    // "not a price, a division artifact". SD/E is now 6.38 on a real expected
-    // cost, which the same formula prices without difficulty.
-    //
-    // ⚠ THE PLAYER-FACING CONSEQUENCE IS THE POINT. Left non-purchasable, the
-    // pool would be forced to retain a band it can now genuinely be hit in, with
-    // no way to buy cover — and `retainedAboveTower` would show WC carrying
-    // 0.0227 per $100 of unreinsurable exposure that a market would in fact write.
-    // The alternative was deleting the layer, which would have made the same band
-    // retained and invisible. Offering it at its measured price is the honest
-    // option; a player may still decline it.
-    //
-    // Still NOT built, and still not prerequisites for this layer: multi-claim WC
-    // occurrences and a death-benefit outcome. Do not build them from here.
-    { name: '$25M xs $25M', attachment: 25e6, limit: 25e6, expectedCededPer100: 0.0366, sdOverExpected: 6.38, purchasable: true },
+    // Above it the pool retains 0.0252 per $100, unreinsurable and unbounded:
+    // one occurrence over $50M per ~109 years.
+    { name: '$40M xs $10M', attachment: 10e6, limit: 40e6, expectedCededPer100: 0.1383, sdOverExpected: 3.38, purchasable: true },
   ],
   GL: [
     { name: '$4M xs $1M', attachment: 1e6, limit: 4e6, expectedCededPer100: 0.9050, sdOverExpected: 0.97, purchasable: true },
@@ -280,20 +270,22 @@ export const AGG_OVERDISPERSION = 1.05;
 // (E[gross] - sum of placed E[ceded]) / lambda, from the constants above, so the
 // two cannot drift apart.
 //
-// RE-DERIVED over 12,000 full-market years. Every mask rose — the retired
-// annuity's $15.51M ceiling capped the retained second moment, and the mixture's
-// unbounded tail does not. The rise is largest where the tower cedes most
-// (mask 15, every layer placed: 5.39e9 -> 3.62e10, +572%), because what the old
-// model left retained above the layers was nearly nothing and now is not.
+// RE-DERIVED over 12,000 full-market years, and RE-INDEXED for three layers.
 //
-// ⚠ MASKS 8-15 ARE NO LONGER NEAR-DUPLICATES OF 0-7. They used to be, because the
-// $25M xs $25M layer was almost never penetrated. It now attaches once every 26
-// years, so bit 3 genuinely changes the retained moment and the pairs differ.
+// ⚠ THE MASK SET HALVED, 16 -> 8. It is 2^(number of layers), so merging the top
+// two layers changed the index space, not just the values. Bit 2 is now the
+// merged $40M xs $10M band; the old bit 3 is gone. Any stored 16-entry table read
+// against this index would silently address the wrong mask — quoteAggregate falls
+// back to WC_RETAINED_SECOND_MOMENT[0] on an out-of-range index, which would have
+// priced every selection as if NO layers were placed.
+//
+// Every mask is far above the retired four-tier model's: that model's catastrophic
+// annuity was capped at $15.51M present value, so the retained second moment was
+// capped with it, and the mixture's tail is unbounded. Mask 7 (all three placed)
+// is 2.23e10 against the old all-placed 5.39e9.
 export const WC_RETAINED_SECOND_MOMENT: number[] = [
   1.1792e11, 7.7680e10, 9.0537e10, 5.9075e10,
-  8.1251e10, 4.7156e10, 6.1548e10, 3.6229e10,
-  1.1792e11, 7.7680e10, 9.0537e10, 5.9075e10,
-  8.1251e10, 4.7156e10, 6.1548e10, 3.6229e10,
+  6.2558e10, 3.0598e10, 4.5523e10, 2.2339e10,
 ];
 
 // ATTACHMENT SET, as a multiple of EXPECTED RETAINED LOSS — recalculated from
