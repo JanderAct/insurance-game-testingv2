@@ -27,7 +27,7 @@ import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
-import { deriveNeutralPurePremiumPer100, expectedWcGrossLoss } from '../../src/utils/wcClaimEngine';
+import { deriveNeutralPurePremiumPer100, expectedWcGrossLossForPricing } from '../../src/utils/wcClaimEngine';
 import type { GameState, CoverageLine } from '../../src/types/simulation';
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
@@ -79,7 +79,7 @@ for (const id of SEEDS) {
         const grossLR = x.grossUltimateLoss / Math.max(x.poolPremiumAndAdminExpense, 1);
         wcGrossLR.push(grossLR); seedGross.push(grossLR);
         // ANALYTIC basis: this enrolled book's own expected WC loss, no draw noise.
-        const expNeutral = expectedWcGrossLoss(x.memberList, { riskQualityOverride: 5, kLine: 1 });
+        const expNeutral = expectedWcGrossLossForPricing(x.memberList, { riskQualityOverride: 5, kLine: 1 });
         wcAnalyticLR.push(expNeutral / Math.max(x.poolPremiumAndAdminExpense, 1));
         wcWideLR.push(x.actualLossRatio);
         wcGross.push(x.grossUltimateLoss); wcPremium.push(x.poolPremium);

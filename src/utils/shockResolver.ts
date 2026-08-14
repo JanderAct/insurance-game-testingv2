@@ -31,17 +31,23 @@ import type {
   ShockResolution,
 } from '../types/shocks';
 import { IMPLEMENTED_EFFECTS } from '../types/shocks';
-import { SHOCK_CATALOG, readModelPath } from '../data/shockCatalog';
+import { SHOCK_CATALOG } from '../data/shockCatalog';
 import { WHOLE_LINE } from './shockEffects';
 
 function describe(effect: ShockEffect): string {
   switch (effect.kind) {
     case 'forceEvent':
       return `force ${effect.peril} in ${effect.region} at intensity ${effect.intensity}${effect.span ? ' (spanning)' : ''}`;
-    case 'injectClaim':
-      return `inject ${effect.count} ${effect.line} ${effect.tier} claim${effect.count === 1 ? '' : 's'}`;
+    case 'injectClaim': {
+      const when = effect.accidentYearOffset
+        ? ` backdated ${Math.abs(effect.accidentYearOffset)}yr`
+        : '';
+      return `inject ${effect.count} ${effect.line} claim${effect.count === 1 ? '' : 's'} at $${(effect.amount / 1e6).toFixed(2)}M${when}`;
+    }
     case 'freqMultiplier':
       return `${effect.line}${effect.sub ? ` ${effect.sub}` : ''} frequency x${effect.factor}`;
+    case 'componentFreqMultiplier':
+      return `${effect.line} '${effect.component}' arrival rate x${effect.factor}`;
     case 'sevMultiplier':
       return `${effect.line}${effect.sub ? ` ${effect.sub}` : ''} severity x${effect.factor}`;
     case 'investmentShock':
@@ -87,7 +93,6 @@ export function resolveShocks(instance: GameInstance, yearNumber: number): Shock
   if (!scheduled || scheduled.length === 0) return undefined;
 
   const byLine: Partial<Record<CoverageLine, LineShockEffects>> = {};
-  const paramOverrides: Partial<Record<CoverageLine, Record<string, number>>> = {};
   const firings: ShockFiring[] = [];
 
   // Deterministic order: by fire year, then by catalog id. Two overrides on the
@@ -132,23 +137,30 @@ export function resolveShocks(instance: GameInstance, yearNumber: number): Shock
           bucket.freqMultipliers[key] = (bucket.freqMultipliers[key] ?? 1) * effect.factor;
           break;
         }
-        case 'injectClaim': {
+        case 'componentFreqMultiplier': {
           const bucket = lineBucket(byLine, effect.line);
-          bucket.injections = bucket.injections ?? [];
-          bucket.injections.push({ tier: effect.tier, count: effect.count, ratingClass: effect.ratingClass, shockId: def.id });
+          bucket.componentFreqMultipliers = bucket.componentFreqMultipliers ?? {};
+          // Two events hitting the same component COMPOUND rather than the later
+          // one winning — two independent causes both raising a rate genuinely do
+          // both. Same rule as freqMultiplier.
+          bucket.componentFreqMultipliers[effect.component] =
+            (bucket.componentFreqMultipliers[effect.component] ?? 1) * effect.factor;
           break;
         }
-        case 'paramOverride': {
-          const perLine = paramOverrides[effect.line] ?? {};
-          // Resolve against any EARLIER override of the same path, falling back
-          // to the model's own value — so two successive expansions of the same
-          // parameter compound, which is what successive legislation does.
-          const base = perLine[effect.path] ?? readModelPath(effect.line, effect.path);
-          if (base === undefined) {
-            throw new Error(`shock ${def.id}: paramOverride path '${effect.path}' does not resolve on ${effect.line}`);
-          }
-          perLine[effect.path] = effect.multiplier !== undefined ? base * effect.multiplier : effect.value!;
-          paramOverrides[effect.line] = perLine;
+        case 'injectClaim': {
+          // A one-off effect on a FUTURE-horizon event fires only in the year the
+          // event fired. Without this, #10's backdated reach-back would be
+          // re-injected every year for the rest of the game — see the
+          // firstYearOnly comment in types/shocks.ts.
+          if (effect.firstYearOnly && firedYear !== yearNumber) break;
+          const bucket = lineBucket(byLine, effect.line);
+          bucket.injections = bucket.injections ?? [];
+          bucket.injections.push({
+            count: effect.count,
+            amount: effect.amount,
+            accidentYearOffset: effect.accidentYearOffset,
+            shockId: def.id,
+          });
           break;
         }
       }
@@ -167,7 +179,7 @@ export function resolveShocks(instance: GameInstance, yearNumber: number): Shock
   }
 
   if (firings.length === 0) return undefined;
-  return { byLine, paramOverrides, firings };
+  return { byLine, firings };
 }
 
 // ONE event's own frequency multipliers for ONE line, read back from the
@@ -179,23 +191,6 @@ export function resolveShocks(instance: GameInstance, yearNumber: number): Shock
 // the same sub-coverage each report what they alone would add. Those figures do
 // not sum to the combined effect, and that is correct: the question is "what
 // did this event add", not "how should we split the interaction".
-// The same, for parameter overrides. Resolved against the MODEL's own value
-// rather than against any earlier override, so the figure answers "what would
-// this event alone have added" — which is what per-event attribution means.
-export function ownParamOverrides(shockId: string, line: CoverageLine): Record<string, number> | undefined {
-  const def = SHOCK_CATALOG[shockId];
-  if (!def) return undefined;
-  let out: Record<string, number> | undefined;
-  for (const effect of def.effects) {
-    if (effect.kind !== 'paramOverride' || effect.line !== line) continue;
-    const base = readModelPath(line, effect.path);
-    if (base === undefined) continue;
-    out = out ?? {};
-    out[effect.path] = effect.multiplier !== undefined ? base * effect.multiplier : effect.value!;
-  }
-  return out;
-}
-
 export function ownFreqMultipliers(shockId: string, line: CoverageLine): Record<string, number> | undefined {
   const def = SHOCK_CATALOG[shockId];
   if (!def) return undefined;
@@ -205,6 +200,21 @@ export function ownFreqMultipliers(shockId: string, line: CoverageLine): Record<
     out = out ?? {};
     const key = effect.sub ?? WHOLE_LINE;
     out[key] = (out[key] ?? 1) * effect.factor;
+  }
+  return out;
+}
+
+// The same, for component arrival-rate multipliers — one event's own, for cost
+// attribution, read back from the catalog rather than from the compounded
+// bucket.
+export function ownComponentFreqMultipliers(shockId: string, line: CoverageLine): Record<string, number> | undefined {
+  const def = SHOCK_CATALOG[shockId];
+  if (!def) return undefined;
+  let out: Record<string, number> | undefined;
+  for (const effect of def.effects) {
+    if (effect.kind !== 'componentFreqMultiplier' || effect.line !== line) continue;
+    out = out ?? {};
+    out[effect.component] = (out[effect.component] ?? 1) * effect.factor;
   }
   return out;
 }

@@ -17,7 +17,8 @@ import {
   ScrollText,
 } from 'lucide-react';
 
-import type { GameState, GameSetupSettings, DecisionSet, StartingFinancials, Member, CoverageLine, LineView } from './types/simulation';
+import type { GameState, GameSetupSettings, DecisionSet, StartingFinancials, Member, LinePoolState, CoverageLine, LineView } from './types/simulation';
+import { getPredefinedMarketMembers } from './data/memberCatalog';
 import { generateGameInstance } from './utils/instanceGenerator';
 import { processYear, applyLoanAuthorizations, type ProcessYearResult } from './utils/simulationEngine';
 import { runPriorHistory, toHistoricalYear } from './utils/priorHistoryEngine';
@@ -143,6 +144,36 @@ export default function App() {
               if (!Array.isArray(ld.layersPlaced)) ld.layersPlaced = [...DEFAULT_LAYERS_PLACED];
               if (typeof ld.aggregateStopLevel !== 'number') ld.aggregateStopLevel = -1;
             }
+          }
+          // WC SEVERITY REBUILD: three additive fields, defaulted rather than
+          // bumping the save key — same precedent as membershipHistory and
+          // memberLossHistory, and orphaning every save over additive fields
+          // would be a worse trade.
+          //
+          //   wcRatingGroup   re-stamped onto every member from the canonical
+          //                   catalog. It is roster data, not game state, so
+          //                   rebuilding it is exact rather than a guess — and
+          //                   wcClaimEngine THROWS on a member without one.
+          //   unreportedClaims / wcAccidentYearReported
+          //                   default to empty. An old save therefore cold-starts
+          //                   with no IBNR inventory and understates IBNR for
+          //                   about four years while it refills. That is visible
+          //                   and self-correcting; discarding the save is not.
+          {
+            const groupByName = new Map(
+              getPredefinedMarketMembers().map(m => [m.name, m.wcRatingGroup]),
+            );
+            const repair = (m: Member | undefined) => {
+              if (m && !m.wcRatingGroup) m.wcRatingGroup = groupByName.get(m.name);
+            };
+            (gs.poolState?.allMarketMembers ?? []).forEach(repair);
+            const lines = (gs.poolState?.lines ?? {}) as Record<string, LinePoolState | undefined>;
+            for (const ls of Object.values(lines)) {
+              (ls?.members ?? []).forEach(repair);
+              if (ls && !Array.isArray(ls.unreportedClaims)) ls.unreportedClaims = [];
+              if (ls && !Array.isArray(ls.wcAccidentYearReported)) ls.wcAccidentYearReported = [];
+            }
+            (im ?? []).forEach(repair);
           }
           setGameState(gs);
           setStartingFinancials(sf);

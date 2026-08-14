@@ -1,8 +1,6 @@
 // Financial Statement engine for Risk Pool Simulation v1
 
 import type { LineResultSet } from '../types/simulation';
-import { placementSummary, resultUsesTower } from './reinsuranceDisplay';
-import type { CoverageLine } from '../types/simulation';
 
 export interface IncomeStatement {
   poolPremium: number;
@@ -49,26 +47,6 @@ export interface SurplusRollforward {
   tieOutDifference: number;          // endingSurplus - surplusFromIncome (should be ~0)
 }
 
-export interface ReinsuranceDetail {
-  // `level` / `levelLabel` are PROPERTY'S product. On WC and GL they are set to
-  // -1 / the tower's placement summary, because those lines have no level — see
-  // reinsuranceDisplay.ts. Read `usesTower` before showing a level anywhere.
-  usesTower: boolean;
-  level: number;
-  levelLabel: string;
-  // Retained above the top of the tower — unreinsurable at any price. 0 on
-  // Property, which has no tower.
-  retainedAboveTower: number;
-  attachment: number;
-  limit: number;
-  recoveryPct: number;
-  reinsuranceCost: number;
-  grossLoss: number;
-  reinsuranceRecovery: number;
-  netLoss: number;
-  cessionRatio: number;
-}
-
 export interface ReserveDetail {
   beginningNetReserve: number;
   currentYearUltimate: number;
@@ -103,7 +81,17 @@ export interface AnnualFinancialStatement {
   incomeStatement: IncomeStatement;
   balanceSheet: BalanceSheet;
   surplusRollforward: SurplusRollforward;
-  reinsuranceDetail: ReinsuranceDetail;
+  // ⚠ WAS a 12-field `reinsuranceDetail: ReinsuranceDetail` object. Eleven of
+  // those fields (level, levelLabel, attachment, limit, recoveryPct,
+  // reinsuranceCost, grossLoss, reinsuranceRecovery, netLoss, cessionRatio,
+  // usesTower) fed the Reinsurance Detail card and died with it at 1e7d3fb; they
+  // were computed every year and read by nothing for months.
+  //
+  // THE TWELFTH IS LIVE and is why the object was not deleted outright: the
+  // income statement discloses the band retained above the top of the tower.
+  // Collapsed to the one surviving number rather than kept as an object with a
+  // single field.
+  retainedAboveTower: number;
   reserveDetail: ReserveDetail;
   fundingDetail: FundingDetail | null;  // null for historical years — no player-selected funding confidence exists pre-game
 }
@@ -154,28 +142,6 @@ export function deriveAnnualStatement(result: LineResultSet): AnnualFinancialSta
     tieOutDifference: result.surplusTieOutDifference,
   };
 
-  const reinsLabels = ['Self Fund', 'Low', 'Moderate', 'High', 'Full Transfer'];
-  const reinsLevel = result.decisions.reinsuranceLevel;
-  const tower = resultUsesTower(result);
-  const towerLine: CoverageLine = (result.cededByLayer?.length ?? 0) >= 4 ? 'WC' : 'GL';
-
-  const reinsuranceDetail: ReinsuranceDetail = {
-    usesTower: tower,
-    retainedAboveTower: result.retainedAboveTower ?? 0,
-    // -1 is deliberate and load-bearing: it makes a level read as ABSENT rather
-    // than as level 0 ("Self Fund"), which is a real program a tower line is not on.
-    level: tower ? -1 : reinsLevel,
-    levelLabel: tower ? placementSummary(towerLine, result.decisions) : (reinsLabels[reinsLevel] ?? 'Unknown'),
-    attachment: result.attachment,
-    limit: Infinity,
-    recoveryPct: result.excessLosses > 0 ? result.reinsuranceRecovery / result.excessLosses : 0,
-    reinsuranceCost: result.reinsuranceCost,
-    grossLoss: result.grossUltimateLoss,
-    reinsuranceRecovery: result.reinsuranceRecovery,
-    netLoss: result.netUltimateLoss,
-    cessionRatio: result.reinsuranceRecovery / Math.max(result.grossUltimateLoss, 1),
-  };
-
   const reserveDetail: ReserveDetail = {
     beginningNetReserve: result.beginningNetReserve,
     currentYearUltimate: result.grossUltimateLoss,
@@ -209,7 +175,8 @@ export function deriveAnnualStatement(result: LineResultSet): AnnualFinancialSta
     incomeStatement,
     balanceSheet,
     surplusRollforward,
-    reinsuranceDetail,
+    // Disclosed, never deducted — see the income statement's own comment.
+    retainedAboveTower: result.retainedAboveTower ?? 0,
     reserveDetail,
     fundingDetail,
   };

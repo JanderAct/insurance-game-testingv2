@@ -199,7 +199,7 @@ function reportLayers(label: string, layers: Layer[], accs: LayerAcc[], years: n
 
 function drawYear(line: CoverageLine, members: Member[], k: number, seed: number, year: number) {
   return line === 'WC'
-    ? generateWcClaims({ members, yearNumber: year, calendarYear: 2025 + year, instanceSeed: seed, kLine: k, gPool: 1, riskControlEffectiveness: 0 })
+    ? generateWcClaims({ members, yearNumber: year, calendarYear: 2025 + year, instanceSeed: seed, kLine: k, riskControlEffectiveness: 0 })
     : generateGlClaims({ members, yearNumber: year, calendarYear: 2025 + year, instanceSeed: seed, kGl: k, gPool: 1, riskControlEffectiveness: 0 });
 }
 

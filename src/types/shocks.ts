@@ -6,7 +6,7 @@
 // events themselves live in a TABLE (src/data/shockCatalog.ts). Adding event
 // #23 is adding a row, not writing a generator.
 //
-// SCOPE. Eight effect kinds are DEFINED so the shape is right. Only three are
+// SCOPE. Nine effect kinds are DEFINED so the shape is right. Only three are
 // IMPLEMENTED, because only three are needed by the representative events
 // built so far. An effect kind with no consumer is NOT silently ignored — the
 // resolver throws on it (see shockResolver.ts). A shock that quietly does
@@ -39,13 +39,58 @@ export type ShockEffect =
   // There is no quake peril to force. Kept in the vocabulary because event #2
   // is in the catalog as data (see shockCatalog.ts).
   | { kind: 'forceEvent'; line: 'Property'; peril: string; region: Region; intensity: number; span?: boolean }
-  // IMPLEMENTED for WC. Injects `count` claims of an EXISTING tier through that
-  // line's own generator, so the claims are real: they carry ids, join the
-  // occurrence list, and flow into reserving and reinsurance like any other.
-  | { kind: 'injectClaim'; line: CoverageLine; tier: string; count: number; ratingClass?: string }
-  // IMPLEMENTED for GL sub-coverages and for WC presumption. Multiplies a
-  // realized frequency for one year. `sub` omitted means the whole line.
+  // IMPLEMENTED for WC. Injects `count` claims through that line's own
+  // generator, so the claims are real: they carry ids, join the occurrence
+  // list, and flow into reserving and reinsurance like any other.
+  //
+  // ⚠ `amount` IS REQUIRED, AND THAT IS THE POINT. This used to inject "a claim
+  // of tier X" and let the generator draw it. Under the mixture model that
+  // silently guts the event: two claims of the heavy component drawn at its MEAN
+  // is $0.19M, against the retired catastrophic tier's $17.91M — 93x smaller.
+  // $9.0M is the heavy component's 99.95th percentile, not its mean. An
+  // instructor-triggered event wants a REPRODUCIBLE amount, not a tail draw.
+  //
+  // `accidentYearOffset` BACKDATES the claim (negative = prior years). This is
+  // the "conditions that were not compensable now are" mechanism — a presumption
+  // expansion or an abuse revival statute ADDS claims dated to prior accident
+  // years. It is NOT the same as revising the existing unreported inventory,
+  // which makes known-but-unreported claims cost more; do not conflate them.
+  // Relative, not absolute, because the event can be scheduled in any year.
+  //
+  // `firstYearOnly` exists because HORIZON IS PER-EVENT, NOT PER-EFFECT. #10 is
+  // future-horizon so its frequency multiplier persists forward — but its
+  // backdated injection is a one-off at enactment, and without this flag the
+  // resolver would re-inject the same reach-back every single year.
+  | {
+      kind: 'injectClaim';
+      line: CoverageLine;
+      count: number;
+      amount: number;
+      accidentYearOffset?: number;
+      firstYearOnly?: boolean;
+    }
+  // IMPLEMENTED for GL sub-coverages. Multiplies a realized frequency for one
+  // year. `sub` omitted means the whole line.
+  //
+  // NOT USED BY WC ANY MORE — WC's frequency is now per mixture component, so it
+  // uses componentFreqMultiplier below.
   | { kind: 'freqMultiplier'; line: CoverageLine; sub?: string; factor: number }
+  // IMPLEMENTED for WC. Multiplies the ARRIVAL RATE of ONE MIXTURE COMPONENT,
+  // leaving the others alone. `component` is a WC_SEVERITY_COMPONENTS key, or
+  // '*' for the whole line.
+  //
+  // ⚠ THIS IS NOT "RAISE THE COMPONENT'S WEIGHT", AND THE DIFFERENCE IS THE
+  // WHOLE REASON THE EFFECT EXISTS. Weights must sum to 1, so raising the heavy
+  // component's weight forces the others DOWN — at w_large x 1.5, County's
+  // small-claim weight falls 0.4415 -> 0.3752. A presumption expansion does not
+  // make sprained backs rarer. The generator draws one Poisson PER COMPONENT
+  // (thinning), so this multiplies a rate and the other components genuinely do
+  // not move.
+  //
+  // SIZING: the loss multiplier is `1 + share_i x (k - 1)` where share_i is that
+  // component's share of loss (the heavy component is ~94.9% of it), so
+  // `k = 1 + target / 0.949`.
+  | { kind: 'componentFreqMultiplier'; line: CoverageLine; component: string; factor: number }
   // NOT IMPLEMENTED.
   | { kind: 'sevMultiplier'; line: CoverageLine; sub?: string; factor: number }
   // NOT IMPLEMENTED.
@@ -56,10 +101,25 @@ export type ShockEffect =
   | { kind: 'poolExpense'; amount: number; label: string }
   // --- FUTURE ---
   //
-  // IMPLEMENTED for WC only. A dotted path into that line's loss model plus
-  // either a multiplier or an absolute value, persisting from its year forward.
-  // Paths are validated against the real object at module load (see
-  // shockCatalog.ts) so a typo fails at startup, not silently in year 7.
+  // NOT IMPLEMENTED. It was implemented for WC alone, against an allow-list
+  // (WC_OVERRIDABLE_PATHS) that held exactly one path:
+  // `presumption.ratePer1MPoliceFire`. The WC severity rebuild retired the
+  // presumption process, which left the allow-list empty and every WC parameter
+  // unreachable — so the mechanism was deleted rather than parked, and the
+  // effect kind moved here with the other five.
+  //
+  // GL and Property never supported it: both compute constants at module load
+  // (GL's `baseThreshold` and `stageTrendFactor`, Property's four trend/intensity
+  // factors) which would silently ignore any override.
+  //
+  // FUTURE-HORIZON PERSISTENCE STILL WORKS WITHOUT IT: horizon is a property of
+  // the EVENT, so a future-horizon componentFreqMultiplier applies every year
+  // from its firing onward. That is how #10 persists.
+  //
+  // TO BRING IT BACK: reinstate a path allow-list next to the parameters it
+  // reaches, grep every read of each path first (a read inside a module-level
+  // helper must be refactored to take params), and add the kind back to
+  // IMPLEMENTED_EFFECTS.
   | { kind: 'paramOverride'; line: CoverageLine; path: string; multiplier?: number; value?: number };
 
 export type ShockEffectKind = ShockEffect['kind'];
@@ -69,7 +129,7 @@ export type ShockEffectKind = ShockEffect['kind'];
 export const IMPLEMENTED_EFFECTS: ReadonlySet<ShockEffectKind> = new Set<ShockEffectKind>([
   'injectClaim',
   'freqMultiplier',
-  'paramOverride',
+  'componentFreqMultiplier',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -141,16 +201,16 @@ export interface LineShockEffects {
   // raising the same frequency compound rather than the later one winning: two
   // independent causes genuinely do both.
   freqMultipliers?: Record<string, number>;
+  // WC mixture component -> COMPOUNDED arrival-rate factor. Same compounding
+  // rule. '*' means every component.
+  componentFreqMultipliers?: Record<string, number>;
   // shockId is carried so an injected claim's cost maps back to the event that
   // caused it. Frequency multipliers carry no such tag because their cost is
   // not exactly attributable in the first place — see ShockRecord.
-  injections?: { tier: string; count: number; ratingClass?: string; shockId: string }[];
+  injections?: { count: number; amount: number; accidentYearOffset?: number; shockId: string }[];
 }
 
 export interface ShockResolution {
   byLine: Partial<Record<CoverageLine, LineShockEffects>>;
-  // Resolved dotted path -> absolute value, per line. Accumulated across every
-  // future-horizon event fired in THIS year or any earlier one.
-  paramOverrides: Partial<Record<CoverageLine, Record<string, number>>>;
   firings: ShockFiring[];
 }

@@ -19,8 +19,8 @@
 // about whether that is the right amount.
 
 import type { ShockDefinition } from '../types/shocks';
-import { WC_LOSS_MODEL, GL_LOSS_MODEL, PROPERTY_LOSS_MODEL } from './defaultAssumptions';
-import type { CoverageLine } from '../types/simulation';
+import { WC_SEVERITY_COMPONENTS } from './defaultAssumptions';
+import { WHOLE_LINE } from '../utils/shockEffects';
 
 export const SHOCK_CATALOG: Record<string, ShockDefinition> = {
   // -------------------------------------------------------------------------
@@ -67,18 +67,45 @@ export const SHOCK_CATALOG: Record<string, ShockDefinition> = {
   },
 
   // -------------------------------------------------------------------------
-  // #10 — FUTURE horizon. Tests paramOverride and forward persistence.
+  // #10 — FUTURE horizon. Tests componentFreqMultiplier, forward persistence,
+  // and the backdated one-off injection.
   //
-  // The presumption generator was built with theta_WC deliberately NOT applied,
-  // and the design doc calls that "the legislative-shock hook" — presumption
-  // exposure is statutory, not a function of how well a member is run. This
-  // event is what that hook exists for.
+  // ⚠ RE-TARGETED BY THE WC SEVERITY REBUILD. This used to be a paramOverride on
+  // `presumption.ratePer1MPoliceFire` x1.5. The presumption process is retired
+  // and that path no longer exists — which would have THROWN AT MODULE LOAD and
+  // stopped the app from starting, since paths are validated at import below.
   //
-  // MEASURED SCALE: presumption runs 14.94 claims/yr at FULL MARKET. At 1.5x
-  // that is +7.5/yr full market — but the pool writes only ~27% of the market,
-  // so the enrolled book sees roughly +2.0 claims/yr, about +$1.2M/yr, forward
-  // and permanently. Quote both bases; a full-market figure is not what the
-  // pool pays.
+  // A LEGISLATIVE EXPANSION HAS TWO HALVES AND THEY ARE DIFFERENT MECHANISMS:
+  //
+  //   FORWARD — more severe claims are compensable from now on. That is an
+  //   ARRIVAL-RATE change on the heavy mixture component, persisting forward
+  //   because the event is future-horizon.
+  //
+  //   RETROACTIVE — conditions that were not compensable when they happened now
+  //   are. That ADDS CLAIMS DATED TO PRIOR ACCIDENT YEARS. It is emphatically NOT
+  //   "revise the unreported inventory", which would make already-drawn claims
+  //   cost more; these are claims that did not previously exist.
+  //
+  // FORWARD MAGNITUDE, x1.096, DERIVED NOT INVENTED. The retired shock raised
+  // presumption frequency 50%, and presumption was 18.26% of CLASS-ONLY loss, so
+  // the old event added +9.13% of loss. The heavy component carries ~94.9% of
+  // loss, so `k = 1 + 0.0911 / 0.949 = 1.096` reproduces that. (Measured on the
+  // class-only base, which is the right one: with presumption retired, all WC
+  // loss is now "class" loss and there is no separate channel to exclude.)
+  //
+  // ⚠ RETROACTIVE MAGNITUDE IS A JUDGMENT CALL — the spec requires the mechanism
+  // but sets no number, and the retired event had no retroactive half at all.
+  // Sized to mirror the forward rate over a three-year reach-back: 3 claims, one
+  // dated to each of the three prior accident years, at $900,000 each. That is
+  // $2.70M against an enrolled annual WC loss near $9.70M, i.e. ~9.3% per year
+  // reached back — the same rate as the forward effect. $900,000 is the heavy
+  // component's ~98.3rd percentile, which is the right neighbourhood for a
+  // serious occupational-disease claim and well below #15's $9.0M mega-claim.
+  // DISPLACED BY: any real reach-back window from comparable legislation.
+  //
+  // `firstYearOnly` on all three: the event is future-horizon so the frequency
+  // multiplier persists, but enactment happens once. Without the flag the same
+  // reach-back would be re-injected every year for the rest of the game.
   // -------------------------------------------------------------------------
   '#10': {
     id: '#10',
@@ -87,9 +114,13 @@ export const SHOCK_CATALOG: Record<string, ShockDefinition> = {
     band: 'high',
     description:
       'Legislation permanently expands the presumption that police and fire occupational disease is '
-      + 'work-related, raising presumption claim frequency by 50% from this year forward.',
+      + 'work-related, raising the rate of severe claims from this year forward and reopening three '
+      + 'prior accident years for conditions that were not previously compensable.',
     effects: [
-      { kind: 'paramOverride', line: 'WC', path: 'presumption.ratePer1MPoliceFire', multiplier: 1.5 },
+      { kind: 'componentFreqMultiplier', line: 'WC', component: 'large', factor: 1.096 },
+      { kind: 'injectClaim', line: 'WC', count: 1, amount: 900_000, accidentYearOffset: -1, firstYearOnly: true },
+      { kind: 'injectClaim', line: 'WC', count: 1, amount: 900_000, accidentYearOffset: -2, firstYearOnly: true },
+      { kind: 'injectClaim', line: 'WC', count: 1, amount: 900_000, accidentYearOffset: -3, firstYearOnly: true },
     ],
   },
 
@@ -112,6 +143,18 @@ export const SHOCK_CATALOG: Record<string, ShockDefinition> = {
   // frequency trend of -1.5%/yr, so looping the year averages over a decline
   // rather than sampling one year repeatedly.
   // -------------------------------------------------------------------------
+  // ⚠ RE-TARGETED BY THE WC SEVERITY REBUILD. This used to inject two claims of
+  // tier 'catastrophic' and let the generator build each as a lifetime annuity
+  // booked at present value (~$8.96M each, $17.91M for the pair). That tier is
+  // retired, and the generator now THROWS on an injection without an explicit
+  // amount — deliberately, because the silent failure here was far worse than a
+  // loud one: injecting two claims of the heavy component and letting them DRAW
+  // would produce its MEAN of $96,529, $0.19M for the pair. That is 93x smaller,
+  // and the event would have looked like it still worked.
+  //
+  // $9.0M each preserves the retired event's magnitude. It is the heavy
+  // component's 99.95th percentile — a claim this model genuinely produces, just
+  // not one to leave to a draw when an instructor triggers the event.
   '#15': {
     id: '#15',
     name: 'Catastrophic WC Mega-Claim',
@@ -119,9 +162,9 @@ export const SHOCK_CATALOG: Record<string, ShockDefinition> = {
     band: 'high',
     description:
       'Two catastrophic workers-compensation injuries in one year — lifetime medical care plus wage '
-      + 'indemnity to retirement, booked at present value.',
+      + 'indemnity to retirement.',
     effects: [
-      { kind: 'injectClaim', line: 'WC', tier: 'catastrophic', count: 2 },
+      { kind: 'injectClaim', line: 'WC', count: 2, amount: 9_000_000 },
     ],
   },
 
@@ -168,11 +211,26 @@ export const SHOCK_CATALOG: Record<string, ShockDefinition> = {
   // makes the two mechanisms compose on one knob: #10 moves the base rate
   // permanently, #28 multiplies the realized draw for one year.
   //
-  // BOTH FACTORS ARE JUDGMENT CALLS — see the plan. 3.0x on presumption reflects
-  // a COVID-style presumption surge; 1.25x on GL 'general' is the secondary
-  // public-health liability exposure. 'general' is the natural GL target: the
-  // exposure is duty-of-care to the public rather than employment practice
-  // (epl), use of force (lawEnforcement) or custodial abuse.
+  // ⚠ THE WC HALF WAS RE-TARGETED BY THE SEVERITY REBUILD. It used to be
+  // `freqMultiplier` on sub 'presumption' x3.0. That key no longer exists, and
+  // unlike #10 this one would NOT have thrown — shockFactorFor returns 1 for an
+  // unknown key, so the event would have SILENTLY become a GL-only shock while
+  // still describing itself as a workers-comp surge.
+  //
+  // x1.620 IS A DELIBERATE CHOICE OF WHAT TO PRESERVE, stated rather than
+  // stumbled into. It preserves the measured DOLLARS (+$5.71M) against the new
+  // enrolled WC loss of $9.70M: the heavy component is ~94.9% of loss, so
+  // 1 + 0.949 x 0.620 = 1.588, and 0.588 x $9.70M = $5.71M. The original
+  // measurement was against an old enrolled base near $12.76M, where the same
+  // dollars were +45%. Preserving dollars makes the event harsher in relative
+  // terms; preserving the percentage would make it milder in dollars. Neither is
+  // automatically right — dollars were chosen because the event's severity band
+  // was set against a dollar figure.
+  //
+  // 1.25x on GL 'general' is unchanged: the secondary public-health liability
+  // exposure. 'general' is the natural GL target — duty-of-care to the public
+  // rather than employment practice (epl), use of force (lawEnforcement) or
+  // custodial abuse.
   // -------------------------------------------------------------------------
   '#28': {
     id: '#28',
@@ -183,49 +241,60 @@ export const SHOCK_CATALOG: Record<string, ShockDefinition> = {
       'A pandemic drives a surge of workers-compensation presumption claims among police and fire '
       + 'personnel, with secondary public-health liability exposure on the general liability line.',
     effects: [
-      { kind: 'freqMultiplier', line: 'WC', sub: 'presumption', factor: 3.0 },
+      { kind: 'componentFreqMultiplier', line: 'WC', component: 'large', factor: 1.620 },
       { kind: 'freqMultiplier', line: 'GL', sub: 'general', factor: 1.25 },
     ],
   },
 };
 
 // ---------------------------------------------------------------------------
-// PATH VALIDATION AT MODULE LOAD.
+// CATALOG VALIDATION AT MODULE LOAD.
 //
-// paramOverride paths are dotted strings, which keeps the catalog readable as
-// data but gives up compile-time safety. This buys it back at startup: every
-// path in the table is walked against the real model object, so a typo throws
-// when the app loads rather than silently doing nothing in year 7 of a game.
+// Effects are data, which keeps the catalog readable but gives up compile-time
+// safety on their VALUES. This buys some of it back at startup, so a bad row
+// throws when the app loads rather than silently doing nothing in year 7.
+//
+// ⚠ THE paramOverride PATH VALIDATOR WAS DELETED WITH THE MECHANISM. The WC
+// severity rebuild retired the presumption process, which emptied
+// WC_OVERRIDABLE_PATHS — the only allow-list there was — leaving paramOverride
+// implemented for no line and used by no event. Validating paths for an effect
+// the resolver refuses to execute is a parked mechanic, so both went. If
+// paramOverride is ever reinstated, the walker and this loop come back with it;
+// see types/shocks.ts for the full checklist.
 //
 // Consumes no randomness and reads no mutable state, so it cannot affect
 // simulation output.
 // ---------------------------------------------------------------------------
 
-const LINE_MODELS: Record<CoverageLine, unknown> = {
-  WC: WC_LOSS_MODEL,
-  GL: GL_LOSS_MODEL,
-  Property: PROPERTY_LOSS_MODEL,
-};
-
-export function readModelPath(line: CoverageLine, path: string): number | undefined {
-  let node: unknown = LINE_MODELS[line];
-  for (const segment of path.split('.')) {
-    if (typeof node !== 'object' || node === null) return undefined;
-    node = (node as Record<string, unknown>)[segment];
-  }
-  return typeof node === 'number' ? node : undefined;
-}
-
 for (const def of Object.values(SHOCK_CATALOG)) {
   for (const effect of def.effects) {
-    if (effect.kind !== 'paramOverride') continue;
-    if (readModelPath(effect.line, effect.path) === undefined) {
-      throw new Error(
-        `shockCatalog ${def.id}: paramOverride path '${effect.path}' does not resolve to a number on the ${effect.line} loss model`,
-      );
+    // An injected claim MUST carry a positive explicit amount. The generator
+    // throws too, but that is at fire time, possibly years into a game; this
+    // catches a bad row at startup. See the #15 comment for why a missing
+    // amount is the dangerous case rather than an obviously broken one.
+    if (effect.kind === 'injectClaim') {
+      if (!(effect.amount > 0)) {
+        throw new Error(`shockCatalog ${def.id}: injectClaim needs a positive explicit amount, got ${effect.amount}`);
+      }
+      if (!(effect.count > 0)) {
+        throw new Error(`shockCatalog ${def.id}: injectClaim needs a positive count, got ${effect.count}`);
+      }
+      if (effect.accidentYearOffset !== undefined && effect.accidentYearOffset > 0) {
+        throw new Error(
+          `shockCatalog ${def.id}: injectClaim accidentYearOffset must be <= 0 (it BACKDATES a claim); got ${effect.accidentYearOffset}`,
+        );
+      }
     }
-    if ((effect.multiplier === undefined) === (effect.value === undefined)) {
-      throw new Error(`shockCatalog ${def.id}: paramOverride needs exactly one of multiplier or value`);
+    // A component multiplier must name a component the model actually has, or
+    // '*'. shockFactorFor returns 1 for an unknown key, so a typo would make the
+    // event silently do nothing — which is exactly how #28 would have failed.
+    if (effect.kind === 'componentFreqMultiplier' && effect.line === 'WC') {
+      if (effect.component !== WHOLE_LINE && !(effect.component in WC_SEVERITY_COMPONENTS)) {
+        throw new Error(
+          `shockCatalog ${def.id}: componentFreqMultiplier names WC component '${effect.component}', `
+          + `which is not in WC_SEVERITY_COMPONENTS. A typo here would silently do nothing.`,
+        );
+      }
     }
   }
 }

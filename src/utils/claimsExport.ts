@@ -115,29 +115,37 @@ function sharedCells(row: LineClaimRow): Row {
   ];
 }
 
-// Medical / Indemnity / Impairment sit immediately after Gross Incurred: they
-// are a decomposition OF it and sum back to it per row, so adjacency is what
-// makes that checkable by eye in the sheet. Rounded to whole dollars like every
-// other money column, so a row can be off by up to 1 from rounding alone —
-// the to-the-cent assertion lives in wc-claim-check.ts, on the unrounded values.
+// ⚠ THE THREE PAYOUT-COMPONENT COLUMNS (Medical / Indemnity / Impairment) WERE
+// REMOVED BY THE WC SEVERITY REBUILD, and they are not coming back in this
+// shape. They were a decomposition of a TIERED severity — medical care cost,
+// wage replacement during healing, and the scheduled permanent-impairment
+// award — and the mixture model draws ONE amount per claim with no legs. There
+// is nothing to decompose.
+//
+// This changes the sheet's SHAPE, so solo-export-guard's WC hash moves. That is
+// expected and is a shape change, not a value change.
+//
+// What went with them: the separate 6.0% medical and 3.5% indemnity trends
+// (there is now no severity trend at all), the hook a medical-fee-schedule
+// shock would have attached to, and Phase 3's ability to develop medical and
+// indemnity on different payout patterns. Recorded in CALIBRATION_FINDINGS.
 const WC_COMPONENT_NOTE =
-  'Medical + Indemnity + Impairment = Gross Incurred on every row (each rounded to whole dollars, ' +
-  'so a row may differ by $1 from rounding). Medical is care cost, Indemnity is wage replacement, ' +
-  'Impairment is the scheduled permanent-impairment award. Only perm claims carry Impairment; ' +
-  'medOnly and presumption are all Medical; catastrophic is Medical + lifetime Indemnity. ' +
-  'Medical trends at 6.0%/yr, Indemnity and Impairment at 3.5%.';
+  'One amount per claim: WC severity is a per-rating-group lognormal mixture with no medical / ' +
+  'indemnity split. Tier is the MIXTURE COMPONENT the claim was drawn from (small / medium / large / ' +
+  'schoolsMedium, or "injected" for a shock claim) — these are NOT the retired medOnly / temp / perm / ' +
+  'catastrophic tiers. Rating Class is the rating GROUP (county / schools / highSafety / lowSafety). ' +
+  'Reported Year exceeds Accident Year on a late-reported claim; those sit in the IBNR inventory in ' +
+  'between and are not counted in any year before they report.';
 
 function buildWcSheetRows(rows: LineClaimRow[]): Row[] {
   const header = [
-    ...SHARED_HEADER, 'Rating Class', 'Tier', 'Status', 'Gross Incurred',
-    'Medical', 'Indemnity', 'Impairment',
+    ...SHARED_HEADER, 'Rating Group', 'Component', 'Status', 'Gross Incurred',
     'Gross Paid', 'Reported Year', 'Enrolled',
   ];
   const body = sortClaimRows(rows).map(row => [
     ...sharedCells(row),
     safeStr(row.claim.ratingClass), row.claim.tier,
     row.claim.status, roundOrBlank(row.claim.grossUltimate),
-    roundOrBlank(row.claim.medical), roundOrBlank(row.claim.indemnity), roundOrBlank(row.claim.impairment),
     roundOrBlank(row.claim.paidToDate), row.claim.reportedYear, row.enrolled ? 'Yes' : 'No',
   ]);
   return [[`WC claims. ${WC_COMPONENT_NOTE} ${ENROLLED_NOTE}`], header, ...body];

@@ -42,7 +42,7 @@ import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
-import { computeKLine, expectedWcGrossLoss } from '../../src/utils/wcClaimEngine';
+import { computeKLine, expectedWcGrossLossForPricing } from '../../src/utils/wcClaimEngine';
 import { computeKGl, expectedGlGrossLoss } from '../../src/utils/glClaimEngine';
 import type { CoverageLine, GameState, Member } from '../../src/types/simulation';
 
@@ -150,7 +150,7 @@ for (const id of SEEDS) {
         if (!m) continue;
         trap2Checked++;
         const expAtOne = line === 'WC'
-          ? expectedWcGrossLoss([m], { kLine: 1, yearNumber: y })
+          ? expectedWcGrossLossForPricing([m], { kLine: 1, yearNumber: y })
           : expectedGlGrossLoss([m], { kGl: 1 });
         if (Math.abs(pr.expectedLoss - expAtOne) > Math.max(1e-6, expAtOne * 1e-9)) {
           note(false, `${line} Y${y} seed ${id}: prospect ${pr.memberId} expectedLoss ${pr.expectedLoss.toFixed(2)} != expectation at k=1 ${expAtOne.toFixed(2)} — the pool's k or rc reached a prospect`);
@@ -159,7 +159,7 @@ for (const id of SEEDS) {
 
       // --- the pricing invariant, statistically ---------------------------
       const exp = line === 'WC'
-        ? expectedWcGrossLoss(enrolled, { kLine: lr.kLineApplied ?? 1, yearNumber: y })
+        ? expectedWcGrossLossForPricing(enrolled, { kLine: lr.kLineApplied ?? 1, yearNumber: y })
         : expectedGlGrossLoss(enrolled, { kGl: lr.kLineApplied ?? 1 });
       if (exp > 0) ratio[line].push(lr.grossUltimateLoss / exp);
     }

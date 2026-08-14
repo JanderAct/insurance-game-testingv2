@@ -47,7 +47,7 @@ import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
-import { expectedWcGrossLoss } from '../../src/utils/wcClaimEngine';
+import { expectedWcGrossLossForPricing } from '../../src/utils/wcClaimEngine';
 import { expectedGlGrossLoss } from '../../src/utils/glClaimEngine';
 import {
   EXPERIENCE_WINDOW_YEARS,
@@ -199,7 +199,7 @@ console.log('\n--- 3. THE ASYMMETRY: expected includes k_line, excludes risk con
     const k = lr.kLineApplied!;
     const enrolledIds = new Set(lr.memberLossResults.map(m => m.memberId));
     const expectFor = (m: Member, kUsed: number) => line === 'WC'
-      ? expectedWcGrossLoss([m], { kLine: kUsed, yearNumber: 1 })
+      ? expectedWcGrossLossForPricing([m], { kLine: kUsed, yearNumber: 1 })
       : expectedGlGrossLoss([m], { kGl: kUsed });
 
     // ENROLLED: stored expected must equal the expectation AT kLineApplied, and
@@ -281,7 +281,7 @@ console.log('\n--- 3. THE ASYMMETRY: expected includes k_line, excludes risk con
         const stored = storedLossYears(h, mlr.memberId, line).find(y => y.yearNumber === 1);
         if (!stored) continue;
         const at = line === 'WC'
-          ? expectedWcGrossLoss([m], { kLine: k, yearNumber: 1 })
+          ? expectedWcGrossLossForPricing([m], { kLine: k, yearNumber: 1 })
           : expectedGlGrossLoss([m], { kGl: k });
         worst = Math.max(worst, Math.abs(stored.expected - at));
         n++;

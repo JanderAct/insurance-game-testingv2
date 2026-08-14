@@ -35,6 +35,7 @@
 // defaultAssumptions.ts. They are intentionally NOT stored per member.
 
 import type { CoverageLine, Member, MemberType, Region, SizeCategory } from '../types/simulation';
+import { WC_HIGH_SAFETY_CITIES, WC_RATING_GROUP_BY_TYPE, type WcRatingGroup } from './defaultAssumptions';
 
 export interface CanonicalRosterRow {
   id: string;
@@ -281,8 +282,30 @@ export const PREDEFINED_MARKET_MEMBERS: ReadonlyArray<Member> = CANONICAL_ROSTER
     // (6.2-8.4); the roster CSV carries no satisfaction column.
     satisfaction: Number((6.2 + ((index * 19) % 23) / 10).toFixed(1)),
     status: 'prospect',
+    wcRatingGroup: wcRatingGroupFor(row.type, row.name),
   })
 );
+
+// A member's WC rating group.
+//
+// ⚠ THIS IS THE ONE MEMBER ATTRIBUTE THAT IS *STORED* RATHER THAN DERIVED FROM
+// TYPE, and it contradicts the header note above only in appearance. WC_CLASS_MIX
+// and GL_RELATIVITIES really are exact functions of Type, so storing them per
+// member would be duplication. This is not: WC_CLASS_MIX gives EVERY city a
+// safety share of exactly 0.3500, so no rule over it can separate the eight
+// cities that run their own police and fire departments from the other 24. The
+// list is genuine additional information and lives in
+// WC_HIGH_SAFETY_CITIES.
+//
+// It is computed here, at catalog construction, and then travels ON the member —
+// so it serialises into saved games with everything else and a member cannot
+// arrive without one.
+function wcRatingGroupFor(type: MemberType, name: string): WcRatingGroup {
+  if (type === 'City') return WC_HIGH_SAFETY_CITIES.has(name) ? 'highSafety' : 'lowSafety';
+  const group = WC_RATING_GROUP_BY_TYPE[type];
+  if (!group) throw new Error(`no WC rating group for member type '${type}'`);
+  return group;
+}
 
 export function getPredefinedMarketMembers(): Member[] {
   return PREDEFINED_MARKET_MEMBERS.map(member => ({ ...member }));

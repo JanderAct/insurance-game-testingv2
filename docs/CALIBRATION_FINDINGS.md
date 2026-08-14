@@ -1305,3 +1305,170 @@ the same number. The cause is the mix table, not the class costs: School Distric
 payroll but ~75% public works **by cost**, because clerical is ~17x cheaper per payroll dollar, so
 School and Low Safety share the same dominant cost driver and the public-works channel caps the
 achievable ratio at 1.90.
+
+---
+
+## 30. The WC severity rebuild — what replaced what, and what was lost
+
+WC's four-tier severity structure (medical-only / temporary / permanent / catastrophic, plus a
+separate presumption process) is retired. It was authored as domain-judgment estimates in a design
+document that described its own figures as *"plausible, but priors, not posteriors"*, and three
+rounds of calibration then fitted those priors to each other — which produces internal consistency
+and no external validity. Roughly 57 of ~65 parameters are gone.
+
+The replacement draws **one loss amount per claim** from a per-rating-group 3-component lognormal
+mixture, fitted by EM to the pool's own claim severities with per-group weights solved against the
+pool's own layered rate table. It is the first independent measurement of the book in this project.
+
+**What was lost, and it is not nothing:**
+
+| lost | consequence |
+|---|---|
+| the medical / indemnity / impairment split | one blended trend instead of separate 6.0% medical and 3.5% indemnity; no hook for a medical-fee-schedule shock; Phase 3 reserving can no longer develop medical and indemnity on different patterns |
+| the catastrophic annuity | claims no longer carry a payment schedule; the PV-vs-nominal question goes away with it |
+| severity trend of any kind | deliberate — see finding 31 |
+| three WC claims-export columns | shape change; solo-export-guard's WC hash moves |
+
+**Findings 27 and 28 are superseded, not resolved.** Both were about the retired structure: 27 that a
+shared medical severity forced tier mix to absorb the whole class differential, and 28 that $115k perm
+medical was forced by a level constraint. Neither quantity exists. The *lesson* of 28 — state every
+target, or the free variable absorbs the adjustment invisibly — still stands and is why the spec for
+this change stated four separate targets.
+
+**Finding 29's provenance table is superseded too**, and the replacement is better: exactly one input
+there was sourced (the WCIRB rates). Here the components and weights come from the pool's own claim
+file and rate table. What remains ASSERTED is tagged at its parameter site: the heavy component
+(finding 31), Schools' second component, `rqSeverityBeta`, and all four report-lag parameters.
+
+---
+
+## 31. The heavy component is ASSERTED, and the EM fit understates the tail
+
+The EM fit produced component 3 at **mu 10.653133, sigma 1.243817** — mean $91,736, CV 1.92. The model
+ships **mu 9.4776, sigma 2.00** — mean $96,529, CV 7.32. This is deliberate and must not be "corrected"
+back to the fit.
+
+The fitted component cannot produce large claims: its practical maximum over a 50-year game is about
+$5.3M and it reaches $9.8M roughly once per 431 years. **The pool has observed claims in the $45-50M
+range.** That is consistent with the fit having been run on paid or capped amounts rather than
+developed-to-ultimate values — which is recorded as an open question, because it decides whether the
+re-specification is a correction or an override.
+
+The re-specification holds the $1M-limited loss costs fixed at the pool's supplied rates, so it moves
+the tail **without moving the priced layer**. Share of loss above $1M goes 9.1% -> 26.0%; the
+1-in-100-year claim goes $6.5M -> $47.0M.
+
+**The tail has no ceiling.** The 1-in-250-year claim is $71.2M. If $50M is a hard maximum rather than a
+high observation, that needs an explicit cap, and none is imposed.
+
+### A pre-assertion figure was carried forward twice
+
+Two figures in the specification were computed against the FITTED component and then quoted as if they
+described the shipped one. Both were caught by arithmetic rather than by review:
+
+- **"blended CV 4.32."** No mixture containing a CV-7.32 component can have a CV below 7.32, because
+  adding small claims cuts the mean far more than it cuts `E[X²]`. The real blend is 11.22-14.56 by
+  group. 4.32 was the pre-assertion mixture.
+- **"claims over $5M arrive roughly once per 41 years."** The real rate is **0.70/yr — one every 1.4
+  years**, a 21% reduction against the retired catastrophic tier's 0.89/yr, not a 36x one. 41 years
+  corresponds to a ~$30M threshold under the shipped component.
+
+The second one mattered: it was the stated justification for the reinsurance tower's re-derivation
+ordering, and it pointed the wrong way. See finding 32.
+
+**The lesson is narrow and worth stating: when a parameter is re-specified, every figure derived from
+the old value is stale, including the ones in the prose.** Both survivors were derived quantities in
+text, not values in code, which is exactly where a stale figure is hardest to see.
+
+---
+
+## 32. The tower's WC constants are invalidated, and NOT uniformly in the direction expected
+
+`expectedCededPer100` is verified linear in exposure, so closed-form layer expectations under the new
+severity are directly comparable to the stored constants:
+
+| WC layer | stored | new severity | direction |
+|---|---|---|---|
+| $4M xs $1M | 0.4662 | ~0.668 | **under-priced ~43%** |
+| $5M xs $5M | 0.2697 | ~0.145 | over-priced ~46% |
+| $15M xs $10M | 0.0866 | ~0.104 | **under-priced ~20%** |
+| $25M xs $25M | 0.0007 | ~0.035 | **under-priced ~50x** |
+| `retainedAboveTower` | structurally $0 | ~0.060 per $100 | newly real, unbounded |
+
+The retired model had a **hard ceiling**: `reinsuranceTower.ts` states that a single catastrophic claim
+could not exceed $15.51M in present value. The mixture has no ceiling. So the top of the tower moves
+from unreachable to genuinely exposed, and the pool would buy real catastrophe cover for near-nothing.
+
+**The `$25M xs $25M` layer's non-purchasable justification is VOID.** It reads "WC emits exactly one
+claim per occurrence, and a single catastrophic claim cannot reach $25M: the present value ceiling is
+$15.51M." Under the new severity, P(claim > $25M) x annual heavy-component count is **0.037/yr — one
+every 27 years**, by the ordinary single-claim mechanism the comment says cannot reach it. Either the
+layer becomes purchasable at its real price or it comes out; it must not stay defined with a false
+reason.
+
+Also invalidated: the retained-CV diagnostic (`diagnostic/retained-cv`). Removing gPool from WC strips
+a Gamma(25, 1/25) multiplier while the mixture severity pushes the other way, so WC's measured
+0.4579 / 0.2496 are both stale.
+
+---
+
+## 33. IBNR: accrual and balance differ by the mean lag, and the level cannot be gated
+
+The chain-ladder provision `IBNR(Y) = reported-to-date(Y) x (LDF(age) - 1)` introduces two numbers that
+are easy to swap and silent either way:
+
+| | value | what it is |
+|---|---|---|
+| annual accrual | 17.1% of the year's loss | what you ADD each year |
+| steady-state balance | 0.599x annual loss | what SITS on the sheet |
+
+They differ by the mean report lag (3.47 years measured), and the relationship is **Little's Law** —
+inventory = arrival rate x time in system. Booking the balance as the accrual settles at ~2.5x the
+correct reserve and reads as ordinary conservatism; booking the accrual as the balance under-reserves
+3.5x and shows up as persistent adverse development.
+
+**The level cannot be gated, and this is structural rather than a tolerance problem.** At game year N
+only N accident years are open, so the balance cannot exceed `p x sum(1 - F(t))` for t = 0..N-1. A
+5-year run reaches **0.443** — 26% short of 0.599 on entirely correct code. Gating on 0.599 is the same
+fixed-percentage failure this project has now hit five times.
+
+**Gate on the Little's Law ratio instead**, `balance / (mean accrual x mean lag)`, which approaches 1
+from below. Two refinements were needed to make it a usable gate, and both are worth recording:
+
+1. **The denominator must be the MEAN accrual, not the current year's.** One year's accrual tracks one
+   year's reported loss, which on a CV-11 book swings threefold. A single-year denominator peaked at
+   **2.47** with the reserve entirely correct.
+2. **It must be measured across independent paths, not along one.** Little's Law holds in expectation.
+   The chain-ladder balance is driven by what actually reported, so a year in which one large claim
+   reports inflates the estimate regardless of the inventory. One path's maximum still reached **1.74**
+   after fix 1; averaged over 40 paths the ratio peaks at 1.038 and settles at 0.972.
+
+Under the balance-as-accrual failure the ratio reads ~3.5 from turn one, on any path, so the gate
+retains its power after both refinements.
+
+### A related trap, hit again in the same harness
+
+The first version of the rebuild harness gated the drawn annual loss against its own bootstrap CI. It
+failed on correct code. At sigma 2.0 the mean is carried by draws rarer than 300 years of experience
+contains, and **a bootstrap can only resample values it has seen**, so it systematically under-covers.
+The fix is finding 26's own rule: gate the **$1M-capped** mean (which is also the layer the weights were
+calibrated against), and report the ground-up figure without a gate.
+
+---
+
+## 34. A current-horizon shock now has a multi-year reported tail
+
+`gl-cutover-check` and `shock-check` both carried assertions that a current-horizon event moves only its
+own year. That was correct when every claim reported in its accident year. With a report lag it is not:
+#28 raises the heavy component's arrival rate for one year, 18% of heavy-component claims report late,
+so the extra claims keep emerging for years afterward (measured $0.25M, $0.06M, $0.00M against a $3.61M
+shock year).
+
+The assertion was replaced rather than relaxed. What still holds, and is now asserted: nothing leaks
+BACKWARDS; the tail can only ADD; the tail is small relative to the shock year; and **GL, which has no
+report lag, is still confined to a single year** — the contrast between the two lines is what
+distinguishes a report lag from state leaking somewhere.
+
+The same logic retired `gl-cutover-check`'s "WC and GL share commonLossFactor" assertion. gPool was the
+model's only cross-line correlation and it is gone from WC, so the check now asserts the DECOUPLING:
+WC reports exactly 1, GL still varies.

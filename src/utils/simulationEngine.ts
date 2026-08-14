@@ -1,9 +1,9 @@
 // Core simulation engine for Risk Pool Simulation v1
 // Premium formula: Premium = Exposure($M) × Rate_per_$100_payroll × 10,000
 
-import type { Claim, GameState, Occurrence, PoolState, DecisionSet, LinePoolState, LineDecisionSet, ResultSet, LineResultSet, ReserveCohort, Member, MemberLossResult, MembershipHistory, CoverageLine, GameInstance, AssetAllocation } from '../types/simulation';
+import type { Claim, WcUnreportedClaim, GameState, Occurrence, PoolState, DecisionSet, LinePoolState, LineDecisionSet, ResultSet, LineResultSet, ReserveCohort, Member, MemberLossResult, MembershipHistory, CoverageLine, GameInstance, AssetAllocation } from '../types/simulation';
 import type { LineShockEffects, ShockFiring, ShockRecord } from '../types/shocks';
-import { resolveShocks, ownFreqMultipliers, ownParamOverrides } from './shockResolver';
+import { resolveShocks, ownFreqMultipliers, ownComponentFreqMultipliers } from './shockResolver';
 
 // Collapse the per-line shock records into one row per EVENT for the pool
 // result, summing each cost across the lines that event touched and unioning
@@ -38,7 +38,8 @@ import { simulateMarketReturns, blendInvestmentReturn } from './investmentEngine
 import { simulateMemberMovement } from './membershipEngine';
 import { cloneMembershipHistory, openInterval, closeInterval } from './membershipHistory';
 import { cloneMemberLossHistory, recordMemberLossYear } from './memberLossHistory';
-import { computeKLine, deriveNeutralPurePremiumPer100, expectedWcGrossLoss, generateWcClaims } from './wcClaimEngine';
+import { computeKLine, deriveNeutralPurePremiumPer100, expectedWcGrossLossForPricing, generateWcClaims } from './wcClaimEngine';
+import { dollarWeightedPDelayed, ldfToUltimate, wcIbnrBalance } from './wcIbnr';
 import { computeKGl, deriveNeutralGlPurePremiumPer100, expectedGlGrossLoss, generateGlClaims } from './glClaimEngine';
 import { generateNarrative } from './narrativeEngine';
 import { getMemberExposure } from './lineHelpers';
@@ -125,10 +126,6 @@ interface LineYearContext {
   // coordination happens at pool level and a line-local generator never learns
   // that another line exists.
   shock?: LineShockEffects;
-  // Resolved dotted path -> absolute value for this line's loss model,
-  // accumulated across every future-horizon override in force. Consumed through
-  // the parameter overlay (wcParams.ts), never by reaching into the global.
-  paramOverrides?: Record<string, number>;
   // The firings that touched this line, for RECORDING. Separate from `shock`
   // because effects are what the generators consume and firings are what the
   // audit page reads — a compounded frequency multiplier no longer knows which
@@ -340,10 +337,20 @@ export function processLineYear(
 
   const lossRng = deriveSubRng(instance.seed, yearNumber, lineRngLabel('losses', line));
 
-  // The aggregate annual factor for the NON-claim lines. WC and GL do not draw
-  // it: their cross-line correlation now comes from the shared ctx.gPool, and
-  // applying both would double-count the aggregate shock.
-  const commonLossFactor = isClaimLine
+  // The aggregate annual factor for the NON-claim lines.
+  //
+  // WC IS NOW 1, NOT ctx.gPool. The WC severity rebuild removed the pool-year
+  // factor from WC's generation path entirely, so there is no shared factor to
+  // report — WC's year-to-year variation comes from its own frequency noise and
+  // its severity tail. GL still consumes ctx.gPool, which is why the draw stays
+  // (see WC_LOSS_MODEL.poolYearFactor).
+  //
+  // CONSEQUENCE, DELIBERATE: gPool was the model's ONLY cross-line correlation,
+  // so WC is now independent of GL and Property. A bad WC year carries no
+  // information about the others.
+  const commonLossFactor = isWcClaimLine
+    ? 1
+    : isClaimLine
     ? ctx.gPool
     : lossRng.lognormal(
         AGGREGATE_LOSS_DISTRIBUTION.logMean,
@@ -402,6 +409,14 @@ export function processLineYear(
   const shockAttributableLoss: Record<string, number> = {};
   const shockAttributableClaims: Record<string, number> = {};
   const shockExpectedAdded: Record<string, number> = {};
+  // WC report-lag / IBNR outputs. Left at their empty values on GL and Property,
+  // which draw every claim as reported in its accident year.
+  let nextUnreportedClaims: WcUnreportedClaim[] = [];
+  let unreportedClaimCount = 0;
+  // Gross loss from THIS accident year reported this year, and gross loss from
+  // PRIOR accident years reported this year. They sum to aggregateMemberLoss.
+  let currentAccidentYearGross = 0;
+  let emergedPriorYearLoss = 0;
 
   if (isWcClaimLine) {
     // k_line is recomputed against the CURRENTLY ENROLLED book, after member
@@ -411,14 +426,31 @@ export function processLineYear(
     // ⚠ ENROLLED BOOK, NOT THE FULL ROSTER. Marketplace-wide generation makes it
     // tempting to hand the 200-member roster to everything below; doing it here
     // would drive k_line to ~1 permanently and silently disable the correction.
-    const kLine = computeKLine(memberResult.activeMembers, ctx.paramOverrides);
+    const kLine = computeKLine(memberResult.activeMembers);
+
+    // THE UNREPORTED INVENTORY. Claims drawn in an earlier accident year whose
+    // reportYear is now. Split rather than filtered-twice so the carry-forward
+    // and the emergence are visibly complementary.
+    //
+    // ⚠ THE INVENTORY IS FULL-MARKET (all 200 members); the pool's own figures
+    // must use the ENROLLED slice. Splitting on reportYear first and enrolment
+    // second keeps a prospect's claim in the inventory when it emerges while it
+    // is still a prospect, rather than dropping it on the floor.
+    const inventory = lineState.unreportedClaims ?? [];
+    const emergingAll = inventory.filter(u => u.reportYear <= yearNumber);
+    const stillUnreported = inventory.filter(u => u.reportYear > yearNumber);
+    const enrolledIds = new Set(memberResult.activeMembers.map(m => m.id));
+    const emergingEnrolled = emergingAll.filter(u => enrolledIds.has(u.memberId));
+    const emergingProspect = emergingAll.filter(u => !enrolledIds.has(u.memberId));
+
     const generated = generateWcClaims({
       members: memberResult.activeMembers,
       yearNumber,
       calendarYear,
       instanceSeed: instance.seed,
       kLine,
-      // Future-horizon overrides, resolved through the wcParams overlay.
+      // Current-horizon component arrival-rate multipliers, DRAW ONLY like risk
+      // control.
       //
       // ⚠ THEY DO NOT REACH PREMIUM, AND THAT IS THE POINT (ruled). The priced
       // expectedLoss is activeExposure x the HELD purePremiumPer100, not this
@@ -428,14 +460,12 @@ export function processLineYear(
       // you. Second-order and equally deliberate: the reinsurance attachment is
       // 125% of that same unchanged expectedLoss, so the treaty does not adjust
       // either. Do not "fix" either of these.
-      paramOverrides: ctx.paramOverrides,
-      // Current-horizon multipliers, DRAW ONLY like risk control.
-      freqMultipliers: ctx.shock?.freqMultipliers,
-      gPool: ctx.gPool,
+      componentFreqMultipliers: ctx.shock?.componentFreqMultipliers,
       // Risk control acts on the DRAW ONLY (finding 17): it reduces realized
       // frequency without touching the pricing expectation, so it genuinely
       // moves the loss ratio instead of cancelling out.
       riskControlEffectiveness: newRCEffectiveness,
+      emerging: emergingEnrolled,
       injections: ctx.shock?.injections,
     });
     // PROSPECTS: the rest of the 200-member marketplace, generated at kLine = 1
@@ -452,15 +482,14 @@ export function processLineYear(
         // Market-wide conditions DO reach prospects: a statutory change or a bad
         // year is not a pool membership benefit. Pool-specific claim injections
         // do NOT — those are events landing on the pool's own book.
-        paramOverrides: ctx.paramOverrides,
-        freqMultipliers: ctx.shock?.freqMultipliers,
-        gPool: ctx.gPool,
+        componentFreqMultipliers: ctx.shock?.componentFreqMultipliers,
+        emerging: emergingProspect,
       })
       : undefined;
     generatedClaims = generated.claims;
     generatedOccurrences = generated.occurrences;
-    wcCountsByClass = generated.claimCountsByClass;
-    wcCountsByTier = generated.claimCountsByTier;
+    wcCountsByClass = generated.claimCountsByGroup;
+    wcCountsByTier = generated.claimCountsByComponent;
     memberLossResults = generated.memberLossResults;
     aggregateMemberLoss = generated.grossUltimateLoss;
     marketMemberLossResults = [
@@ -468,9 +497,25 @@ export function processLineYear(
       ...(prospectGenerated?.memberLossResults ?? []),
     ];
     kLineApplied = kLine;
-    // A catastrophic-tier claim is WC's shock event, replacing the old
-    // "aggregate factor exceeded a threshold" definition.
-    shockOccurred = (generated.claimCountsByTier.catastrophic ?? 0) > 0;
+
+    // CARRY THE INVENTORY FORWARD: what did not emerge, plus what was drawn this
+    // year and deferred, across BOTH calls so prospects keep their own pipeline.
+    nextUnreportedClaims = [
+      ...stillUnreported,
+      ...generated.newlyDelayed,
+      ...(prospectGenerated?.newlyDelayed ?? []),
+    ];
+    // ENROLLED ONLY — this is a pool figure. See the field comment on
+    // LinePoolState.unreportedClaims.
+    unreportedClaimCount = nextUnreportedClaims.filter(u => enrolledIds.has(u.memberId)).length;
+    currentAccidentYearGross = generated.currentAccidentYearGross;
+    emergedPriorYearLoss = generated.emergedGross;
+
+    // WC's shock flag: a claim from the heavy mixture component large enough to
+    // matter. Replaces the retired "a catastrophic-tier claim occurred" test,
+    // which named a tier that no longer exists. $1M is the per-occurrence
+    // retention, so this reads as "the pool had a claim that pierced retention".
+    shockOccurred = generated.claims.some(c => c.grossUltimate >= 1_000_000);
 
     // EXACT attribution: the engine returns one outcome per requested
     // injection, in order, and ctx.shock.injections carries the shockId that
@@ -482,20 +527,20 @@ export function processLineYear(
       shockAttributableClaims[injection.shockId] = (shockAttributableClaims[injection.shockId] ?? 0) + outcome.count;
     });
 
-    // EXPECTED cost of any parameter override in force, per event, measured
-    // against the un-overridden book with WC's own analytic. Same construction
-    // as GL's frequency attribution and for the same reason: reconstructing the
-    // expectation would create a second definition of WC's expected loss.
-    if ((ctx.paramOverrides || ctx.shock?.freqMultipliers) && ctx.shockFirings?.length) {
-      const baseline = expectedWcGrossLoss(memberResult.activeMembers, { kLine, yearNumber });
+    // EXPECTED cost of any component multiplier in force, per event, measured
+    // against the unshocked book with WC's own analytic. Reconstructing the
+    // expectation here would create a second definition of WC's expected loss.
+    //
+    // PRICING BASIS on both sides: the difference is what the EVENT adds, and
+    // measuring it on a basis that includes the risk-quality severity tilt would
+    // fold the book's RQ mix into a figure attributed to the shock.
+    if (ctx.shock?.componentFreqMultipliers && ctx.shockFirings?.length) {
+      const baseline = expectedWcGrossLossForPricing(memberResult.activeMembers, { kLine, yearNumber });
       for (const firing of ctx.shockFirings) {
-        const overrides = ownParamOverrides(firing.shockId, 'WC');
-        const multipliers = ownFreqMultipliers(firing.shockId, 'WC');
-        if (!overrides && !multipliers) continue;
-        // Both channels of ONE event priced together, since an event carrying
-        // both is a single cause and splitting it would be arbitrary.
-        shockExpectedAdded[firing.shockId] = expectedWcGrossLoss(memberResult.activeMembers, {
-          kLine, yearNumber, paramOverrides: overrides, freqMultipliers: multipliers,
+        const multipliers = ownComponentFreqMultipliers(firing.shockId, 'WC');
+        if (!multipliers) continue;
+        shockExpectedAdded[firing.shockId] = expectedWcGrossLossForPricing(memberResult.activeMembers, {
+          kLine, yearNumber, componentFreqMultipliers: multipliers,
         }) - baseline;
       }
     }
@@ -620,10 +665,14 @@ export function processLineYear(
   let aggregatePremium = 0;
   let aggregateAttachment = 0;
   let attachment: number;
+  // Hoisted so the IBNR provision below can net against the SAME placement the
+  // cession used. Empty on Property, which has no tower.
+  let placedLayers: boolean[] = [];
 
   if (isClaimLine && (isWcClaimLine || isGlClaimLine)) {
     const towerLine = line as TowerLine;
     const placed = normalizeLayersPlaced(towerLine, lineDecisions.layersPlaced);
+    placedLayers = placed;
     const totals = occurrenceTotals(generatedClaims ?? [], generatedOccurrences ?? [], towerLine);
     const cession = cedeOccurrences(towerLine, totals, placed);
     cededByLayer = cession.cededByLayer;
@@ -705,17 +754,83 @@ export function processLineYear(
 
   const allCohorts = [...updatedCohorts, currentYearCohort];
 
+  // --- IBNR (WC only) --------------------------------------------------------
+  //
+  // THE CHAIN-LADDER PROVISION: for each open accident year,
+  // `net reported to date x (LDF(age) - 1)`.
+  //
+  // WHY CHAIN-LADDER RATHER THAN "EXPECTED UNREPORTED DOLLARS" (which is
+  // algebraically identical IN EXPECTATION): it conditions on what ACTUALLY
+  // reported, so a year that reports heavy books a heavier IBNR. The reserve
+  // becomes responsive to experience instead of a fixed fraction of an assumed
+  // ultimate — which is what a real reserve does, and is the shape that
+  // accommodates IBNER later without rework. See src/utils/wcIbnr.ts.
+  //
+  // NET, and computable HERE rather than after the tower re-derivation: the
+  // netting depends only on the layer STRUCTURE (attachments and limits), which
+  // this change does not touch, not on the tower's measured expectedCededPer100
+  // constants, which it does invalidate.
+  //
+  // GL AND PROPERTY HAVE NO REPORT LAG, so every claim reports in its accident
+  // year and their IBNR is 0 by construction, not by omission.
+  let ibnrReserve = 0;
+  let ibnrAccrual = 0;
+  let nextAccidentYearReported = lineState.wcAccidentYearReported ?? [];
+  if (isWcClaimLine) {
+    // The share of THIS year's net loss that will report late, on the book and
+    // the reinsurance placement as they actually are this year. Stored with the
+    // accident year rather than recomputed later, because both change.
+    const pDelayedNet = dollarWeightedPDelayed(memberResult.activeMembers, placedLayers);
+    // Net-down this accident year's own reported gross by the year's realized
+    // cession ratio. Using the realized ratio rather than re-deriving the
+    // waterfall keeps ONE definition of what was ceded.
+    const cessionRatio = aggregateMemberLoss > 0 ? netUltimateLoss / aggregateMemberLoss : 1;
+    const currentNetReported = currentAccidentYearGross * cessionRatio;
+    const emergedNetByYear = new Map<number, number>();
+    for (const c of generatedClaims ?? []) {
+      if (c.accidentYear >= yearNumber) continue;
+      emergedNetByYear.set(c.accidentYear, (emergedNetByYear.get(c.accidentYear) ?? 0) + c.grossUltimate * cessionRatio);
+    }
+
+    const merged = lineState.wcAccidentYearReported
+      ? lineState.wcAccidentYearReported.map(e => ({
+        ...e,
+        netReported: e.netReported + (emergedNetByYear.get(e.yearNumber) ?? 0),
+      }))
+      : [];
+    // An accident year that has emerged but was never opened (an old save, or a
+    // backdated shock injection reaching further back than the ledger goes) is
+    // opened now at this year's pattern rather than dropped.
+    for (const [ay, amount] of emergedNetByYear) {
+      if (!merged.some(e => e.yearNumber === ay)) merged.push({ yearNumber: ay, netReported: amount, pDelayedNet });
+    }
+    merged.push({ yearNumber, netReported: currentNetReported, pDelayedNet });
+    nextAccidentYearReported = merged;
+
+    ibnrReserve = wcIbnrBalance(nextAccidentYearReported, yearNumber);
+    // ⚠ THE ACCRUAL IS THIS YEAR'S ADDITION; ibnrReserve IS THE BALANCE. They
+    // differ by the mean report lag (~3.5 years) and swapping them is a 3.5x
+    // reserve error in either direction, silent both ways. The relationship is
+    // Little's Law and is asserted, not hoped for — see littlesLawRatio.
+    ibnrAccrual = currentNetReported * (ldfToUltimate(0, pDelayedNet) - 1);
+  }
+
   // --- Accounting Reserves ---
   // These are expected unpaid losses (net of reinsurance) from all accident
   // years. They are the booked balance sheet reserves and are NOT CLF-loaded.
-  const endingNetReserve = allCohorts.reduce((s, c) => s + c.netUnpaid, 0);
+  //
+  // IBNR SITS ALONGSIDE THE COHORTS, NOT INSIDE THEM. The cohort rollforward
+  // pays down CASE reserves on a per-line percentage; IBNR is a different
+  // quantity with a different runoff (the reporting pattern), and folding it
+  // into netUnpaid would put it on the wrong paydown curve.
+  const endingNetReserve = allCohorts.reduce((s, c) => s + c.netUnpaid, 0) + ibnrReserve;
 
   const expectedNetUnpaidLoss = endingNetReserve;
 
   const beginningNetReserve = lineState.reserveCohorts.reduce(
     (s, c) => s + c.netUnpaid,
     0
-  );
+  ) + wcIbnrBalance(lineState.wcAccidentYearReported ?? [], yearNumber - 1);
 
   // --- Income Statement ---
   // Use reserve-rollforward incurred loss so the income statement and balance sheet tie.
@@ -988,6 +1103,10 @@ export function processLineYear(
 
     beginningNetReserve,
     currentYearNetReserve,
+    ibnrReserve,
+    ibnrAccrual,
+    emergedPriorYearLoss,
+    unreportedClaimCount,
     netPaidLosses: netPaidLossesThisYear,
     endingNetReserve,
 
@@ -1086,6 +1205,11 @@ export function processLineYear(
     riskControlEffectiveness: newRCEffectiveness,
 
     reserveCohorts: allCohorts,
+    // WC's report-lag state, carried to next year. Empty on GL and Property.
+    // FULL-MARKET inventory (see the field comment); ENROLLED, NET reported
+    // ledger.
+    unreportedClaims: nextUnreportedClaims,
+    wcAccidentYearReported: nextAccidentYearReported,
     members: memberResult.activeMembers,
 
     netUnpaidReserve: endingNetReserve,
@@ -1286,7 +1410,6 @@ export function processYear(
       membershipHistory,
       gPool,
       shock: shocks?.byLine[line],
-      paramOverrides: shocks?.paramOverrides[line],
       shockFirings: shocks?.firings.filter(f => f.linesAffected.includes(line)),
       cash: poolState.cash * share,
       investments: lineState.investedAssets,
@@ -1721,6 +1844,13 @@ export function aggregateLineResults(
 
     beginningNetReserve: sum('beginningNetReserve'),
     currentYearNetReserve: sum('currentYearNetReserve'),
+    // Pooled elementwise like every other reserve figure. Non-WC lines
+    // contribute 0, so the pool total IS WC's — correct, since only WC has a
+    // report lag.
+    ibnrReserve: sum('ibnrReserve'),
+    ibnrAccrual: sum('ibnrAccrual'),
+    emergedPriorYearLoss: sum('emergedPriorYearLoss'),
+    unreportedClaimCount: sum('unreportedClaimCount'),
     netPaidLosses: sum('netPaidLosses'),
     endingNetReserve: sum('endingNetReserve'),
 

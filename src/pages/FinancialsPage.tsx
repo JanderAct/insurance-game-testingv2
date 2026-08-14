@@ -98,10 +98,10 @@ export default function FinancialsPage({ lockedResults, priorResults, lineView }
                         already inside "Current year claims" above and must not be
                         subtracted again. It is shown because it is the pool's largest
                         single exposure and was previously invisible. */}
-                    {statement.reinsuranceDetail.retainedAboveTower > 0 && (
+                    {statement.retainedAboveTower > 0 && (
                       <ISLine
                         label="  of which retained above tower (unreinsurable)"
-                        value={formatCurrency(statement.reinsuranceDetail.retainedAboveTower)}
+                        value={formatCurrency(statement.retainedAboveTower)}
                         indent2
                       />
                     )}
@@ -111,7 +111,7 @@ export default function FinancialsPage({ lockedResults, priorResults, lineView }
                     <ISLine label="Loss prevention expenses" value={formatCurrency(is.riskControlInvestment)} indent />
                     <ISLine label="Member dividends & returned premium" value={formatCurrency(is.dividends)} indent />
                     <ISLine label="Total operating expenses" value={formatCurrency(totalOperatingExpenses)} bold />
-                    {statement.reinsuranceDetail.retainedAboveTower > 0 && (
+                    {statement.retainedAboveTower > 0 && (
                       <p className="text-xs text-gray-500 italic leading-relaxed pt-2">{RETAINED_ABOVE_TOWER_CAVEAT}</p>
                     )}
 

@@ -1,3 +1,7 @@
+import type { WcComponentKey, WcRatingGroup } from '../data/defaultAssumptions';
+// TYPE-ONLY, so the cycle with defaultAssumptions.ts (which imports Region from
+// here) is erased at compile time and never exists at runtime.
+
 // Core TypeScript types for Risk Pool Simulation v1
 
 // Type-only, and circular with shocks.ts (which imports CoverageLine and Region
@@ -60,6 +64,21 @@ export interface Member {
   satisfaction: number; // 1-10
   status: MemberStatus;
   yearWithdrawn?: number;
+  // WC rating group — a STORED attribute, assigned in memberCatalog.ts.
+  //
+  // ⚠ DELIBERATELY STORED WHERE WC_CLASS_MIX AND GL_RELATIVITIES ARE NOT. Those
+  // two are exact functions of `type`, so the catalog header states they are
+  // intentionally not stored per member. This one CANNOT be: WC_CLASS_MIX gives
+  // every city a safety share of exactly 0.3500, so no threshold over it can
+  // separate the eight cities that run their own police and fire departments
+  // from the other 24. That is genuinely extra information — see
+  // WC_HIGH_SAFETY_CITIES in defaultAssumptions.ts.
+  //
+  // Optional only so that saves written before the WC severity rebuild still
+  // parse; App.tsx repairs it on load. wcClaimEngine THROWS on a member without
+  // one rather than defaulting, because a silent default would generate no
+  // claims and read as calibration drift months later.
+  wcRatingGroup?: WcRatingGroup;
 }
 
 export interface MemberSegment {
@@ -134,25 +153,6 @@ export interface Occurrence {
 
 export type ClaimStatus = 'open' | 'closed' | 'reopened';
 
-// A catastrophic claim's payment stream. Lifetime-care claims are not a single
-// severity draw — they are decades of inflating medical payments plus wage
-// indemnity to retirement. Stored NOMINAL (first-year payment plus the
-// escalation rate and duration of each leg) so Phase 3 reserving can consume
-// the real schedule rather than re-deriving it. The medical and indemnity legs
-// escalate at different rates on purpose.
-//
-// The claim's booked grossUltimate is the PRESENT VALUE of this stream, not
-// its nominal sum — see WC_LOSS_MODEL.catastrophicDiscountRate for why this
-// one tier is discounted before Phase 3.
-export interface ClaimAnnuity {
-  medicalFirstYearPayment: number;
-  medicalInflationPct: number;
-  medicalYears: number;
-  indemnityAnnualPayment: number;
-  indemnityInflationPct: number;
-  indemnityYears: number;
-}
-
 // One claim within an occurrence.
 export interface Claim {
   id: string;
@@ -161,14 +161,18 @@ export interface Claim {
   line: CoverageLine;
   accidentYear: number;   // yearNumber (pre-game years negative)
   calendarYear: number;
-  // Sub-coverage / rating tier the claim falls under: a WC_CLASS_MIX class
-  // (clerical / publicWorks / police / fire) for WC, a GL_RELATIVITIES
-  // sub-line (general / epl / lawEnforcement / abuse) for GL, a peril label
-  // for Property. Deliberately a string, not a union — the tier vocabularies
-  // belong to the distribution work.
+  // Sub-coverage / severity class the claim falls under: a WC MIXTURE COMPONENT
+  // (small / medium / large / schoolsMedium, or 'injected' for a shock claim) for
+  // WC, a GL_RELATIVITIES sub-line (general / epl / lawEnforcement / abuse) for
+  // GL, a peril label for Property. Deliberately a string, not a union — the
+  // vocabularies belong to the distribution work.
+  //
+  // WC's values CHANGED with the severity rebuild: they used to be tiers
+  // (medOnly / temp / perm / catastrophic / presumption). Anything that pattern-
+  // matches WC tier strings needs revisiting, not just recompiling.
   tier: string;
-  // The rating class the claim arose from (WC: clerical/publicWorks/police/
-  // fire). Kept alongside tier because WC severity depends on both.
+  // The rating GROUP the claim arose from (WC: county / schools / highSafety /
+  // lowSafety). Was a rating CLASS before the severity rebuild.
   ratingClass?: string;
   status: ClaimStatus;
   reportedYear: number;   // yearNumber the claim became known (>= accidentYear; supports IBNR vs case)
@@ -176,34 +180,12 @@ export interface Claim {
   paidToDate: number;
   caseReserve: number;    // unpaid estimate on this claim (grossUltimate - paidToDate once reported)
   // Fractions of grossUltimate expected to be paid in years 1..n after the
-  // accident year (A7). Data for Phase 3 reserving — nothing consumes it yet.
-  // Absent on catastrophic claims, which carry `annuity` instead.
+  // accident year. Data for Phase 3 reserving — nothing consumes it yet.
+  //
+  // NO LONGER POPULATED BY WC. The retired tier model carried a payout pattern
+  // per tier; the mixture model books one amount with no payout schedule, so
+  // WC claims leave this absent. GL and Property are unaffected.
   paymentPattern?: number[];
-  annuity?: ClaimAnnuity;
-  // --- WC payout components (medical / indemnity / impairment) -------------
-  // A PURE DECOMPOSITION of grossUltimate: the three sum to it to the cent on
-  // every WC claim. Stored rather than recomputed because the engine already
-  // derives medical and indemnity separately and TRENDS THEM AT DIFFERENT
-  // RATES (medicalTrend 6.0% vs indemnityTrend 3.5%) — collapsing them into
-  // one figure threw away the mix that produced the claim, so the book's
-  // blended effective trend could not be verified from its own output.
-  //
-  // `medical` is care cost. `indemnity` is WAGE REPLACEMENT while the worker
-  // is off work. `impairment` is the scheduled award for residual permanent
-  // impairment — a distinct payment with its own statutory basis, which is
-  // why it is not folded into indemnity.
-  //
-  // Which tiers populate which component:
-  //   medOnly       medical only.
-  //   temp          medical + indemnity.
-  //   perm          medical + indemnity (healing period) + impairment (award).
-  //   catastrophic  medical + indemnity. impairment is 0 — permanent TOTAL
-  //                 disability is lifetime wage replacement, not a scheduled
-  //                 award for a residual rating.
-  //   presumption   medical only, matching the fact that the engine trends
-  //                 the whole claim at medicalTrend.
-  medical?: number;
-  impairment?: number;
   // --- GL claim-level fields (Part B) ---
   // Indemnity/ALAE split of grossUltimate. Kept separately because the
   // statutory cap applies to INDEMNITY ONLY (caps bound damages, not defense
@@ -418,6 +400,45 @@ export interface ReinsuranceStructure {
 // Annual reserve cohort for simplified development. NET basis: losses enter
 // net of reinsurance recoveries (recovery cash arrives in lockstep with the
 // claim payments it offsets, so there is no separate recoverable receivable).
+// A claim DRAWN but NOT YET REPORTED — the IBNR inventory.
+//
+// ⚠ THIS IS PERSISTED TO localStorage, AND THAT IS AN EXCEPTION TO RULING 8
+// WITH A REASON, not an oversight. Ruling 8 keeps `ResultSet.claims` out of
+// storage because the claim log is an UNBOUNDED FLOW: ~1,800 claims/yr reaches
+// ~7MB by year 10 and blows the quota. This inventory is a BOUNDED STOCK — at
+// ~151 delayed claims/yr full-market and a ~3.5-year mean lag it holds ~530
+// records and stops growing, because 78%+ clear within four years. At ~150
+// bytes a record that is ~80KB, about 1.6% of a 5MB quota.
+//
+// AND IT CANNOT BE REGENERATED. Every draw is a pure function of
+// (seed, member, year), so replaying year 3 in year 9 is architecturally
+// available. Three reasons not to, the third decisive:
+//   1. O(years^2) work.
+//   2. It would have to replay that year's exact kLine, enrolment and
+//      risk-control inputs.
+//   3. A RETROACTIVE SHOCK CHANGES PARAMETERS, so replaying a prior year under
+//      current parameters would silently restate history. The pinned original
+//      draw is precisely what gives a retroactive shock its force.
+//
+// Fields are exactly what re-emitting the claim needs, and no more.
+export interface WcUnreportedClaim {
+  id: string;
+  memberId: string;
+  region: Region;
+  ratingGroup: WcRatingGroup;
+  component: WcComponentKey;
+  accidentYear: number;   // when it happened — attribution
+  reportYear: number;     // when it becomes known — recognition
+  amount: number;         // fixed at draw; no trend over the lag (see wcClaimEngine invariant 4)
+}
+
+// One accident year's reported-to-date and reporting pattern. See LinePoolState.
+export interface WcAccidentYearReportedEntry {
+  yearNumber: number;
+  netReported: number;
+  pDelayedNet: number;
+}
+
 export interface ReserveCohort {
   yearNumber: number;
   calendarYear: number;
@@ -506,6 +527,15 @@ export interface ResultSet {
   // and reloaded carry the aggregates, and per-claim detail is regenerated
   // from seed x member x year on demand. Optional for exactly that reason:
   // any consumer must handle its absence.
+  //
+  // ⚠ ONE THING IS PERSISTED, AND THE EXCEPTION HAS A REASON. WC's unreported
+  // claim inventory (LinePoolState.unreportedClaims) DOES go to localStorage.
+  // The rule above is about an UNBOUNDED FLOW — the claim log grows with every
+  // year played and reaches ~7MB by year 10. The inventory is a BOUNDED STOCK:
+  // it reaches steady state at ~530 records (~80KB) because delayed claims clear
+  // faster than they arrive. And unlike this array it CANNOT be regenerated,
+  // because a retroactive shock changes the parameters a replay would use. See
+  // WcUnreportedClaim for the full argument.
   claims?: Claim[];
   occurrences?: Occurrence[];
   claimCountsByClass?: Record<string, number>;  // WC
@@ -552,7 +582,22 @@ export interface ResultSet {
   // Reserve development (NET basis — reserves are net of reinsurance)
   priorYearDevelopment: number; // positive = favorable, negative = adverse
   beginningNetReserve: number;
-  currentYearNetReserve: number; // IBNR + case for this accident year, net
+  currentYearNetReserve: number; // case reserve for this accident year, net (excludes IBNR below)
+  // --- IBNR (WC only; 0 on GL and Property, which have no report lag) -------
+  // The chain-ladder provision: sum over open accident years of
+  // `net reported to date x (LDF(age) - 1)`. See src/utils/wcIbnr.ts.
+  //
+  // ⚠ ibnrReserve is the BALANCE (what sits on the sheet); ibnrAccrual is this
+  // year's ADDITION. They differ by the mean report lag (~3.5 years) and
+  // confusing them is a 3.5x reserve error in either direction — both silent.
+  ibnrReserve: number;
+  ibnrAccrual: number;
+  // Claims reported this calendar year that belong to a PRIOR accident year —
+  // recognised now, attributed back. Dual booking: no locked year's reported
+  // figures change.
+  emergedPriorYearLoss: number;
+  // Count of claims sitting unreported at year end, ENROLLED members only.
+  unreportedClaimCount: number;
   netPaidLosses: number;
   endingNetReserve: number;
 
@@ -691,6 +736,32 @@ export interface LinePoolState {
   averageRiskQuality: number;
   riskControlEffectiveness: number; // rolling score 0-1
   reserveCohorts: ReserveCohort[];
+  // WC ONLY, empty on GL and Property. Claims drawn but not yet reported.
+  //
+  // ⚠ FULL-MARKET: keyed across ALL 200 CANONICAL MEMBERS, not just enrolled.
+  // Claims are generated marketplace-wide so prospects carry a readable loss
+  // history, and their delayed claims belong to it.
+  //
+  // WHO MAY SUM THIS. Pool accounting — reserves, IBNR, anything on the balance
+  // sheet — must filter to ENROLLED members first, exactly as memberLossResults
+  // is the enrolled list and marketMemberLossResults is the full one. Summing it
+  // whole into a pool figure is the full-market/enrolled error this project has
+  // hit more than any other.
+  //
+  // Optional so saves predating the WC severity rebuild still parse; App.tsx
+  // defaults it to [] on load rather than bumping the save key. An old save
+  // cold-starts with no inventory and understates IBNR for ~4 years while it
+  // fills — a better trade than orphaning every save.
+  unreportedClaims?: WcUnreportedClaim[];
+  // WC ONLY. Net reported-to-date per accident year, plus the NET dollar-weighted
+  // delayed share measured in that year — the two inputs the chain-ladder IBNR
+  // provision needs. `pDelayedNet` is stored per accident year rather than
+  // recomputed because both the book's mix and its reinsurance placement change,
+  // and the reporting pattern that applies to a given accident year is that
+  // year's. See src/utils/wcIbnr.ts.
+  //
+  // ENROLLED AND NET, unlike unreportedClaims above — it is a reserve input.
+  wcAccidentYearReported?: WcAccidentYearReportedEntry[];
   members: Member[];
   netUnpaidReserve: number;    // unpaid loss reserve, net of reinsurance
   surplus: number;

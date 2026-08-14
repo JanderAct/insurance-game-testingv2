@@ -71,9 +71,7 @@ function project(claims: Claim[]): string {
       grossUltimate: c.grossUltimate,
       paidToDate: c.paidToDate,
       caseReserve: c.caseReserve,
-      medical: c.medical ?? null,
       indemnity: c.indemnity ?? null,
-      impairment: c.impairment ?? null,
       alae: c.alae ?? null,
       legalBasis: c.legalBasis ?? null,
       litigationStage: c.litigationStage ?? null,
@@ -81,7 +79,6 @@ function project(claims: Claim[]): string {
       damageRatio: c.damageRatio ?? null,
       locationTiv: c.locationTiv ?? null,
       paymentPattern: c.paymentPattern ?? null,
-      annuity: c.annuity ?? null,
     })),
   );
 }
@@ -136,7 +133,7 @@ for (const seed of SEEDS) {
     for (const v of variants) {
       const r = generateWcClaims({
         members: v.members, yearNumber: YEAR, calendarYear: CALENDAR, instanceSeed: seed,
-        kLine: 1, gPool: 1, riskControlEffectiveness: 0,
+        kLine: 1, riskControlEffectiveness: 0,
       });
       wcRefs.push(project(r.claims.filter(c => c.memberId === x.id)));
     }

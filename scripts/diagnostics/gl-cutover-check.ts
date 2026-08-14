@@ -3,7 +3,8 @@
 // Complements gl-claim-check.ts: that one exercises the generator in
 // isolation, this one drives the actual processYear loop across 40 seeds x 5
 // live years. Beyond claim integrity it checks the wiring GL shares with WC —
-// both lines must read the same pool-wide gPool as their commonLossFactor,
+// WC and GL must be DECOUPLED on the pool-year factor (WC reports 1, GL reports
+// the shared gPool draw — see WC_LOSS_MODEL.poolYearFactor),
 // neither may carry a separate shockLossAmount (their shock lives inside the
 // drawn claims), and claimCountsBySub must reconcile to the claims array.
 //
@@ -42,7 +43,7 @@ const glGrossLR: number[] = [], perSeedGlGross: number[] = [];
 const glAnalyticLR: number[] = [], glEnrolledPP: number[] = [], glDrawOverExp: number[] = [];
 const wcGrossLR: number[] = [];
 let maxTie = 0, glClaimSumErr = 0, wcClaimSumErr = 0, lineYears = 0, nonFinite = 0;
-let glShockAmtBad = 0, gPoolMismatch = 0, subCountMismatch = 0, memberSumErr = 0;
+let glShockAmtBad = 0, wcFactorNotOne = 0, glFactorIsOne = 0, subCountMismatch = 0, memberSumErr = 0;
 const glClaimsPerYear: number[] = [], glShockYears: number[] = [];
 const wcGross: number[] = [], wcPrem: number[] = [], glGross: number[] = [], glPrem: number[] = [], prGross: number[] = [], prPrem: number[] = [];
 const subTotals: Record<string, number> = {};
@@ -62,8 +63,17 @@ for (const id of SEEDS) {
       maxTie = Math.max(maxTie, Math.abs(x.surplusTieOutDifference));
       for (const [k, v] of Object.entries(x)) if (typeof v === 'number' && !Number.isFinite(v)) { nonFinite++; console.log(`  NON-FINITE ${id} Y${y} ${l}.${k}`); }
     }
-    // WC and GL must both read the same shared gPool as their commonLossFactor.
-    if (wc.commonLossFactor !== gl.commonLossFactor) gPoolMismatch++;
+    // ⚠ WAS `wc.commonLossFactor === gl.commonLossFactor` — the two lines used to
+    // SHARE the pool-year factor, and that shared draw was the model's only
+    // cross-line correlation. The WC severity rebuild REMOVED gPool from WC
+    // (WC_LOSS_MODEL.poolYearFactor, §7), so WC now reports a defined 1 and GL
+    // still consumes the draw. Asserting they match would now fail by design.
+    //
+    // The replacement asserts the DECOUPLING, which is the stronger statement:
+    // WC must be exactly 1, and GL must not be (it is a Gamma(25, 1/25) draw, so
+    // landing on exactly 1 would mean the draw had stopped happening).
+    if (wc.commonLossFactor !== 1) wcFactorNotOne++;
+    if (gl.commonLossFactor === 1) glFactorIsOne++;
     // claim-line shockLossAmount must be 0 (shock lives inside the claims).
     if (gl.shockLossAmount !== 0 || wc.shockLossAmount !== 0) glShockAmtBad++;
     if (gl.claims) {
@@ -105,7 +115,10 @@ console.log(`  max |sum(GL claims) - grossUltimateLoss|: $${glClaimSumErr.toFixe
 console.log(`  max |sum(WC claims) - grossUltimateLoss|: $${wcClaimSumErr.toFixed(6)}  ${note(wcClaimSumErr < 0.01, 'WC claims do not sum to grossUltimateLoss')}`);
 console.log(`  max |sum(GL memberLossResults) - aggregate|: $${memberSumErr.toFixed(6)}  ${note(memberSumErr < 0.01, 'GL member losses do not sum')}`);
 console.log(`  max |surplus tie-out|: ${maxTie.toExponential(2)}  ${note(maxTie < 1e-4, `tie-out ${maxTie}`)}`);
-console.log(`  WC/GL commonLossFactor (gPool) mismatches: ${gPoolMismatch}  ${note(gPoolMismatch === 0, 'gPool not shared')}`);
+console.log(`  WC commonLossFactor is exactly 1 (pool factor REMOVED from WC): ${lineYears - wcFactorNotOne}/${lineYears}  ${note(wcFactorNotOne === 0, 'WC does not report commonLossFactor 1 — the pool-year factor is still reaching WC')}`);
+console.log(`  GL commonLossFactor still varies (gPool draw retained for GL): ${lineYears - glFactorIsOne}/${lineYears}  ${note(glFactorIsOne === 0, 'GL commonLossFactor is exactly 1 — the shared pool-year draw has stopped')}`);
+console.log(`    WC and GL are now INDEPENDENT. gPool was the model's only cross-line correlation, so a bad`);
+console.log(`    WC year no longer carries any information about GL. Deliberate — see WC_LOSS_MODEL.poolYearFactor.`);
 console.log(`  claim-line shockLossAmount != 0 count: ${glShockAmtBad}  ${note(glShockAmtBad === 0, 'claim-line shockLossAmount nonzero')}`);
 console.log(`  claimCountsBySub mismatches: ${subCountMismatch}  ${note(subCountMismatch === 0, 'claimCountsBySub missing or does not sum to claims')}`);
 console.log(`  GL claims/yr (enrolled book): mean ${mean(glClaimsPerYear).toFixed(1)}`);

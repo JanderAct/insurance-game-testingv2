@@ -39,284 +39,333 @@ export const AGGREGATE_LOSS_DISTRIBUTION = {
 };
 
 // ===========================================================================
-// WORKERS' COMPENSATION claim-level loss model (design doc Part A).
+// WORKERS' COMPENSATION claim-level loss model.
 //
-// Replaces, for WC only, the aggregate member-Gamma draw above: individual
-// claims are generated per member per rating class, so the $1M retention
-// waterfall, per-claim reserving, and per-tail development have real objects
-// to work on. GL and Property still use MEMBER_LOSS_VOLATILITY /
-// AGGREGATE_LOSS_DISTRIBUTION until their own generators are built.
+// PER-RATING-GROUP LOGNORMAL MIXTURES, fitted to the pool's own claim
+// severities by EM, with per-group weights solved against the pool's own
+// layered rate table. This REPLACED a four-tier structure (medical-only /
+// temporary / permanent / catastrophic) whose ~65 parameters were authored as
+// domain-judgment estimates and then fitted to each other over three rounds of
+// calibration — internally consistent, externally unvalidated. This model is
+// the first independent measurement of the book in this project.
 //
-// Two model-wide conventions worth stating up front:
+// Three model-wide conventions:
 //
-// 1. DOLLAR VINTAGE IS EXPLICIT. Every severity figure here is stated in
-//    ACCIDENT-YEAR dollars. Carrying a payment forward to the year it is
-//    actually settled is done in exactly one place — trendToSettlement() in
-//    wcClaimEngine — using the two trend rates below. Nothing in the model
-//    stores a value whose vintage is ambiguous, which is what lets Phase 3
-//    reserving trend and discount FROM a known basis instead of trying to
-//    reconstruct a vintage the generator threw away. Frequency trends too,
-//    separately (below).
+// 1. ONE LOSS AMOUNT PER CLAIM. There are no tiers, no wage/medical legs, and
+//    no annuity. A claim draws a mixture component, then a severity from that
+//    component. The medical / indemnity / impairment split is GONE — it needed
+//    tiers to exist. Consequences are recorded in CALIBRATION_FINDINGS.
 //
-// 2. FREQUENCY TREND IS A DECLINE and pure premium does NOT track it. WC's
+// 2. NO SEVERITY TREND, AND THEREFORE NO VINTAGE PROBLEM. A claim's amount is
+//    fixed at draw. The retired model carried separate 6.0% medical and 3.5%
+//    indemnity trends and a single vintage-conversion point; with a report lag
+//    now in the model, trending severity over the lag would make
+//    E[(1+r)^lag] over an unbounded lognormal DIVERGENT — which is exactly why
+//    the retired presumption process had to truncate its lag at 40 years. Not
+//    trending removes the divergence, removes the truncation, and leaves the
+//    severity fit as fitted.
+//
+// 3. FREQUENCY TREND IS A DECLINE and pure premium does NOT track it. WC's
 //    purePremiumPer100 is derived ONCE from the neutral-book expectation and
-//    held (see wcClaimEngine), while realized frequency falls 1.5%/yr. The
-//    loss ratio therefore drifts down slightly over a game — a deliberate
-//    consequence of holding the pick while frequency improves, and the
-//    counterpart to the severity inflation that Phase 3 will add on the other
-//    side.
+//    held, while realized frequency falls 1.5%/yr. Unchanged from the retired
+//    model.
 // ===========================================================================
 
+// RETAINED IN FULL — the police column is GL law-enforcement's exposure base
+// (GL_LOSS_MODEL.ratePer1M.lawEnforcement is applied to WC_CLASS_MIX[type].police
+// x payroll), and keeping all four columns avoids touching the roster file.
+// WC ITSELF NO LONGER READS THIS TABLE for loss generation: rating groups
+// (below) replaced rating classes. See WC_RATING_GROUP_BY_TYPE for the one
+// remaining WC-side use, which is group assignment, not class payroll.
 export const WC_CLASS_KEYS = ['clerical', 'publicWorks', 'police', 'fire'] as const;
 export type WcClassKey = (typeof WC_CLASS_KEYS)[number];
 
-export const WC_TIERS = ['medOnly', 'temp', 'perm', 'catastrophic'] as const;
-export type WcTier = (typeof WC_TIERS)[number];
+// --- Rating groups ---------------------------------------------------------
+//
+// Four groups replace the four rating classes. A member's group is a STORED
+// per-member attribute (Member.wcRatingGroup, assigned in memberCatalog.ts),
+// NOT a derived one — and that is load-bearing, not a style choice.
+//
+// ⚠ WHY IT CANNOT BE DERIVED. WC_CLASS_MIX is an exact function of entity
+// type, so every one of the 32 cities carries a safety share of exactly 0.3500
+// (verified across the roster, spread 0.0001). Any threshold rule therefore
+// selects either all 32 cities or none. A 40%-safety threshold picks out the
+// 16 Fire Districts and nothing else (County 0.30, School 0.02, the other six
+// types 0.00). The eight High Safety cities are genuinely additional
+// information about which cities run their own police and fire departments,
+// and they have to be written down.
+export const WC_RATING_GROUPS = ['county', 'schools', 'highSafety', 'lowSafety'] as const;
+export type WcRatingGroup = (typeof WC_RATING_GROUPS)[number];
+
+// Group by entity type, for the types where type alone decides it. City is
+// deliberately ABSENT: a city is High Safety or Low Safety depending on whether
+// it appears in WC_HIGH_SAFETY_CITIES below, and nothing else distinguishes
+// them. Leaving City out of this table rather than defaulting it makes the
+// lookup fail loudly if the stored-city list is ever lost.
+export const WC_RATING_GROUP_BY_TYPE: Record<string, WcRatingGroup> = {
+  County: 'county',
+  'School District': 'schools',
+  'Fire District': 'highSafety',
+  'Park District': 'lowSafety',
+  'Recreation District': 'lowSafety',
+  'Special District': 'lowSafety',
+  'Transit Authority': 'lowSafety',
+  'Water District': 'lowSafety',
+};
+
+// THE EIGHT HIGH SAFETY CITIES — STORED DATA, NOT A DERIVATION.
+//
+// Chosen by a size-tilted random draw (payroll^0.55, seed 20260814) constrained
+// to put High Safety between 18% and 22% of combined Low+High payroll; the
+// result is 19.4%. They span size ranks 1, 2, 3, 4, 13, 19, 22 and 22 of 32 —
+// deliberately NOT the eight largest, because a small city in the right area
+// runs its own department too.
+//
+// Matched by member NAME, which is stable: the canonical roster is permanent
+// and never regenerated (memberCatalog.ts header). The assignment is asserted
+// to select exactly these eight, and to survive a save/load round trip, in
+// scripts/diagnostics/wc-severity-rebuild-check.ts.
+export const WC_HIGH_SAFETY_CITIES: ReadonlySet<string> = new Set([
+  'Harbor City 192',
+  'Glenmoor City 062',
+  'Fairmont City 080',
+  'Harbor City 064',
+  'Ridgeway City 180',
+  'Brookhaven City 160',
+  'Summit City 036',
+  'Cedar Falls City 010',
+]);
+
+// --- Severity mixture components -------------------------------------------
+//
+// LOG-SCALE parameters: a draw is exp(Normal(mu, sigma)). Components are
+// SHARED ACROSS GROUPS (except Schools' second) and only the WEIGHTS differ.
+// That is deliberate physics: a catastrophic injury costs roughly the same
+// whoever employs the person, but a firefighter is far more likely to suffer
+// one. Scaling mu by group instead would put High Safety's ceiling at $67M and
+// County's at $36M, which is wrong.
+export interface WcSeverityComponent {
+  mu: number;
+  sigma: number;
+  // Probability this component's claim is reported LATE (see reportLag below).
+  // Tilted 3.6x on `large` on purpose — see the reportLag comment.
+  pDelayed: number;
+}
+
+export const WC_SEVERITY_COMPONENTS = {
+  // FITTED (EM on the pool's claim severities). Median $308, mean $489, CV 1.23.
+  small: { mu: 5.731549, sigma: 0.960883, pDelayed: 0.05 },
+  // FITTED (EM). Median $1,753, mean $2,974, CV 1.37.
+  medium: { mu: 7.469014, sigma: 1.028369, pDelayed: 0.05 },
+  // ⚠⚠ ASSERTED, NOT FITTED. Median $13,064, mean $96,529, CV 7.32.
+  //
+  // The EM fit produced mu 10.653133, sigma 1.243817 (median $42,325, mean
+  // $91,736, CV 1.92). THAT IS NOT WHAT THIS IS, and it must not be "corrected"
+  // back to the fit. The fitted component cannot produce large claims: its
+  // practical maximum over a 50-year game is about $5.3M and it reaches $9.8M
+  // roughly once per 431 years. THE POOL HAS OBSERVED CLAIMS IN THE $45-50M
+  // RANGE, so the fitted tail understates reality — consistent with the fit
+  // having been run on paid or capped amounts rather than developed-to-ultimate
+  // values (recorded as an open item; it decides whether this is a correction
+  // or an override).
+  //
+  // Re-specified to reach $47M about once per century pool-wide, HOLDING the
+  // $1M-limited loss costs fixed at the pool's supplied rates — so the change
+  // moves the tail without moving the priced layer.
+  //
+  //                 fitted      asserted
+  //   mu            10.653133   9.4776
+  //   sigma          1.243817   2.00
+  //   mean          $91,736     $96,529
+  //   CV             1.92       7.32
+  //   loss > $1M     9.1%       26.0%
+  //   1-in-50yr      $5.3M      $33.8M
+  //   1-in-100yr     $6.5M      $47.0M
+  //
+  // WHAT WOULD DISPLACE IT: the same EM fit run on large claims developed to
+  // ultimate, or a separate tail fitted to the known catastrophic claims.
+  //
+  // THE TAIL HAS NO CEILING. The 1-in-250-year claim is $71.2M. If $50M is a
+  // hard maximum rather than a high observation, that needs an explicit cap —
+  // recorded as an open item, deliberately not imposed here.
+  large: { mu: 9.4776, sigma: 2.00, pDelayed: 0.18 },
+  // ASSERTED. Schools' second component. Median $5,363, mean $27,100, CV 3.51.
+  // Schools has TWO components by design — a school district does not generate
+  // the catastrophic-injury tail that a public-works or safety group does.
+  schoolsMedium: { mu: 8.5873, sigma: 1.80, pDelayed: 0.05 },
+} as const satisfies Record<string, WcSeverityComponent>;
+
+export type WcComponentKey = keyof typeof WC_SEVERITY_COMPONENTS;
+
+export interface WcGroupModel {
+  // Claims per $1M of payroll per year.
+  ratePer1M: number;
+  // Mixture weights over components. MUST sum to exactly 1.0 (asserted).
+  mix: { component: WcComponentKey; weight: number }[];
+  // The component the risk-quality severity tilt acts on. STORED EXPLICITLY,
+  // not "the last one" — Schools' heavy component is its SECOND, and a
+  // mix[mix.length - 1] shortcut would work for the three three-component
+  // groups and silently mis-tilt Schools.
+  heavyComponent: WcComponentKey;
+}
 
 export const WC_LOSS_MODEL = {
-  // --- A1 frequency -------------------------------------------------------
-  // Claims per $1M of that class's payroll per year. Set from a per-100-FTE
-  // frequency (rate = claims-per-100-FTE x 10,000 / classAnnualWage), then the
-  // tier mix below is solved to hit that class's WCIRB rate. Expected
-  // FULL-MARKET claim counts on the canonical roster (200 members, $1,300M
-  // payroll): 332.4 / 1108.6 / 193.7 / 190.8 = 1825.5, the figure the harness
-  // asserts. Was 838.2 before the WCIRB class-cost rebuild.
+  // --- Frequency ----------------------------------------------------------
   //
-  // Per-100-FTE: clerical 4.0, publicWorks 12.0, police 12.0, fire 14.0.
+  // ⚠ THESE FOUR RATES ARE THE LAST FIGURES DERIVED FROM RETIRED MACHINERY.
+  // Each is the payroll-weighted average of the four (now deleted) class rates
+  // {clerical 0.6452, publicWorks 2.0690, police 1.4118, fire 1.7073} weighted
+  // through WC_CLASS_MIX. They are internally consistent with the calibration
+  // below and reconcile with the pool's own rate table to within 3.4%, but they
+  // come from the structure this model deletes.
+  // DISPLACED BY: fitted per-group claim frequencies, which would also remove
+  // WC's last dependency on WC_CLASS_MIX.
   //
-  // ⚠ THE PER-100-FTE ENVELOPES ARE UNSOURCED. The ranges this project has
-  // been quoting (clerical 1-2, publicWorks 6-9, police 8-12, fire 10-15) are
-  // recollection, never sourced. Clerical at 4.0 sits above that band, and the
-  // right reading is that THE ENVELOPE IS WRONG, not the value: clerical
-  // cannot reach its WCIRB rate of $0.690 at 2.0/100 FTE by any severity this
-  // model can defend. Displaced by a sourced public-entity frequency table.
-  rateClassPer1M: { clerical: 0.6452, publicWorks: 2.0690, police: 1.4118, fire: 1.7073 } as Record<WcClassKey, number>,
+  // Full-market expected counts on the canonical roster (200 members, $1,300M
+  // payroll): County 491.7 + Schools 103.9 + High Safety 228.6 + Low Safety
+  // 1001.4 = 1,825.6/yr.
+  ratingGroups: {
+    county: {
+      ratePer1M: 1.2607,
+      mix: [
+        { component: 'small', weight: 0.4415 },
+        { component: 'medium', weight: 0.3274 },
+        { component: 'large', weight: 0.2311 },
+      ],
+      heavyComponent: 'large',
+    },
+    schools: {
+      ratePer1M: 1.0592,
+      mix: [
+        { component: 'small', weight: 0.5500 },
+        { component: 'schoolsMedium', weight: 0.4500 },
+      ],
+      heavyComponent: 'schoolsMedium',
+    },
+    highSafety: {
+      ratePer1M: 1.4516,
+      mix: [
+        { component: 'small', weight: 0.3380 },
+        { component: 'medium', weight: 0.2507 },
+        { component: 'large', weight: 0.4113 },
+      ],
+      heavyComponent: 'large',
+    },
+    lowSafety: {
+      ratePer1M: 1.5302,
+      mix: [
+        { component: 'small', weight: 0.4228 },
+        { component: 'medium', weight: 0.3135 },
+        { component: 'large', weight: 0.2637 },
+      ],
+      heavyComponent: 'large',
+    },
+  } as Record<WcRatingGroup, WcGroupModel>,
 
   // Workplace safety improves ~1.5%/yr. Applied as (1 + trend)^(yearNumber-1),
-  // so live Year 1 is the reference (factor 1.0) and the pre-game years carry
-  // a factor slightly ABOVE 1 — the past was more dangerous, which is both
-  // realistic and keeps the pre-game consistent with the live model.
+  // so live Year 1 is the reference (factor 1.0) and the pre-game years carry a
+  // factor slightly ABOVE 1 — the past was more dangerous.
   frequencyTrendPerYear: -0.015,
 
   // Per member-year frequency noise, mean 1 (SD 0.25). Makes claim counts
   // overdispersed relative to pure Poisson.
+  //
+  // ⚠ GAMMA, NOT NORMAL, AND THIS IS NOT INTERCHANGEABLE. Normal(1, 0.25) goes
+  // negative with probability 3.17e-5 per draw; a 50-year game across 200
+  // members is 10,000 draws, so 27.1% of games would produce at least one
+  // NEGATIVE FREQUENCY MULTIPLIER, which means a negative claim count. Gamma at
+  // shape 16 is already nearly symmetric (SD 0.250, skewness 0.500, median
+  // 0.979) and cannot go negative.
   memberFrequencyNoise: { shape: 16, scale: 1 / 16 },
 
-  // Pool-wide year factor, mean 1 (SD 0.20). ONE draw per year SHARED ACROSS
-  // ALL LINES (drawn in processYear, not per line) — this is the aggregate
-  // correlation that commonLossFactor used to supply per-line.
+  // ⚠ MISNAMED, DELIBERATELY LEFT IN PLACE. WC NO LONGER READS THIS.
+  //
+  // The pool-wide annual factor is still DRAWN once per year in processYear
+  // (parameterised from here) because GL consumes it via commonLossFactor —
+  // but it no longer enters WC's generation path. Removing WC's pool factor
+  // makes WC, GL and Property fully independent: it was the model's ONLY
+  // cross-line correlation, so a bad WC year now carries no information about
+  // GL. The variance effect on WC is modest because WC's volatility is
+  // dominated by its severity tail.
+  //
+  // Relocating this constant to a pool-level home has zero numeric content and
+  // would touch GL's basis, so it stays here with this comment instead.
   poolYearFactor: { shape: 25, scale: 1 / 25 },
 
-  // --- A6 risk-quality beta budget (total nominal 0.12) -------------------
-  // Frequency channel is fully realized; the tier-mix and duration channels
-  // are diluted by tier mix and by indemnity's share of severity.
-  // Catastrophic probability is deliberately NOT affected by risk quality.
-  rqFrequencyBeta: 0.08,   // theta_WC(RQ) = exp(-0.08 * (RQ - 5))
-  rqTierMixDelta: 0.030,   // per point of (5 - RQ), on non-catastrophic tiers
-  rqDurationBeta: 0.033,   // on temp/perm duration (~0.015 realized after dilution)
-
-  // --- A2 tier mix --------------------------------------------------------
-  // [medOnly, temp, perm, catastrophic] per rating class.
+  // --- Risk quality: two channels ----------------------------------------
   //
-  // medOnly/temp/perm now sum to exactly 1.0 in every class (they used to be
-  // read as raw weights, and clerical summed to 0.9995). tierProbabilities()
-  // in wcClaimEngine.ts still RENORMALISES them to (1 - catastrophic) and holds
-  // catastrophic fixed, so the sum was never load-bearing — but writing them as
-  // true shares makes the perm rates below directly readable as "share of
-  // non-catastrophic claims", which is how they were solved.
+  // The retired model spent its RQ budget over three channels — frequency
+  // (0.080), tier mix (0.030) and duration (0.033). Tiers are gone, so the
+  // latter two died with them, and that removed 44% of the budget, ALL OF IT
+  // SEVERITY. rqSeverityBeta below restores a severity channel in a form the
+  // mixture can express.
+  rqFrequencyBeta: 0.08,   // theta_WC(RQ) = exp(-0.08 x (RQ - 5)), DRAW ONLY
+
+  // Tilts the HEAVY component's weight:
+  //   w_heavy(member) = w_heavy(group) x exp(-rqSeverityBeta x (RQ - 5))
+  // with the remaining weights renormalised, preserving their ratio to each
+  // other. Across the roster's RQ 1-10 range the heavy weight runs 1.271x at
+  // RQ 1 down to 0.741x at RQ 10, so the worst-managed members produce severe
+  // claims about 70% more often than the best.
   //
-  // THE PERM RATES CARRY THE ENTIRE CLASS DIFFERENTIAL. They are SOLVED to hit
-  // each class's WCIRB advisory pure premium rate (loss-only), not observed:
-  //   clerical    9410 Municipal non-manual   $0.82 filed -> $0.690 loss-only
-  //   publicWorks 9420 Municipal all other    $8.95 filed -> $6.733 loss-only
-  //   police      7720 Police/Sheriffs        $2.75 filed -> $3.010 model basis
-  //   fire        7710 Firefighters           NOT SOURCED -> $4.396 model basis
-  // See CALIBRATION_FINDINGS.md for why tier mix has to absorb the whole
-  // differential (medical severity is one shared value across all four classes)
-  // and for the per-class severity multiplier that would be the structurally
-  // correct fix instead.
+  // ASSERTED at 0.06 — approximately what the two retired channels carried
+  // combined. DISPLACED BY: observed severity by risk-quality band, or
+  // return-to-work outcome data.
   //
-  // ⚠ publicWorks.perm 0.2780 IS THE LARGEST SINGLE MOVE IN THIS CHANGE —
-  // 4.9x its previous 0.057, and the number most likely to be wrong. It is
-  // SOLVED-TO-TARGET, NOT OBSERVED: it is whatever value makes public works
-  // reach $6.733, given everything else held. Real permanent-partial rates run
-  // roughly 8% of claims overall, and while public works (laborers, mechanics,
-  // park and landscape maintenance) is genuinely the highest-PPD class — which
-  // is why WCIRB prices 9420 as the most expensive public-entity class — 27.8%
-  // is well above any directly observed figure.
-  // DISPLACED BY: a public-entity PPD rate by class from actual claim counts,
-  // or a per-class medical severity multiplier (which would let severity carry
-  // part of the differential and pull this back toward ~8%).
+  // WHY A WEIGHT TILT RATHER THAN POST-DRAW SCALING. The two are the same size
+  // (a +-10% move gives +-10.0% of loss scaled post-draw against +-9.5%
+  // tilted), so this is a choice of MECHANISM, not magnitude. The tilt
+  // represents what actually operates: safety programmes and early intervention
+  // PREVENT CLAIMS ESCALATING — they stop a strained back becoming a permanent
+  // disability. Post-draw scaling would instead assert that a well-managed
+  // employer's catastrophic claim costs 10% less, which is only partly true; a
+  // quadriplegic needing lifetime attendant care costs what it costs.
   //
-  // Catastrophic probabilities are likewise ANCHORED, not costed: solved
-  // alongside the perm rates and then scaled so the book lands at 0.049% of
-  // claims — the floor of the 0.05-0.15% PTD incidence range. Ordering stays
-  // hazard-correct (fire > police > publicWorks > clerical), which an earlier
-  // solve did NOT achieve and which is the check that this one is sane.
-  tierProbabilities: {
-    clerical:    { medOnly: 0.7511, temp: 0.2002, perm: 0.0487, catastrophic: 0.00012 },
-    publicWorks: { medOnly: 0.4612, temp: 0.2608, perm: 0.2780, catastrophic: 0.00048 },
-    police:      { medOnly: 0.6446, temp: 0.3015, perm: 0.0539, catastrophic: 0.00072 },
-    fire:        { medOnly: 0.6183, temp: 0.3021, perm: 0.0796, catastrophic: 0.00096 },
-  } as Record<WcClassKey, Record<WcTier, number>>,
+  // AND IT MUST TOUCH THE HEAVY COMPONENT OR IT DOES NOTHING: scaling the two
+  // small components by +-10% moves total loss by +-0.51%, because together
+  // they are 5.1% of it.
+  rqSeverityBeta: 0.06,
 
-  // Severity-ordering scores for the risk-quality tier tilt: worse risk
-  // quality shifts weight toward the higher-score (costlier) tiers.
-  tierMixScores: { medOnly: 0, temp: 1, perm: 2 } as Record<'medOnly' | 'temp' | 'perm', number>,
-
-  // --- Dollar vintage: trend rates and the one discount rate -------------
-  // Severity is DRAWN and STORED in accident-year dollars; these carry a
-  // payment forward to its settlement year (trendToSettlement). Medical and
-  // wage inflation are kept as SEPARATE rates deliberately — collapsing them
-  // into one would assert an equality between medical and wage inflation that
-  // is false, and GL will need the same distinction for its own legs.
-  medicalTrend: 0.06,    // medical leg of every tier, incl. the catastrophic annuity
-  indemnityTrend: 0.035, // indemnity / wage-linked legs
-
-  // The ONLY discounting done before Phase 3, and only for the catastrophic
-  // tier. Short-tail tiers settle within a few years, so their trended-nominal
-  // value is already within a rounding error of present value; the
-  // catastrophic tier's ~34-year inflating stream diverges by roughly 2.5x
-  // undiscounted, which makes an undiscounted nominal sum a meaningless number
-  // to book. Phase 3 replaces this flat rate with proper reserve-cohort
-  // discounting applied uniformly to every tier.
-  catastrophicDiscountRate: 0.04,
-
-  // --- A3 severity (accident-year dollars; lognormal mean + CV) -----------
-  severity: {
-    medOnly: { mean: 1800, cv: 1.0 },
-    // medicalMean 16,000 -> 8,000: the old figure made medical 1.6x the wage
-    // payment on a lost-time claim, which is inverted — a temporary-disability
-    // claim pays more in wages than in treatment.
-    //
-    // ⚠ durationWeeksMean 9 -> 16 IS THE WEAKEST NUMBER IN THIS CHANGE. It is
-    // ABOVE typical temporary-disability duration, and it was not chosen from
-    // duration data: it is the lever that pulls the book's indemnity share up
-    // into the 22-25% target band, and 16 is where that lands. Treat it as a
-    // fitted value wearing a duration's clothes.
-    // DISPLACED BY: any sourced TTD duration distribution for public entities,
-    // which should be preferred over this even if it moves the mix off target.
-    temp: { durationWeeksMean: 16, durationWeeksCv: 1.2, medicalMean: 8000, medicalCv: 1.5 },
-    // healingWeeks + awardWeeks MUST equal durationWeeksMean. The perm wage
-    // leg is split into a healing period (temporary wage replacement while the
-    // injury stabilises, booked as `indemnity`) and a scheduled award for the
-    // residual rating (booked as `impairment`). Asserted in wc-claim-check.ts,
-    // because the split is only a decomposition if the parts still sum to the
-    // whole.
-    //
-    // THE 15/30 SPLIT IS A JUDGMENT CALL, not a calibrated figure. Real TTD
-    // duration on a PPD claim runs 10-20 weeks, so 15 sits mid-range; awards
-    // vary far more widely with the impairment rating than a single number can
-    // express, and 30 is simply the residual.
-    //
-    // Expressed as ABSOLUTE WEEKS rather than a share on purpose, so a change
-    // to perm duration trips the sum assertion instead of silently rescaling
-    // the healing period out of its real 10-20 week range.
-    //
-    // THE WCIRB CLASS-COST REBUILD LEFT BOTH AT THEIR ORIGINAL VALUES. An
-    // earlier plan had duration going 45 -> 70; that turned out to be
-    // unnecessary once the per-class PERM RATES carry the class differential,
-    // and 45 (15 healing + 30 award) is what puts impairment inside its 13-16%
-    // target. medicalMean 65,000 -> 40,000 because real permanent-partial is
-    // award-dominated — the scheduled payment is the headline figure.
-    //
-    // The split is applied PROPORTIONALLY to each claim's DRAWN duration, not
-    // by subtracting a fixed 15 weeks — a claim that draws 8 weeks total must
-    // not book a negative award.
-    perm: {
-      durationWeeksMean: 45, durationWeeksCv: 1.0, medicalMean: 40000, medicalCv: 1.8,
-      healingWeeks: 15, awardWeeks: 30,
-    },
-  },
-
-  // Average annual wage by class; the weekly indemnity benefit is
-  // min(2/3 x weekly wage, statutory cap).
-  classAnnualWage: { clerical: 62_000, publicWorks: 58_000, police: 85_000, fire: 82_000 } as Record<WcClassKey, number>,
-  indemnityWageReplacement: 2 / 3,
-  // A visible policy lever, INTENTIONALLY NON-BINDING at current wages: the
-  // binding weekly benefit tops out at ~$1,090 (police), well under this cap.
-  // It exists to be turned into a constraint later — by wage inflation, by a
-  // high-wage class, or by a deliberate scenario change — not to bite today.
-  statutoryWeeklyCap: 1450,
-
-  // --- A4 catastrophic tier (an inflating annuity, not a single draw) -----
-  // Frequency note: the tierProbabilities table above implies 0.8935/yr on the
-  // canonical roster (0.040 clerical + 0.532 publicWorks + 0.139 police +
-  // 0.183 fire) — 0.049% of class claims, the floor of the 0.05-0.15% PTD
-  // incidence range. Was 3.3214/yr before the WCIRB class-cost rebuild. The
-  // table is the operative parameter.
+  // --- Report lag ---------------------------------------------------------
   //
-  // THE COSTING BELOW IS UNCHANGED AND DELIBERATELY SO. $180,000/yr of
-  // attendant care x a PV factor of ~48 is a defensible cost build-up; the
-  // catastrophic share was corrected on PROBABILITY, never by cutting this.
-  // An earlier attempt that cut severity to hit a share target produced a
-  // lifetime medical figure of $12,663/yr, which is how that failure is
-  // recognised if it recurs.
-  catastrophic: {
-    ageMin: 25,
-    ageMax: 55,
-    // Disability-adjusted remaining life: (lifeExpectancyAge - age) x
-    // disabilityAdjustment. A closed-form PROXY standing in for a mortality
-    // table — deliberately simple, and the only place a table would be needed.
-    lifeExpectancyAge: 80,
-    disabilityAdjustment: 0.85,
-    medicalFirstYear: 180_000,
-    retirementAge: 65, // indemnity runs to here, medical runs for life
-    // The medical leg escalates at medicalTrend and the indemnity leg at
-    // indemnityTrend (above) — the tier no longer carries its own hardcoded
-    // inflation rate.
-  },
-
-  // --- A5 presumption claims (police/fire occupational disease) -----------
-  // A separate process with a long report lag: the hook for a retroactive
-  // legislative shock. theta_WC(RQ) is deliberately NOT applied — presumption
-  // exposure is statutory, not a function of how well the member is run.
-  presumption: {
-    // 0.06 x $248.9M police+fire payroll on the canonical roster = ~14.9
-    // claims/yr FULL-MARKET, not pool-wide — the pool enrolls only a subset of
-    // the market, so this is what the whole 200-member roster would produce,
-    // not what any one pool actually sees. Full-market vs enrolled is its own
-    // recurring error class in this project; label it explicitly rather than
-    // let "pool-wide" imply the smaller, treaty-facing number.
-    ratePer1MPoliceFire: 0.06,
-    reportLagYearsMean: 8,
-    reportLagYearsCv: 0.8,
-    // The lag distribution is TRUNCATED AND RENORMALISED here — mandatory, not
-    // a tuning choice. Severity is trended forward over the lag at
-    // medicalTrend, and E[(1 + medicalTrend)^lag] for an unbounded lognormal
-    // lag is mathematically DIVERGENT (the lognormal's tail decays more slowly
-    // than the exponential grows), so expected severity has no finite value
-    // and the draw admits absurd claims — an uncapped 100-year lag books a
-    // $119M claim, which a long harness will eventually produce.
-    //
-    // 40 years covers a defensible worst case (exposure at ~22, latent
-    // occupational disease at ~62) and keeps the long-latency cancer and
-    // asbestos claims that make presumption a real policy issue. The book is
-    // insensitive to the exact bound (20y-60y moves it ~3%), so the choice is
-    // made on defensibility rather than on scale.
-    maxReportLagYears: 40,
-    severityMean: 350_000,
-    severityCv: 1.5,
-  },
-
-  // --- A7 payout patterns (data for Phase 3 reserving; nothing reads them yet)
-  // Fractions of the claim paid in years 1..n after the accident year.
-  // Catastrophic uses its own annuity schedule instead. Presumption is
-  // recognized at report and then pays out like perm.
-  payoutPatterns: {
-    medOnly: [0.90, 0.10],
-    temp: [0.60, 0.30, 0.10],
-    perm: [0.35, 0.25, 0.20, 0.12, 0.08],
-  } as Record<'medOnly' | 'temp' | 'perm', number[]>,
-
-  // Geographic severity multiplier, keyed by the roster's authored Region.
+  // Every claim draws a lag AFTER its severity. The draws are INDEPENDENT — the
+  // only coupling is that p_delayed differs by component (above), which is what
+  // makes the unreported inventory dollar-weighted rather than a random sample.
   //
-  // MEAN-NEUTRAL BY CONSTRUCTION: the three factors average exactly 1.00 at
-  // equal assignment probability, so region redistributes severity between
-  // members without moving the book's expected severity. The superseded 5-region
-  // array [0.92, 0.97, 1.03, 1.08, 1.12] under weights 10/20/40/20/10 had a
-  // weighted mean of 1.026 — region was silently adding 2.6% to every WC
-  // severity, which the pure premium then absorbed as if it were pure risk.
+  //   lag = round(1 + lognormal(mean 2.5, CV 2.0))     [years, >= 1]
+  //
+  // Shape: median 2 years, 10% beyond 7, 1% beyond 22, a thin tail to ~57.
+  // That matches the real structure — a large mass reporting at once, a chunk
+  // at one year (December injuries, and minor injuries that later worsened),
+  // and a thin tail of genuine occupational disease.
+  //
+  // THE 15%-ISH OVERALL DELAYED RATE IS DOING TWO JOBS DELIBERATELY: genuine
+  // late reporting, and the CALENDAR-BOUNDARY EFFECT — a December injury
+  // reported in January has a one-month real lag but crosses the accident year.
+  // In an annual model those are indistinguishable.
+  //
+  // WHY `large` IS TILTED 3.6x (0.18 against 0.05). It carries ~94% of the loss,
+  // so tilting it makes the IBNR inventory dollar-weighted toward large claims:
+  // 8.4% of claims by count but 17.1% by dollars, pool-wide. That recovers the
+  // correlation the retired presumption process had (0.82% of claims, 16% of
+  // dollars) and it is what gives a retroactive shock real force — without the
+  // tilt the inventory would be a random sample of ordinary claims. Schools has
+  // no `large` component, so its count and dollar shares are equal at 5.0%,
+  // which is right: a school district's late claims are not occupational
+  // disease.
+  //
+  // NO TRUNCATION IS NEEDED, unlike the retired presumption lag, because
+  // severity does not trend over the lag. See convention 2 in the header.
+  //
+  // ALL FOUR LAG PARAMETERS ARE ASSERTED. DISPLACED BY: report-date-minus-
+  // accident-date from the same claim file the severity fit came from — which
+  // would also make the implied loss-development factors a measured output
+  // instead of a derived one.
+  reportLag: { meanYears: 2.5, cv: 2.0 },
+
+  // Region severity multiplier. Mean-neutral by construction, so region shifts
+  // the DISTRIBUTION of severity across members without moving the book's
+  // expected loss. Unchanged.
   regionMultiplier: { North: 0.95, Central: 1.00, South: 1.05 } as Record<Region, number>,
 };
 

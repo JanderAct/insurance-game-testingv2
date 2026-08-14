@@ -29,7 +29,7 @@ import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { deriveSubRng } from '../../src/utils/random';
 import { WC_LOSS_MODEL } from '../../src/data/defaultAssumptions';
-import { computeKLine, expectedWcGrossLoss } from '../../src/utils/wcClaimEngine';
+import { computeKLine, expectedWcGrossLossForPricing } from '../../src/utils/wcClaimEngine';
 import { computeKGl, expectedGlGrossLoss } from '../../src/utils/glClaimEngine';
 import type { CoverageLine, GameState, Member } from '../../src/types/simulation';
 
@@ -182,7 +182,7 @@ console.log('\n\n=== TEST 2 — composition: enrolled book vs what the held pure
       if (r.line === 'WC') {
         // (a) the enrolled book's OWN analytic expected loss, with its actual
         // class mix, theta at actual RQ, and k_line.
-        const own = expectedWcGrossLoss(r.members, { kLine: computeKLine(r.members) });
+        const own = expectedWcGrossLossForPricing(r.members, { kLine: computeKLine(r.members) });
         wcRatios.push(own / r.expected);   // (b) = exported Pure Premium
       } else {
         const own = expectedGlGrossLoss(r.members, { kGl: computeKGl(r.members) });
@@ -223,10 +223,10 @@ console.log('\n\n=== TEST 3 — does k_line / k_GL fully neutralise RQ on the EN
       // The EXACT statement of neutralisation: expected loss at actual RQ,
       // scaled by k, must equal expected loss at neutral RQ.
       const eAct = r.line === 'WC'
-        ? expectedWcGrossLoss(r.members, { kLine: k })
+        ? expectedWcGrossLossForPricing(r.members, { kLine: k })
         : expectedGlGrossLoss(r.members, { kGl: k });
       const eNeu = r.line === 'WC'
-        ? expectedWcGrossLoss(r.members, { riskQualityOverride: 5 })
+        ? expectedWcGrossLossForPricing(r.members, { riskQualityOverride: 5 })
         : expectedGlGrossLoss(r.members, { riskQualityOverride: 5 });
       rows.push({ line: r.line, rq: wRq, k, product: wTheta * k, exact: eAct / eNeu });
     }

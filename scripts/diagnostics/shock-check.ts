@@ -30,13 +30,11 @@ import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
-import { resolveShocks, ownFreqMultipliers, ownParamOverrides } from '../../src/utils/shockResolver';
+import { resolveShocks, ownFreqMultipliers, ownComponentFreqMultipliers } from '../../src/utils/shockResolver';
 import { computeKGl, expectedGlGrossLoss, generateGlClaims } from '../../src/utils/glClaimEngine';
-import { computeKLine, expectedWcGrossLoss, generateWcClaims, nominalSumOfStream } from '../../src/utils/wcClaimEngine';
-import { getWcParams } from '../../src/utils/wcParams';
-import { WC_LOSS_MODEL } from '../../src/data/defaultAssumptions';
+import { computeKLine, componentMean, expectedWcGrossLossForPricing, generateWcClaims } from '../../src/utils/wcClaimEngine';
 import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
-import type { Claim, Member } from '../../src/types/simulation';
+import type { Member } from '../../src/types/simulation';
 import { SHOCK_CATALOG } from '../../src/data/shockCatalog';
 import { buildResultsWorkbook } from '../../src/utils/resultsExport';
 import { RESULT_METRICS } from '../../src/utils/resultMetrics';
@@ -75,13 +73,6 @@ function play(id: string, years: number, shocks?: ScheduledShock[]): ResultSet[]
 
 const fmt$ = (x: number) => `$${(x / 1e6).toFixed(2)}M`;
 const throws = (fn: () => unknown) => { try { fn(); return false; } catch { return true; } };
-
-// Undiscounted sum of an annuity's two legs, for confirming a catastrophic
-// claim books PRESENT VALUE rather than the nominal stream.
-function nominalOf(a: NonNullable<Claim['annuity']>): number {
-  return nominalSumOfStream(a.medicalFirstYearPayment, a.medicalInflationPct, a.medicalYears)
-    + nominalSumOfStream(a.indemnityAnnualPayment, a.indemnityInflationPct, a.indemnityYears);
-}
 
 // A REAL enrolled book for one line, taken from the game's own enrollment path
 // rather than reconstructed — the share is drawn per seed inside
@@ -272,19 +263,23 @@ console.log('\n--- 6. #15 Catastrophic WC Mega-Claim — measured at both bases 
 {
   const roster = getPredefinedMarketMembers();
   const pool = enrolledBook('MAMC6EA4', 'WC');
-  const inject = [{ tier: 'catastrophic', count: 2 }];
+  // RE-TARGETED: was `{ tier: 'catastrophic', count: 2 }`. The tier is retired
+  // and an amount is now REQUIRED — see below for why that requirement is the
+  // whole point of this section.
+  const INJECT_AMOUNT = 9_000_000;
+  const inject = [{ count: 2, amount: INJECT_AMOUNT }];
 
   const run = (book: Member[], injections?: typeof inject) => generateWcClaims({
     members: book, yearNumber: 3, calendarYear: 2028, instanceSeed: 24601,
-    kLine: computeKLine(book), gPool: 1, riskControlEffectiveness: 0, injections,
+    kLine: computeKLine(book), riskControlEffectiveness: 0, injections,
   });
 
   for (const [label, book] of [['FULL MARKET  ', roster], ['ENROLLED POOL', pool]] as [string, Member[]][]) {
     const base = run(book);
     const shocked = run(book, inject);
     const outcome = shocked.injectionResults[0];
-    console.log(`  ${label} natural catastrophic ${base.claimCountsByTier.catastrophic}/yr at this seed, gross ${fmt$(base.grossUltimateLoss)}`);
-    console.log(`                injected ${outcome.count} claims, ${fmt$(outcome.gross)} — average ${fmt$(outcome.gross / outcome.count)} each`);
+    console.log(`  ${label} gross ${fmt$(base.grossUltimateLoss)} at this seed`);
+    console.log(`                injected ${outcome.count} claims, ${fmt$(outcome.gross)} — ${fmt$(outcome.gross / outcome.count)} each`);
     console.log(`                line gross ${fmt$(base.grossUltimateLoss)} -> ${fmt$(shocked.grossUltimateLoss)} (+${((shocked.grossUltimateLoss / base.grossUltimateLoss - 1) * 100).toFixed(1)}%)`);
     // The injected claims must be the ONLY difference: natural claims are drawn
     // from their own streams and an injection opens a separate label.
@@ -293,69 +288,77 @@ console.log('\n--- 6. #15 Catastrophic WC Mega-Claim — measured at both bases 
     console.log(`                natural claim count unchanged (${base.claims.length} -> ${shocked.claims.length - outcome.count}): ${note(shocked.claims.length - outcome.count === base.claims.length, 'injection changed the natural claim count')}`);
   }
 
-  // WHY TWO AND NOT ONE. The tier already fires ~2.97/yr at full market, so the
-  // enrolled pool sees ~0.8/yr naturally. One injected claim adds roughly what
-  // a bad-luck year already delivers.
-  // ⚠ HOLD yearNumber FIXED AND VARY THE SEED. WC carries a frequency trend of
-  // -1.5%/yr, so looping yearNumber 1..N averages over an N-year decline rather
-  // than sampling one year N times: at year 200 lambda is 0.95^... of year 1's.
-  // A first version of this check looped the year and reported 1.10/yr against
-  // a true year-1 rate more than twice that.
-  let naturalFull = 0, naturalPool = 0;
-  const N = 200;
-  const kFullWc = computeKLine(roster), kPoolWc = computeKLine(pool);
-  for (let s = 1; s <= N; s++) {
-    naturalFull += generateWcClaims({ members: roster, yearNumber: 1, calendarYear: 2026, instanceSeed: 909 + s * 7919, kLine: kFullWc, gPool: 1, riskControlEffectiveness: 0 }).claimCountsByTier.catastrophic;
-    naturalPool += generateWcClaims({ members: pool, yearNumber: 1, calendarYear: 2026, instanceSeed: 909 + s * 7919, kLine: kPoolWc, gPool: 1, riskControlEffectiveness: 0 }).claimCountsByTier.catastrophic;
-  }
-  console.log(`  natural catastrophic rate, year 1, over ${N} seeds: full market ${(naturalFull / N).toFixed(2)}/yr, enrolled pool ${(naturalPool / N).toFixed(2)}/yr`);
-  console.log(`    the pool already sees ~1 every ${(N / Math.max(naturalPool, 1)).toFixed(1)} years unaided, which is why the event injects TWO —`);
-  console.log(`    one adds roughly what a bad-luck year already delivers, which under-delivers for a High band`);
+  // ⚠ WHY THE AMOUNT IS EXPLICIT, MEASURED RATHER THAN ASSERTED. Injecting two
+  // claims of the heavy component and letting them DRAW would book its MEAN.
+  // The retired catastrophic pair was $17.91M. If that ratio is not ~93x, the
+  // reasoning in the #15 catalog comment has drifted from the parameters.
+  const heavyMean = componentMean('large');
+  const ratio = INJECT_AMOUNT / heavyMean;
+  console.log(`  explicit $${(INJECT_AMOUNT / 1e6).toFixed(1)}M vs the heavy component's MEAN $${Math.round(heavyMean).toLocaleString()}: ${ratio.toFixed(0)}x`);
+  console.log(`    a mean-drawn pair would be ${fmt$(2 * heavyMean)} against the retired pair's $17.91M  ` +
+    `${note(ratio > 80 && ratio < 110, `explicit/mean ratio ${ratio.toFixed(0)}x is outside the ~93x the catalog comment claims`)}`);
 
   // An injected claim must be a REAL claim, not a bolt-on amount.
   const s = run(pool, inject);
   const injected = s.claims.slice(-2);
   const occIds = new Set(s.occurrences.map(o => o.id));
   console.log(`  injected claims are real claims:`);
-  console.log(`    carry an annuity schedule: ${note(injected.every(c => c.annuity !== undefined), 'injected claim has no annuity')}`);
-  console.log(`    booked at present value, not nominal: ${note(injected.every(c => c.annuity !== undefined && c.grossUltimate < nominalOf(c.annuity)), 'injected claim is not PV-booked')}`);
+  console.log(`    booked at the requested amount: ${note(injected.every(c => c.grossUltimate === INJECT_AMOUNT), 'injected claim was not booked at its explicit amount')}`);
   console.log(`    have an occurrence: ${note(injected.every(c => occIds.has(c.occurrenceId)), 'injected claim has no occurrence')}`);
-  console.log(`    tier and rating class set: ${note(injected.every(c => c.tier === 'catastrophic' && !!c.ratingClass), 'injected claim missing tier or rating class')}`);
+  console.log(`    component and rating group set: ${note(injected.every(c => c.tier === 'injected' && !!c.ratingClass), 'injected claim missing component or rating group')}`);
+  console.log(`    reported in the accident year (not backdated): ${note(injected.every(c => c.accidentYear === 3 && c.reportedYear === 3), 'an un-offset injection was backdated')}`);
   console.log(`    member losses reconcile to the line total: ${note(Math.abs(s.memberLossResults.reduce((t, m) => t + m.simulatedLoss, 0) - s.grossUltimateLoss) < 1e-6, 'injected claims are missing from memberLossResults')}`);
-  console.log(`    an unsupported tier throws: ${note(throws(() => run(pool, [{ tier: 'perm', count: 1 }])), 'an unsupported injection tier is silently accepted')}`);
+  console.log(`    a zero/absent amount throws: ${note(throws(() => run(pool, [{ count: 1, amount: 0 }])), 'an injection without a positive amount is silently accepted')}`);
+
+  // BACKDATING — the retroactive mechanism #10 needs. A claim dated to a prior
+  // accident year is RECOGNISED now and ATTRIBUTED back; that is dual booking,
+  // and it must show up as emerged prior-year loss rather than current-year.
+  const back = generateWcClaims({
+    members: pool, yearNumber: 3, calendarYear: 2028, instanceSeed: 24601,
+    kLine: computeKLine(pool), riskControlEffectiveness: 0,
+    injections: [{ count: 1, amount: 900_000, accidentYearOffset: -2 }],
+  });
+  const bc = back.claims[back.claims.length - 1];
+  console.log(`  backdated injection: accidentYear ${bc.accidentYear}, reportedYear ${bc.reportedYear}  ` +
+    `${note(bc.accidentYear === 1 && bc.reportedYear === 3, 'a backdated injection did not split accident and report year')}`);
+  console.log(`    counted as EMERGED prior-year loss, not current-accident-year: ` +
+    `${note(Math.abs(back.emergedGross - 900_000) < 1e-6, `backdated injection landed in the wrong bucket (emerged ${back.emergedGross})`)}`);
 }
 
-console.log('\n--- 7. #10 WC Presumption Expansion — paramOverride and forward persistence ---');
+console.log('\n--- 7. #10 WC Presumption Expansion — componentFreqMultiplier and forward persistence ---');
 {
   const roster = getPredefinedMarketMembers();
   const pool = enrolledBook('MAMC6EA4', 'WC');
-  const own = ownParamOverrides('#10', 'WC')!;
-  console.log(`  override: ${JSON.stringify(own)} (base ${WC_LOSS_MODEL.presumption.ratePer1MPoliceFire})`);
+  // RE-TARGETED: was a paramOverride on `presumption.ratePer1MPoliceFire`. That
+  // path is gone with the presumption process, and the mechanism went with it —
+  // the allow-list it needed had exactly one entry. The forward half is now an
+  // ARRIVAL-RATE multiplier on the heavy mixture component.
+  const own = ownComponentFreqMultipliers('#10', 'WC')!;
+  console.log(`  component multipliers: ${JSON.stringify(own)}`);
 
-  // The overlay must return the GLOBAL BY IDENTITY when empty. Not "equal to" —
-  // identical. That is what makes "no shock cannot move a number" structural.
-  console.log(`  getWcParams(undefined) === WC_LOSS_MODEL: ${note(getWcParams(undefined) === WC_LOSS_MODEL, 'the overlay copies the model when there is nothing to override')}`);
-  console.log(`  getWcParams({}) === WC_LOSS_MODEL: ${note(getWcParams({}) === WC_LOSS_MODEL, 'the overlay copies the model for an empty override set')}`);
-  console.log(`  a path outside the allow-list throws: ${note(throws(() => getWcParams({ 'severity.medOnly.mean': 1 })), 'an unreachable override path is silently accepted')}`);
-  console.log(`    (the overlay reaches only reads lexically inside generateWcClaims, expectedWcGrossLoss and`);
-  console.log(`     computeKLine. A path also read by a module-level helper would be HALF-applied, which is`);
-  console.log(`     worse than not applying it — hence the allow-list.)`);
-  console.log(`  the global is not mutated: ${note(WC_LOSS_MODEL.presumption.ratePer1MPoliceFire === 0.06, 'the overlay mutated the global model')}`);
-
+  // ⚠ THE MISTAKE THIS EFFECT EXISTS TO PREVENT, ASSERTED. Raising the heavy
+  // component's ARRIVAL RATE must leave the other components' counts alone. If
+  // this were implemented by raising its WEIGHT, the others would be forced down
+  // — a presumption expansion would make ordinary sprained backs rarer.
+  const S = 150;
   for (const [label, book] of [['FULL MARKET  ', roster], ['ENROLLED POOL', pool]] as [string, Member[]][]) {
     const k = computeKLine(book);
-    const base = expectedWcGrossLoss(book, { kLine: k, yearNumber: 1 });
-    const over = expectedWcGrossLoss(book, { kLine: k, yearNumber: 1, paramOverrides: own });
-    // Presumption claim counts, year 1, averaged over seeds.
-    const S = 150;
-    let cBase = 0, cOver = 0;
-    for (let s = 1; s <= S; s++) {
-      const args = { members: book, yearNumber: 1, calendarYear: 2026, instanceSeed: 5150 + s * 7919, kLine: k, gPool: 1, riskControlEffectiveness: 0 };
-      cBase += generateWcClaims(args).claimCountsByTier.presumption;
-      cOver += generateWcClaims({ ...args, paramOverrides: own }).claimCountsByTier.presumption;
+    const base = expectedWcGrossLossForPricing(book, { kLine: k, yearNumber: 1 });
+    const over = expectedWcGrossLossForPricing(book, { kLine: k, yearNumber: 1, componentFreqMultipliers: own });
+    let heavyBase = 0, heavyOver = 0, smallBase = 0, smallOver = 0;
+    for (let i = 1; i <= S; i++) {
+      const args = { members: book, yearNumber: 1, calendarYear: 2026, instanceSeed: 5150 + i * 7919, kLine: k, riskControlEffectiveness: 0 };
+      const b = generateWcClaims(args);
+      const o = generateWcClaims({ ...args, componentFreqMultipliers: own });
+      heavyBase += b.claimCountsByComponent.large; heavyOver += o.claimCountsByComponent.large;
+      smallBase += b.claimCountsByComponent.small; smallOver += o.claimCountsByComponent.small;
     }
-    console.log(`  ${label} presumption ${(cBase / S).toFixed(2)}/yr -> ${(cOver / S).toFixed(2)}/yr (ratio ${(cOver / cBase).toFixed(3)}, expect 1.5)  ${note(Math.abs(cOver / cBase - 1.5) / 1.5 < 0.05, `${label} presumption count ratio ${(cOver / cBase).toFixed(3)} vs 1.5`)}`);
-    console.log(`                WC expected gross ${fmt$(base)} -> ${fmt$(over)}   added ${fmt$(over - base)}/yr FORWARD, PERMANENTLY`);
+    const heavyRatio = heavyOver / heavyBase, smallRatio = smallOver / smallBase;
+    console.log(`  ${label} heavy-component count ${(heavyBase / S).toFixed(1)}/yr -> ${(heavyOver / S).toFixed(1)}/yr (ratio ${heavyRatio.toFixed(3)}, expect ${own.large})  ` +
+      `${note(Math.abs(heavyRatio - own.large) / own.large < 0.05, `${label} heavy-component ratio ${heavyRatio.toFixed(3)} vs ${own.large}`)}`);
+    console.log(`                small-component count UNMOVED ${(smallBase / S).toFixed(1)} -> ${(smallOver / S).toFixed(1)} (ratio ${smallRatio.toFixed(3)}, expect 1.000)  ` +
+      `${note(Math.abs(smallRatio - 1) < 0.03, `${label} small-component count moved ${smallRatio.toFixed(3)}x — the effect is scaling WEIGHTS, not the arrival rate`)}`);
+    console.log(`                WC expected gross ${fmt$(base)} -> ${fmt$(over)}   added ${fmt$(over - base)}/yr FORWARD, PERMANENTLY (+${((over / base - 1) * 100).toFixed(2)}%)`);
   }
 
   // FORWARD PERSISTENCE through a real game: absent before the fire year,
@@ -366,16 +369,26 @@ console.log('\n--- 7. #10 WC Presumption Expansion — paramOverride and forward
   const y4 = results[3].shockEvents![0];
   console.log(`    Y4 record still reports yearFired ${y4.yearFired} and ${fmt$(y4.expectedGrossLossAdded)} expected added`);
 
+  // ⚠ THE ONE-OFF HALF MUST NOT REPEAT. #10 is FUTURE-horizon, so every effect
+  // it carries applies every year from firing — except the three backdated
+  // injections, which are marked firstYearOnly. Without that flag the same
+  // reach-back would be re-injected annually for the rest of the game, which is
+  // a silent, compounding overstatement.
+  const injY3 = results[2].byLine.WC!.shockEvents?.[0]?.attributableClaims ?? 0;
+  const injY4 = results[3].byLine.WC!.shockEvents?.[0]?.attributableClaims ?? 0;
+  console.log(`  backdated injections: ${injY3} in the fire year, ${injY4} in each later year  ` +
+    `${note(injY3 === 3 && injY4 === 0, `retroactive reach-back repeated (Y3 ${injY3}, Y4 ${injY4}) — firstYearOnly is not being honoured`)}`);
+
   // THE RULED DYNAMIC, ASSERTED. A legislative change raises realized losses
   // and leaves premium standing still, because expectedLoss is built from the
-  // HELD purePremiumPer100 rather than the generator's analytic. The player
-  // must re-rate or bleed. The reinsurance attachment, being 125% of that same
+  // HELD purePremiumPer100 rather than the generator's analytic. The player must
+  // re-rate or bleed. The reinsurance attachment, being 125% of that same
   // unchanged expectedLoss, does not adjust either. Both are deliberate.
   const clean = play('MAMC6EA4', 5, []);
   const wcShock = results[4].byLine.WC!, wcClean = clean[4].byLine.WC!;
-  console.log(`  Y5 premium unchanged by the override: pure premium ${wcShock.purePremiumPer100.toFixed(6)} vs ${wcClean.purePremiumPer100.toFixed(6)}  ${note(wcShock.purePremiumPer100 === wcClean.purePremiumPer100, 'the override moved the pure premium — it must not')}`);
-  console.log(`  Y5 expectedLoss unchanged: ${fmt$(wcShock.expectedLoss)} vs ${fmt$(wcClean.expectedLoss)}  ${note(wcShock.expectedLoss === wcClean.expectedLoss, 'the override moved the priced expected loss')}`);
-  console.log(`  Y5 attachment unchanged: ${fmt$(wcShock.attachment)} vs ${fmt$(wcClean.attachment)}  ${note(wcShock.attachment === wcClean.attachment, 'the override moved the reinsurance attachment')}`);
+  console.log(`  Y5 premium unchanged by the shock: pure premium ${wcShock.purePremiumPer100.toFixed(6)} vs ${wcClean.purePremiumPer100.toFixed(6)}  ${note(wcShock.purePremiumPer100 === wcClean.purePremiumPer100, 'the shock moved the pure premium — it must not')}`);
+  console.log(`  Y5 expectedLoss unchanged: ${fmt$(wcShock.expectedLoss)} vs ${fmt$(wcClean.expectedLoss)}  ${note(wcShock.expectedLoss === wcClean.expectedLoss, 'the shock moved the priced expected loss')}`);
+  console.log(`  Y5 attachment unchanged: ${fmt$(wcShock.attachment)} vs ${fmt$(wcClean.attachment)}  ${note(wcShock.attachment === wcClean.attachment, 'the shock moved the reinsurance attachment')}`);
   console.log(`    RULED AND INTENDED: a law that makes claims more expensive does not politely raise your`);
   console.log(`    rates for you, and the treaty does not adjust either. Do not "fix" either of these.`);
 }
@@ -388,9 +401,13 @@ console.log('\n--- 8. #28 Pandemic — THE CROSS-LINE TEST ---');
   // processYear (which has all three lines in scope) and per-line effects are
   // projected down. Both target lines are REAL cut-over claim-level generators,
   // not stubs.
-  const wcOwn = ownFreqMultipliers('#28', 'WC')!;
+  // WC's half is a COMPONENT multiplier now (its presumption sub-key is gone);
+  // GL's is still a sub-coverage frequency multiplier. Reading them from
+  // different accessors is the point — they are different mechanisms.
+  const wcOwn = ownComponentFreqMultipliers('#28', 'WC')!;
   const glOwn = ownFreqMultipliers('#28', 'GL')!;
-  console.log(`  WC effects ${JSON.stringify(wcOwn)}   GL effects ${JSON.stringify(glOwn)}`);
+  console.log(`  WC component effects ${JSON.stringify(wcOwn)}   GL sub effects ${JSON.stringify(glOwn)}`);
+  console.log(`  WC's half did NOT silently vanish: ${note(!!wcOwn && Object.keys(wcOwn).length > 0, "#28's WC half resolves to nothing — the event has silently become GL-only")}`);
 
   const results = play('MAMC6EA4', 5, [{ shockId: '#28', yearNumber: 2 }]);
   const clean = play('MAMC6EA4', 5, []);
@@ -415,14 +432,46 @@ console.log('\n--- 8. #28 Pandemic — THE CROSS-LINE TEST ---');
     console.log(`  ${line}: gross moved ${movedGross}, cost reported ${fmt$((lineRec?.expectedGrossLossAdded ?? 0) + (lineRec?.attributableGrossLoss ?? 0))}  ${note(movedGross === hasExpectation, `${line} moved the draw without reporting a cost — the analytic is not matched to the draw`)}`);
   }
 
-  // BOTH LINES MOVE IN THE SHOCK YEAR, AND ONLY IN IT.
+  // BOTH LINES MOVE IN THE SHOCK YEAR. WHAT HAPPENS AFTER IT DIFFERS BY LINE,
+  // AND THE DIFFERENCE IS THE REPORT LAG.
+  //
+  // ⚠ THIS ASSERTION CHANGED WITH THE WC SEVERITY REBUILD, and the change is a
+  // real consequence rather than a relaxation. It used to require every year but
+  // the shock year to be byte-identical, on the reasoning that "a current-horizon
+  // event that leaks forward would be indistinguishable from a future-horizon
+  // one". That reasoning was correct when every claim reported in its accident
+  // year. It no longer is:
+  //
+  //   #28 raises the arrival rate of WC's HEAVY component for one year. 18% of
+  //   heavy-component claims report LATE. So the extra claims the shock causes in
+  //   Y2 keep EMERGING through Y3, Y4 and Y5 — the pool learns about them later.
+  //
+  // That is what a report lag means, and a current-horizon shock now genuinely
+  // has a multi-year reported tail. It is still distinguishable from a
+  // future-horizon event: the DRAW is confined to the shock year (Y3+ opens
+  // independent per-member streams), so the later movement can only be positive
+  // and must decay as the lag distribution runs off. Both are asserted.
+  //
+  // GL has no report lag, so GL must still be confined to the single year — the
+  // contrast between the two lines here is the check that this is the lag and
+  // not state leaking somewhere.
   for (const line of ['WC', 'GL'] as CoverageLine[]) {
-    const moved = [0, 1, 2, 3, 4].map(i => results[i].byLine[line]!.grossUltimateLoss !== clean[i].byLine[line]!.grossUltimateLoss);
+    const delta = [0, 1, 2, 3, 4].map(i => results[i].byLine[line]!.grossUltimateLoss - clean[i].byLine[line]!.grossUltimateLoss);
+    const moved = delta.map(d => d !== 0);
     console.log(`  ${line} gross moved in years: ${moved.map((m, i) => (m ? i + 1 : null)).filter(Boolean).join(', ') || 'none'}`);
     console.log(`    Y2 ${fmt$(clean[1].byLine[line]!.grossUltimateLoss)} -> ${fmt$(results[1].byLine[line]!.grossUltimateLoss)}  ${note(moved[1], `${line} did not move in the shock year`)}`);
-    // Years 1 and 3-5 must be untouched. A current-horizon event that leaks
-    // forward would be indistinguishable from a future-horizon one.
-    console.log(`    Y1 and Y3-Y5 untouched: ${note(!moved[0] && !moved[2] && !moved[3] && !moved[4], `${line} moved outside the shock year`)}`);
+    // NOTHING LEAKS BACKWARDS, on either line. A pre-shock year moving would mean
+    // the resolver is applying a current-horizon effect before its fire year.
+    console.log(`    Y1 (pre-shock) untouched: ${note(!moved[0], `${line} moved BEFORE the shock year`)}`);
+    if (line === 'GL') {
+      console.log(`    Y3-Y5 untouched (GL has no report lag): ${note(!moved[2] && !moved[3] && !moved[4], 'GL moved after its current-horizon shock year')}`);
+    } else {
+      const tail = [delta[2], delta[3], delta[4]];
+      console.log(`    Y3-Y5 emergence tail: ${tail.map(d => fmt$(d)).join(', ')}`);
+      console.log(`      every tail year is an ADDITION, never a subtraction: ${note(tail.every(d => d >= 0), `WC's post-shock years moved DOWN (${tail.map(d => fmt$(d)).join(', ')}) — emergence can only add`)}`);
+      console.log(`      and the tail is far smaller than the shock year (${fmt$(delta[1])}): ` +
+        `${note(Math.max(...tail) < delta[1] * 0.5, 'the emergence tail is not small relative to the shock year — this looks like forward leakage, not a report lag')}`);
+    }
   }
 
   // Property is not just unrecorded — it must be numerically untouched, which
@@ -430,13 +479,13 @@ console.log('\n--- 8. #28 Pandemic — THE CROSS-LINE TEST ---');
   const prMoved = [0, 1, 2, 3, 4].some(i => results[i].byLine.Property!.grossUltimateLoss !== clean[i].byLine.Property!.grossUltimateLoss);
   console.log(`  Property gross unmoved in every year: ${note(!prMoved, 'the cross-line event perturbed an untargeted line')}`);
 
-  // And the presumption channel specifically — #28 and #10 act on the same
+  // And the heavy-component channel specifically — #28 and #10 act on the same
   // knob by different mechanisms, so they must compose rather than collide.
   const both = play('MAMC6EA4', 5, [{ shockId: '#10', yearNumber: 1 }, { shockId: '#28', yearNumber: 2 }]);
   const y2both = both[1];
   console.log(`  #10 + #28 together in Y2: ${y2both.shockEvents?.length} records, ${y2both.shockEvents?.map(s => s.shockId).join(' + ')}  ${note(y2both.shockEvents?.length === 2, 'two concurrent events did not both record')}`);
-  console.log(`    #10 moves the base rate permanently, #28 multiplies the realized draw for one year —`);
-  console.log(`    same knob, different mechanisms, and they compose.`);
+  console.log(`    #10 raises the heavy component's arrival rate permanently, #28 for one year —`);
+  console.log(`    same knob, different horizons, and the resolver COMPOUNDS them rather than letting one win.`);
   const wcBoth = y2both.byLine.WC!.grossUltimateLoss;
   const wc28 = results[1].byLine.WC!.grossUltimateLoss;
   console.log(`    WC Y2 gross: clean ${fmt$(clean[1].byLine.WC!.grossUltimateLoss)}, #28 only ${fmt$(wc28)}, both ${fmt$(wcBoth)}`);
