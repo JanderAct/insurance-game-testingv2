@@ -1597,3 +1597,73 @@ the analytic (−9.0% here, −4.1% measured directly full-market) until the tai
 genuinely reported. Draw-versus-expectation remains gated where it can be — the **$1M-capped** mean in
 `wc-severity-rebuild-check`. The header's claim that `wc-claim-check.ts` covered it was stale; that
 harness was deleted with the tier model.
+
+---
+
+## 37. WC's frequency trend was drawn but not priced — the pool's underwriting drift
+
+The draw trended frequency at −1.5%/yr with year 1 as reference. The price was a single held constant
+that never saw the year. So realized loss ran below the priced level **by construction**, and the gap
+compounded: 93.5% of expected averaged over ten years.
+
+```
+expected combined ratio    0.8696 + 0.1304 = 1.0000
+with losses at 93.5%       0.8132 + 0.1304 = 0.9436
+measured, before the fix                     0.9394
+```
+
+**It was documented as deliberate** — `defaultAssumptions.ts` said pure premium "is derived ONCE from
+the neutral-book expectation and held, while realized frequency falls 1.5%/yr. Unchanged from the
+retired model." An inherited choice, not a slip, and a real defect wearing a documented-intent label.
+That comment is now rewritten to say the opposite, with the measurement, so it cannot be restored by
+someone reading it as design.
+
+**The fix is one factor at the pricing step**: `WC_HELD_PURE_PREMIUM_PER_100 * wcFrequencyTrend(yearNumber)`.
+
+**The held-pure-premium rule is intact.** It forbids *re-deriving* the pick annually, which
+double-corrects against k_line and makes pricing chase the roster. `wcFrequencyTrend` is a pure
+function of the year and one constant — it cannot see who is enrolled. The WC branch also reads the
+held constant rather than `lineState.purePremiumPer100`, so the factor is applied fresh each year
+instead of compounding off the stored value; only Property's branch compounds, deliberately.
+
+### Measured, 50 games x 10 years, WC only, no reinsurance, CLF 1.000
+
+| | before | after | predicted |
+|---|---|---|---|
+| underwriting, median | +0.453x | **+0.127x** | ~0 |
+| underwriting, mean | +0.302x | **−0.017x** (CI ±0.230) | ~0 |
+| investment income, median | +1.207x | +1.142x | +1.21x |
+| combined ratio | 93.94% | **100.41%** (CI ±4.69pp) | ~100% |
+| pure premium Y1→Y10 | 3.7398 flat | 3.7398 → 3.2642 (−12.72%) | −13% |
+| member charge Y1→Y10 | — | $14.57M → $11.51M (−21%) | falls |
+
+**Q1 answers yes: the underwriting component goes to zero.** Mean −0.017x against a ±0.230 CI, median
++0.127x inside it. No second source of drift. Investment income at +1.142x is now the only driver, a
+little below its prior +1.207x because a smaller surplus earns less.
+
+**Q2 answers yes**, 100.41% against an expected 100.00%, comfortably inside its CI. The per-year
+`drawn/expected` column, which ran 1.00 → 0.88 across the game before, is now flat around 0.96–1.03
+with no slope. That flatness is the real confirmation: the *compounding* is gone, not merely the
+average level.
+
+### The membership channel is effectively dead, and that is worth knowing
+
+A 21% fall in the member charge moved membership almost not at all:
+
+| | before | after |
+|---|---|---|
+| members at Y10 | 51.8 | 51.2 |
+| exposure at Y10 | $304.8M | $306.5M |
+| retention rate | 0.960 | 0.959 |
+| satisfaction | 7.46 | 7.54 |
+| market share Y10 | 23.45% | 23.58% |
+
+Satisfaction moved +0.08 for a fifth off the price, and retention did not move at all. Note also that
+membership declines ~14% over ten years in **both** runs — that decline is driven by something other
+than price, and cheapening the product by 21% did not slow it. Recorded, not chased.
+
+### Also moved: IBNR / annual loss
+
+Median 0.577 at Y10 against 0.529 before. The numerator is unchanged in construction; the denominator
+is a single year's gross loss, and the book shifted slightly with membership. Little's Law still
+converges from below (0.680 → 0.796 → 0.841 at Y2/Y5/Y10), which is the gated quantity.

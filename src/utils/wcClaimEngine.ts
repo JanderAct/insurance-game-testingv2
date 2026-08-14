@@ -97,7 +97,18 @@ function thetaWc(riskQuality: number): number {
 
 // Safety improves ~1.5%/yr. Live Year 1 is the reference (factor 1.0); the
 // pre-game years sit slightly above 1 — the past was more dangerous.
-function frequencyTrend(yearNumber: number): number {
+//
+// EXPORTED SO PRICING CAN APPLY IT TOO. The draw has always trended; the PRICE
+// did not, so WC losses ran below the priced level by construction and the gap
+// compounded — 93.5% of expected over ten years, which is most of the pool's
+// underwriting drift. See the note on WC_HELD_PURE_PREMIUM_PER_100's use site.
+//
+// ⚠ IT IS SAFE AT THE PRICING STEP PRECISELY BECAUSE IT IS ROSTER-BLIND: a pure
+// function of yearNumber and one constant. The held-pure-premium rule forbids
+// RECOMPUTING the pick annually (that double-corrects against k_line and makes
+// pricing chase the roster); it does not forbid a deterministic factor that
+// cannot see who is enrolled.
+export function wcFrequencyTrend(yearNumber: number): number {
   return Math.pow(1 + M.frequencyTrendPerYear, yearNumber - 1);
 }
 
@@ -200,7 +211,7 @@ function expectedWcGrossLossCore(
   const params = M;
   const rqOverride = options.riskQualityOverride;
   const kLine = options.kLine ?? 1;
-  const trend = frequencyTrend(options.yearNumber ?? 1);
+  const trend = wcFrequencyTrend(options.yearNumber ?? 1);
 
   let total = 0;
   for (const member of members) {
@@ -329,7 +340,7 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
   const params = M;
   const componentFreqMultipliers = inputs.componentFreqMultipliers;
 
-  const trend = frequencyTrend(yearNumber);
+  const trend = wcFrequencyTrend(yearNumber);
   const rcFactor = Math.max(0, 1 - riskControlEffectiveness);
 
   const claims: Claim[] = [];

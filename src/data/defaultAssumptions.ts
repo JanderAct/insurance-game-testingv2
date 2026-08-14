@@ -65,10 +65,22 @@ export const AGGREGATE_LOSS_DISTRIBUTION = {
 //    trending removes the divergence, removes the truncation, and leaves the
 //    severity fit as fitted.
 //
-// 3. FREQUENCY TREND IS A DECLINE and pure premium does NOT track it. WC's
-//    purePremiumPer100 is derived ONCE from the neutral-book expectation and
-//    held, while realized frequency falls 1.5%/yr. Unchanged from the retired
-//    model.
+// 3. FREQUENCY TREND IS A DECLINE AND THE PRICE NOW TRACKS IT. The pick is still
+//    DERIVED ONCE from the neutral-book expectation and held; the pricing step
+//    then multiplies it by wcFrequencyTrend(yearNumber), so the rate falls 1.5%
+//    a year alongside the draw. Over a ten-year game the WC rate declines ~13%.
+//
+//    ⚠ THIS PARAGRAPH USED TO SAY THE PRICE DELIBERATELY DID NOT TRACK IT
+//    ("unchanged from the retired model"), and that was a real defect wearing a
+//    documented-intent label. The draw trended and the price did not, so losses
+//    ran below the priced level BY CONSTRUCTION and the gap compounded: 93.5% of
+//    expected averaged over ten years, turning an expected 100.0% combined ratio
+//    into a measured 93.9%. It was inherited from the retired tier model rather
+//    than chosen for this one. Do not restore it.
+//
+//    The held-pure-premium rule is intact. It forbids RE-DERIVING the pick each
+//    year, which would double-correct against k_line and make pricing chase the
+//    roster; a factor that is a pure function of the year cannot do either.
 // ===========================================================================
 
 // RETAINED IN FULL — the police column is GL law-enforcement's exposure base

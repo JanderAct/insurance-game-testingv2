@@ -38,7 +38,7 @@ import { simulateMarketReturns, blendInvestmentReturn } from './investmentEngine
 import { simulateMemberMovement } from './membershipEngine';
 import { cloneMembershipHistory, openInterval, closeInterval } from './membershipHistory';
 import { cloneMemberLossHistory, recordMemberLossYear } from './memberLossHistory';
-import { computeKLine, deriveNeutralPurePremiumPer100, expectedWcGrossLossForPricing, generateWcClaims } from './wcClaimEngine';
+import { computeKLine, deriveNeutralPurePremiumPer100, expectedWcGrossLossForPricing, generateWcClaims, wcFrequencyTrend } from './wcClaimEngine';
 import { dollarWeightedPDelayed, ldfToUltimate, wcIbnrBalance } from './wcIbnr';
 import { computeKGl, deriveNeutralGlPurePremiumPer100, expectedGlGrossLoss, generateGlClaims } from './glClaimEngine';
 import { generateNarrative } from './narrativeEngine';
@@ -208,12 +208,30 @@ export function processLineYear(
   // Risk control is deliberately ABSENT here while multiplying the draws'
   // frequency (finding 17): applying it to both sides would cancel and rebuild
   // the no-op. Instance lossTrend is likewise absent from the claim lines —
-  // WC trends frequency at its own -1.5%/yr inside its generator; GL's 7%
-  // social inflation acts on the accident-to-settlement lag, which is
-  // year-invariant, so its expectation (and held premium) is constant too.
+  // GL's 7% social inflation acts on the accident-to-settlement lag, which is
+  // year-invariant, so its expectation (and held premium) is constant.
   // lossTrend remains Property-only.
+  //
+  // ⚠ WC'S FREQUENCY TREND IS NOW PRICED, AND IT DID NOT USE TO BE. The draw has
+  // always trended frequency at -1.5%/yr with year 1 as the reference; the price
+  // was a single held constant that never saw the year. So realized loss ran below
+  // the priced level BY CONSTRUCTION and the gap compounded — 93.5% of expected
+  // averaged over ten years, which turned an expected 100.0% combined ratio into a
+  // measured 93.9% and accounted for essentially all of the pool's underwriting
+  // drift. It was documented as deliberate and inherited from the retired model;
+  // it is overturned here.
+  //
+  // THIS DOES NOT BREAK THE HELD-PURE-PREMIUM RULE. The rule exists because
+  // RE-DERIVING the pick each year double-corrects against k_line, which already
+  // makes the roster/risk-quality-mix correction, and creates a pricing-chases-
+  // roster feedback loop. wcFrequencyTrend is a pure function of yearNumber and
+  // one constant — it cannot see the roster — so the derivation stays held and
+  // only a deterministic factor is applied on top. Note the WC branch reads the
+  // HELD CONSTANT, never lineState.purePremiumPer100, so the factor is applied
+  // fresh each year rather than compounding off last year's stored value; only
+  // Property's branch compounds, and deliberately.
   const newPurePremiumPer100 = line === 'WC'
-    ? WC_HELD_PURE_PREMIUM_PER_100
+    ? WC_HELD_PURE_PREMIUM_PER_100 * wcFrequencyTrend(yearNumber)
     : line === 'GL'
     ? GL_HELD_PURE_PREMIUM_PER_100
     : lineState.purePremiumPer100 *
