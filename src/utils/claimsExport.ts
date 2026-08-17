@@ -151,21 +151,35 @@ function buildWcSheetRows(rows: LineClaimRow[]): Row[] {
   return [[`WC claims. ${WC_COMPONENT_NOTE} ${ENROLLED_NOTE}`], header, ...body];
 }
 
+// ⚠ THE SUB-COVERAGE / LEGAL BASIS / LITIGATION STAGE / INDEMNITY / ALAE /
+// SETTLEMENT YEAR COLUMNS WERE REMOVED BY THE GL SUB-COVERAGE REBUILD, and
+// they are not coming back in this shape. GL draws one amount per claim from
+// a flat 3-component mixture with no sub-coverage, no liability gate, no
+// litigation stage, no statutory cap (so no indemnity/ALAE split to report),
+// and no report-lag trending (so no settlement year). There is nothing left
+// to decompose.
+//
+// This changes the sheet's SHAPE, so solo-export-guard's GL hash moves. That
+// is expected and is a shape change, not a value change.
+const GL_COMPONENT_NOTE =
+  'One amount per claim: GL severity is a flat 3-component lognormal mixture with no sub-coverage, ' +
+  'gate, litigation stage, or indemnity/ALAE split (ALAE is included in the drawn amount). Tier is ' +
+  'the MIXTURE COMPONENT the claim was drawn from (component1 / component2 / component3) — these are ' +
+  'NOT the retired general / epl / lawEnforcement / abuse sub-coverages. Reported Year always equals ' +
+  'Accident Year: GL carries no report lag.';
+
 function buildGlSheetRows(rows: LineClaimRow[]): Row[] {
   const header = [
-    ...SHARED_HEADER, 'Sub-Coverage', 'Legal Basis', 'Litigation Stage',
-    'Status', 'Gross Incurred', 'Gross Paid', 'Indemnity', 'ALAE',
-    'Reported Year', 'Settlement Year', 'Enrolled',
+    ...SHARED_HEADER, 'Component', 'Status', 'Gross Incurred',
+    'Gross Paid', 'Reported Year', 'Enrolled',
   ];
-  const body = sortClaimRows(rows).map(({ claim, member, enrolled }) => [
-    claim.id, claim.occurrenceId, claim.memberId, safeStr(member?.name), safeStr(member?.type),
-    claim.accidentYear, claim.calendarYear,
-    claim.tier, safeStr(claim.legalBasis), safeStr(claim.litigationStage),
-    claim.status, roundOrBlank(claim.grossUltimate), roundOrBlank(claim.paidToDate),
-    roundOrBlank(claim.indemnity), roundOrBlank(claim.alae),
-    claim.reportedYear, claim.settlementYear ?? '', enrolled ? 'Yes' : 'No',
+  const body = sortClaimRows(rows).map(row => [
+    ...sharedCells(row),
+    row.claim.tier,
+    row.claim.status, roundOrBlank(row.claim.grossUltimate),
+    roundOrBlank(row.claim.paidToDate), row.claim.reportedYear, row.enrolled ? 'Yes' : 'No',
   ]);
-  return [[`GL claims. ${ENROLLED_NOTE}`], header, ...body];
+  return [[`GL claims. ${GL_COMPONENT_NOTE} ${ENROLLED_NOTE}`], header, ...body];
 }
 
 function buildPropertySheetRows(rows: LineClaimRow[]): Row[] {

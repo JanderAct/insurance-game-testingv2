@@ -431,7 +431,7 @@ export function processLineYear(
   let generatedOccurrences: Occurrence[] | undefined;
   let wcCountsByClass: Record<string, number> | undefined;
   let wcCountsByTier: Record<string, number> | undefined;
-  let glCountsBySub: Record<string, number> | undefined;
+  let glClaimCount: number | undefined;
   let memberLossResults: MemberLossResult[];
   let aggregateMemberLoss: number;
   let marketMemberLossResults: MemberLossResult[] | undefined;
@@ -645,7 +645,7 @@ export function processLineYear(
       : undefined;
     generatedClaims = generated.claims;
     generatedOccurrences = generated.occurrences;
-    glCountsBySub = generated.claimCountsBySub;
+    glClaimCount = generated.claimCount;
     memberLossResults = generated.memberLossResults;
     aggregateMemberLoss = generated.grossUltimateLoss;
     marketMemberLossResults = [
@@ -653,8 +653,8 @@ export function processLineYear(
       ...(prospectGenerated?.memberLossResults ?? []),
     ];
     kLineApplied = kGl;
-    // GL's shock event (ruled J11): any single occurrence whose gross total
-    // (indemnity + ALAE, all claimants of an abuse batch combined) exceeds $1M.
+    // GL's shock event (ruled J11): any single occurrence exceeds $1M.
+    // Occurrence == claim for GL now, so this is the largest single claim.
     shockOccurred = generated.maxOccurrenceGross > 1_000_000;
 
     // The EXPECTED cost of any frequency shock on this line, attributed per
@@ -663,10 +663,11 @@ export function processLineYear(
     // definition of GL's expected loss would drift from the first.
     //
     // PER EVENT INDEPENDENTLY: each firing is priced against the unshocked
-    // baseline using only its OWN effects. When two events compound on the same
-    // sub-coverage their individual figures therefore do not sum to the
-    // combined effect, which is correct — each answers "what did this event
-    // add", not "how do we split the interaction".
+    // baseline using only its OWN effects. When two events compound on GL
+    // (both are whole-line multipliers now — no sub-coverage left to target)
+    // their individual figures therefore do not sum to the combined effect,
+    // which is correct — each answers "what did this event add", not "how do
+    // we split the interaction".
     if (ctx.shock?.freqMultipliers && ctx.shockFirings?.length) {
       const baseline = expectedGlGrossLoss(memberResult.activeMembers, { kGl });
       for (const firing of ctx.shockFirings) {
@@ -740,7 +741,7 @@ export function processLineYear(
     const towerLine = line as TowerLine;
     const placed = normalizeLayersPlaced(towerLine, lineDecisions.layersPlaced);
     placedLayers = placed;
-    const totals = occurrenceTotals(generatedClaims ?? [], generatedOccurrences ?? [], towerLine);
+    const totals = occurrenceTotals(generatedClaims ?? [], generatedOccurrences ?? []);
     const cession = cedeOccurrences(towerLine, totals, placed);
     cededByLayer = cession.cededByLayer;
     retainedAboveTower = cession.retainedAboveTower;
@@ -1142,7 +1143,7 @@ export function processLineYear(
     occurrences: generatedOccurrences,
     claimCountsByClass: wcCountsByClass,
     claimCountsByTier: wcCountsByTier,
-    claimCountsBySub: glCountsBySub,
+    claimCount: glClaimCount,
     commonLossFactor,
     catastropheFactor,
     shockLossAmount,

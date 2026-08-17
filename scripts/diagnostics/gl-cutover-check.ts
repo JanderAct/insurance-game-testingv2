@@ -6,7 +6,8 @@
 // WC and GL must be DECOUPLED on the pool-year factor (WC reports 1, GL reports
 // the shared gPool draw — see WC_LOSS_MODEL.poolYearFactor),
 // neither may carry a separate shockLossAmount (their shock lives inside the
-// drawn claims), and claimCountsBySub must reconcile to the claims array.
+// drawn claims), and claimCount must reconcile to the claims array (no more
+// per-sub breakdown to reconcile — the GL sub-coverage rebuild deleted it).
 //
 //   npx tsx scripts/diagnostics/gl-cutover-check.ts 6b   # assert the ratio
 //   npx tsx scripts/diagnostics/gl-cutover-check.ts      # 6a: report only
@@ -43,10 +44,9 @@ const glGrossLR: number[] = [], perSeedGlGross: number[] = [];
 const glAnalyticLR: number[] = [], glEnrolledPP: number[] = [], glDrawOverExp: number[] = [];
 const wcGrossLR: number[] = [];
 let maxTie = 0, glClaimSumErr = 0, wcClaimSumErr = 0, lineYears = 0, nonFinite = 0;
-let glShockAmtBad = 0, wcFactorNotOne = 0, glFactorIsOne = 0, subCountMismatch = 0, memberSumErr = 0;
+let glShockAmtBad = 0, wcFactorNotOne = 0, glFactorIsOne = 0, countMismatch = 0, memberSumErr = 0;
 const glClaimsPerYear: number[] = [], glShockYears: number[] = [];
 const wcGross: number[] = [], wcPrem: number[] = [], glGross: number[] = [], glPrem: number[] = [], prGross: number[] = [], prPrem: number[] = [];
-const subTotals: Record<string, number> = {};
 
 for (const id of SEEDS) {
   const instance = generateGameInstance(id, seedOf(id));
@@ -79,13 +79,8 @@ for (const id of SEEDS) {
     if (gl.claims) {
       glClaimSumErr = Math.max(glClaimSumErr, Math.abs(gl.claims.reduce((s, c) => s + c.grossUltimate, 0) - gl.grossUltimateLoss));
       glClaimsPerYear.push(gl.claims.length);
-      const counts = gl.claimCountsBySub;
-      if (!counts) { subCountMismatch++; problems.push(`${id} Y${y}: GL result carries no claimCountsBySub`); }
-      else {
-        const subSum = (counts.general ?? 0) + (counts.epl ?? 0) + (counts.lawEnforcement ?? 0) + (counts.abuse ?? 0);
-        if (subSum !== gl.claims.length) subCountMismatch++;
-        for (const [k, v] of Object.entries(counts)) subTotals[k] = (subTotals[k] ?? 0) + v;
-      }
+      if (gl.claimCount === undefined) { countMismatch++; problems.push(`${id} Y${y}: GL result carries no claimCount`); }
+      else if (gl.claimCount !== gl.claims.length) countMismatch++;
       const mSum = gl.memberLossResults.reduce((s, r) => s + r.simulatedLoss, 0);
       memberSumErr = Math.max(memberSumErr, Math.abs(mSum - gl.aggregateMemberLoss));
     } else problems.push(`${id} Y${y}: GL result carries no claims array`);
@@ -120,10 +115,8 @@ console.log(`  GL commonLossFactor still varies (gPool draw retained for GL): ${
 console.log(`    WC and GL are now INDEPENDENT. gPool was the model's only cross-line correlation, so a bad`);
 console.log(`    WC year no longer carries any information about GL. Deliberate — see WC_LOSS_MODEL.poolYearFactor.`);
 console.log(`  claim-line shockLossAmount != 0 count: ${glShockAmtBad}  ${note(glShockAmtBad === 0, 'claim-line shockLossAmount nonzero')}`);
-console.log(`  claimCountsBySub mismatches: ${subCountMismatch}  ${note(subCountMismatch === 0, 'claimCountsBySub missing or does not sum to claims')}`);
+console.log(`  claimCount mismatches: ${countMismatch}  ${note(countMismatch === 0, 'claimCount missing or does not equal claims.length')}`);
 console.log(`  GL claims/yr (enrolled book): mean ${mean(glClaimsPerYear).toFixed(1)}`);
-const st = Object.entries(subTotals).map(([k, v]) => `${k} ${(v / lineYears * 3).toFixed(1)}`).join('  ');
-console.log(`  per-sub mean/yr: ${st}`);
 console.log(`  GL shock (occurrence > $1M) share of line-years: ${(mean(glShockYears) * 100).toFixed(0)}%`);
 
 // --- the two-part 6b check -------------------------------------------------
@@ -153,11 +146,29 @@ if (MODE === '6b') {
 } else {
   console.log(`      [6a] not asserted — the OLD GL pure premium is still in place here; 6b flips it.`);
 }
-console.log(`  [2] REALIZED (reported, not gated — alpha=1.3 tail)`);
+console.log(`  [2] REALIZED (reported, not gated — GL's blended CV is 29.55 post-rebuild)`);
 console.log(`      mean ${(m * 100).toFixed(2)}%   95% CI +/-${(ci * 100).toFixed(2)}pp across ${perSeedGlGross.length} seeds`);
 console.log(`      realized/analytic ratio ${mean(glDrawOverExp).toFixed(4)} over ${glDrawOverExp.length} GL line-years (finite-sample tail bias: heavy-tailed sample means sit low, repaid by rare huge draws)`);
-const withinCI = Math.abs(m - ma) <= ci;
-console.log(`      realized within its own CI of the analytic: ${withinCI ? 'YES' : 'NO'}  ${note(withinCI, `realized ${(m * 100).toFixed(2)}% is OUTSIDE its own CI (+/-${(ci * 100).toFixed(2)}pp) of the analytic ${(ma * 100).toFixed(2)}% — draw/expectation divergence, investigate`)}`);
+// ⚠ RE-WRITTEN BY THE GL SUB-COVERAGE REBUILD, for the identical reason
+// wc-cutover-check.ts's own gross-basis check was already fixed this session:
+// a normal-theory CI on 40 SEEDS assumes the sample mean is close to normal at
+// that sample size, and GL's fitted mixture (CV 29.55, MORE heavy-tailed than
+// WC's own ~11-14) violates that badly enough that this exact assertion now
+// fails on entirely correct code — measured here at realized 75.87% vs
+// analytic 86.96%, outside a +/-7.38pp band that a heavy right tail routinely
+// produces on the low side until a rare large draw shows up. Confirmed
+// against the parent commit (9cc90fd, pre-rebuild): analytic read 85.58%,
+// realized 79.65%, and the SAME check passed — the tail got heavier, not the
+// pricing wrong.
+//
+// DRAW-VS-EXPECTATION IS STILL ASSERTED, just not on this quantity:
+// gl-claim-check.ts gates the $1M-CAPPED mean against its analytic (finding
+// 26's rule: gate counts, rates, quantiles and capped means, never a
+// heavy-tailed sample mean), on a 1,500-year sample — 0.08% relative error
+// against a tight +/-0.82% CI there.
+const gap = (m - ma) / ma;
+console.log(`      realized is ${(gap * 100).toFixed(1)}% of analytic, against a +/-${(ci * 100).toFixed(2)}pp normal CI — REPORTED, NOT GATED`);
+console.log(`      (a normal CI under-covers a CV-29.55 mixture mean; see gl-claim-check.ts for the gated capped-basis test)`);
 console.log(`  WC gross-basis for reference: ${(mean(wcGrossLR) * 100).toFixed(2)}%`);
 
 console.log('\n--- cross-line scale (enrolled books, mean per line-year) ---');

@@ -37,7 +37,7 @@ import { cedeOccurrences, occurrenceTotals } from '../../src/utils/reinsuranceTo
 const cededTo = (t: number, a: number, lim: number) => Math.min(Math.max(t - a, 0), lim);
 import { WC_LOSS_MODEL, WC_SEVERITY_COMPONENTS } from '../../src/data/defaultAssumptions';
 import { ratingGroupOf, regionMultiplier, tiltedWeights } from '../../src/utils/wcClaimEngine';
-import { limitedExpectedValue } from '../../src/utils/wcIbnr';
+import { limitedExpectedValue } from '../../src/utils/claimMath';
 import type { Member } from '../../src/types/simulation';
 
 const M = WC_LOSS_MODEL;
@@ -85,7 +85,7 @@ function run(members: Member[], years: number) {
       accidentYear: c.accidentYear, calendarYear: 2026, region: 'Central' as const,
       isCatastrophe: false, claimIds: [c.id],
     }));
-    out.push({ totals: occurrenceTotals(claims, occurrences, LINE) });
+    out.push({ totals: occurrenceTotals(claims, occurrences) });
   }
   return out;
 }

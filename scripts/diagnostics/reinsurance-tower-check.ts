@@ -8,7 +8,6 @@
 // occurrence-layer selection, and — the whole point of the pricing change — that
 // the price no longer moves with the funding confidence level.
 
-import { GL_STATUTORY_CAP } from '../../src/data/defaultAssumptions';
 import {
   AGG_ATTACHMENT_LEVELS, REINSURANCE_TOWER, RISK_LOAD_LAMBDA, TOWER_TOP, WC_RETAINED_SECOND_MOMENT,
 } from '../../src/data/reinsuranceTower';
@@ -40,25 +39,25 @@ function play(id: string, lines: CoverageLine[], years: number, mutate?: (d: Dec
   return gs.lockedResults;
 }
 
-console.log('=== 1. THE WATERFALL ORDER (J14): cap indemnity only, retain on the combined total ===');
+console.log('=== 1. claimContribution COLLAPSES TO grossUltimate ON BOTH LINES ===');
 {
-  // A state-law claim capped on damages must STILL reach the treaty on defense
-  // costs. Transposing the two rules is the easy mistake, so it is asserted on a
-  // constructed claim rather than hoped for.
-  const mk = (indemnity: number, alae: number, basis: 'stateLaw' | 'federal1983'): Claim => ({
-    id: 'c', occurrenceId: 'o', memberId: 'm', line: 'GL', accidentYear: 1, calendarYear: 2026,
-    tier: 'general', status: 'open', reportedYear: 1, grossUltimate: indemnity + alae,
-    paidToDate: 0, caseReserve: indemnity + alae, indemnity, alae, legalBasis: basis,
+  // ⚠ RE-WRITTEN BY THE GL SUB-COVERAGE REBUILD. This used to assert the J14
+  // cap/retention order (a stateLaw claim capped on indemnity but still
+  // piercing the $1M retention on ALAE alone). GL's statutory cap, and the
+  // indemnity/ALAE split it needed, both retired: the fitted mixture comes
+  // from claims already realized under real-world caps, so capping again
+  // would double-count (see GL_LOSS_MODEL's header for the full reasoning).
+  // claimContribution no longer takes a `line` argument at all — there is
+  // nothing left to special-case by line.
+  const mk = (grossUltimate: number, line: CoverageLine): Claim => ({
+    id: 'c', occurrenceId: 'o', memberId: 'm', line, accidentYear: 1, calendarYear: 2026,
+    tier: 'component1', status: 'open', reportedYear: 1, grossUltimate,
+    paidToDate: 0, caseReserve: grossUltimate,
   });
-  const capped = mk(5e6, 900e3, 'stateLaw');
-  const uncapped = mk(5e6, 900e3, 'federal1983');
-  console.log(`  stateLaw $5.0M indemnity + $900k ALAE -> ${fmt$(claimContribution(capped, 'GL'))} ` +
-    `${note(Math.abs(claimContribution(capped, 'GL') - (GL_STATUTORY_CAP + 900e3)) < 1, 'stateLaw cap not applied to indemnity only')}`);
-  console.log(`  federal1983 same claim              -> ${fmt$(claimContribution(uncapped, 'GL'))} ` +
-    `${note(Math.abs(claimContribution(uncapped, 'GL') - 5.9e6) < 1, 'federal1983 claim was capped')}`);
-  console.log(`  the capped claim STILL pierces the $1M retention on ALAE alone: ` +
-    `${note(claimContribution(capped, 'GL') > 1e6, 'capped claim wrongly kept below retention')}`);
-  console.log(`  WC has no cap: ${note(claimContribution({ ...mk(9e6, 0, 'stateLaw'), line: 'WC' }, 'WC') === 9e6, 'WC claim was capped')}`);
+  console.log(`  GL claim $5.9M -> ${fmt$(claimContribution(mk(5.9e6, 'GL')))} ` +
+    `${note(claimContribution(mk(5.9e6, 'GL')) === 5.9e6, 'GL claimContribution did not collapse to grossUltimate')}`);
+  console.log(`  WC claim $9.0M -> ${fmt$(claimContribution(mk(9e6, 'WC')))} ` +
+    `${note(claimContribution(mk(9e6, 'WC')) === 9e6, 'WC claimContribution did not collapse to grossUltimate')}`);
 }
 
 console.log('\n=== 2. EROSION AND CORRIDOR RETENTION FALL OUT OF THE ARITHMETIC ===');
@@ -188,7 +187,7 @@ console.log('\n=== 6. LIVE GAME: ceded reconciles, and GL above-tower exceeds th
     let ceded = 0, byLayer = [0, 0, 0, 0], above = 0, gross = 0;
     for (const r of locked) {
       const lr = r.byLine[line]!;
-      const totals = occurrenceTotals(lr.claims ?? [], lr.occurrences ?? [], line);
+      const totals = occurrenceTotals(lr.claims ?? [], lr.occurrences ?? []);
       gross += totals.reduce((a, b) => a + b, 0);
       lr.cededByLayer.forEach((v, i) => { byLayer[i] += v; });
       ceded += lr.cededByLayer.reduce((a, b) => a + b, 0);

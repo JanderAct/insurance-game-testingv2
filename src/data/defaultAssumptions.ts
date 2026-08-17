@@ -382,166 +382,146 @@ export const WC_LOSS_MODEL = {
 };
 
 // ===========================================================================
-// GENERAL LIABILITY claim-level loss model (design doc Part B).
-//
-// The second line converted to individual claims, on the WC architecture:
+// GENERAL LIABILITY claim-level loss model — REBUILT onto a fitted per-claim
+// mixture, on the WC architecture (WC_LOSS_MODEL above is the template):
 // matched draw/analytic-expectation pair, RC on the draw only, held pure
-// premium + annual k_GL, accident-year dollars with trendToSettlement as the
-// only vintage conversion, shared ctx.gPool (GL does not draw its own
-// aggregate factor). What is genuinely new versus WC: the liability GATE
-// (latent claim strength decides IF a claim pays, correlated with how much),
-// litigation-stage-keyed ALAE, per-claim settlement timing driving per-claim
-// severity trend, a Pareto tail on law enforcement, multi-claimant abuse
-// occurrences, and the stateLaw/federal1983 cap flag.
+// premium + annual k_GL, shared ctx.gPool (GL does not draw its own aggregate
+// factor).
+//
+// WHAT THE ORIGINAL DESIGN-DOC MODEL HAD THAT THIS ONE DOES NOT:
+//   - FOUR SUB-COVERAGES (general/epl/lawEnforcement/abuse), each with its own
+//     frequency rate, pay rate, severity distribution and ALAE. DELETED. One
+//     flat rate, one severity distribution, no per-type or per-sub
+//     differentiation. A deliberate simplification, not an oversight — see
+//     the flat-rate note below for what it costs.
+//   - THE LIABILITY GATE: a latent claim-strength draw deciding pay/no-pay,
+//     correlated with severity, plus an RQ-driven threshold shift
+//     (rqGateGamma). DELETED. A fitted PAID-claim severity distribution has
+//     no analog of an unpaid attempt to gate away — every drawn claim is
+//     already a realized paid outcome. The RQ effect this threshold carried
+//     does NOT reappear as a frequency recalibration (rqFrequencyBeta stays
+//     at its pre-existing 0.055); it reappears below as a severity tilt.
+//   - LITIGATION STAGES, stage-keyed ALAE, and GL_SOCIAL_INFLATION's
+//     within-claim settlement-lag trend. DELETED, all together. The fitted
+//     mixture includes ALAE and comes from a real pool's real claim
+//     experience — whatever settlement-lag trending happened historically is
+//     already realized in those dollar amounts. Trending on top would
+//     double-count, the identical reasoning that retired the statutory cap
+//     below. GL carries no severity or frequency trend of any kind as a
+//     result — see exposureTrend.ts's GL note.
+//   - THE STATUTORY CAP (indemnity-only, state-law-only) and the
+//     indemnity/ALAE/legalBasis split it needed. DELETED. It was applied in
+//     the waterfall, downstream of generation, against a severity that was
+//     itself an invented parameter with no claim on reality beyond internal
+//     consistency. The fitted mixture instead comes from a pool that already
+//     operated under real statutory caps — a second cap on top would
+//     suppress claims that were never able to exceed it in the first place.
+//     One real, named consequence: a capped claim could previously still
+//     pierce the $1M retention on ALAE alone even with near-zero indemnity.
+//     Nothing replaces that; it is a genuine loss, not an absorbed one.
+//   - MULTI-CLAIMANT ABUSE BATCHES. DELETED ENTIRELY, not layered on top of
+//     the mixture. This was reconsidered after measurement, not assumed: the
+//     71.8%/71.5% (full-market/enrolled) share of >$25M occurrences that were
+//     batch accumulations, and the 185-claimant reference case, both traced
+//     to external anchors rather than this pool's own claim experience —
+//     which tops out around 15 claimants — and the fitted mixture is on
+//     INDIVIDUAL CLAIMS, which already include whatever abuse-type claimants
+//     exist in the pool's real data. Occurrence == claim for GL now, exactly
+//     as WC's is. Measured consequence of dropping batches: occurrences
+//     above $25M fall to 0.236/yr (one per 4.2 years) — see the verification
+//     targets below and the tower-rederivation diagnostic that measures it
+//     against a live generator rather than treating it as a shortfall.
+//
+// WHAT SURVIVES: the RQ FREQUENCY channel (rqFrequencyBeta, unchanged), the
+// per-member-year frequency noise, and k_GL / held-pure-premium / RC-on-draw-
+// only exactly as before. One thing is NEW versus the original design: an RQ
+// SEVERITY tilt (rqSeverityBeta below), added to partially restore what the
+// deleted gate's RQ-threshold channel contributed.
 // ===========================================================================
 
-export const GL_SUB_KEYS = ['general', 'epl', 'lawEnforcement', 'abuse'] as const;
-export type GlSubKey = (typeof GL_SUB_KEYS)[number];
+// One component of the fitted 3-component lognormal mixture every GL claim
+// draws from — no sub-coverage, no gate, ALAE included in the amount.
+export interface GlSeverityComponent {
+  key: string;
+  weight: number;
+  mu: number;
+  sigma: number;
+}
 
-export const GL_LITIGATION_STAGES = ['closedOnInvestigation', 'settledPreSuit', 'suitDiscoverySettle', 'triedToVerdict'] as const;
-export type GlLitigationStage = (typeof GL_LITIGATION_STAGES)[number];
-
-// Social inflation: ONE shared severity trend across GL's four sub-coverages,
-// applied through the standard accident-year-dollars + trendToSettlement
-// convention (indemnity AND ALAE — defense costs ride the same tort
-// environment). GL-INTERNAL for now: it is not pool-wide and does not touch
-// WC. HOOK, NOT BUILT: a future shock-event system may replace this constant
-// with a cross-line inflation regime (which is exactly what would reprice
-// prior accident years retroactively); nothing here anticipates that beyond
-// keeping the rate a single named constant.
-export const GL_SOCIAL_INFLATION = 0.07;
-
-// Statutory damages cap for state-law claims — ILLUSTRATIVE value, a policy
-// lever like WC's weekly cap. Applies to INDEMNITY ONLY (statutory caps bound
-// damages, not defense costs), and only to claims flagged stateLaw; a
-// federal1983 claim is uncapped, which is why law enforcement owns the tail.
-// Consumed by the retention-waterfall phase, not by claim generation — claims
-// carry the flag from birth so the waterfall can apply cap -> retention ->
-// reinsurance in order.
-export const GL_STATUTORY_CAP = 1_000_000;
+// FITTED TO THE POOL'S OWN INDIVIDUAL CLAIMS (not occurrence totals — there
+// are no occurrences bigger than one claim anymore). Component 1 is the heavy
+// tail: 51.9% of claims by weight, 99.1% of loss by dollar, CV 21.5 alone.
+// Component 2 (6.3% weight, CV 0.55 — tight for any claims distribution, let
+// alone the tail-heavy component sitting next to it) is flagged as a
+// candidate EM-fitting artifact rather than a genuine population; kept for
+// now because three parameters disturb nothing else, and dropping it later is
+// a one-line trim, not a rebuild. Component 3 carries most of the CLAIM
+// COUNT (41.8%) at a small dollar share — the ordinary-nuisance-claim mass.
+//
+// heavyIndex 0 is hardcoded rather than a named field (contrast WC's
+// per-rating-group heavyComponent) because there is only one mixture here —
+// nothing to look the heavy component up BY, unlike WC's four rating groups
+// where Schools tilts its 2nd component, not its last.
+export const GL_SEVERITY_COMPONENTS: GlSeverityComponent[] = [
+  { key: 'component1', weight: 0.519201, mu: 8.799445, sigma: 2.477151 },
+  { key: 'component2', weight: 0.0629521, mu: 8.1841218, sigma: 0.5127005 },
+  { key: 'component3', weight: 0.417847, mu: 6.601986, sigma: 0.830612 },
+];
+export const GL_HEAVY_COMPONENT_INDEX = 0;
 
 export const GL_LOSS_MODEL = {
-  // --- B1 frequency --------------------------------------------------------
-  // lambda_sub = basePayroll x weight(GL_RELATIVITIES) x rate x theta_GL(RQ)
-  //              x k_GL x epsilon x gPool.
-  // Payroll bases: general/epl/abuse use the member's TOTAL payroll;
-  // lawEnforcement uses POLICE payroll (WC_CLASS_MIX[type].police x payroll).
-  // No frequency trend — flat by design (WC's -1.5%/yr is WC-specific safety
-  // improvement; GL frequency is not trending, its SEVERITY is, above).
+  // --- frequency -------------------------------------------------------------
+  // lambda = totalPayroll x ratePer1M x theta_GL(RQ) x k_GL x epsilon x gPool.
+  // FLAT: no sub-coverage, no per-type relativity — a water district and a
+  // city with the same payroll face the same rate and the same severity
+  // distribution. RULED DELIBERATE, overriding the alternative this rebuild's
+  // planning turn raised (a composite per-type multiplier to preserve some
+  // signal that police-less districts can't generate law-enforcement-type
+  // severe claims). Recorded as a known, deliberate simplification: GL_RELATIVITIES
+  // was never externally validated either (roster-CSV judgment calls, see
+  // CALIBRATION_FINDINGS), so this trades one unanchored differentiation for
+  // none rather than for a better one.
   //
-  // Full-market expected claims on the canonical roster, at neutral RQ and
-  // k_GL = 1 (basePayroll x weight x rate, summed over members): general
-  // 881.2, epl 111.5, lawEnforcement 28.4, abuse 3.2 incidents. The design
-  // doc's "~832 general" assumed a payroll-weighted mean relativity of 1.0;
-  // the roster's actual mean is ~1.06, so 881.2 is the operative roster-derived
-  // figure and 832 is a stale reference (ruled: rates verbatim, assert 881.2).
-  // Verified against gl-claim-check.ts's own analytic and reference targets
-  // (v3 881.2 / ~111.5 / ~28.4 / ~3.2), which already had it right — only this
-  // comment was stale. lawEnforcement in particular had drifted furthest:
-  // police payroll weighted by the LE relativity is $135.4M, and
-  // $135.4M x 0.21 = 28.4, not the ~13.3 this comment used to claim.
-  ratePer1M: { general: 0.64, epl: 0.084, lawEnforcement: 0.21, abuse: 0.003 } as Record<GlSubKey, number>,
+  // DERIVED, NOT FITTED — this is GL's only externally-grounded number.
+  // The pool's observed 0-$1M loss cost is $2.8300 per $100 of payroll.
+  // The mixture's $1M-LIMITED mean (E[min(X, 1e6)] across all three
+  // components) is $35,920. A rate consistent with both:
+  //   rate = 2.8300 x 10,000 / 35,920 = 0.7879 claims per $1M of payroll
+  // ($2.83 is stated per $100; x10,000 converts the $100-basis loss cost to a
+  // per-$1M-of-payroll dollar figure before dividing by the limited mean, so
+  // rate comes out in claims per $1M). Every other GL number in this block —
+  // the mixture's own weights/mu/sigma, rqFrequencyBeta, rqSeverityBeta — is
+  // either fitted directly or carried over from before this rebuild; this
+  // rate is the one number derived FROM an external anchor plus the fit.
+  ratePer1M: 0.7879,
 
-  // Per member-year frequency noise, mean 1 (SD ~0.35) — ONE draw per member
-  // per year shared across the four sub-coverages (the literal design
-  // reading). Wider than WC's k=16 because payroll is a looser GL predictor.
+  // Per member-year frequency noise, mean 1 (SD ~0.35) — unchanged from
+  // before the rebuild. One draw per member per year; with no sub-coverages
+  // left to share it across, this is simply the line's own noise term now.
   memberFrequencyNoise: { shape: 8, scale: 1 / 8 },
 
-  // --- B7 risk-quality channels (total realized beta ~0.084) ---------------
-  rqFrequencyBeta: 0.055, // theta_GL = exp(-0.055 x (RQ - 5)), all subs
-  // Gate-threshold shift per RQ point: worse RQ makes claims harder to
-  // defend (higher pay rate). Moves the PAY RATE only — paid-claim severity
-  // marginals stay the B3 distributions (ruled interpretation J9).
-  rqGateGamma: 0.05,
-  // NOTE deliberately skipped: an optional ~0.6 WC-GL theta correlation.
-  // Both lines currently read the same member.riskQuality, which correlates
-  // them at 1.0 already; a separate per-line RQ is a future refinement.
+  // --- risk quality: two channels, unchanged split -----------------------
+  // FREQUENCY: theta_GL = exp(-0.055 x (RQ - 5)). UNCHANGED from before the
+  // gate was deleted — ruled explicitly not to recalibrate upward to
+  // compensate for the lost gate-threshold channel. GL's combined RQ budget
+  // (frequency beta + severity beta, treated as roughly additive sensitivity,
+  // not composed analytically — they act on different things, a count and a
+  // mixture weight) is 0.055 + 0.060 = 0.115, against WC's own
+  // rqFrequencyBeta 0.08 + rqSeverityBeta 0.06 = 0.14. The gap between GL's
+  // 0.115 and WC's 0.14 comes entirely from the two lines' PRE-EXISTING
+  // frequency betas (0.055 vs 0.08), not from anything invented in this
+  // rebuild.
+  rqFrequencyBeta: 0.055,
 
-  // --- B2/B3 liability gate + severity (accident-year dollars) -------------
-  // payRate at RQ 5; the gate threshold is t_sub = PhiInv(1 - payRate).
-  // ALAE is drawn on EVERY claim (defense costs exist even when nothing is
-  // paid); indemnity only when the latent strength clears the gate.
-  subCoverages: {
-    general: {
-      payRate: 0.45,
-      indemnity: { mean: 28_000, cv: 2.2 },
-      alae: { mean: 5_000, cv: 1.5 },
-      reportLag: { meanYears: 1.5, cv: 0.6, maxYears: 10 },
-      federal1983Share: 0.075, // 92.5% state-law (ruled J7)
-    },
-    epl: {
-      payRate: 0.38,
-      indemnity: { mean: 105_000, cv: 1.9 },
-      alae: { mean: 42_000, cv: 1.4 },
-      reportLag: { meanYears: 2, cv: 0.6, maxYears: 12 },
-      federal1983Share: 0.075,
-    },
-    lawEnforcement: {
-      payRate: 0.30,
-      // Bimodal: most paid LE claims are ordinary; 5% are the catastrophic
-      // civil-rights tail (Pareto alpha 1.3 — infinite variance, finite mean
-      // $4.33M). Component drawn first, gate quantile mapped within it (J8).
-      indemnity: { mean: 85_000, cv: 1.5 },
-      paretoTail: { weight: 0.05, xm: 1_000_000, alpha: 1.3 },
-      alae: { mean: 70_000, cv: 1.6 },
-      reportLag: { meanYears: 2, cv: 0.6, maxYears: 12 },
-      federal1983Share: 0.60, // 60% plead section 1983 -> uncapped (given)
-    },
-    abuse: {
-      payRate: 0.70,
-      indemnity: { mean: 650_000, cv: 2.0 },
-      alae: { mean: 150_000, cv: 1.2 },
-      // 50y bound (ruled J1): 45y truncates 1.2% of mass exactly where the 7%
-      // trend is steepest; 50y captures ~99.3% and matches what revival
-      // statutes exist to do — reopen 50-year-old claims. Same
-      // divergence-mandatory reasoning as WC presumption's 40y bound:
-      // E[(1.07)^lag] over an UNBOUNDED lognormal lag has no finite value.
-      reportLag: { meanYears: 15, cv: 0.6, maxYears: 50 },
-      federal1983Share: 0.88, // "mostly uncapped" -> 88% (ruled J7)
-    },
-  } as Record<GlSubKey, {
-    payRate: number;
-    indemnity: { mean: number; cv: number };
-    paretoTail?: { weight: number; xm: number; alpha: number };
-    alae: { mean: number; cv: number };
-    reportLag: { meanYears: number; cv: number; maxYears: number };
-    federal1983Share: number;
-  }>,
-
-  // --- B4 litigation stages -------------------------------------------------
-  // One stage per claim; the ALAE multiple applies to the sub's ALAE draw and
-  // the settlement lag adds to the report lag (settlement = accident +
-  // round(reportLag + stageLag), ruled J2). The tried-to-verdict stage with a
-  // gate loss is the max-defense-cost-zero-indemnity case — deliberate.
-  stageAlaeMultiple: { closedOnInvestigation: 0.3, settledPreSuit: 1.0, suitDiscoverySettle: 2.5, triedToVerdict: 6.0 } as Record<GlLitigationStage, number>,
-  stageSettlementLagYears: { closedOnInvestigation: 0.5, settledPreSuit: 1.5, suitDiscoverySettle: 3, triedToVerdict: 5 } as Record<GlLitigationStage, number>,
-  // epl and lawEnforcement skew toward discovery/verdict (ruled J4); abuse
-  // uses the general vector (no design guidance — flagged micro-call).
-  stageProbabilities: {
-    general:        [0.45, 0.30, 0.20, 0.05],
-    epl:            [0.25, 0.30, 0.30, 0.15],
-    lawEnforcement: [0.30, 0.25, 0.30, 0.15],
-    abuse:          [0.45, 0.30, 0.20, 0.05],
-  } as Record<GlSubKey, number[]>,
-
-  // --- abuse batch (the first multi-claim occurrence) -----------------------
-  abuseBatch: {
-    // Claimants per incident ~ Gamma-Poisson (NegBin) mean 5, dispersion r=2
-    // (variance 17.5), truncated to >= 1 by reject-and-redraw — a 0-claimant
-    // incident is a non-event (ruled J5). The truncation raises the realized
-    // mean to mean/(1 - P0) with P0 = (r/(r+mean))^r — the analytic
-    // expectation uses exactly that corrected mean.
-    claimantMean: 5,
-    claimantDispersion: 2,
-    // Within-batch severity correlation via ONE shared occurrence-level
-    // lognormal factor (mean 1) multiplying independent per-claimant
-    // lognormals; the total CV 2.0 splits 50/50 in log-variance between the
-    // shared and idiosyncratic components (ruled J6 — the harness REPORTS the
-    // realized batch-total distribution so the plausibility of single-batch
-    // size is a number, not a hope).
-    logVarianceShare: 0.5,
-  },
-};
+  // SEVERITY TILT — NEW in this rebuild, matching WC's rqSeverityBeta
+  // mechanism exactly: worse RQ raises the heavy component's (index 0) share
+  // of the mixture, remaining weights renormalise to preserve their ratio to
+  // each other, clamp below 1.0 exactly as WC's tiltedWeights does. DRAW AND
+  // k_GL ONLY, NEVER the pricing expectation (WC invariant 2, carried over
+  // unchanged) — the held pure premium and neutral k_GL both use the
+  // untilted weights above. At RQ 5 (neutral) this is the identity.
+  rqSeverityBeta: 0.060,
+} as const;
 
 // Base retention probability per member per year — high by default for realistic public entity pools
 export const BASE_RETENTION = 0.95;
@@ -777,38 +757,24 @@ export const STARTING_EXPOSURE_SHARE = { min: 0.25, max: 0.35 };
 // values and had no engine consumer; they were removed with the canonical
 // roster ingestion.
 
-// Each member's WC payroll splits across four rating classes as an exact,
-// permanent function of its entity Type (fractions sum to 1.0 per type). The
-// canonical roster's WC_* dollar columns are round(fraction x payroll, 4) —
-// verified at generation time by scripts/tools/generate-member-catalog.ts to
-// reproduce every CSV cell within $100. Intentionally NOT stored per member.
-export const WC_CLASS_MIX: Record<string, { clerical: number; publicWorks: number; police: number; fire: number }> = {
-  City:                  { clerical: 0.35, publicWorks: 0.30, police: 0.22, fire: 0.13 },
-  County:                { clerical: 0.45, publicWorks: 0.25, police: 0.20, fire: 0.10 },
-  'Fire District':       { clerical: 0.08, publicWorks: 0.04, police: 0.00, fire: 0.88 },
-  'Park District':       { clerical: 0.30, publicWorks: 0.70, police: 0.00, fire: 0.00 },
-  'Recreation District': { clerical: 0.45, publicWorks: 0.55, police: 0.00, fire: 0.00 },
-  'School District':     { clerical: 0.70, publicWorks: 0.28, police: 0.02, fire: 0.00 },
-  'Special District':    { clerical: 0.50, publicWorks: 0.50, police: 0.00, fire: 0.00 },
-  'Transit Authority':   { clerical: 0.25, publicWorks: 0.75, police: 0.00, fire: 0.00 },
-  'Water District':      { clerical: 0.30, publicWorks: 0.70, police: 0.00, fire: 0.00 },
-};
-
-// GL sub-line loss relativities, likewise an exact, permanent function of
-// entity Type (matches the canonical roster's GL_* columns cell-for-cell —
-// verified at generation time). Relativities, not dollars: the future claim
-// generator applies them against the member's payroll exposure.
-export const GL_RELATIVITIES: Record<string, { general: number; epl: number; lawEnforcement: number; abuse: number }> = {
-  City:                  { general: 1.1, epl: 1.0, lawEnforcement: 1.00, abuse: 0.6 },
-  County:                { general: 1.0, epl: 1.1, lawEnforcement: 1.00, abuse: 0.8 },
-  'Fire District':       { general: 0.9, epl: 0.9, lawEnforcement: 0.05, abuse: 0.2 },
-  'Park District':       { general: 1.0, epl: 0.8, lawEnforcement: 0.05, abuse: 1.6 },
-  'Recreation District': { general: 1.0, epl: 0.8, lawEnforcement: 0.05, abuse: 1.9 },
-  'School District':     { general: 0.9, epl: 1.1, lawEnforcement: 0.10, abuse: 1.8 },
-  'Special District':    { general: 0.9, epl: 1.0, lawEnforcement: 0.05, abuse: 0.4 },
-  'Transit Authority':   { general: 1.6, epl: 1.0, lawEnforcement: 0.10, abuse: 0.3 },
-  'Water District':      { general: 0.8, epl: 1.2, lawEnforcement: 0.00, abuse: 0.1 },
-};
+// WC_CLASS_MIX and GL_RELATIVITIES (per-entity-Type lookup tables, exact
+// functions of Type, matched cell-for-cell against the canonical roster CSV
+// at generation time) BOTH RETIRED by the GL severity rebuild.
+//
+// WC_CLASS_MIX's last production consumer was glClaimEngine.ts's
+// law-enforcement exposure base (POLICE payroll rather than total payroll) —
+// WC itself stopped reading it at the per-rating-group severity rebuild.
+// GL_RELATIVITIES was GL's own four-sub-coverage relativity table. The GL
+// rebuild deleted sub-coverages entirely (one flat rate for all of GL, see
+// GL_LOSS_MODEL below), which removed both: no relativity to weight, and no
+// distinct law-enforcement exposure base to gate by police payroll. A water
+// district and a city with the same total payroll now face the same rate and
+// the same severity distribution — ruled deliberate, not discovered. Neither
+// table was ever externally validated (both were roster-CSV judgment calls,
+// see CALIBRATION_FINDINGS), so nothing sourced is lost, only an unanchored
+// differentiation.
+// scripts/tools/generate-member-catalog.ts's verification of these two tables
+// against the roster CSV retired with them.
 
 // Starting rate per $100 payroll range
 export const STARTING_RATE_PER_100 = { min: 5.00, max: 10.00 };

@@ -104,6 +104,21 @@ export function lognormalPartialMoment(mean: number, cv: number, k: number, boun
   return fullMoment * normalCdf((Math.log(bound) - mu - k * sigma * sigma) / sigma);
 }
 
+// E[min(X, limit)] for X ~ LogNormal(mu, sigma) — the mu/sigma-parameterized
+// twin of lognormalPartialMoment above, for callers whose components are
+// already stated as (mu, sigma) rather than (mean, cv): WC's and GL's mixture
+// components both are. Closed form, no quadrature:
+//   E[X ^ L] = exp(mu + s^2/2) x Phi((ln L - mu - s^2)/s) + L x (1 - Phi((ln L - mu)/s))
+// Shared by both lines' reinsurance netting (wcIbnr.ts) and tower re-derivation
+// diagnostics — moved here from wcIbnr.ts so a GL consumer isn't importing a
+// WC-named module for shared math.
+export function limitedExpectedValue(mu: number, sigma: number, limit: number): number {
+  if (!(limit > 0)) return 0;
+  if (!Number.isFinite(limit)) return Math.exp(mu + (sigma * sigma) / 2);
+  const z = (Math.log(limit) - mu) / sigma;
+  return Math.exp(mu + (sigma * sigma) / 2) * normalCdf(z - sigma) + limit * (1 - normalCdf(z));
+}
+
 // --- dollar vintage -----------------------------------------------------------
 
 // THE single point of dollar-vintage conversion. An amount stated in

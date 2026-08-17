@@ -1771,3 +1771,87 @@ Severity is trended once at the accident-year draw and frozen onto the claim. A 
 five years later carries its accident-year amount unchanged — asserted over 156 claims, worst change
 $0.00, against a 19.7% move had it been re-trended. This holds by construction, but `E[(1+r)^lag]` over
 an unbounded lognormal is divergent, so the construction is now defended by a test.
+
+## 40. GL rebuilt onto a fitted per-claim mixture — sub-coverages, the gate, and abuse batches all deleted
+
+GL follows WC onto a fitted-mixture severity, but the rebuild is narrower than a straight port: an
+inventory pass first established what GL actually has (four sub-coverages, a liability pay/no-pay gate,
+litigation-stage-keyed ALAE, a statutory cap, and multi-claimant abuse batches — none of which WC ever
+had), and each piece was ruled on individually rather than assumed to survive or die together.
+
+**What's gone, and why:**
+
+- **The four sub-coverages** (general/epl/lawEnforcement/abuse), each with its own frequency rate,
+  relativity table, and severity distribution. Replaced by ONE flat rate (0.7879 claims per $1M of total
+  payroll) and ONE 3-component mixture for all of GL. `GL_RELATIVITIES` deletes entirely, and
+  `WC_CLASS_MIX` retires with it — GL's law-enforcement police-payroll read was its last production
+  consumer (WC stopped reading it at its own severity rebuild). Ruled a deliberate simplification: a water
+  district and a city with the same payroll now face the same rate and the same distribution, even though
+  a water district structurally cannot generate a law-enforcement-type claim. `GL_RELATIVITIES` was never
+  externally validated either — a roster-CSV judgment call, same category as the WC_CLASS_MIX class rates
+  before their WCIRB re-anchor — so nothing sourced is lost.
+- **The liability gate** (a latent claim-strength draw deciding pay/no-pay, correlated with severity via
+  one quantile mapping) and its RQ-threshold channel (`rqGateGamma`). A fitted PAID-claim severity
+  distribution has no room for a separate "did it pay" decision — every drawn claim is already a realized
+  paid outcome. `rqFrequencyBeta` stays at its pre-existing 0.055, unrecalibrated, so GL's combined RQ
+  budget is smaller than before (0.115 vs WC's 0.14) — the gap comes entirely from the two lines'
+  pre-existing frequency betas, not from anything invented here.
+- **Litigation stages, stage-keyed ALAE, and `GL_SOCIAL_INFLATION`'s trend-to-settlement conversion.**
+  ALAE is inside the fitted mixture amount now, and the fitted severities come from a real pool's real
+  claim experience — whatever settlement-lag trending happened historically is already realized in those
+  dollars. A forward trend on top would double-count, the identical logic that retired the cap (below).
+  GL carries no severity or frequency trend of any kind post-rebuild.
+- **The statutory cap** (indemnity-only, state-law-only) and the indemnity/ALAE/legalBasis split it
+  needed. It was applied in the waterfall, downstream of generation, against a severity that was itself an
+  invented parameter with no claim on reality — the fitted mixture comes from claims already realized
+  under real-world caps, so capping again double-counts. One real loss, named rather than silently
+  absorbed: a capped claim could previously still pierce the $1M retention on ALAE alone even at near-zero
+  indemnity; nothing replaces that.
+- **Multi-claimant abuse batches, deleted entirely rather than layered onto the mixture.** The 71.8%/71.5%
+  (full-market/enrolled) share of GL's >$25M occurrences that were batch accumulations, and the reference
+  185-claimant case, both traced back to external anchors rather than this pool's own experience, which
+  tops out around 15 claimants — and the fitted mixture is on INDIVIDUAL CLAIMS, which already include
+  whatever abuse-type claimants exist in the data. Occurrence == claim for GL now, exactly like WC.
+  Measured, not assumed: occurrences above $25M fall from ~14.7/yr to 0.236/yr, a ~62x reduction — reported
+  as the expected consequence of the ruling, not investigated as a regression.
+
+**What's new:** an RQ SEVERITY TILT (`rqSeverityBeta` 0.060, matching WC's mechanism exactly — tilts the
+heavy component's weight, remaining weights renormalise, clamp below 1.0, draw-only and never the pricing
+expectation), added to partially restore what the deleted gate's RQ-threshold channel used to contribute.
+
+**The frequency anchor is DERIVED, not fitted — GL's only externally-grounded number.** The pool's
+observed 0-$1M loss cost is $2.83 per $100 of payroll; the mixture's $1M-limited mean is $35,920.32;
+`rate = 2.8300 x 10,000 / 35,920.32 = 0.7879` claims per $1M of payroll. Every verification target derived
+from this — full-market claims 1,024.3/yr, full-market gross $76.53M/yr, loss by band 48.1%/40.0%/12.0%,
+occurrence frequencies at $1M/$5M/$25M — matched the supplied targets exactly. The given component
+weights (0.519201/0.0629521/0.417847) sum to 1.0000001, a ~1e-7 rounding residual from the fit's own 6dp
+precision; immaterial, not "corrected" by renormalising numbers given verbatim, and the verification
+harness's tolerances account for it explicitly.
+
+**Two pre-existing diagnostics were gating a heavy-tailed sample mean too tightly (finding 26), and GL's
+new mixture — blended CV 29.55, heavier than WC's own ~11-14 — is what surfaced it.** Both
+`gl-cutover-check.ts`'s realized-vs-analytic gross-basis check and `marketplace-generation-check.ts`'s
+drawn/expected ratio check used a normal-theory CI on a 200-line-year (or 40-seed) sample of a heavy-tailed
+ground-up loss — exactly the pattern `wc-cutover-check.ts` was already fixed for earlier this session.
+Confirmed against the parent commit that these are finite-sample instability, not a pricing bug: GL's
+ratio there was 0.9254 (comfortably passing) under the old model and 0.8725 under the new one, on the same
+200-line-year sample size — the CI narrowed on an unlucky draw rather than the mean moving to something
+wrong. Both now REPORT rather than gate, matching `wc-cutover-check.ts`'s and `gl-claim-check.ts`'s own
+precedent: gate the $1M-capped mean instead (bounded per-observation variance, valid at any tail
+heaviness) — 0.08% relative error against a ±0.82% CI on 1,500 years.
+
+**Leak check.** WC-solo and Property-solo are byte-identical on both export gates, on every seed —
+neither line's engine was touched. GL-solo and the tri config move on both, as expected: GL's frequency,
+severity, tower waterfall (`claimContribution` collapses to `grossUltimate`, matching WC), export columns,
+and two shock events (`#22`, `#28`'s GL half — retargeted to whole-line frequency multipliers, since GL
+has no sub-coverage left to target) all changed together in this one commit, because removing the
+sub-coverages before the mixture existed would have left GL generating nothing.
+
+**Deferred, not forgotten:** IBNR was scoped out — GL books every claim's full amount at accident year
+with no deferral mechanism at all (unlike WC's genuine emergence architecture), and building that
+architecture from scratch is larger than the rest of this rebuild combined. A calendar-year severity/
+frequency trend was also scoped out — no sourced trend rate exists for GL the way WC's WCIRB-derived
+figures did before that work started. Both are separable future projects, not omissions from this one. The
+tower re-derivation and GL's own CV-indexed CLF grid (GL is still on the generic `FUNDING_CLF_TABLE`,
+calibrated to a $20-30B reference book) follow as separate measurement passes against this now-live
+generator, exactly as WC's `19d04e7` and `cd154e2`/`332cae4` followed `3181b18`.

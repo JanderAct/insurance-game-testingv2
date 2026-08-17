@@ -30,9 +30,11 @@
 // severity is still capped at the hit location's value, so nothing downstream
 // is affected; do not assert that the primary is the maximum.
 //
-// Each member's WC class-payroll split and GL sub-line relativities are exact
-// functions of its Type — see WC_CLASS_MIX and GL_RELATIVITIES in
-// defaultAssumptions.ts. They are intentionally NOT stored per member.
+// Each member's WC class-payroll split used to be an exact function of its
+// Type (WC_CLASS_MIX in defaultAssumptions.ts). GL sub-line relativities were
+// too (GL_RELATIVITIES). Both retired with the GL sub-coverage rebuild — WC
+// stopped reading WC_CLASS_MIX at its own severity rebuild, and GL's rebuild
+// deleted GL_RELATIVITIES outright along with the sub-coverages it weighted.
 
 import type { CoverageLine, Member, MemberType, Region, SizeCategory } from '../types/simulation';
 import { WC_HIGH_SAFETY_CITIES, WC_RATING_GROUP_BY_TYPE, type WcRatingGroup } from './defaultAssumptions';
@@ -289,13 +291,13 @@ export const PREDEFINED_MARKET_MEMBERS: ReadonlyArray<Member> = CANONICAL_ROSTER
 // A member's WC rating group.
 //
 // ⚠ THIS IS THE ONE MEMBER ATTRIBUTE THAT IS *STORED* RATHER THAN DERIVED FROM
-// TYPE, and it contradicts the header note above only in appearance. WC_CLASS_MIX
-// and GL_RELATIVITIES really are exact functions of Type, so storing them per
-// member would be duplication. This is not: WC_CLASS_MIX gives EVERY city a
-// safety share of exactly 0.3500, so no rule over it can separate the eight
-// cities that run their own police and fire departments from the other 24. The
-// list is genuine additional information and lives in
-// WC_HIGH_SAFETY_CITIES.
+// TYPE, and it contradicts the header note above only in appearance. The
+// retired WC_CLASS_MIX and GL_RELATIVITIES really were exact functions of
+// Type, so storing them per member would have been duplication. This is not:
+// the old WC_CLASS_MIX gave EVERY city a safety share of exactly 0.3500, so
+// no rule over it could separate the eight cities that run their own police
+// and fire departments from the other 24. The list is genuine additional
+// information and lives in WC_HIGH_SAFETY_CITIES.
 //
 // It is computed here, at catalog construction, and then travels ON the member —
 // so it serialises into saved games with everything else and a member cannot

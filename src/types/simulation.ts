@@ -66,12 +66,14 @@ export interface Member {
   yearWithdrawn?: number;
   // WC rating group — a STORED attribute, assigned in memberCatalog.ts.
   //
-  // ⚠ DELIBERATELY STORED WHERE WC_CLASS_MIX AND GL_RELATIVITIES ARE NOT. Those
-  // two are exact functions of `type`, so the catalog header states they are
-  // intentionally not stored per member. This one CANNOT be: WC_CLASS_MIX gives
-  // every city a safety share of exactly 0.3500, so no threshold over it can
-  // separate the eight cities that run their own police and fire departments
-  // from the other 24. That is genuinely extra information — see
+  // ⚠ DELIBERATELY STORED WHERE THE RETIRED WC_CLASS_MIX/GL_RELATIVITIES
+  // LOOKUP TABLES WERE NOT. Both were exact functions of `type` (and both
+  // retired with the GL severity rebuild — see CALIBRATION_FINDINGS), so
+  // storing a type-derived value per member was duplication. This one
+  // CANNOT be derived from `type` alone: the old WC_CLASS_MIX gave every city
+  // a safety share of exactly 0.3500, so no threshold over it could separate
+  // the eight cities that run their own police and fire departments from the
+  // other 24. That is genuinely extra information — see
   // WC_HIGH_SAFETY_CITIES in defaultAssumptions.ts.
   //
   // Optional only so that saves written before the WC severity rebuild still
@@ -109,9 +111,9 @@ export interface MemberLossResult {
 // against the WC/GL distribution spec has a settled data shape to target.
 // ---------------------------------------------------------------------------
 
-// One loss event. Groups the claims it causes (a single event can produce
-// several claims — GL's abuse batches are the first multi-claim user; WC
-// emits 1:1; Property's weather/cat events reuse the same shape), and
+// One loss event. Groups the claims it causes (WC and GL both emit 1:1 —
+// GL's multi-claimant abuse batches were deleted with the sub-coverage
+// rebuild; Property's weather/cat events are the multi-claim case now), and
 // is the unit the $1M retention waterfall nets against: the retention
 // applies to the OCCURRENCE total, i.e. the sum over claimIds.
 export interface Occurrence {
@@ -125,9 +127,8 @@ export interface Occurrence {
   // load-bearing, not stylistic. tsconfig sets strict: true, so memberId reads
   // as `string | undefined` and the COMPILER forces every consumer to handle
   // the multi-member case explicitly rather than silently attributing a
-  // pool-wide event to one member. Weather is the first genuinely multi-member
-  // occurrence: GL's abuse batches are multi-CLAIM but single-member, and that
-  // distinction is exactly what this shape exists to keep visible.
+  // pool-wide event to one member. Weather is the only genuinely multi-member
+  // occurrence now that GL's multi-claimant abuse batches are gone.
   memberId?: string;
   memberIds: string[];
   accidentYear: number;   // yearNumber the event happened (pre-game years negative)
@@ -137,7 +138,7 @@ export interface Occurrence {
   // not a property of any one member.
   region: Region;
   isCatastrophe: boolean; // part of a regional/pool-wide catastrophe event
-  claimIds: string[];     // every claim this event produced (WC: exactly one)
+  claimIds: string[];     // every claim this event produced (WC and GL: exactly one)
   // The hazard band this event belongs to, for lines that have more than one:
   // Property emits 'attritional' | 'weather' | 'cat'. Absent on WC and GL,
   // which have a single hazard band each — their sub-coverage vocabulary lives
@@ -161,15 +162,16 @@ export interface Claim {
   line: CoverageLine;
   accidentYear: number;   // yearNumber (pre-game years negative)
   calendarYear: number;
-  // Sub-coverage / severity class the claim falls under: a WC MIXTURE COMPONENT
-  // (small / medium / large / schoolsMedium, or 'injected' for a shock claim) for
-  // WC, a GL_RELATIVITIES sub-line (general / epl / lawEnforcement / abuse) for
-  // GL, a peril label for Property. Deliberately a string, not a union — the
-  // vocabularies belong to the distribution work.
+  // Severity class the claim falls under: a MIXTURE COMPONENT for both WC
+  // (small / medium / large / schoolsMedium, or 'injected' for a shock claim)
+  // and GL (component1 / component2 / component3), a peril label for
+  // Property. Deliberately a string, not a union — the vocabularies belong to
+  // the distribution work.
   //
-  // WC's values CHANGED with the severity rebuild: they used to be tiers
-  // (medOnly / temp / perm / catastrophic / presumption). Anything that pattern-
-  // matches WC tier strings needs revisiting, not just recompiling.
+  // GL's values CHANGED with the sub-coverage rebuild: they used to be a
+  // GL_RELATIVITIES sub-line (general / epl / lawEnforcement / abuse), one
+  // flat mixture replaced all four. Anything that pattern-matches the old GL
+  // sub-coverage strings needs revisiting, not just recompiling.
   tier: string;
   // The rating GROUP the claim arose from (WC: county / schools / highSafety /
   // lowSafety). Was a rating CLASS before the severity rebuild.
@@ -186,28 +188,12 @@ export interface Claim {
   // per tier; the mixture model books one amount with no payout schedule, so
   // WC claims leave this absent. GL and Property are unaffected.
   paymentPattern?: number[];
-  // --- GL claim-level fields (Part B) ---
-  // Indemnity/ALAE split of grossUltimate. Kept separately because the
-  // statutory cap applies to INDEMNITY ONLY (caps bound damages, not defense
-  // costs), while the $1M occurrence retention applies to the combined total
-  // — a capped state-law claim can still pierce retention via defense costs.
-  //
-  // NOTE ON THE SHARED `indemnity` FIELD: WC and GL both populate it, and in
-  // both it means "the loss payment proper", but they decompose grossUltimate
-  // over DIFFERENT partitions — WC over (medical, indemnity, impairment), GL
-  // over (indemnity, alae). Read it with the claim's `line` in hand; a check
-  // that sums indemnity+alae, or medical+indemnity+impairment, is only valid
-  // within its own line. Both partitions are asserted per line in that line's
-  // harness, never across lines.
-  indemnity?: number;
-  alae?: number;
-  // stateLaw claims are capped at GL_STATUTORY_CAP in the waterfall;
-  // federal1983 claims are uncapped (why law enforcement owns the tail).
-  legalBasis?: 'stateLaw' | 'federal1983';
-  litigationStage?: string;
-  // yearNumber the claim settles (accident + report lag + stage lag) — the
-  // year whose dollars the booked severity is trended to.
-  settlementYear?: number;
+  // --- GL claim-level fields ---
+  // NONE LEFT. The GL sub-coverage rebuild deleted the indemnity/ALAE split
+  // (ALAE is now inside the fitted mixture amount), legalBasis and the
+  // statutory cap it gated, litigationStage, and settlementYear (no more
+  // trend-to-settlement conversion — GL books the mixture draw as-is). See
+  // GL_LOSS_MODEL in defaultAssumptions.ts for the full reasoning.
   // --- Property claim-level fields (design doc property_noncat NC1) ---
   // Property severity is EMERGED FROM THE BOOK rather than drawn as a dollar
   // amount: severity = damageRatio x the hit location's TIV, which is what
@@ -553,7 +539,7 @@ export interface ResultSet {
   occurrences?: Occurrence[];
   claimCountsByClass?: Record<string, number>;  // WC
   claimCountsByTier?: Record<string, number>;   // WC
-  claimCountsBySub?: Record<string, number>;    // GL (general/epl/lawEnforcement/abuse + abuseIncidents)
+  claimCount?: number;                          // GL — total claims generated this line-year, no sub-coverage breakdown anymore
   shockLossAmount: number;
   grossUltimateLoss: number;
   // ⚠ NOT THE SHOCK EVENT SYSTEM. This flag predates it and already carries

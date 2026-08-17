@@ -35,16 +35,11 @@
 // connected to the live engine (see claimsExport.ts's header).
 // ============================================================================
 //
-// OCCURRENCE BASIS (J14). Layers attach to the OCCURRENCE total, not to any one
-// claim: a GL abuse batch is one occurrence across several claimant claims, and
-// the treaty sees their sum. Two rules interact and are easy to transpose:
-//
-//   the STATUTORY CAP applies to INDEMNITY ONLY, per claim, stateLaw only
-//   the RETENTION applies to INDEMNITY + ALAE COMBINED, per occurrence
-//
-// So a state-law claim can be capped on damages and still reach the treaty on
-// defense costs. Order is therefore: cap each claim's indemnity, add its ALAE,
-// sum the claims in the occurrence, then layer that total.
+// OCCURRENCE BASIS. Layers attach to the OCCURRENCE total. Occurrence == claim
+// for both WC and GL now — GL's multi-claimant abuse batches and its statutory
+// cap (indemnity-only, state-law-only) both retired with the GL sub-coverage
+// rebuild, so there is no longer a multi-claim sum or a cap-then-add-ALAE
+// order to get wrong. Both lines layer the claim's grossUltimate directly.
 //
 // ============================================================================
 // WHICH LAYER MEANS ARE ALLOWED A CONFIDENCE INTERVAL
@@ -62,7 +57,6 @@
 // ============================================================================
 
 import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
-import { GL_STATUTORY_CAP } from '../../src/data/defaultAssumptions';
 import { computeKLine, generateWcClaims } from '../../src/utils/wcClaimEngine';
 import { computeKGl, generateGlClaims } from '../../src/utils/glClaimEngine';
 import { generateGameInstance } from '../../src/utils/instanceGenerator';
@@ -112,19 +106,17 @@ function quantile(xs: number[], q: number): number {
 
 // --- the waterfall, per J14 -------------------------------------------------
 
-// One claim's contribution to its occurrence total. WC has no cap. GL caps
-// INDEMNITY ONLY and only on stateLaw, then adds ALAE uncapped — so defense
-// costs can carry a capped claim into the treaty.
-function claimContribution(c: Claim, line: CoverageLine): number {
-  if (line !== 'GL') return c.grossUltimate;
-  const indemnity = c.indemnity ?? 0;
-  const capped = c.legalBasis === 'stateLaw' ? Math.min(indemnity, GL_STATUTORY_CAP) : indemnity;
-  return capped + (c.alae ?? 0);
+// One claim's contribution to its occurrence total. Neither line caps
+// anything at generation time now — GL's statutory cap retired with the
+// sub-coverage rebuild (see reinsuranceTower.ts's claimContribution, which
+// this mirrors for cross-checking independence).
+function claimContribution(c: Claim): number {
+  return c.grossUltimate;
 }
 
 interface OccView { total: number; largestClaim: number; claimCount: number; source: string }
 
-function occurrenceViews(claims: Claim[], occurrences: Occurrence[], line: CoverageLine): OccView[] {
+function occurrenceViews(claims: Claim[], occurrences: Occurrence[]): OccView[] {
   const byId = new Map(claims.map(c => [c.id, c]));
   const out: OccView[] = [];
   for (const o of occurrences) {
@@ -132,12 +124,12 @@ function occurrenceViews(claims: Claim[], occurrences: Occurrence[], line: Cover
     for (const id of o.claimIds) {
       const c = byId.get(id);
       if (!c) continue;
-      const amt = claimContribution(c, line);
+      const amt = claimContribution(c);
       total += amt;
       if (amt > largestClaim) largestClaim = amt;
-      // Every claim in a GL occurrence shares one sub-coverage (an abuse batch
-      // is all-abuse), and WC occurrences are 1:1, so the first claim's tier
-      // identifies the source for the whole occurrence.
+      // Occurrence == claim for both WC and GL now (GL's multi-claimant abuse
+      // batches were deleted with the sub-coverage rebuild), so the first
+      // claim's tier identifies the source for the whole occurrence exactly.
       if (source === '?') source = c.tier;
     }
     out.push({ total, largestClaim, claimCount: o.claimIds.length, source });
@@ -211,7 +203,7 @@ function runA(line: CoverageLine, members: Member[], years: number, layers: Laye
   const extra: ExtraAcc = { over25: 0, over25WithBigClaim: 0, glRetainedAbove: [], glRetainedEvents: 0, glLargest: 0, retainedBelow: [] };
   for (let y = 0; y < years; y++) {
     const res = drawYear(line, members, k, seedBase + y * 31337, 1);
-    const views = occurrenceViews(res.claims, res.occurrences, line);
+    const views = occurrenceViews(res.claims, res.occurrences);
     const yearCeded = layers.map(() => 0);
     let retainedBelow = 0, retainedAbove = 0;
     for (const v of views) {
@@ -257,7 +249,7 @@ function playGame(id: string, lines: CoverageLine[], years: number): ResultSet[]
 
 console.log('=== REINSURANCE LAYER TABLES, measured from the generators ===');
 console.log(`WC horizon ${WC_YEARS} yrs | GL horizon ${GL_YEARS} yrs | RUN B ${RUN_B_GAMES} games x ${RUN_B_LENGTH} yrs`);
-console.log('Occurrence basis. GL: statutory cap on indemnity only (stateLaw), retention on indemnity+ALAE combined.');
+console.log('Occurrence basis. Occurrence == claim for both WC and GL — no cap, no multi-claim batching on either line.');
 
 const fullMarket = getPredefinedMarketMembers();
 
@@ -302,7 +294,7 @@ for (const [basis, key] of [['FULL-MARKET', 'GL|FULL-MARKET'], ['ENROLLED', 'GL|
   console.log(`    mean INDICATIVE ONLY — unbounded band, no valid CI.`);
 }
 
-console.log('\n=== OCCURRENCES OVER $25M: one big claim, or an accumulation? ===');
+console.log('\n=== OCCURRENCES OVER $25M: regression guard — occurrence == claim on both lines now ===');
 for (const line of ['WC', 'GL'] as CoverageLine[]) {
   for (const basis of ['FULL-MARKET', 'ENROLLED'] as const) {
     const e = runAResults[`${line}|${basis}`].extra;
@@ -328,7 +320,7 @@ console.log('real membership churn and real pool-year factors. Ceded is summed o
         const lr = r.byLine[line];
         if (!lr?.occurrences?.length) continue;
         const layers = line === 'WC' ? WC_LAYERS : GL_LAYERS;
-        for (const v of occurrenceViews(lr.claims ?? [], lr.occurrences, line)) {
+        for (const v of occurrenceViews(lr.claims ?? [], lr.occurrences)) {
           for (const l of layers) {
             const c = cedeToLayer(v.total, l);
             if (c > 0) tally[`${line} ${l.name}`] = (tally[`${line} ${l.name}`] ?? 0) + c;

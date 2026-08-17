@@ -169,20 +169,24 @@ export const SHOCK_CATALOG: Record<string, ShockDefinition> = {
   },
 
   // -------------------------------------------------------------------------
-  // #22 — CURRENT horizon. Tests freqMultiplier with sub-coverage targeting.
+  // #22 — CURRENT horizon. Tests freqMultiplier at whole-line scope.
   //
-  // MEASURED SCALE, and the arithmetic here is easy to get wrong in two ways.
+  // ⚠ RE-TARGETED BY THE GL SUB-COVERAGE REBUILD. This used to be
+  // `freqMultiplier` on sub 'epl' x2.0. That key no longer exists — GL has no
+  // sub-coverages left to target, only WHOLE_LINE — and unlike a
+  // componentFreqMultiplier typo this would NOT have thrown at load: it would
+  // have silently done nothing every time it fired.
   //
-  //   ALAE IS INCURRED ON EVERY CLAIM, PAID OR NOT (design B3/B4), and a
-  //   frequency multiplier multiplies the GATE count, so the unpaid claims and
-  //   their ALAE double too. Counting only paid claims understates the cost by
-  //   about 43%. Full market: 41.5 paid x $265,973 = $11.04M, plus 67.7 unpaid
-  //   x $125,021 = $8.46M, total $19.50M — confirmed by simulation at $19.79M.
-  //
-  //   THE COMPARISON BASE IS THE WHOLE LINE, NOT THE SUB-COVERAGE. GL's enrolled
-  //   gross is ~$25.3M/yr (full market $93.80M measured). So 2x adds ~$5.3M
-  //   enrolled, which is ~+21% of GL — material, and nothing like the
-  //   +60-120% that comparing against EPL's own $5M would suggest.
+  // x1.217 PRESERVES THE OLD EVENT'S SHARE OF GL's TOTAL, not its old dollar
+  // amount or its old factor. Doubling EPL added EPL's own full-market analytic
+  // ($19.84M) against the old four-sub-coverage total ($91.44M) — 21.7% of GL.
+  // A whole-line frequency multiplier adds exactly (factor - 1) x 100% of GL's
+  // total, so matching that same 21.7% share of the new total gives
+  // factor = 1 + 19.84/91.44 = 1.217. This is a judgment call, not a
+  // derivation from the new model the way the mixture parameters are: there is
+  // no sub-coverage left to anchor the event's narrative "EPL surge" framing
+  // to, so what's preserved is the moderate-band SCALE the event was
+  // calibrated to read as, not a specific mechanism it now hits.
   // -------------------------------------------------------------------------
   '#22': {
     id: '#22',
@@ -191,9 +195,9 @@ export const SHOCK_CATALOG: Record<string, ShockDefinition> = {
     band: 'moderate',
     description:
       'A wave of employment-practices claims — discrimination, harassment, wrongful termination — '
-      + 'doubles EPL claim frequency for one year.',
+      + 'raises General Liability claim frequency for one year.',
     effects: [
-      { kind: 'freqMultiplier', line: 'GL', sub: 'epl', factor: 2.0 },
+      { kind: 'freqMultiplier', line: 'GL', factor: 1.217 },
     ],
   },
 
@@ -227,10 +231,14 @@ export const SHOCK_CATALOG: Record<string, ShockDefinition> = {
   // automatically right — dollars were chosen because the event's severity band
   // was set against a dollar figure.
   //
-  // 1.25x on GL 'general' is unchanged: the secondary public-health liability
-  // exposure. 'general' is the natural GL target — duty-of-care to the public
-  // rather than employment practice (epl), use of force (lawEnforcement) or
-  // custodial abuse.
+  // ⚠ THE GL HALF WAS RE-TARGETED BY THE GL SUB-COVERAGE REBUILD, for the
+  // identical reason as #22: 'general' no longer exists. x1.057 preserves the
+  // same SHARE-OF-LINE logic as #22's — 1.25x on 'general' added 0.25 x
+  // $21.00M (general's old full-market analytic) against the old $91.44M GL
+  // total, 5.74% of GL. factor = 1 + 5.25/91.44 = 1.057. Smaller than #22's
+  // adjustment because 'general' was a smaller slice of the old line total
+  // than 'epl' was multiplied by a smaller factor — this event was always the
+  // secondary, lower-scale half of a cross-line pair, and stays that way.
   // -------------------------------------------------------------------------
   '#28': {
     id: '#28',
@@ -242,7 +250,7 @@ export const SHOCK_CATALOG: Record<string, ShockDefinition> = {
       + 'personnel, with secondary public-health liability exposure on the general liability line.',
     effects: [
       { kind: 'componentFreqMultiplier', line: 'WC', component: 'large', factor: 1.620 },
-      { kind: 'freqMultiplier', line: 'GL', sub: 'general', factor: 1.25 },
+      { kind: 'freqMultiplier', line: 'GL', factor: 1.057 },
     ],
   },
 };

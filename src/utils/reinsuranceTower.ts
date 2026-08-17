@@ -15,7 +15,6 @@
 // The one thing that does NOT fall out is reinstatements, because there is no
 // annual limit to reinstate — see the simplification note in reinsuranceTower.ts.
 
-import { GL_STATUTORY_CAP } from '../data/defaultAssumptions';
 import {
   AGG_ATTACHMENT_LEVELS,
   AGG_LIMIT_MULTIPLE,
@@ -34,26 +33,30 @@ export const isTowerLine = (line: CoverageLine): line is TowerLine => line === '
 
 // --- the waterfall (J14) ----------------------------------------------------
 
-// One claim's contribution to its occurrence total. WC has no cap. GL caps
-// INDEMNITY ONLY and only on stateLaw, then adds ALAE UNCAPPED — so defense
-// costs can carry a capped claim into the treaty. Transposing these two is the
-// easy mistake; the order here is cap-indemnity, then add ALAE.
-export function claimContribution(c: Claim, line: CoverageLine): number {
-  if (line !== 'GL') return c.grossUltimate;
-  const indemnity = c.indemnity ?? 0;
-  const capped = c.legalBasis === 'stateLaw' ? Math.min(indemnity, GL_STATUTORY_CAP) : indemnity;
-  return capped + (c.alae ?? 0);
+// One claim's contribution to its occurrence total. Neither line caps
+// anything at generation time: WC never did, and GL's statutory cap was
+// deleted with the sub-coverage rebuild (the fitted mixture comes from claims
+// already realized under real-world caps — applying one on top would
+// double-count, the same reasoning that removed GL_SOCIAL_INFLATION's
+// trend-to-settlement step). This function now exists only because
+// occurrenceTotals needs a uniform per-claim accessor across lines, not
+// because the two lines differ.
+export function claimContribution(c: Claim): number {
+  return c.grossUltimate;
 }
 
-// Occurrence totals — the unit the tower attaches to. A GL abuse batch is one
-// occurrence across several claimant claims and the treaty sees their sum.
-export function occurrenceTotals(claims: Claim[], occurrences: Occurrence[], line: CoverageLine): number[] {
+// Occurrence totals — the unit the tower attaches to. Occurrence == claim for
+// both WC and GL now (GL's multi-claimant abuse batches were deleted with the
+// sub-coverage rebuild), so every occurrence sums exactly one claim — this
+// function stays line-agnostic rather than special-cased to 1:1, since
+// nothing prevents a future multi-claim occurrence from returning.
+export function occurrenceTotals(claims: Claim[], occurrences: Occurrence[]): number[] {
   const byId = new Map(claims.map(c => [c.id, c]));
   return occurrences.map(o => {
     let total = 0;
     for (const id of o.claimIds) {
       const c = byId.get(id);
-      if (c) total += claimContribution(c, line);
+      if (c) total += claimContribution(c);
     }
     return total;
   });

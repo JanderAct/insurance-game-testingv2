@@ -44,32 +44,21 @@
 //   CSV. Nothing about Property exposure is derived here any more.
 // - Satisfaction keeps the old catalog's formula (6.2 + ((index*19)%23)/10) —
 //   the CSV carries no satisfaction column.
-// - The eight WC_*/GL_* class columns are NOT ingested: they are exactly
-//   Type-determined (WC_CLASS_MIX / GL_RELATIVITIES in defaultAssumptions.ts).
-//   This script VERIFIES the tables reproduce every CSV cell and refuses to
-//   emit if they don't.
+// - The eight WC_*/GL_* class columns are NOT ingested as lookup tables — the
+//   two tables they used to verify against (WC_CLASS_MIX, GL_RELATIVITIES)
+//   both retired with the GL sub-coverage rebuild (see CALIBRATION_FINDINGS).
+//   Columns are still parsed into each row (below) and the WC ones are still
+//   checked for internal row-sum consistency against payroll, but nothing
+//   here cross-checks them against a Type-keyed table anymore.
 
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import {
-  WC_CLASS_MIX,
-  GL_RELATIVITIES,
-} from '../../src/data/defaultAssumptions';
 import type { MemberType, Region, SizeCategory } from '../../src/types/simulation';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CSV_PATH = path.join(__dirname, '../../src/data/roster_canonical_v4.csv');
 const OUT_PATH = path.join(__dirname, '../../src/data/memberCatalog.ts');
-
-// WC class columns are authored to 4dp of $M, i.e. quantized to $100. Four
-// columns each rounding +/-$50 gives a theoretical worst case of $200, so the
-// tolerance must clear that: 34 of the 200 v3 members land exactly on $100.00
-// and a future roster could legitimately produce $150 or $200. $250 is
-// comfortably above the bound and still orders of magnitude below anything a
-// genuinely broken class-mix table would produce (which would miss by whole
-// percentages of payroll, not by dollars).
-const WC_RESIDUAL_LIMIT_DOLLARS = 250;
 
 const VALID_TYPES: ReadonlySet<string> = new Set([
   'City', 'County', 'Fire District', 'Water District', 'Transit Authority',
@@ -177,41 +166,25 @@ for (const [zone, expected] of [['North', 5039.0], ['Central', 4840.6], ['South'
   }
 }
 
-// --- Verify WC_CLASS_MIX reproduces the CSV's WC dollar columns ---
-// and GL_RELATIVITIES matches the CSV's GL columns exactly.
-let worstWcResidualDollars = 0;
-let worstWcCell = '';
+// --- CSV WC column internal consistency (row sums to payroll) ---
+// WC_CLASS_MIX and GL_RELATIVITIES themselves RETIRED with the GL
+// sub-coverage rebuild (WC stopped reading WC_CLASS_MIX at its own severity
+// rebuild; GL's rebuild removed WC_CLASS_MIX's last consumer and deleted
+// GL_RELATIVITIES outright), so the per-cell verification against those two
+// tables — which this block used to run — no longer has a table to check
+// against. What survives is CSV-internal: the four wc[] columns per row
+// should still sum to that row's payroll, independent of any lookup table.
 let atLimitCount = 0;
 let worstRowResidualDollars = 0;
 for (const r of rows) {
-  const mix = WC_CLASS_MIX[r.type];
-  const fracs = [mix.clerical, mix.publicWorks, mix.police, mix.fire];
-  fracs.forEach((f, i) => {
-    const residual = Math.abs(f * r.payroll - r.wc[i]) * 1e6; // $M -> $
-    if (residual > worstWcResidualDollars) {
-      worstWcResidualDollars = residual;
-      worstWcCell = `${r.id} col ${i}`;
-    }
-  });
-  // Two DIFFERENT residuals, both worth seeing:
-  //  - per-cell (above): |mix x payroll - csv cell|, what the throw gates on.
-  //    Cells are 4dp of $M, so this cannot exceed half a $100 tick = $50.
-  //  - row sum (here): |sum of the four csv cells - payroll|. Four cells each
-  //    rounding +/-$50 bounds this at $200; 34 of the 200 v3 members land on
-  //    exactly $100. This is the number that made $150 an unsafe limit.
+  // |sum of the four csv cells - payroll|. Four cells each rounding +/-$50
+  // bounds this at $200; 34 of the 200 v3 members land on exactly $100 —
+  // this is the number that made $150 an unsafe limit.
   const rowResidual = Math.abs(
     r.wc.reduce((s, v) => s + v, 0) - r.payroll
   ) * 1e6;
   if (rowResidual > worstRowResidualDollars) worstRowResidualDollars = rowResidual;
   if (rowResidual >= 100 - 1e-6) atLimitCount++;
-  const rel = GL_RELATIVITIES[r.type];
-  const rels = [rel.general, rel.epl, rel.lawEnforcement, rel.abuse];
-  rels.forEach((v, i) => {
-    if (v !== r.gl[i]) throw new Error(`${r.id}: GL_RELATIVITIES[${r.type}][${i}] = ${v} but CSV has ${r.gl[i]}`);
-  });
-}
-if (worstWcResidualDollars > WC_RESIDUAL_LIMIT_DOLLARS) {
-  throw new Error(`WC_CLASS_MIX x payroll misses the CSV by $${worstWcResidualDollars.toFixed(2)} at ${worstWcCell} (limit $${WC_RESIDUAL_LIMIT_DOLLARS})`);
 }
 
 // --- Risk Quality clamp ---
@@ -271,9 +244,11 @@ const out = `// Canonical 200-member marketplace — GENERATED FILE, do not edit
 // severity is still capped at the hit location's value, so nothing downstream
 // is affected; do not assert that the primary is the maximum.
 //
-// Each member's WC class-payroll split and GL sub-line relativities are exact
-// functions of its Type — see WC_CLASS_MIX and GL_RELATIVITIES in
-// defaultAssumptions.ts. They are intentionally NOT stored per member.
+// Each member's WC class-payroll split used to be an exact function of its
+// Type (WC_CLASS_MIX in defaultAssumptions.ts). GL sub-line relativities were
+// too (GL_RELATIVITIES). Both retired with the GL sub-coverage rebuild — WC
+// stopped reading WC_CLASS_MIX at its own severity rebuild, and GL's rebuild
+// deleted GL_RELATIVITIES outright along with the sub-coverages it weighted.
 
 import type { CoverageLine, Member, MemberType, Region, SizeCategory } from '../types/simulation';
 
@@ -354,9 +329,7 @@ console.log(`  payroll shares: County ${(shareOf('County') * 100).toFixed(2)}%  
 console.log(`  TIV sum: $${tivSum.toFixed(1)}M (blended ${(tivSum / payrollSum).toFixed(2)}x payroll); largest member ${(largestTivShare * 100).toFixed(2)}%`);
 console.log(`  zone TIV: North $${zoneTiv.North.toFixed(1)}M / Central $${zoneTiv.Central.toFixed(1)}M / South $${zoneTiv.South.toFixed(1)}M`);
 console.log(`  locations: ${locationsSum} (min ${Math.min(...rows.map(r => r.locations))}, max ${Math.max(...rows.map(r => r.locations))})`);
-console.log(`  WC_CLASS_MIX worst PER-CELL residual: $${worstWcResidualDollars.toFixed(2)} (limit $${WC_RESIDUAL_LIMIT_DOLLARS})`);
 console.log(`  worst ROW-SUM residual: $${worstRowResidualDollars.toFixed(2)}; ${atLimitCount}/200 members sit at exactly $100 (4dp quantization)`);
-console.log(`  GL_RELATIVITIES: exact match on all 800 cells`);
 console.log(`  risk quality clamped to 1.0: ${clamped.length ? clamped.join(', ') : 'none'}`);
 const sizes: Record<string, number> = {};
 rows.forEach(r => { const s = sizeById.get(r.id)!; sizes[s] = (sizes[s] ?? 0) + 1; });

@@ -58,9 +58,18 @@ export const WAGE_INFLATION_PER_YEAR = 0.0363;
 // line-agnostic because GL and Property will both need it, but turning either on
 // is a REPRICING, not a toggle:
 //
-//   GL — carries a 7% social-inflation severity trend. Once its payroll grows,
-//        GL's rate trend becomes 1.07 / 1.0363 = +3.25%/yr rather than +7%.
-//        Expect that when the switch is flipped; do not discover it.
+//   GL — CARRIES NO SEVERITY OR FREQUENCY TREND OF ANY KIND (the GL
+//        sub-coverage rebuild deleted GL_SOCIAL_INFLATION entirely — see
+//        GL_LOSS_MODEL in defaultAssumptions.ts). An EARLIER version of this
+//        comment claimed GL's rate trend would become "+3.25%/yr rather than
+//        +7%" once payroll grows — that assumed a 7% trend GL no longer has,
+//        and was wrong even before the rebuild (it never paired frequency's
+//        flatness with any severity trend correctly). With no trend at all,
+//        flipping this switch on GL as-is would make GL's rate FALL by the
+//        full wage rate (payroll grows, nothing offsets it) — the mirror
+//        image of the defect WC's own wage-inflation work fixed. Do not flip
+//        this switch until GL has a sourced severity trend to pair against it,
+//        exactly as WC's wcSeverityTrend pairs with this factor.
 //
 //   PROPERTY — its exposure base is TIV, not payroll, and TIV inflates with
 //        CONSTRUCTION COST, not wages. 3.63% IS NOT PROPERTY'S RATE. Turning

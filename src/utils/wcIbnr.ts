@@ -61,7 +61,7 @@ import {
   type WcComponentKey,
 } from '../data/defaultAssumptions';
 import { REINSURANCE_TOWER } from '../data/reinsuranceTower';
-import { lognormalParams, normalCdf } from './claimMath';
+import { limitedExpectedValue, lognormalParams, normalCdf } from './claimMath';
 import type { Member } from '../types/simulation';
 import { ratingGroupOf, regionMultiplier, tiltedWeights, trendedMu } from './wcClaimEngine';
 
@@ -111,16 +111,6 @@ export function ldfToUltimate(age: number, pDelayed: number): number {
 }
 
 // --- the dollar-weighted delayed share ----------------------------------------
-
-// Expected value of min(X, limit) for X ~ lognormal(mu, sigma). Closed form,
-// no quadrature:
-//   E[X ^ L] = exp(mu + s^2/2) x Phi((ln L - mu - s^2)/s) + L x (1 - Phi((ln L - mu)/s))
-export function limitedExpectedValue(mu: number, sigma: number, limit: number): number {
-  if (!(limit > 0)) return 0;
-  if (!Number.isFinite(limit)) return Math.exp(mu + (sigma * sigma) / 2);
-  const z = (Math.log(limit) - mu) / sigma;
-  return Math.exp(mu + (sigma * sigma) / 2) * normalCdf(z - sigma) + limit * (1 - normalCdf(z));
-}
 
 // Expected RETAINED severity of one claim of this component, after the
 // per-occurrence tower cedes to whichever layers are placed.

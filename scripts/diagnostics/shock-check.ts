@@ -31,6 +31,7 @@ import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { resolveShocks, ownFreqMultipliers, ownComponentFreqMultipliers } from '../../src/utils/shockResolver';
+import { WHOLE_LINE } from '../../src/utils/shockEffects';
 import { computeKGl, expectedGlGrossLoss, generateGlClaims } from '../../src/utils/glClaimEngine';
 import { computeKLine, componentMean, expectedWcGrossLossForPricing, generateWcClaims } from '../../src/utils/wcClaimEngine';
 import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
@@ -203,6 +204,17 @@ console.log('\n--- 4. recording surface ---');
 
 console.log('\n--- 5. #22 Employment Practices Surge — measured at both bases ---');
 {
+  // ⚠ RE-TARGETED BY THE GL SUB-COVERAGE REBUILD. This used to isolate EPL
+  // claims specifically (freqMultiplier on sub 'epl') and had to separate an
+  // "EPL-only" delta from a "whole-line" delta because GL drew one Poisson
+  // PER SUB-COVERAGE — multiplying EPL's lambda reshaped every draw after it
+  // in the shared gl_freq stream, contaminating the whole-line comparison
+  // with independent-sample noise from abuse's own heavy tail. GL now draws
+  // ONE Poisson per member (no sub-coverages left to separate), so there is
+  // no "EPL-only vs whole-line" distinction anymore — #22 IS a whole-line
+  // event now, by construction, and the claim-count ratio is directly
+  // comparable to the shocked factor with no contamination to worry about.
+  //
   // BOTH BASES, ALWAYS. Full market is what mu and the AAL targets are
   // calibrated against; the enrolled pool is what a game actually pays. A
   // treaty- or premium-facing figure quoted at full-market scale runs ~4x high,
@@ -222,37 +234,32 @@ console.log('\n--- 5. #22 Employment Practices Surge — measured at both bases 
   const share = pool.reduce((s, m) => s + (m.exposureByLine.GL ?? 0), 0) / roster.reduce((s, m) => s + (m.exposureByLine.GL ?? 0), 0);
   console.log(`  ENROLLED POOL ${pool.length} members at ${(share * 100).toFixed(1)}% of market payroll`);
   console.log(`                GL expected gross ${fmt$(poolBase)} -> ${fmt$(poolShocked)}   added ${fmt$(poolShocked - poolBase)} (+${((poolShocked / poolBase - 1) * 100).toFixed(1)}% of GL)`);
-  console.log(`  ⚠ ALAE IS INCURRED ON EVERY CLAIM, PAID OR NOT (design B3/B4), and a frequency multiplier`);
-  console.log(`    multiplies the GATE count — so the unpaid claims and their ALAE scale too. Counting only`);
-  console.log(`    paid claims understates this by ~43%.`);
   console.log(`  CALIBRATION DEFERRED: this reports what the event costs and asserts nothing about whether`);
   console.log(`    that is right for a Moderate band. Shocks must be sized against a pool that already has`);
   console.log(`    two-sided risk (finding 24), which it does not yet have.`);
 
   // The DRAW must move with the multiplier, and by about the analytic amount.
+  // Paired seeds are directly comparable now: one Poisson per member, so
+  // shifting lambda shifts exactly that one count draw (severity streams
+  // still diverge after a shifted count, which is the expected consequence
+  // of a frequency shock, not contamination).
   const YEARS = 400;
   const drawn = (mult?: Record<string, number>) => {
-    let sum = 0, epl = 0, eplGross = 0;
+    let sum = 0, count = 0;
     for (let y = 1; y <= YEARS; y++) {
       const g = generateGlClaims({
         members: pool, yearNumber: y, calendarYear: 2025 + y, instanceSeed: 4242 + y * 7919,
         kGl: kPool, gPool: 1, riskControlEffectiveness: 0, freqMultipliers: mult,
       });
       sum += g.grossUltimateLoss;
-      epl += g.claimCountsBySub.epl;
-      for (const c of g.claims) if (c.tier === 'epl') eplGross += c.grossUltimate;
+      count += g.claimCount;
     }
-    return { gross: sum / YEARS, epl: epl / YEARS, eplGross: eplGross / YEARS };
+    return { gross: sum / YEARS, count: count / YEARS };
   };
   const a = drawn(undefined), b = drawn(own);
-  console.log(`  drawn over ${YEARS} yrs: EPL claims ${a.epl.toFixed(1)}/yr -> ${b.epl.toFixed(1)}/yr (ratio ${(b.epl / a.epl).toFixed(3)}, expect ${own.epl})  ${note(Math.abs(b.epl / a.epl - own.epl) / own.epl < 0.05, `EPL claim count ratio ${(b.epl / a.epl).toFixed(3)} vs ${own.epl}`)}`);
-  console.log(`    EPL gross only  ${fmt$(a.eplGross)} -> ${fmt$(b.eplGross)}   added ${fmt$(b.eplGross - a.eplGross)} vs analytic ${fmt$(poolShocked - poolBase)}`);
-  console.log(`    WHOLE LINE      ${fmt$(a.gross)} -> ${fmt$(b.gross)}   added ${fmt$(b.gross - a.gross)}`);
-  console.log(`  ⚠ THE TWO RUNS ARE NOT PAIRED, THOUGH THEY SHARE SEEDS. poisson() consumes a VARIABLE number`);
-  console.log(`    of uniforms, so multiplying the EPL lambda reshapes everything drawn from gl_freq after it —`);
-  console.log(`    including abuse. The whole-line delta therefore carries the FULL independent-sample noise of`);
-  console.log(`    two heavy-tailed totals, and abuse alone is ~47% of GL gross. The EPL-only delta is the`);
-  console.log(`    tighter read; the claim-count ratio, being a stable statistic, is the assertable one.`);
+  const expectRatio = own[WHOLE_LINE];
+  console.log(`  drawn over ${YEARS} yrs: claims ${a.count.toFixed(1)}/yr -> ${b.count.toFixed(1)}/yr (ratio ${(b.count / a.count).toFixed(3)}, expect ${expectRatio})  ${note(Math.abs(b.count / a.count - expectRatio) / expectRatio < 0.05, `claim count ratio ${(b.count / a.count).toFixed(3)} vs ${expectRatio}`)}`);
+  console.log(`    WHOLE LINE      ${fmt$(a.gross)} -> ${fmt$(b.gross)}   added ${fmt$(b.gross - a.gross)} vs analytic ${fmt$(poolShocked - poolBase)}`);
 
   // INVARIANT 2, the shock version: the multiplier must move the DRAW and stay
   // out of the PRICING expectation. Nothing that prices GL passes it.
@@ -401,12 +408,14 @@ console.log('\n--- 8. #28 Pandemic — THE CROSS-LINE TEST ---');
   // processYear (which has all three lines in scope) and per-line effects are
   // projected down. Both target lines are REAL cut-over claim-level generators,
   // not stubs.
-  // WC's half is a COMPONENT multiplier now (its presumption sub-key is gone);
-  // GL's is still a sub-coverage frequency multiplier. Reading them from
-  // different accessors is the point — they are different mechanisms.
+  // WC's half is a COMPONENT multiplier (its presumption sub-key is gone).
+  // GL's half is a WHOLE-LINE frequency multiplier now — GL has no
+  // sub-coverage left to target either, since the GL rebuild deleted them
+  // all. Reading the two from different accessors is still the point — they
+  // are different mechanisms — even though GL's own key collapsed to WHOLE_LINE.
   const wcOwn = ownComponentFreqMultipliers('#28', 'WC')!;
   const glOwn = ownFreqMultipliers('#28', 'GL')!;
-  console.log(`  WC component effects ${JSON.stringify(wcOwn)}   GL sub effects ${JSON.stringify(glOwn)}`);
+  console.log(`  WC component effects ${JSON.stringify(wcOwn)}   GL whole-line effects ${JSON.stringify(glOwn)}`);
   console.log(`  WC's half did NOT silently vanish: ${note(!!wcOwn && Object.keys(wcOwn).length > 0, "#28's WC half resolves to nothing — the event has silently become GL-only")}`);
 
   const results = play('MAMC6EA4', 5, [{ shockId: '#28', yearNumber: 2 }]);

@@ -48,11 +48,10 @@ import {
   MEAN_REPORT_LAG_YEARS,
   dollarWeightedPDelayed,
   ldfToUltimate,
-  limitedExpectedValue,
   reportLagCdf,
   wcIbnrBalance,
 } from '../../src/utils/wcIbnr';
-import { normalCdf } from '../../src/utils/claimMath';
+import { limitedExpectedValue, normalCdf } from '../../src/utils/claimMath';
 import { SeededRandom } from '../../src/utils/random';
 import type { Member, WcUnreportedClaim, WcAccidentYearReportedEntry } from '../../src/types/simulation';
 
