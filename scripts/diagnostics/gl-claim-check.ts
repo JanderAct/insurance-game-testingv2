@@ -6,18 +6,32 @@
 //
 // Run: npx tsx scripts/diagnostics/gl-claim-check.ts
 //
-// STRUCTURE: section 1 replicates the frequency-anchor derivation and the
-// mixture's own closed-form moments independently of the engine, and
-// validates the replica against the real exported expectedGlGrossLoss before
-// trusting anything built on it — the same discipline
-// wc-severity-rebuild-check.ts used for WC's rebuild. Sections 2-4 assert the
-// spec's verification targets. Section 5+ exercises the draw, the RQ
-// channels, and engine integrity.
+// STRUCTURE: section 1 replicates the mixture's closed-form moments
+// independently of the engine and validates the replica against the real
+// exported functions before trusting anything built on them — the same
+// discipline wc-severity-rebuild-check.ts used for WC's rebuild. 2 is the
+// frequency anchor, 2b is k_GL's identity, 3 the distribution targets, 4 the
+// RQ channels, 5 the draw, 6 integrity.
 //
-// GL's blended CV is 29.55 (roughly double WC's ~11-14) — the draw's ground-up
-// mean is gated ONLY by a wide CI (finding 26: never gate a heavy-tailed
-// sample mean on a tight tolerance); the $1M-CAPPED mean is well-behaved and
-// gated strictly, exactly as WC's rebuild-check does for its own mixture.
+// ============================================================================
+// EVERY CHECK IS LABELLED [ANALYTIC] OR [DRAWN], AND THAT DISTINCTION MATTERS.
+//
+//   [ANALYTIC]  closed form vs the spec's own closed form. A real check of the
+//               PARAMETERS and the arithmetic; NO check of the generator. It
+//               cannot be "suspiciously tight" because no sampling is involved.
+//   [DRAWN]     measured from generateGlClaims. Only these test the generator.
+//               Each carries a CI, and whether that CI is TRUSTWORTHY depends
+//               entirely on whether the quantity has bounded variance:
+//                 trustworthy  counts, rates, quantiles, CAPPED means
+//                 NOT          any ground-up mean of a heavy-tailed severity
+//
+// GL's blended CV is 29.55 (component 1 alone: 99.1% of loss at CV 21.5), so a
+// ground-up sample mean is dominated by the largest draw seen and CANNOT carry a
+// gate at any realistic sample size — finding 26. Ground-up figures here are
+// REPORTED with their CI marked untrustworthy; the gates sit on capped means and
+// on counts. A previous version of this file mislabelled a circular closed-form
+// identity as a verification of the anchor; see section 2.
+// ============================================================================
 
 import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
 import { GL_HEAVY_COMPONENT_INDEX, GL_LOSS_MODEL, GL_SEVERITY_COMPONENTS } from '../../src/data/defaultAssumptions';
@@ -25,7 +39,8 @@ import {
   computeKGl,
   deriveNeutralGlPurePremiumPer100,
   expectedClaimSeverity,
-  expectedGlGrossLoss,
+  expectedGlGrossLossForKLine,
+  expectedGlGrossLossForPricing,
   generateGlClaims,
   glInternals,
   tiltedGlWeights,
@@ -36,10 +51,19 @@ import type { Claim } from '../../src/types/simulation';
 const problems: string[] = [];
 const note = (ok: boolean, m: string) => { if (!ok) problems.push(m); return ok ? 'OK' : 'FAIL'; };
 const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / Math.max(1, xs.length);
+const sdOfAll = (xs: number[]) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, x) => a + (x - m) ** 2, 0) / Math.max(1, xs.length - 1)); };
+const ci99 = (xs: number[]) => 2.5758 * sdOfAll(xs) / Math.sqrt(xs.length);
 const fmt$ = (x: number) => `$${(x / 1e6).toFixed(2)}M`;
 const roster = getPredefinedMarketMembers();
 const M = GL_LOSS_MODEL;
 const TOTAL_PAYROLL_M = roster.reduce((s, m) => s + (m.exposureByLine.GL ?? 0), 0);
+
+// Mixture survival P(X > x) — used by both the analytic occurrence counts in
+// section 3 and their drawn counterparts' targets in section 5.
+const survivalAt = (x: number) => GL_SEVERITY_COMPONENTS.reduce((s, c) => {
+  const z = (Math.log(x) - c.mu) / c.sigma;
+  return s + c.weight * (1 - normalCdf(z));
+}, 0);
 
 console.log(`=== GL generator: full canonical market ($${TOTAL_PAYROLL_M.toFixed(1)}M payroll), fitted 3-component mixture ===\n`);
 
@@ -70,30 +94,95 @@ let ANALYTIC_GROUND_MEAN = 0, ANALYTIC_1M_LIMITED_MEAN = 0;
   console.log(`  replica vs expectedClaimSeverity: ${engineGroundMean.toFixed(6)} vs ${ANALYTIC_GROUND_MEAN.toFixed(6)}  ${note(Math.abs(engineGroundMean - ANALYTIC_GROUND_MEAN) < 1e-6, 'expectedClaimSeverity disagrees with the independent replica')}`);
 }
 
-console.log('\n--- 2. the frequency anchor: DERIVED, not fitted ---');
+console.log('\n--- 2. the frequency anchor: DERIVED, and checked BY SIMULATION not by rearranging it ---');
 {
   // rate = 2.8300 x 10,000 / 35,920 = 0.7879, per GL_LOSS_MODEL's own comment.
+  // ASSERTED ANALYTICALLY: that the stored constant matches the derivation.
   const derivedRate = 2.8300 * 10_000 / ANALYTIC_1M_LIMITED_MEAN;
-  console.log(`  0-$1M loss cost anchor: $2.8300 per $100 (ASSERT — this is GL's only externally-grounded number)`);
-  console.log(`  derived rate: 2.8300 x 10,000 / ${ANALYTIC_1M_LIMITED_MEAN.toFixed(2)} = ${derivedRate.toFixed(4)} vs stored ${M.ratePer1M}  ${note(Math.abs(derivedRate - M.ratePer1M) < 0.0001, `derived rate ${derivedRate.toFixed(4)} vs stored ${M.ratePer1M}`)}`);
+  console.log(`  0-$1M loss cost anchor: $2.8300 per $100 — GL's only externally-grounded number`);
+  console.log(`  [ANALYTIC] derived rate: 2.8300 x 10,000 / ${ANALYTIC_1M_LIMITED_MEAN.toFixed(2)} = ${derivedRate.toFixed(4)} vs stored ${M.ratePer1M}  ${note(Math.abs(derivedRate - M.ratePer1M) < 0.0001, `derived rate ${derivedRate.toFixed(4)} vs stored ${M.ratePer1M}`)}`);
 
-  const oneHundredLossCost0to1M = M.ratePer1M * ANALYTIC_1M_LIMITED_MEAN / 10_000;
+  // ⚠ THE OLD VERSION OF THIS CHECK WAS CIRCULAR AND HAS BEEN REPLACED.
+  // It computed `ratePer1M * ANALYTIC_1M_LIMITED_MEAN / 10000` and compared it
+  // to 2.83 — which is the derivation above rearranged, over the same closed
+  // form and the same inputs. It is an arithmetic identity: it cannot fail
+  // unless 0.7879 is mistyped, and it says nothing about whether the GENERATOR
+  // reproduces the anchor. Do not reinstate it.
+  //
+  // THE INDEPENDENT ROUTE: simulate, cap each claim at $1M, divide by exposure.
+  // Never touches the closed form. Capping bounds per-claim variance, so the CI
+  // is valid however heavy the raw tail is (finding 26).
+  const YEARS = 4000;
+  const neutralBook = roster.map(m => ({ ...m, riskQuality: 5 }));
+  const capped: number[] = [];
+  for (let y = 1; y <= YEARS; y++) {
+    const r = generateGlClaims({
+      members: neutralBook, yearNumber: y, calendarYear: 2025 + y,
+      instanceSeed: 555_001 + y * 7919, kGl: 1, gPool: 1, riskControlEffectiveness: 0,
+    });
+    capped.push(r.claims.reduce((s, c) => s + Math.min(c.grossUltimate, 1_000_000), 0));
+  }
+  const drawnCost = mean(capped) / (TOTAL_PAYROLL_M * 10_000);
+  const ciCost = ci99(capped) / (TOTAL_PAYROLL_M * 10_000);
+  console.log(`  [DRAWN, ${YEARS} yrs, uniform RQ 5, kGl=1] 0-$1M loss cost ${drawnCost.toFixed(5)} per $100, 99% CI +/-${ciCost.toFixed(5)} (+/-${(ciCost / drawnCost * 100).toFixed(3)}%)`);
+  console.log(`      vs the 2.83000 anchor: ${note(Math.abs(drawnCost - 2.83) <= ciCost, `the DRAWN capped loss cost ${drawnCost.toFixed(5)} is outside its 99% CI of the 2.83 anchor — the generator does not reproduce the anchor its rate was derived from`)}`);
+
+  // Ground-up loss cost stays an ANALYTIC assertion: its drawn counterpart has a
+  // ~3% CI at 4,000 years (CV 29.55), so nothing tight is assertable there.
   const groundUpLossCost = M.ratePer1M * ANALYTIC_GROUND_MEAN / 10_000;
-  console.log(`  reconstructed 0-$1M loss cost: ${oneHundredLossCost0to1M.toFixed(4)} vs 2.8300  ${note(Math.abs(oneHundredLossCost0to1M - 2.8300) < 0.001, `0-$1M loss cost ${oneHundredLossCost0to1M.toFixed(4)} vs 2.8300`)}`);
-  console.log(`  ground-up loss cost: ${groundUpLossCost.toFixed(4)} vs 5.8864  ${note(Math.abs(groundUpLossCost - 5.8864) < 0.001, `ground-up loss cost ${groundUpLossCost.toFixed(4)} vs 5.8864`)}`);
+  console.log(`  [ANALYTIC] ground-up loss cost: ${groundUpLossCost.toFixed(4)} vs 5.8864  ${note(Math.abs(groundUpLossCost - 5.8864) < 0.001, `ground-up loss cost ${groundUpLossCost.toFixed(4)} vs 5.8864`)}`);
 }
 
-console.log('\n--- 3. full-market claims, gross, and loss by band (neutral RQ, kGl=1) ---');
+console.log('\n--- 2b. k_GL NEUTRALISES BOTH RQ CHANNELS (the held-pure-premium identity) ---');
 {
+  // ⚠ THIS IS THE ASSERTION THAT WOULD HAVE CAUGHT THE k_GL DEFECT.
+  // computeKGl used to call the PRICING basis on both sides, which is untilted —
+  // so the severity term cancelled out of the ratio and k_GL corrected FREQUENCY
+  // ONLY, while the draw applied the tilt anyway. Drawn expected loss then
+  // diverged from the held priced expectation by up to 26.6% as the book's RQ mix
+  // moved, and because underwriting selection moves that mix, a player who
+  // underwrote well earned a hidden margin. Exact, deterministic, no draw noise —
+  // and it must hold across the WHOLE RQ range, not just at neutral where the
+  // tilt is the identity and everything trivially agrees.
+  //
+  // WC satisfies the same identity to 1.33e-15 (see wcClaimEngine's computeKLine).
+  let worst = 0, worstRq = 0;
+  for (const q of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) {
+    const book = roster.map(m => ({ ...m, riskQuality: q }));
+    const kGl = computeKGl(book);
+    const drawnBasis = expectedGlGrossLossForKLine(book, { kGl });
+    const heldPriced = expectedGlGrossLossForPricing(book, { riskQualityOverride: 5, kGl: 1 });
+    const dev = Math.abs(drawnBasis / heldPriced - 1);
+    if (dev > worst) { worst = dev; worstRq = q; }
+  }
+  console.log(`  uniform books RQ 1..10: worst |drawn-basis / held-priced - 1| = ${worst.toExponential(2)} at RQ ${worstRq}`);
+  console.log(`  ${note(worst < 1e-12, `k_GL does not neutralise both RQ channels: drawn expected loss diverges from the held priced expectation by ${(worst * 100).toFixed(2)}% at RQ ${worstRq}. computeKGl must use the k_GL basis (tilted) on BOTH sides — see its comment.`)}`);
+  // And on the real, non-uniform roster.
+  const kFull = computeKGl(roster);
+  const devFull = Math.abs(expectedGlGrossLossForKLine(roster, { kGl: kFull })
+    / expectedGlGrossLossForPricing(roster, { riskQualityOverride: 5, kGl: 1 }) - 1);
+  console.log(`  full canonical roster (mixed RQ): deviation ${devFull.toExponential(2)}  ${note(devFull < 1e-12, `k_GL identity fails on the real roster by ${(devFull * 100).toFixed(2)}%`)}`);
+  // The two bases MUST differ away from neutral, or the tilt is not reaching the
+  // draw at all — the converse failure, and just as silent.
+  const at1 = roster.map(m => ({ ...m, riskQuality: 1 }));
+  const spread = expectedGlGrossLossForKLine(at1, { kGl: 1 }) / expectedGlGrossLossForPricing(at1, { kGl: 1 });
+  console.log(`  the two bases DO differ at RQ 1 (ratio ${spread.toFixed(4)}): ${note(Math.abs(spread - 1) > 0.05, 'the k_GL and pricing bases are identical away from neutral — the severity tilt is not in the k_GL basis, so k_GL is correcting nothing extra')}`);
+}
+
+console.log('\n--- 3. [ANALYTIC] full-market claims, gross, loss by band, occurrence counts ---');
+{
+  // ALL FIGURES IN THIS SECTION ARE [ANALYTIC] — closed-form mixture moments and
+  // survival probabilities. Their DRAWN counterparts, with CIs and a trustworthy/
+  // not verdict for each, are measured in section 5.
   const fullMarketClaims = M.ratePer1M * TOTAL_PAYROLL_M;
   const fullMarketGross = fullMarketClaims * ANALYTIC_GROUND_MEAN;
   console.log(`  full-market claims: ${fullMarketClaims.toFixed(1)}/yr vs target 1,024/yr  ${note(Math.abs(fullMarketClaims - 1024) < 1, `full-market claims ${fullMarketClaims.toFixed(1)} vs 1,024`)}`);
   console.log(`  full-market gross: ${fmt$(fullMarketGross)}/yr vs target $76.5M/yr  ${note(Math.abs(fullMarketGross - 76.5e6) < 0.05e6, `full-market gross ${fmt$(fullMarketGross)} vs $76.5M`)}`);
 
-  // Validate against the real exported expectedGlGrossLoss (neutral RQ, kGl=1
+  // Validate against the real exported expectedGlGrossLossForPricing (neutral RQ, kGl=1
   // — the exact pricing basis deriveNeutralGlPurePremiumPer100 uses).
-  const engineGross = expectedGlGrossLoss(roster, { riskQualityOverride: 5, kGl: 1 });
-  console.log(`  engine expectedGlGrossLoss (RQ=5, kGl=1): ${fmt$(engineGross)}  ${note(Math.abs(engineGross - fullMarketGross) / fullMarketGross < 1e-6, 'expectedGlGrossLoss disagrees with the independent replica')}`);
+  const engineGross = expectedGlGrossLossForPricing(roster, { riskQualityOverride: 5, kGl: 1 });
+  console.log(`  engine expectedGlGrossLossForPricing (RQ=5, kGl=1): ${fmt$(engineGross)}  ${note(Math.abs(engineGross - fullMarketGross) / fullMarketGross < 1e-6, 'expectedGlGrossLossForPricing disagrees with the independent replica')}`);
 
   const bandMean = (lo: number, hi: number) => {
     const limLo = lo > 0 ? GL_SEVERITY_COMPONENTS.reduce((s, c) => s + c.weight * limitedExpectedValue(c.mu, c.sigma, lo), 0) : 0;
@@ -108,20 +197,16 @@ console.log('\n--- 3. full-market claims, gross, and loss by band (neutral RQ, k
   console.log(`                above $25M ${(above25M * 100).toFixed(1)}% (target 12.0%)  ${note(Math.abs(above25M - 0.120) < 0.002, `above-$25M share ${(above25M * 100).toFixed(1)}% vs 12.0%`)}`);
   console.log(`                bands sum to 1: ${note(Math.abs(below1M + oneMto25M + above25M - 1) < 1e-9, 'loss bands do not sum to 1')}`);
 
-  const survival = (x: number) => GL_SEVERITY_COMPONENTS.reduce((s, c) => {
-    const z = (Math.log(x) - c.mu) / c.sigma;
-    return s + c.weight * (1 - normalCdf(z));
-  }, 0);
-  const occ1M = M.ratePer1M * TOTAL_PAYROLL_M * survival(1_000_000);
-  const occ5M = M.ratePer1M * TOTAL_PAYROLL_M * survival(5_000_000);
-  const occ25M = M.ratePer1M * TOTAL_PAYROLL_M * survival(25_000_000);
+  const occ1M = M.ratePer1M * TOTAL_PAYROLL_M * survivalAt(1_000_000);
+  const occ5M = M.ratePer1M * TOTAL_PAYROLL_M * survivalAt(5_000_000);
+  const occ25M = M.ratePer1M * TOTAL_PAYROLL_M * survivalAt(25_000_000);
   console.log(`  occurrences (== claims) over $1M: ${occ1M.toFixed(3)}/yr vs target 11.400/yr  ${note(Math.abs(occ1M - 11.400) < 0.01, `occ>$1M ${occ1M.toFixed(3)} vs 11.400`)}`);
   console.log(`  occurrences over $5M: ${occ5M.toFixed(3)}/yr vs target 1.989/yr  ${note(Math.abs(occ5M - 1.989) < 0.01, `occ>$5M ${occ5M.toFixed(3)} vs 1.989`)}`);
   console.log(`  occurrences over $25M: ${occ25M.toFixed(3)}/yr vs target 0.236/yr  ${note(Math.abs(occ25M - 0.236) < 0.005, `occ>$25M ${occ25M.toFixed(3)} vs 0.236`)}`);
   console.log(`  (dropping batches cut this from ~14.7/yr to ${occ25M.toFixed(3)}/yr — a ~${(14.7 / occ25M).toFixed(0)}x reduction, matching the measured consequence recorded in GL_LOSS_MODEL's header)`);
 }
 
-console.log('\n--- 4. RQ channels: frequency unchanged, severity tilt NEW and draw-only ---');
+console.log('\n--- 4. [ANALYTIC] RQ channels: frequency unchanged, severity tilt NEW and draw-only ---');
 {
   const b = M.rqFrequencyBeta;
   console.log(`  rqFrequencyBeta = ${b} (unchanged from before the gate was deleted)  ${note(b === 0.055, `rqFrequencyBeta is ${b}, expected 0.055`)}`);
@@ -132,30 +217,32 @@ console.log('\n--- 4. RQ channels: frequency unchanged, severity tilt NEW and dr
   const w5 = tiltedGlWeights(5);
   const w0 = tiltedGlWeights(0);
   const w10 = tiltedGlWeights(10);
-  const untilted = GL_SEVERITY_COMPONENTS.map(c => c.weight);
-  // Tolerance 1e-6, not 1e-9, for the same reason as the weight-sum check
-  // above: the renormalisation scale factor inherits the fit's ~1e-7 rounding
-  // residual (otherTotal is computed from weights that sum to 1.0000001, not
-  // exactly 1), so exact identity at RQ5 is not achievable to machine
-  // precision — only to the precision the input weights carry.
-  console.log(`  RQ5 (neutral) tilt is the identity: ${note(w5.every((w, i) => Math.abs(w - untilted[i]) < 1e-6), 'RQ5 tilt is not the identity')}`);
+  // THE REFERENCE IS THE NORMALISED WEIGHT VECTOR, not the raw stored one. The
+  // stored weights sum to 1.0000001 (the fit's 6dp rounding); glClaimEngine
+  // normalises once and both expectation bases and the tilt all work off that
+  // single normalised vector, which is what makes k_GL's identity exact (see
+  // NORMALISED_WEIGHTS there, and section 2b). Comparing against the RAW weights
+  // here would reintroduce that 1e-7 as a phantom discrepancy in the harness.
+  const rawTotal = GL_SEVERITY_COMPONENTS.reduce((s, c) => s + c.weight, 0);
+  const untilted = GL_SEVERITY_COMPONENTS.map(c => c.weight / rawTotal);
+  console.log(`  RQ5 (neutral) tilt is the identity: ${note(w5.every((w, i) => Math.abs(w - untilted[i]) < 1e-15), 'RQ5 tilt is not the identity against the normalised base')}`);
   const factor0 = Math.exp(-M.rqSeverityBeta * (0 - 5)), factor10 = Math.exp(-M.rqSeverityBeta * (10 - 5));
   console.log(`  heavy component weight: RQ0 ${w0[GL_HEAVY_COMPONENT_INDEX].toFixed(4)} (x${factor0.toFixed(4)}) / RQ5 ${w5[GL_HEAVY_COMPONENT_INDEX].toFixed(4)} / RQ10 ${w10[GL_HEAVY_COMPONENT_INDEX].toFixed(4)} (x${factor10.toFixed(4)})`);
-  console.log(`  RQ0 heavy weight matches exp(-0.06x(0-5)): ${note(Math.abs(w0[GL_HEAVY_COMPONENT_INDEX] - untilted[GL_HEAVY_COMPONENT_INDEX] * factor0) < 1e-9, 'RQ0 heavy tilt does not match the formula')}`);
+  console.log(`  RQ0 heavy weight matches exp(-0.06x(0-5)): ${note(Math.abs(w0[GL_HEAVY_COMPONENT_INDEX] - untilted[GL_HEAVY_COMPONENT_INDEX] * factor0) < 1e-15, 'RQ0 heavy tilt does not match the formula')}`);
   console.log(`  weights still sum to 1 at every RQ: ${note([w0, w5, w10].every(w => Math.abs(w.reduce((s, x) => s + x, 0) - 1) < 1e-9), 'tilted weights do not sum to 1')}`);
   console.log(`  clamp never binds in the roster's RQ range (max heavy weight ${Math.max(...[w0, w5, w10].map(w => w[GL_HEAVY_COMPONENT_INDEX])).toFixed(4)} << 0.999): ${note(Math.max(...[w0, w5, w10].map(w => w[GL_HEAVY_COMPONENT_INDEX])) < 0.999, 'clamp is binding')}`);
 
   // INVARIANT 2: the tilt must NEVER reach the pricing expectation. RQ0 and
-  // RQ10 severity means (via expectedGlGrossLoss with an RQ override) must be
+  // RQ10 severity means (via expectedGlGrossLossForPricing with an RQ override) must be
   // identical, because the analytic always uses untilted weights.
-  const grossRQ0 = expectedGlGrossLoss(roster, { riskQualityOverride: 0, kGl: 1 });
-  const grossRQ10 = expectedGlGrossLoss(roster, { riskQualityOverride: 10, kGl: 1 });
+  const grossRQ0 = expectedGlGrossLossForPricing(roster, { riskQualityOverride: 0, kGl: 1 });
+  const grossRQ10 = expectedGlGrossLossForPricing(roster, { riskQualityOverride: 10, kGl: 1 });
   const freqOnlyRatio = grossRQ0 / grossRQ10;
   const expectedFreqOnlyRatio = Math.exp(-b * (0 - 5)) / Math.exp(-b * (10 - 5));
   console.log(`  pricing expectation RQ0/RQ10 ratio ${freqOnlyRatio.toFixed(4)} vs FREQUENCY-ONLY ${expectedFreqOnlyRatio.toFixed(4)} (severity tilt absent from pricing): ${note(Math.abs(freqOnlyRatio - expectedFreqOnlyRatio) < 1e-6, 'pricing expectation carries the severity tilt — invariant 2 violated')}`);
 }
 
-console.log('\n--- 5. draw vs analytic (invariant 1): $1M-capped mean GATED, ground-up REPORTED ---');
+console.log('\n--- 5. [DRAWN] every section-3 target measured from the generator, with CIs ---');
 {
   // Finding 26: never gate a heavy-tailed sample mean. GL's blended CV is
   // 29.55 (computed from the full mixture, roughly double WC's 11-14), so the
@@ -184,43 +271,83 @@ console.log('\n--- 5. draw vs analytic (invariant 1): $1M-capped mean GATED, gro
   const sdOf = (xs: number[]) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, x) => a + (x - m) ** 2, 0) / Math.max(1, xs.length - 1)); };
   const ciHalf = (xs: number[]) => Z99 * sdOf(xs) / Math.sqrt(xs.length);
 
-  const analyticGross = expectedGlGrossLoss(roster, { kGl }); // actual RQ mix, untilted (pricing basis)
-  const analyticCapped = (() => {
-    // Capped analytic MATCHED TO THE DRAW, not to the pricing basis: the draw
-    // tilts each member's severity mix by their OWN risk quality
-    // (tiltedGlWeights, draw-only), so a member's realized capped mean is NOT
-    // the untilted pricing-basis mean whenever that member's RQ != 5. Using
-    // the untilted mean here would compare the draw against the wrong
-    // quantity — invariant 2 says the TILT stays out of pricing, not that the
-    // tilt stays out of a check that is specifically about the draw.
-    let total = 0;
-    for (const member of roster) {
-      const theta = glInternals.thetaGl(member.riskQuality);
-      const payroll = member.exposureByLine.GL ?? 0;
-      const lambda = payroll * M.ratePer1M * theta * kGl;
-      const weights = tiltedGlWeights(member.riskQuality);
-      const cappedMean = GL_SEVERITY_COMPONENTS.reduce((s, c, i) => s + weights[i] * limitedExpectedValue(c.mu, c.sigma, 1_000_000), 0);
-      total += lambda * cappedMean;
-    }
-    return total;
-  })();
+  // Both analytics come from the engine's own expectation on the basis that
+  // matches what is being compared:
+  //   ground-up / capped DRAW  <-> the k_GL basis (tilted), because the draw
+  //     tilts each member's mix by their own RQ. Comparing the draw against the
+  //     untilted PRICING basis would be comparing it to a different quantity —
+  //     invariant 2 says the tilt stays out of pricing, not out of a check whose
+  //     subject is the draw.
+  // Using expectedGlGrossLossForKLine(..., { severityLimit }) rather than a
+  // hand-rolled loop keeps ONE definition of GL's capped expectation.
+  const analyticGround = expectedGlGrossLossForKLine(roster, { kGl });
+  const analyticCapped = expectedGlGrossLossForKLine(roster, { kGl, severityLimit: 1_000_000 });
 
   const drawnGround = mean(groundPerYear);
   const drawnCapped = mean(cappedPerYear);
-  const relGround = (drawnGround - analyticGross) / analyticGross;
-  console.log(`  ground-up: drawn ${fmt$(drawnGround)} vs analytic ${fmt$(analyticGross)} (${(relGround * 100).toFixed(2)}%, 99% CI +/-${(ciHalf(groundPerYear) / analyticGross * 100).toFixed(2)}%)  REPORTED, NOT GATED (CV 29.55: heavy-tailed sample mean, finding 26)`);
+  console.log(`  ground-up loss/yr:  drawn ${fmt$(drawnGround)} vs analytic ${fmt$(analyticGround)} (${((drawnGround / analyticGround - 1) * 100).toFixed(2)}%, 99% CI +/-${(ciHalf(groundPerYear) / analyticGround * 100).toFixed(2)}%)   CI NOT TRUSTWORTHY (CV 29.55) — REPORTED, NOT GATED`);
   const cappedInCI = Math.abs(drawnCapped - analyticCapped) <= ciHalf(cappedPerYear);
-  console.log(`  $1M-capped: drawn ${fmt$(drawnCapped)} vs analytic ${fmt$(analyticCapped)} (${((drawnCapped / analyticCapped - 1) * 100).toFixed(2)}%, 99% CI +/-${(ciHalf(cappedPerYear) / analyticCapped * 100).toFixed(2)}%)  ${note(cappedInCI, `$1M-capped mean outside its 99% CI of the analytic — gross-error signal, investigate`)}`);
+  console.log(`  $1M-capped loss/yr: drawn ${fmt$(drawnCapped)} vs analytic ${fmt$(analyticCapped)} (${((drawnCapped / analyticCapped - 1) * 100).toFixed(2)}%, 99% CI +/-${(ciHalf(cappedPerYear) / analyticCapped * 100).toFixed(2)}%)   CI valid (bounded)  ${note(cappedInCI, `$1M-capped mean outside its 99% CI of the analytic — gross-error signal, investigate`)}`);
 
   const drawnCount = mean(claimCounts);
   const analyticCount = roster.reduce((s, m) => s + (m.exposureByLine.GL ?? 0) * glInternals.thetaGl(m.riskQuality), 0) * M.ratePer1M * kGl;
   const countCI = ciHalf(claimCounts);
-  console.log(`  claim COUNT (bounded-variance instrument): drawn ${drawnCount.toFixed(2)}/yr vs analytic ${analyticCount.toFixed(2)}/yr, 99% CI +/-${countCI.toFixed(2)}  ${note(Math.abs(drawnCount - analyticCount) <= countCI, 'claim count outside its 99% CI')}`);
+  console.log(`  claims/yr:          drawn ${drawnCount.toFixed(2)} vs analytic ${analyticCount.toFixed(2)}, 99% CI +/-${countCI.toFixed(2)}   CI valid (count)  ${note(Math.abs(drawnCount - analyticCount) <= countCI, 'claim count outside its 99% CI')}`);
+
+  // --- the section-3 targets, measured. Neutral book so the targets' own basis
+  // applies (kGl=1, RQ 5) and the tilt is inert.
+  const NEUTRAL_YEARS = 4000;
+  const neutral = roster.map(m => ({ ...m, riskQuality: 5 }));
+  const nCounts: number[] = [], nGround: number[] = [], nCapped: number[] = [];
+  const over1: number[] = [], over5: number[] = [], over25: number[] = [];
+  const bBelow1: number[] = [], b1to25: number[] = [], bAbove25: number[] = [];
+  let claimSample: number[] = [];
+  for (let y = 1; y <= NEUTRAL_YEARS; y++) {
+    const r = generateGlClaims({
+      members: neutral, yearNumber: y, calendarYear: 2025 + y,
+      instanceSeed: 909_101 + y * 7919, kGl: 1, gPool: 1, riskControlEffectiveness: 0,
+    });
+    nCounts.push(r.claimCount);
+    nGround.push(r.grossUltimateLoss);
+    nCapped.push(r.claims.reduce((s, c) => s + Math.min(c.grossUltimate, 1e6), 0));
+    over1.push(r.claims.filter(c => c.grossUltimate > 1e6).length);
+    over5.push(r.claims.filter(c => c.grossUltimate > 5e6).length);
+    over25.push(r.claims.filter(c => c.grossUltimate > 25e6).length);
+    let x1 = 0, x2 = 0, x3 = 0;
+    for (const c of r.claims) {
+      x1 += Math.min(c.grossUltimate, 1e6);
+      x2 += Math.max(0, Math.min(c.grossUltimate, 25e6) - 1e6);
+      x3 += Math.max(0, c.grossUltimate - 25e6);
+    }
+    bBelow1.push(x1); b1to25.push(x2); bAbove25.push(x3);
+    if (y <= 400) claimSample = claimSample.concat(r.claims.map(c => c.grossUltimate));
+  }
+  const row = (label: string, xs: number[], target: number, trustworthy: boolean, dp = 4) => {
+    const d = mean(xs), ci = ciHalf(xs);
+    const inCI = Math.abs(d - target) <= ci;
+    const verdict = trustworthy
+      ? note(inCI, `${label.trim()} drawn ${d.toFixed(dp)} outside its 99% CI (+/-${ci.toFixed(dp)}) of the analytic target ${target.toFixed(dp)}`)
+      : (inCI ? 'within CI' : 'OUTSIDE CI') + ' — CI NOT TRUSTWORTHY, reported only';
+    console.log(`    ${label.padEnd(24)} drawn ${d.toFixed(dp).padStart(12)}  99% CI +/-${ci.toFixed(dp).padStart(10)}  target ${target.toFixed(dp).padStart(12)}  ${((d / target - 1) * 100).toFixed(2).padStart(6)}%  ${verdict}`);
+  };
+  console.log(`\n    (${NEUTRAL_YEARS} draw-years, uniform RQ 5, kGl=1 — the section-3 targets' own basis)`);
+  row('claims/yr', nCounts, M.ratePer1M * TOTAL_PAYROLL_M, true, 2);
+  row('occurrences > $1M /yr', over1, M.ratePer1M * TOTAL_PAYROLL_M * survivalAt(1e6), true);
+  row('occurrences > $5M /yr', over5, M.ratePer1M * TOTAL_PAYROLL_M * survivalAt(5e6), true);
+  row('occurrences > $25M /yr', over25, M.ratePer1M * TOTAL_PAYROLL_M * survivalAt(25e6), true);
+  row('$1M-limited mean $', claimSample.map(x => Math.min(x, 1e6)), ANALYTIC_1M_LIMITED_MEAN, true, 2);
+  row('0-$1M cost /$100', nCapped.map(x => x / (TOTAL_PAYROLL_M * 10_000)), 2.8300, true, 5);
+  console.log('    --- below here the CI is NOT trustworthy: heavy-tailed ground-up quantities ---');
+  row('mean claim $', claimSample, ANALYTIC_GROUND_MEAN, false, 2);
+  row('ground-up cost /$100', nGround.map(x => x / (TOTAL_PAYROLL_M * 10_000)), 5.8864, false, 4);
+  const bTot = mean(bBelow1) + mean(b1to25) + mean(bAbove25);
+  console.log(`    band shares: below $1M ${(mean(bBelow1) / bTot * 100).toFixed(2)}% (target 48.10) | $1M-$25M ${(mean(b1to25) / bTot * 100).toFixed(2)}% (40.00) | above $25M ${(mean(bAbove25) / bTot * 100).toFixed(2)}% (12.00)`);
+  console.log(`      REPORTED ONLY — a ratio of dollar sums, so the >$25M share inherits the full tail.`);
 
   const compCounts = { component1: 0, component2: 0, component3: 0 } as Record<string, number>;
   for (const c of allClaims) compCounts[c.tier] = (compCounts[c.tier] ?? 0) + 1;
   const compShare = Object.fromEntries(Object.entries(compCounts).map(([k, v]) => [k, v / allClaims.length]));
-  console.log(`  component draw shares (300yr sample): component1 ${(compShare.component1 * 100).toFixed(1)}% (weight ${(GL_SEVERITY_COMPONENTS[0].weight * 100).toFixed(1)}%), component2 ${(compShare.component2 * 100).toFixed(1)}% (weight ${(GL_SEVERITY_COMPONENTS[1].weight * 100).toFixed(1)}%), component3 ${(compShare.component3 * 100).toFixed(1)}% (weight ${(GL_SEVERITY_COMPONENTS[2].weight * 100).toFixed(1)}%)`);
+  console.log(`\n  component draw shares (300yr sample): component1 ${(compShare.component1 * 100).toFixed(1)}% (weight ${(GL_SEVERITY_COMPONENTS[0].weight * 100).toFixed(1)}%), component2 ${(compShare.component2 * 100).toFixed(1)}% (weight ${(GL_SEVERITY_COMPONENTS[1].weight * 100).toFixed(1)}%), component3 ${(compShare.component3 * 100).toFixed(1)}% (weight ${(GL_SEVERITY_COMPONENTS[2].weight * 100).toFixed(1)}%)`);
 }
 
 console.log('\n--- 6. determinism, integrity, shock signal, held pure premium ---');

@@ -30,7 +30,7 @@ import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { deriveSubRng } from '../../src/utils/random';
 import { WC_LOSS_MODEL } from '../../src/data/defaultAssumptions';
 import { computeKLine, expectedWcGrossLossForPricing } from '../../src/utils/wcClaimEngine';
-import { computeKGl, expectedGlGrossLoss } from '../../src/utils/glClaimEngine';
+import { computeKGl, expectedGlGrossLossForPricing } from '../../src/utils/glClaimEngine';
 import type { CoverageLine, GameState, Member } from '../../src/types/simulation';
 
 // Sections run independently so each fits in a foreground run and prints as it
@@ -185,7 +185,7 @@ console.log('\n\n=== TEST 2 — composition: enrolled book vs what the held pure
         const own = expectedWcGrossLossForPricing(r.members, { kLine: computeKLine(r.members) });
         wcRatios.push(own / r.expected);   // (b) = exported Pure Premium
       } else {
-        const own = expectedGlGrossLoss(r.members, { kGl: computeKGl(r.members) });
+        const own = expectedGlGrossLossForPricing(r.members, { kGl: computeKGl(r.members) });
         glRatios.push(own / r.expected);
       }
     }
@@ -224,10 +224,10 @@ console.log('\n\n=== TEST 3 — does k_line / k_GL fully neutralise RQ on the EN
       // scaled by k, must equal expected loss at neutral RQ.
       const eAct = r.line === 'WC'
         ? expectedWcGrossLossForPricing(r.members, { kLine: k })
-        : expectedGlGrossLoss(r.members, { kGl: k });
+        : expectedGlGrossLossForPricing(r.members, { kGl: k });
       const eNeu = r.line === 'WC'
         ? expectedWcGrossLossForPricing(r.members, { riskQualityOverride: 5 })
-        : expectedGlGrossLoss(r.members, { riskQualityOverride: 5 });
+        : expectedGlGrossLossForPricing(r.members, { riskQualityOverride: 5 });
       rows.push({ line: r.line, rq: wRq, k, product: wTheta * k, exact: eAct / eNeu });
     }
   }

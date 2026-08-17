@@ -304,5 +304,28 @@ for (const def of Object.values(SHOCK_CATALOG)) {
         );
       }
     }
+    // THE GL COUNTERPART, and it exists for the same reason. The GL sub-coverage
+    // rebuild deleted general/epl/lawEnforcement/abuse, and BOTH GL's draw and
+    // GL's analytic now read only the WHOLE_LINE key. A `sub` on a GL
+    // freqMultiplier is therefore inert in both halves at once — the event would
+    // cost nothing, price at nothing, and still describe itself as a surge. That
+    // is strictly worse than the WC case above, where at least the two halves
+    // could disagree visibly; here they agree on doing nothing.
+    if (effect.kind === 'freqMultiplier' && effect.line === 'GL' && effect.sub !== undefined) {
+      throw new Error(
+        `shockCatalog ${def.id}: freqMultiplier on GL names sub '${effect.sub}', but GL has no `
+        + `sub-coverages since the severity rebuild — both the draw and the analytic read only `
+        + `'${WHOLE_LINE}'. Omit ` + '`sub`' + ` to target the whole line. As written this effect would be silently inert.`,
+      );
+    }
+    // ⚠ NOT VALIDATED HERE, AND KNOWN: a `freqMultiplier` on WC or Property is
+    // read by NEITHER line's generator (WC takes componentFreqMultipliers;
+    // Property is still on the legacy aggregate path), so it is inert too. #2
+    // carries exactly that — `freqMultiplier` on WC — and is NOT a live bug only
+    // because #2 also carries an unimplemented `forceEvent`, which makes the
+    // resolver throw if #2 is ever scheduled. Throwing here instead would break
+    // module load for a deliberately-unexecutable event. If #2's forceEvent is
+    // ever implemented, its WC half needs re-targeting to
+    // componentFreqMultiplier at the same time, or it will silently do nothing.
   }
 }

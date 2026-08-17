@@ -22,7 +22,7 @@ import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
-import { deriveNeutralGlPurePremiumPer100, expectedGlGrossLoss } from '../../src/utils/glClaimEngine';
+import { deriveNeutralGlPurePremiumPer100, expectedGlGrossLossForPricing } from '../../src/utils/glClaimEngine';
 import type { GameState, CoverageLine } from '../../src/types/simulation';
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
@@ -42,6 +42,9 @@ console.log(`held neutral GL purePremiumPer100 (full canonical roster @ RQ=5) = 
 
 const glGrossLR: number[] = [], perSeedGlGross: number[] = [];
 const glAnalyticLR: number[] = [], glEnrolledPP: number[] = [], glDrawOverExp: number[] = [];
+// $1M-CAPPED counterparts — the quantity [3] gates. Bounded per-claim variance.
+const glCappedLR: number[] = [], glCappedAnalyticLR: number[] = [], perSeedGlCapped: number[] = [];
+const CAP = 1_000_000;
 const wcGrossLR: number[] = [];
 let maxTie = 0, glClaimSumErr = 0, wcClaimSumErr = 0, lineYears = 0, nonFinite = 0;
 let glShockAmtBad = 0, wcFactorNotOne = 0, glFactorIsOne = 0, countMismatch = 0, memberSumErr = 0;
@@ -54,6 +57,7 @@ for (const id of SEEDS) {
   const { poolState, priorHistory } = runPriorHistory(instance, setup as never);
   let gs: GameState = { setup: setup as never, instance, currentYearNumber: 1, isStarted: true, isComplete: false, poolState, lockedResults: [], currentDecisions: defaultDecisionSet(1), priorHistory };
   const seedGl: number[] = [];
+  const seedGlCapped: number[] = [];
   for (let y = 1; y <= YEARS; y++) {
     const p = processYear(gs, defaultDecisionSet(y));
     const wc = p.result.byLine.WC, gl = p.result.byLine.GL, pr = p.result.byLine.Property;
@@ -91,10 +95,16 @@ for (const id of SEEDS) {
     // ANALYTIC basis: this enrolled book's OWN expected GL loss, no draw noise.
     // kGl=1 with RQ pinned to neutral reproduces E[draw] exactly, because the
     // engine's kGl (= neutral/adjusted) cancels the actual-RQ tilt in the draw.
-    const expNeutral = expectedGlGrossLoss(gl.memberList, { riskQualityOverride: 5, kGl: 1 });
+    const expNeutral = expectedGlGrossLossForPricing(gl.memberList, { riskQualityOverride: 5, kGl: 1 });
     glAnalyticLR.push(expNeutral / Math.max(gl.poolPremiumAndAdminExpense, 1));
     glEnrolledPP.push(expNeutral / (gl.memberList.reduce((s: number, m: any) => s + (m.exposureByLine.GL ?? 0), 0) * 10_000));
     glDrawOverExp.push(gl.grossUltimateLoss / Math.max(expNeutral, 1));
+    // The capped pair, on the SAME neutral/held basis as expNeutral above.
+    const drawnCapped = (gl.claims ?? []).reduce((s2, c) => s2 + Math.min(c.grossUltimate, CAP), 0);
+    const expNeutralCapped = expectedGlGrossLossForPricing(gl.memberList, { riskQualityOverride: 5, kGl: 1, severityLimit: CAP });
+    const glCapLR = drawnCapped / Math.max(gl.poolPremiumAndAdminExpense, 1);
+    glCappedLR.push(glCapLR); seedGlCapped.push(glCapLR);
+    glCappedAnalyticLR.push(expNeutralCapped / Math.max(gl.poolPremiumAndAdminExpense, 1));
     wcGrossLR.push(wc.grossUltimateLoss / Math.max(wc.poolPremiumAndAdminExpense, 1));
     wcGross.push(wc.grossUltimateLoss); wcPrem.push(wc.poolPremium);
     glGross.push(gl.grossUltimateLoss); glPrem.push(gl.poolPremium);
@@ -102,6 +112,7 @@ for (const id of SEEDS) {
     gs = { ...gs, currentYearNumber: y + 1, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result] };
   }
   perSeedGlGross.push(mean(seedGl));
+  perSeedGlCapped.push(mean(seedGlCapped));
 }
 
 console.log('--- claim integrity through the engine ---');
@@ -146,29 +157,42 @@ if (MODE === '6b') {
 } else {
   console.log(`      [6a] not asserted — the OLD GL pure premium is still in place here; 6b flips it.`);
 }
-console.log(`  [2] REALIZED (reported, not gated — GL's blended CV is 29.55 post-rebuild)`);
+console.log(`  [2] REALIZED, GROUND-UP — REPORTED, NOT GATED (GL's blended CV is 29.55 post-rebuild)`);
 console.log(`      mean ${(m * 100).toFixed(2)}%   95% CI +/-${(ci * 100).toFixed(2)}pp across ${perSeedGlGross.length} seeds`);
 console.log(`      realized/analytic ratio ${mean(glDrawOverExp).toFixed(4)} over ${glDrawOverExp.length} GL line-years (finite-sample tail bias: heavy-tailed sample means sit low, repaid by rare huge draws)`);
-// ⚠ RE-WRITTEN BY THE GL SUB-COVERAGE REBUILD, for the identical reason
-// wc-cutover-check.ts's own gross-basis check was already fixed this session:
-// a normal-theory CI on 40 SEEDS assumes the sample mean is close to normal at
-// that sample size, and GL's fitted mixture (CV 29.55, MORE heavy-tailed than
-// WC's own ~11-14) violates that badly enough that this exact assertion now
-// fails on entirely correct code — measured here at realized 75.87% vs
-// analytic 86.96%, outside a +/-7.38pp band that a heavy right tail routinely
-// produces on the low side until a rare large draw shows up. Confirmed
-// against the parent commit (9cc90fd, pre-rebuild): analytic read 85.58%,
-// realized 79.65%, and the SAME check passed — the tail got heavier, not the
-// pricing wrong.
-//
-// DRAW-VS-EXPECTATION IS STILL ASSERTED, just not on this quantity:
-// gl-claim-check.ts gates the $1M-CAPPED mean against its analytic (finding
-// 26's rule: gate counts, rates, quantiles and capped means, never a
-// heavy-tailed sample mean), on a 1,500-year sample — 0.08% relative error
-// against a tight +/-0.82% CI there.
 const gap = (m - ma) / ma;
-console.log(`      realized is ${(gap * 100).toFixed(1)}% of analytic, against a +/-${(ci * 100).toFixed(2)}pp normal CI — REPORTED, NOT GATED`);
-console.log(`      (a normal CI under-covers a CV-29.55 mixture mean; see gl-claim-check.ts for the gated capped-basis test)`);
+console.log(`      realized is ${(gap * 100).toFixed(1)}% of analytic, against a +/-${(ci * 100).toFixed(2)}pp normal CI`);
+
+// ============================================================================
+// ⚠ [3] IS THE GATE, AND IT IS ON THE $1M-CAPPED QUANTITY. DO NOT MOVE IT BACK
+// TO THE GROUND-UP FIGURE IN [2] — that was tried and it fails on correct code.
+//
+// GL's fitted mixture has a blended CV of 29.55; component 1 alone carries 99.1%
+// of the loss at CV 21.5. A normal-theory CI over 40 seeds assumes the sample
+// mean is roughly normal at that sample size, which at this tail weight it is
+// not: the realized mean sits BELOW expectation until a rare large draw lands,
+// and the CI is computed from realized variance, which a heavy tail makes an
+// unstable statistic in its own right. Measured on the ground-up basis:
+// realized 75.87% vs analytic 86.96%, outside a +/-7.38pp band, on correct code.
+//
+// CAPPING AT $1M BOUNDS PER-CLAIM VARIANCE, so the normal CI is valid however
+// heavy the raw tail is — the same reasoning that makes a FINITE reinsurance
+// layer's ceded mean gateable where an unlimited layer's is not. The capped CI
+// is ~4x tighter, and that tightness is what earns it the gate: it is precise
+// enough to have caught the k_GL defect (computeKGl neutralising frequency only,
+// so the severity tilt survived in losses with nothing offsetting it in price),
+// which the ground-up figure had buried in its own noise.
+//
+// BOTH LINES OF DEFENCE, kept separate on purpose:
+//   [1] analytic vs 66.8%      — deterministic, zero draw noise
+//   [3] drawn vs analytic      — capped, bounded variance, gateable
+//   gl-claim-check             — k_GL's identity, exact to 1e-12
+// ============================================================================
+const mc = mean(glCappedLR), mca = mean(glCappedAnalyticLR);
+const cic = 1.96 * sd(perSeedGlCapped) / Math.sqrt(perSeedGlCapped.length);
+console.log(`  [3] REALIZED, $1M-CAPPED — THE GATE (bounded per-claim variance, so this CI is valid)`);
+console.log(`      realized ${(mc * 100).toFixed(2)}%   analytic ${(mca * 100).toFixed(2)}%   gap ${((mc / mca - 1) * 100).toFixed(2)}%   95% CI +/-${(cic * 100).toFixed(2)}pp`);
+console.log(`      ${note(Math.abs(mc - mca) <= cic, `GL capped realized ${(mc * 100).toFixed(2)}% is outside its 95% CI (+/-${(cic * 100).toFixed(2)}pp) of the capped analytic ${(mca * 100).toFixed(2)}% — on a bounded-variance basis that is a STRUCTURAL draw/expectation divergence, not sampling noise. Check k_GL's identity in gl-claim-check first.`)}`);
 console.log(`  WC gross-basis for reference: ${(mean(wcGrossLR) * 100).toFixed(2)}%`);
 
 console.log('\n--- cross-line scale (enrolled books, mean per line-year) ---');

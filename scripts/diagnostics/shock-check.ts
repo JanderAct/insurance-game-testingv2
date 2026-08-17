@@ -32,7 +32,7 @@ import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { resolveShocks, ownFreqMultipliers, ownComponentFreqMultipliers } from '../../src/utils/shockResolver';
 import { WHOLE_LINE } from '../../src/utils/shockEffects';
-import { computeKGl, expectedGlGrossLoss, generateGlClaims } from '../../src/utils/glClaimEngine';
+import { computeKGl, expectedGlGrossLossForPricing, generateGlClaims } from '../../src/utils/glClaimEngine';
 import { computeKLine, componentMean, expectedWcGrossLossForPricing, generateWcClaims } from '../../src/utils/wcClaimEngine';
 import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
 import type { Member } from '../../src/types/simulation';
@@ -222,15 +222,15 @@ console.log('\n--- 5. #22 Employment Practices Surge — measured at both bases 
   const roster = getPredefinedMarketMembers();
   const kFull = computeKGl(roster);
   const own = ownFreqMultipliers('#22', 'GL')!;
-  const fullBase = expectedGlGrossLoss(roster, { kGl: kFull });
-  const fullShocked = expectedGlGrossLoss(roster, { kGl: kFull, freqMultipliers: own });
+  const fullBase = expectedGlGrossLossForPricing(roster, { kGl: kFull });
+  const fullShocked = expectedGlGrossLossForPricing(roster, { kGl: kFull, freqMultipliers: own });
   console.log(`  effect: ${JSON.stringify(own)}`);
   console.log(`  FULL MARKET   GL expected gross ${fmt$(fullBase)} -> ${fmt$(fullShocked)}   added ${fmt$(fullShocked - fullBase)} (+${((fullShocked / fullBase - 1) * 100).toFixed(1)}% of GL)`);
 
   const pool = enrolledBook('MAMC6EA4', 'GL');
   const kPool = computeKGl(pool);
-  const poolBase = expectedGlGrossLoss(pool, { kGl: kPool });
-  const poolShocked = expectedGlGrossLoss(pool, { kGl: kPool, freqMultipliers: own });
+  const poolBase = expectedGlGrossLossForPricing(pool, { kGl: kPool });
+  const poolShocked = expectedGlGrossLossForPricing(pool, { kGl: kPool, freqMultipliers: own });
   const share = pool.reduce((s, m) => s + (m.exposureByLine.GL ?? 0), 0) / roster.reduce((s, m) => s + (m.exposureByLine.GL ?? 0), 0);
   console.log(`  ENROLLED POOL ${pool.length} members at ${(share * 100).toFixed(1)}% of market payroll`);
   console.log(`                GL expected gross ${fmt$(poolBase)} -> ${fmt$(poolShocked)}   added ${fmt$(poolShocked - poolBase)} (+${((poolShocked / poolBase - 1) * 100).toFixed(1)}% of GL)`);
@@ -263,7 +263,7 @@ console.log('\n--- 5. #22 Employment Practices Surge — measured at both bases 
 
   // INVARIANT 2, the shock version: the multiplier must move the DRAW and stay
   // out of the PRICING expectation. Nothing that prices GL passes it.
-  console.log(`  pricing expectation is shock-blind: ${fmt$(expectedGlGrossLoss(pool, { kGl: kPool }))} unchanged  ${note(expectedGlGrossLoss(pool, { kGl: kPool }) === poolBase, 'the priced expectation moved with the shock')}`);
+  console.log(`  pricing expectation is shock-blind: ${fmt$(expectedGlGrossLossForPricing(pool, { kGl: kPool }))} unchanged  ${note(expectedGlGrossLossForPricing(pool, { kGl: kPool }) === poolBase, 'the priced expectation moved with the shock')}`);
 }
 
 console.log('\n--- 6. #15 Catastrophic WC Mega-Claim — measured at both bases ---');

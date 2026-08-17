@@ -1855,3 +1855,125 @@ figures did before that work started. Both are separable future projects, not om
 tower re-derivation and GL's own CV-indexed CLF grid (GL is still on the generic `FUNDING_CLF_TABLE`,
 calibrated to a $20-30B reference book) follow as separate measurement passes against this now-live
 generator, exactly as WC's `19d04e7` and `cd154e2`/`332cae4` followed `3181b18`.
+
+## 41. k_GL corrected frequency only — the GL rebuild's severity tilt survived in losses with nothing offsetting it in price
+
+Found by an independent review of finding 40's commit (`23da65c`), which the tier rule exists for: claim
+generators sit in the top model tier because a subtle error there is hard to detect, and 23da65c was built
+one tier down. The review checked by MEASUREMENT and INDEPENDENT REIMPLEMENTATION rather than by re-reading
+the code, and this is what that turned up.
+
+**The defect.** `computeKGl` called `expectedGlGrossLoss` on both sides of its ratio, and that function
+used **untilted** severity. The severity term therefore cancelled out of the ratio entirely and k_GL
+corrected **frequency only** — while the draw applied the RQ severity tilt regardless. So the tilt survived
+in losses with nothing offsetting it in premium.
+
+The invariant that broke is the one k_line exists for: **drawn expected loss must equal the held (neutral)
+priced expectation whatever the book's RQ mix.** Measured, drawn-basis over held-priced:
+
+| book mean RQ | WC | GL (before) | GL (after) |
+|---|---|---|---|
+| 1 | 1.0000000000 | 1.2660 | 1.0000000000 |
+| 5 | 1.0000000000 | 1.0000 | 1.0000000000 |
+| 10 | 1.0000000000 | 0.7458 | 1.0000000000 |
+| worst dev | 1.33e-15 | **26.60%** | **4.44e-16** |
+
+WC had it right all along — `wcClaimEngine`'s `expectedWcGrossLossCore` selects
+`basis === 'kLine' ? tiltedWeights(...) : groupWeights(...)`, and `computeKLine` uses the `kLine` basis on
+both sides. GL had only one basis and used it on both sides of k_GL.
+
+**Why it mattered, and why it was invisible.** At the observed enrolled book (payroll-weighted mean RQ
+5.51) the divergence was 3.0% — about $0.64M/yr on GL, $6.4M over ten years against a ~$30M starting
+surplus. It also *moved with the book*: 11.2% at mean RQ 7. Because underwriting selection changes the
+book's mean RQ, **a player who underwrote well earned a hidden margin that grew with their skill** — where
+on WC the same skill lowers the PRICE and the loss ratio stays flat, which is the right lesson for a pool
+whose objective is affordable coverage rather than profit. Nothing displayed it: the loss ratio just ran a
+few percent light and read as sampling on a CV-29.55 line. `computeKGl`'s own comment asserted "same
+semantics as WC's computeKLine (pool-level RQ effects neutralized)", which measurement contradicted.
+
+**The fix** mirrors WC's seam exactly: a `GlLossBasis = 'pricing' | 'kLine'` core with two named wrappers
+(`expectedGlGrossLossForPricing`, `expectedGlGrossLossForKLine`) instead of a boolean, and `computeKGl` on
+the `kLine` basis both sides. The identity is now asserted directly in `gl-claim-check.ts` §2b across the
+whole RQ range, not just at neutral where the tilt is inert and everything trivially agrees.
+
+### The last 1.9e-9 was a second, smaller inconsistency
+
+The fix first landed at 1.93e-9 rather than float precision. Cause, and it is exact: the fitted weights
+sum to **1.0000001** (6dp rounding), `tiltedGlWeights` renormalises by construction while the untilted
+accessor handed back raw weights, so the two bases carried different normalisations. The two small
+components are 0.926% of the mixture's dollars and were being scaled by 2.08e-7 → 0.00926 × 2.08e-7 =
+1.93e-9, matching the measurement. Fixed by normalising **once** at the source (`NORMALISED_WEIGHTS`) and
+having both bases and the tilt work off that single vector. The stored constants are still exactly what the
+fit gave. `SeededRandom.categorical` normalises by its own total, so the draw was never affected either
+way.
+
+### Both gates narrowed rather than left ungated, and the k_GL fix is what let them narrow
+
+Finding 40 converted two failing checks to reported-only. That was the wrong call — diagnosing a failure is
+right, deciding it does not count is not — and the failure was only *mostly* pre-existing tail instability:
+part of it was this defect.
+
+| | ground-up (before) | capped (before) | capped (after fix) |
+|---|---|---|---|
+| `gl-cutover-check` | −12.75%, ±7.38pp FAIL | −1.75%, ±1.80pp | **+0.77%, ±1.69pp** |
+| `marketplace-generation` | 0.8725, ±0.1063 FAIL | 0.9825, ±0.0583 | **1.0074, ±0.0588** |
+
+Both now **gate on the $1M-capped quantity and report the ground-up figure**, with the reason recorded at
+each gate so nobody re-widens it: capping bounds per-claim variance, so a normal CI is valid however heavy
+the raw tail is — the same reasoning that makes a *finite* reinsurance layer's ceded mean gateable where an
+unlimited layer's is not. The ground-up gap also tightened, −12.75% → −9.3%, which is the ~3pp structural
+component leaving.
+
+`marketplace-generation-check` additionally moved to the **k_line basis** for both lines. Its subject is
+"drawn enrolled loss / *its own* analytic", and the draw's own analytic is the k_line basis; on the pricing
+basis that ratio sits at the θ-weighted mean tilt rather than at 1.0, near 1 only because the roster's mean
+RQ happens to be near neutral. That is luck, not a test. WC's line was on the same wrong basis and passing
+because its CI is wide; it now sits on the correct basis and its gate is restored. WC deliberately stays on
+the **ground-up** figure there: WC has a report lag, so its drawn year-*y* loss includes prior-accident-year
+emergence at prior years' k_line and trend, and a tight capped gate would measure that transient rather
+than the pricing invariant.
+
+### Two traps closed, and one left open deliberately
+
+- **`tiltedGlWeights(riskQuality, params = M)` accepted `params` and discarded it** via `void params`,
+  reading module-level `M` regardless — a signature promising parameterisation and silently ignoring it,
+  where WC's honours its. **Removed from the signature** rather than honoured, because honouring it could
+  only ever be half true: WC's rating groups *and* its `rqSeverityBeta` both live in `WC_LOSS_MODEL`, while
+  GL's mixture lives in the separate `GL_SEVERITY_COMPONENTS` export, so a GL `params` could carry the beta
+  but never the components — the same class of silent wrong answer, one level subtler.
+- **No load-time validator for GL shock keys.** Added, matching WC's for `componentFreqMultiplier`. Both
+  GL's draw and GL's analytic read only `WHOLE_LINE`, so a `sub` on a GL `freqMultiplier` would be inert in
+  *both halves at once* — strictly worse than the WC case, where the two halves could at least disagree
+  visibly.
+- **LEFT OPEN, RECORDED AT THE SITE:** a `freqMultiplier` on **WC or Property** is read by neither line's
+  generator (WC takes `componentFreqMultipliers`; Property is on the legacy aggregate path), so it is inert
+  too. `#2` carries exactly that. It is not a live bug only because `#2` also carries an unimplemented
+  `forceEvent` that makes the resolver throw if `#2` is ever scheduled — incidental protection, not design.
+  Throwing in the validator would break module load for a deliberately-unexecutable event. **If `#2`'s
+  `forceEvent` is ever implemented, its WC half needs re-targeting to `componentFreqMultiplier` at the same
+  time.**
+
+### What the review also established, needing no change
+
+- **The tilt reaches only the draw.** Proven exactly, not by reading: the priced expectation's RQ response
+  is *exactly* `exp(-β_freq(q−5))` to 1.55e-15, where a leaked tilt would give 1.5776 at RQ 1 instead of
+  1.2461. Finding 17's silent-cancellation failure mode is ruled out. Note the loss-ratio-moves-with-RQ test
+  would *fail on WC by design*, since WC's k_line neutralises the pool-level effect — so that test alone
+  cannot isolate finding 17; the exact analytic one can.
+- **The clamp exists and binds.** At RQ −20 the raw tilt would give heavy weight 2.3269; the engine returns
+  exactly 0.999 with the others strictly positive. Unreachable in play (RQ is clamped 1–10 upstream), which
+  is why the question was whether the guard exists, not whether it fires.
+- **`gl-claim-check`'s anchor check was CIRCULAR** — `ratePer1M × limitedMean / 10000` compared to 2.83 is
+  the derivation rearranged over the same closed form, an arithmetic identity that cannot fail unless
+  0.7879 is mistyped. Replaced with the independent route: simulate, cap at $1M, divide by exposure.
+  Measured 2.83458 per $100, 99% CI ±0.01483 — the generator does reproduce the anchor its rate came from.
+- **All eight headline spec targets in finding 40 were asserted ANALYTICALLY, not measured.** "Verified
+  exactly" meant closed-form-reproduces-closed-form: a real check of the parameters and the arithmetic, and
+  no check of the generator. Every target is now additionally measured from draws and labelled
+  `[ANALYTIC]` / `[DRAWN]`, with each drawn CI marked trustworthy or not. The three occurrence counts
+  (>$1M/$5M/$25M, all within 3.2% on bounded-variance CIs) are the strongest evidence the mixture's tail
+  *shape* is right; the ground-up mean claim reads −4.30% with a ±6.01% CI that is explicitly not
+  trustworthy.
+- **The shock recalibration was right.** 1.217 and 1.057 preserve each event's original share-of-line
+  magnitude (21.70% / 5.70% of GL, verified against draws to <1%); carrying 2.0 and 1.25 across unchanged
+  would have made `#22` 4.6× larger.

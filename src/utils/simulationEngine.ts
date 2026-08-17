@@ -41,7 +41,7 @@ import { cloneMemberLossHistory, recordMemberLossYear } from './memberLossHistor
 import { computeKLine, deriveNeutralPurePremiumPer100, expectedWcGrossLossForPricing, generateWcClaims, wcFrequencyTrend, wcSeverityTrend } from './wcClaimEngine';
 import { dollarWeightedPDelayed, ldfToUltimate, wcIbnrBalance } from './wcIbnr';
 import { computeWcClf } from './wcLossDistribution';
-import { computeKGl, deriveNeutralGlPurePremiumPer100, expectedGlGrossLoss, generateGlClaims } from './glClaimEngine';
+import { computeKGl, deriveNeutralGlPurePremiumPer100, expectedGlGrossLossForPricing, generateGlClaims } from './glClaimEngine';
 import { generateNarrative } from './narrativeEngine';
 import { getMemberExposure } from './lineHelpers';
 import { wageFactor } from '../data/exposureTrend';
@@ -669,12 +669,12 @@ export function processLineYear(
     // which is correct — each answers "what did this event add", not "how do
     // we split the interaction".
     if (ctx.shock?.freqMultipliers && ctx.shockFirings?.length) {
-      const baseline = expectedGlGrossLoss(memberResult.activeMembers, { kGl });
+      const baseline = expectedGlGrossLossForPricing(memberResult.activeMembers, { kGl });
       for (const firing of ctx.shockFirings) {
         const own = ownFreqMultipliers(firing.shockId, 'GL');
         if (!own) continue;
         shockExpectedAdded[firing.shockId] =
-          expectedGlGrossLoss(memberResult.activeMembers, { kGl, freqMultipliers: own }) - baseline;
+          expectedGlGrossLossForPricing(memberResult.activeMembers, { kGl, freqMultipliers: own }) - baseline;
       }
     }
   } else {

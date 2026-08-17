@@ -42,8 +42,8 @@ import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
-import { computeKLine, expectedWcGrossLossForPricing } from '../../src/utils/wcClaimEngine';
-import { computeKGl, expectedGlGrossLoss } from '../../src/utils/glClaimEngine';
+import { computeKLine, expectedWcGrossLossForKLine, expectedWcGrossLossForPricing } from '../../src/utils/wcClaimEngine';
+import { computeKGl, expectedGlGrossLossForKLine, expectedGlGrossLossForPricing } from '../../src/utils/glClaimEngine';
 import type { CoverageLine, GameState, Member } from '../../src/types/simulation';
 
 const problems: string[] = [];
@@ -65,6 +65,11 @@ console.log(`=== MARKETPLACE-WIDE GENERATION: ${SEEDS.length} seeds x ${YEARS} l
 
 // Ratios of drawn enrolled loss to its own analytic expectation, per line-year.
 const ratio: Record<string, number[]> = { WC: [], GL: [] };
+// The same ratio on a $1M-CAPPED basis — bounded per-claim variance, so this one
+// can carry a real gate where the ground-up figure cannot. GL only; see the gate
+// block for why WC stays on the ground-up figure.
+const ratioCapped: Record<string, number[]> = { WC: [], GL: [] };
+const CAP = 1_000_000;
 let genT = 0;
 let bootstrapMarketYears = 0;
 let bootstrapWithHistory = 0;
@@ -151,17 +156,38 @@ for (const id of SEEDS) {
         trap2Checked++;
         const expAtOne = line === 'WC'
           ? expectedWcGrossLossForPricing([m], { kLine: 1, yearNumber: y })
-          : expectedGlGrossLoss([m], { kGl: 1 });
+          : expectedGlGrossLossForPricing([m], { kGl: 1 });
         if (Math.abs(pr.expectedLoss - expAtOne) > Math.max(1e-6, expAtOne * 1e-9)) {
           note(false, `${line} Y${y} seed ${id}: prospect ${pr.memberId} expectedLoss ${pr.expectedLoss.toFixed(2)} != expectation at k=1 ${expAtOne.toFixed(2)} — the pool's k or rc reached a prospect`);
         }
       }
 
       // --- the pricing invariant, statistically ---------------------------
+      //
+      // ⚠ THE k_line BASIS, NOT THE PRICING BASIS. This check's own subject is
+      // "drawn enrolled loss / ITS OWN analytic", and the draw's own analytic is
+      // the k_line basis — both risk-quality channels, frequency theta AND the
+      // severity tilt. It used to call the PRICING basis (untilted severity),
+      // which measures a different and blurrier thing: drawn-over-priced mixes
+      // the generator's internal consistency together with whether k_line
+      // neutralises the book's RQ mix. Those are separable and are now separated:
+      //   this check          drawn vs the draw's own expectation  (generator)
+      //   gl-claim-check      draw's expectation == held priced     (k_line, exact)
+      //   gl/wc-cutover-check drawn vs held priced                  (both together)
+      // On the pricing basis this ratio sits at the theta-weighted mean tilt
+      // rather than at 1.0 — near 1 only because the roster's mean RQ happens to
+      // be near neutral, which is luck, not a test.
       const exp = line === 'WC'
-        ? expectedWcGrossLossForPricing(enrolled, { kLine: lr.kLineApplied ?? 1, yearNumber: y })
-        : expectedGlGrossLoss(enrolled, { kGl: lr.kLineApplied ?? 1 });
+        ? expectedWcGrossLossForKLine(enrolled, { kLine: lr.kLineApplied ?? 1, yearNumber: y })
+        : expectedGlGrossLossForKLine(enrolled, { kGl: lr.kLineApplied ?? 1 });
       if (exp > 0) ratio[line].push(lr.grossUltimateLoss / exp);
+      // The $1M-CAPPED counterpart — the quantity GL's gate is on. See the gate
+      // block below for why the gate cannot be on the ground-up figure.
+      if (line === 'GL') {
+        const expCapped = expectedGlGrossLossForKLine(enrolled, { kGl: lr.kLineApplied ?? 1, severityLimit: CAP });
+        const drawnCapped = (lr.claims ?? []).reduce((s, c) => s + Math.min(c.grossUltimate, CAP), 0);
+        if (expCapped > 0) ratioCapped[line].push(drawnCapped / expCapped);
+      }
     }
 
     gs = { ...gs, currentYearNumber: y + 1, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result] };
@@ -187,29 +213,56 @@ console.log(`  aggregateMemberLoss ties to the enrolled sum, and the claims arra
 console.log('\n--- 5. THE PRICING INVARIANT, STATISTICALLY (drawn enrolled loss / its own analytic) ---');
 console.log('  Value-for-value comparison against pre-stage-1 baselines is impossible: per-member');
 console.log('  stream keying moved every draw. This is the invariant that must survive it.');
-// ⚠ RE-WRITTEN BY THE GL SUB-COVERAGE REBUILD — this ratio used to call
-// note() on a normal-theory CI around 1.00, which is exactly the finding-26
-// violation already fixed once this session in wc-cutover-check.ts and
-// gl-cutover-check.ts: a 200-line-year sample mean is not close enough to
-// normal for a heavy-tailed ground-up loss to gate tightly. It happened to
-// pass for both lines under the old models (and still passes for WC, whose
-// engine this rebuild did not touch), but GL's new mixture has a blended CV
-// of 29.55 — heavier than WC's own ~11-14 — and the SAME check now excludes
-// 1.00 on an unlucky sample: measured 0.8725 against a +/-0.1063 band.
-// Confirmed against the parent commit (9cc90fd, pre-rebuild): GL's ratio was
-// 0.9254 with 99% CI [0.7452, 1.1056], comfortably including 1.00 — a wider
-// CI on the SAME 200-line-year sample size, which is itself the instability
-// finding 26 warns about (the CI is computed from realized variance, which a
-// heavy tail makes an unstable statistic in its own right). Reported for both
-// lines now, matching the "SHAPE OF THE DISTRIBUTION" block just below, which
-// already treats a different statistic on this same ratio the same way.
+// ============================================================================
+// ⚠ WHY GL'S GATE IS ON THE $1M-CAPPED RATIO AND NOT THE GROUND-UP ONE.
+// DO NOT "RESTORE" A GROUND-UP GATE HERE. It was tried and it fails on correct
+// code.
+//
+// GL's fitted mixture has a blended CV of 29.55 — component 1 alone carries
+// 99.1% of the loss at CV 21.5. At that tail weight a 200-line-year sample mean
+// is nowhere near normal: the mean is carried by draws rarer than the sample
+// usually contains, so the realized figure sits BELOW expectation until a large
+// draw lands, and the CI — computed from realized variance — is itself unstable,
+// which is finding 26's whole point. Measured on the ground-up basis: 0.8725
+// with a +/-0.1063 band, excluding 1.00 on entirely correct code.
+//
+// CAPPING AT $1M BOUNDS PER-CLAIM VARIANCE, so a normal CI is valid however
+// heavy the raw tail is — the same reasoning that makes a finite reinsurance
+// layer's ceded mean gateable where an unlimited layer's is not. The capped
+// gate is ~1.8x tighter and is a real test: it is what caught the k_GL defect
+// (see below), which the ground-up figure had buried in its own noise.
+//
+// WC STAYS ON THE GROUND-UP FIGURE, and that is not an inconsistency. WC has a
+// REPORT LAG: its drawn loss in year y includes prior-accident-year claims
+// emerging late, drawn at prior years' k_line and trend factors. A tight capped
+// gate there would be measuring that emergence transient rather than the pricing
+// invariant, so the honest instrument for WC is the wide one. WC's CV (~11-14)
+// is also low enough that the ground-up CI covers correctly, which is why this
+// gate has always passed for WC.
+//
+// HISTORY: before the GL rebuild both lines were gated on ground-up and both
+// passed. GL's rebuild made its tail heavier and the GL gate started failing; it
+// was briefly converted to reported-only, which was the wrong call — diagnosing
+// a failure is right, deciding it does not count is not. It is now gated on the
+// quantity that can carry a gate.
+// ============================================================================
 for (const line of ['WC', 'GL']) {
   const xs = ratio[line];
   const m = mean(xs);
   const half = Z99 * sd(xs) / Math.sqrt(xs.length);
-  console.log(`  ${line.padEnd(3)} ratio ${m.toFixed(4)} over ${xs.length} line-years, 99% CI [${(m - half).toFixed(4)}, ${(m + half).toFixed(4)}]`
-    + `  REPORTED, NOT GATED (heavy-tailed sample mean, finding 26)`
+  const groundLabel = line === 'GL'
+    ? 'REPORTED (heavy-tailed sample mean, finding 26 — the gate is the capped line below)'
+    : `${note(Math.abs(m - 1) <= half, `WC drawn/expected ${m.toFixed(4)} excludes 1.00 at 99% (CI half-width ${half.toFixed(4)})`)}`;
+  console.log(`  ${line.padEnd(3)} ground-up ratio ${m.toFixed(4)} over ${xs.length} line-years, 99% CI [${(m - half).toFixed(4)}, ${(m + half).toFixed(4)}]`
+    + `  ${groundLabel}`
     + `   (pre-change reference 1.0021 over 1,000 line-years)`);
+  if (line === 'GL') {
+    const cs = ratioCapped[line];
+    const mc = mean(cs);
+    const halfC = Z99 * sd(cs) / Math.sqrt(cs.length);
+    console.log(`      $1M-capped ratio ${mc.toFixed(4)} over ${cs.length} line-years, 99% CI [${(mc - halfC).toFixed(4)}, ${(mc + halfC).toFixed(4)}]`
+      + `  THE GATE: ${note(Math.abs(mc - 1) <= halfC, `GL capped drawn/expected ${mc.toFixed(4)} excludes 1.00 at 99% (CI half-width ${halfC.toFixed(4)}) — on a BOUNDED-VARIANCE basis this is a structural divergence between the draw and its own expectation, not sampling noise`)}`);
+  }
   // SHAPE OF THE DISTRIBUTION — REPORTED, NOT GATED, and the reason matters.
   //
   // A first draft asserted that the fraction of line-years reaching expectation
