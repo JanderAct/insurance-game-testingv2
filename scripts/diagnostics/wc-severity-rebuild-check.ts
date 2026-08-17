@@ -29,7 +29,11 @@ import {
   type WcRatingGroup,
 } from '../../src/data/defaultAssumptions';
 import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
+import { REINSURANCE_TOWER } from '../../src/data/reinsuranceTower';
+import { WAGE_INFLATION_PER_YEAR } from '../../src/data/exposureTrend';
 import {
+  WC_SEVERITY_TREND_PER_YEAR,
+  trendedMu,
   componentMean,
   computeKLine,
   deriveNeutralPurePremiumPer100,
@@ -303,7 +307,7 @@ console.log('\n--- 5. REPORT LAG — the pattern and its LDFs ---');
 
   // The implied LDF table — a checkable OUTPUT, and what makes the lag testable
   // against a real reporting triangle.
-  const pPool = dollarWeightedPDelayed(roster, []);
+  const pPool = dollarWeightedPDelayed(roster, [], 1);
   console.log(`  pool dollar-weighted p_delayed, GROSS, FULL MARKET: ${pct(pPool)} (spec 17.1%)  ` +
     `${note(Math.abs(pPool - 0.171) < 0.005, `dollar-weighted p_delayed ${pct(pPool)} vs 17.1%`)}`);
   const ldfTargets: Record<number, number> = { 0: 1.2063, 1: 1.1442, 2: 1.0751, 3: 1.0471, 5: 1.0238, 10: 1.0079 };
@@ -327,7 +331,7 @@ console.log('\n--- 5. REPORT LAG — the pattern and its LDFs ---');
   // NET vs GROSS. Delayed dollars sit in the heavy component, which is exactly
   // what the tower cedes, so the two patterns are materially different.
   const allPlaced = [true, true, true, false];
-  const pNet = dollarWeightedPDelayed(roster, allPlaced);
+  const pNet = dollarWeightedPDelayed(roster, allPlaced, 1);
   console.log(`  p_delayed NET of the purchasable tower: ${pct(pNet)} vs GROSS ${pct(pPool)}  ` +
     `${note(pNet < pPool, 'netting did not reduce the delayed dollar share — the heavy component is what the tower cedes')}`);
   console.log(`    LDF(0) net ${ldfToUltimate(0, pNet).toFixed(4)} vs gross ${ldfToUltimate(0, pPool).toFixed(4)} — reserves are NET, so the net one is booked.`);
@@ -446,7 +450,7 @@ console.log('\n--- 7. IBNR — Little\'s Law, not a fixed percentage ---');
   const k = computeKLine(enrolled);
   const N = 40;
   const PATHS = 40;
-  const pDelayedNet = dollarWeightedPDelayed(enrolled, []);
+  const pDelayedNet = dollarWeightedPDelayed(enrolled, [], 1);
   const balByYear: number[][] = Array.from({ length: N }, () => []);
   const accByYear: number[][] = Array.from({ length: N }, () => []);
   const lossByYear: number[][] = Array.from({ length: N }, () => []);
@@ -515,6 +519,85 @@ console.log('\n--- 7. IBNR — Little\'s Law, not a fixed percentage ---');
   console.log(`  E[inventory] year 20 ${inv20.toFixed(0)} -> year 40 ${inv40.toFixed(0)} (a growing stock would roughly double)  ` +
     `${note(inv40 < inv20 * 1.15, `the unreported inventory grew ${(inv40 / inv20).toFixed(2)}x between years 20 and 40 rather than holding steady`)}`);
   console.log(`  ENROLLED-SCALE figures; they scale with exposure. THE RATIO DOES NOT.`);
+}
+
+// ---------------------------------------------------------------------------
+console.log('\n--- 8. WAGE INFLATION: the trend-free lag, and what fixed attachments do ---');
+// ---------------------------------------------------------------------------
+{
+  // ⚠ THE REPORT LAG MUST STAY TREND-FREE. Severity is trended ONCE, at the
+  // accident-year draw, and then frozen. If a delayed claim were re-trended when
+  // it emerges, E[(1+r)^lag] over an unbounded lognormal lag would be DIVERGENT —
+  // the reason the retired presumption process had to truncate at 40 years, and
+  // the reason this lag was built trend-free. It holds by CONSTRUCTION (the
+  // amount is stored on WcUnreportedClaim), so this asserts the construction
+  // rather than trusting it.
+  const k = computeKLine(roster);
+  const y1 = generateWcClaims({
+    members: roster, yearNumber: 1, calendarYear: 2026,
+    instanceSeed: 5150, kLine: k, riskControlEffectiveness: 0,
+  });
+  const delayed = y1.newlyDelayed;
+  const later = generateWcClaims({
+    members: roster, yearNumber: 6, calendarYear: 2031,
+    instanceSeed: 909, kLine: k, riskControlEffectiveness: 0,
+    emerging: delayed,
+  });
+  const byId = new Map(later.claims.map(c => [c.id, c.grossUltimate]));
+  const worst = delayed.reduce((w, u) => Math.max(w, Math.abs((byId.get(u.id) ?? 0) - u.amount)), 0);
+  console.log(`  ${delayed.length} year-1 claims emerged in year 6; worst amount change $${worst.toExponential(2)}  ` +
+    `${note(worst < 1e-9, `a delayed claim was re-trended on emergence (worst $${worst}) — E[(1+r)^lag] is divergent and the lag must stay trend-free`)}`);
+  const sevRatio = Math.pow(1 + WC_SEVERITY_TREND_PER_YEAR, 5);
+  console.log(`    (had it been re-trended over 5 years it would have moved ${((sevRatio - 1) * 100).toFixed(1)}%, so this is a real test)`);
+
+  // SEVERITY AND PAYROLL TREND TOGETHER, so the rate barely moves. Asserted
+  // analytically because it is the whole design.
+  const rateTrend = (1 + M.frequencyTrendPerYear) * (1 + WC_SEVERITY_TREND_PER_YEAR) / (1 + WAGE_INFLATION_PER_YEAR);
+  console.log(`  rate trend = freq x sev / wage = ${rateTrend.toFixed(5)} -> ${((rateTrend - 1) * 100).toFixed(3)}%/yr  ` +
+    `${note(Math.abs(rateTrend - 0.98538) < 0.0002, `rate trend ${rateTrend.toFixed(5)} is not the expected 0.98538`)}`);
+  const premiumTrend = (1 + M.frequencyTrendPerYear) * (1 + WC_SEVERITY_TREND_PER_YEAR);
+  console.log(`  premium trend = freq x sev = ${((premiumTrend - 1) * 100).toFixed(3)}%/yr — INDEPENDENT of the wage rate  ` +
+    `${note(Math.abs(premiumTrend - 1.02115) < 0.0002, 'premium trend is not freq x sev — a wage factor is missing or doubled somewhere')}`);
+
+  // §5: FIXED REINSURANCE ATTACHMENTS AGAINST INFLATING SEVERITY. The layers
+  // attach at fixed DOLLARS while severity inflates 3.67%/yr, so each layer sees
+  // more — but the per-$100 denominator inflates too, and claim counts fall.
+  // REPORTED, because the near-cancellation is a coincidence of these three
+  // parameters and not a structural identity: if any of them moves, this drifts.
+  const HORIZON = 10;
+  const wage = Math.pow(1 + WAGE_INFLATION_PER_YEAR, HORIZON - 1);
+  const freq = Math.pow(1 + M.frequencyTrendPerYear, HORIZON - 1);
+  console.log(`  reinsurance layers, expected ceded per $100 — year 1 vs year ${HORIZON}:`);
+  for (const l of REINSURANCE_TOWER.WC) {
+    const cededAt = (yearNumber: number) => {
+      let total = 0;
+      for (const m of roster) {
+        const group = ratingGroupOf(m);
+        const spec = M.ratingGroups[group];
+        const rm = regionMultiplier(m.region);
+        const w = tiltedWeights(group, m.riskQuality);
+        const lambda = (m.exposureByLine.WC ?? 0) * spec.ratePer1M * Math.exp(-M.rqFrequencyBeta * (m.riskQuality - 5));
+        spec.mix.forEach(({ component }, i) => {
+          const c = WC_SEVERITY_COMPONENTS[component];
+          const mu = trendedMu(c.mu, yearNumber) + Math.log(rm);
+          total += lambda * w[i] * (limitedExpectedValue(mu, c.sigma, l.attachment + l.limit) - limitedExpectedValue(mu, c.sigma, l.attachment));
+        });
+      }
+      return total;
+    };
+    // Per $100 of NOMINAL exposure, and counts carry the frequency trend.
+    const y1Per100 = cededAt(1) / (1300 * 1e4);
+    const yNPer100 = cededAt(HORIZON) * freq / (1300 * 1e4 * wage);
+    console.log(`    ${l.name.padEnd(14)} ${y1Per100.toFixed(4)} -> ${yNPer100.toFixed(4)}  (${(((yNPer100 / y1Per100) - 1) * 100).toFixed(1)}% over ${HORIZON} years)`);
+  }
+  console.log(`    ⚠ NEAR-CANCELLATION, NOT AN IDENTITY: severity inflation pushes each layer UP while the`);
+  console.log(`      per-$100 denominator inflates and counts fall. Re-measure if the wage rate, the severity`);
+  console.log(`      trend, the frequency trend or any attachment moves.`);
+
+  // The same question for the IBNR netting, which uses the same fixed bounds.
+  const allPlaced = REINSURANCE_TOWER.WC.map(() => true);
+  console.log(`  wcIbnr net p_delayed (fixed layer bounds): year 1 ${pct(dollarWeightedPDelayed(roster, allPlaced, 1))}  ` +
+    `year ${HORIZON} ${pct(dollarWeightedPDelayed(roster, allPlaced, HORIZON))}`);
 }
 
 console.log(`\n${problems.length === 0 ? 'ALL WC SEVERITY REBUILD CHECKS PASS.' : `${problems.length} PROBLEMS:\n  ${problems.join('\n  ')}`}`);

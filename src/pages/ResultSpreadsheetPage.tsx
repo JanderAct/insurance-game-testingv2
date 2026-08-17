@@ -39,7 +39,9 @@ export default function ResultSpreadsheetPage({ lockedResults, activeLines, inst
         name: safeCell(record.name),
         status: safeCell(record.status),
         size: safeCell(record.sizeCategory),
-        exposure: safeNumber(getMemberExposure(member, 'WC')),
+        // NOMINAL, in the dollars of the year being viewed — matching that
+        // year's premium. Roster payroll is frozen in year-1 dollars.
+        exposure: safeNumber(getMemberExposure(member, 'WC', selectedResult.yearNumber)),
         riskQuality: safeNumber(record.riskQuality),
         satisfaction: safeNumber(record.satisfaction),
         expectedLoss: loss ? formatCurrency(loss.expectedLoss) : '',
@@ -366,7 +368,7 @@ function buildMemberCsv(result: ResultSet | undefined): string {
       safeCell(record.name),
       safeCell(record.status),
       safeCell(record.sizeCategory),
-      safeNumber(getMemberExposure(member, 'WC')),
+      safeNumber(getMemberExposure(member, 'WC', result.yearNumber)),
       safeNumber(record.riskQuality),
       safeNumber(record.satisfaction),
       loss ? Math.round(loss.expectedLoss) : '',

@@ -369,7 +369,7 @@ export default function App() {
     const lineState = gameState.poolState.lines[decisionLine];
     const exposure = lineState.members
       .filter(m => m.status === 'active')
-      .reduce((s, m) => s + getMemberExposure(m, decisionLine), 0);
+      .reduce((s, m) => s + getMemberExposure(m, decisionLine, gameState.currentYearNumber), 0);
 
     return exposure * lineState.ratePer100 * 10_000;
   }, [gameState, decisionLine]);
@@ -382,7 +382,7 @@ export default function App() {
     const lineState = gameState.poolState.lines[decisionLine];
     return lineState.members
       .filter(m => m.status === 'active')
-      .reduce((s, m) => s + getMemberExposure(m, decisionLine), 0);
+      .reduce((s, m) => s + getMemberExposure(m, decisionLine, gameState.currentYearNumber), 0);
   }, [gameState, decisionLine]);
 
   const estimatedExpectedLoss = React.useMemo(() => {
@@ -391,7 +391,7 @@ export default function App() {
     const lineState = gameState.poolState.lines[decisionLine];
     const exposure = lineState.members
       .filter(m => m.status === 'active')
-      .reduce((s, m) => s + getMemberExposure(m, decisionLine), 0);
+      .reduce((s, m) => s + getMemberExposure(m, decisionLine, gameState.currentYearNumber), 0);
 
     return exposure * lineState.purePremiumPer100 * 10_000;
   }, [gameState, decisionLine]);

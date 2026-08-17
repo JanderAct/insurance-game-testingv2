@@ -63,7 +63,7 @@ import {
 import { REINSURANCE_TOWER } from '../data/reinsuranceTower';
 import { lognormalParams, normalCdf } from './claimMath';
 import type { Member } from '../types/simulation';
-import { ratingGroupOf, regionMultiplier, tiltedWeights } from './wcClaimEngine';
+import { ratingGroupOf, regionMultiplier, tiltedWeights, trendedMu } from './wcClaimEngine';
 
 const M = WC_LOSS_MODEL;
 
@@ -142,11 +142,12 @@ export function retainedComponentMean(
   component: WcComponentKey,
   regionMult: number,
   layersPlaced: boolean[],
+  yearNumber: number,
 ): number {
   const c = WC_SEVERITY_COMPONENTS[component];
   // regionMult scales the claim, so fold it into mu rather than scaling the
   // limited expectations — a limit does not scale with region.
-  const mu = c.mu + Math.log(regionMult);
+  const mu = trendedMu(c.mu, yearNumber) + Math.log(regionMult);
   const sigma = c.sigma;
   let retained = Math.exp(mu + (sigma * sigma) / 2);
   const layers = REINSURANCE_TOWER.WC;
@@ -168,7 +169,12 @@ export function retainedComponentMean(
 // Computing it from the actual book is both more correct and no harder.
 //
 // `layersPlaced` empty (or all false) gives the GROSS share.
-export function dollarWeightedPDelayed(members: Member[], layersPlaced: boolean[]): number {
+// yearNumber carries the SEVERITY TREND into the netting. The layer bounds are
+// fixed dollars while severity inflates, so the retained share of a claim — and
+// therefore the delayed share of NET dollars — drifts slowly over a game. Small,
+// but it is the same fixed-attachment effect the tower constants have, and
+// hiding it behind a year-1 default would make it invisible.
+export function dollarWeightedPDelayed(members: Member[], layersPlaced: boolean[], yearNumber: number): number {
   let delayed = 0;
   let total = 0;
   for (const member of members) {
@@ -183,7 +189,7 @@ export function dollarWeightedPDelayed(members: Member[], layersPlaced: boolean[
     const lambda = payroll * g.ratePer1M;
     for (let i = 0; i < g.mix.length; i++) {
       const key = g.mix[i].component;
-      const perClaim = retainedComponentMean(key, regionMult, layersPlaced);
+      const perClaim = retainedComponentMean(key, regionMult, layersPlaced, yearNumber);
       const dollars = lambda * weights[i] * perClaim;
       total += dollars;
       delayed += dollars * WC_SEVERITY_COMPONENTS[key].pDelayed;

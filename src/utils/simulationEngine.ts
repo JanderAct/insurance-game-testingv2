@@ -38,12 +38,13 @@ import { simulateMarketReturns, blendInvestmentReturn } from './investmentEngine
 import { simulateMemberMovement } from './membershipEngine';
 import { cloneMembershipHistory, openInterval, closeInterval } from './membershipHistory';
 import { cloneMemberLossHistory, recordMemberLossYear } from './memberLossHistory';
-import { computeKLine, deriveNeutralPurePremiumPer100, expectedWcGrossLossForPricing, generateWcClaims, wcFrequencyTrend } from './wcClaimEngine';
+import { computeKLine, deriveNeutralPurePremiumPer100, expectedWcGrossLossForPricing, generateWcClaims, wcFrequencyTrend, wcSeverityTrend } from './wcClaimEngine';
 import { dollarWeightedPDelayed, ldfToUltimate, wcIbnrBalance } from './wcIbnr';
 import { computeWcClf } from './wcLossDistribution';
 import { computeKGl, deriveNeutralGlPurePremiumPer100, expectedGlGrossLoss, generateGlClaims } from './glClaimEngine';
 import { generateNarrative } from './narrativeEngine';
 import { getMemberExposure } from './lineHelpers';
+import { wageFactor } from '../data/exposureTrend';
 import { getPredefinedMarketMembers } from '../data/memberCatalog';
 
 export function lookupCLF(level: number): number {
@@ -253,8 +254,33 @@ export function processLineYear(
   // HELD CONSTANT, never lineState.purePremiumPer100, so the factor is applied
   // fresh each year rather than compounding off last year's stored value; only
   // Property's branch compounds, and deliberately.
+  // WC'S RATE CARRIES THREE DETERMINISTIC FACTORS, and all three must be here or
+  // the draw and the price diverge — the defect finding 37 corrected, and it is
+  // reintroduced by adding any one of them without the others.
+  //
+  //   x wcFrequencyTrend    -1.5%/yr   claims per worker fall
+  //   x wcSeverityTrend     +3.67%/yr  each claim costs more
+  //   / wageFactor          +3.63%/yr  the rate is per $100 of NOMINAL payroll,
+  //                                    and the denominator has grown
+  //
+  //   net: 0.985 x 1.0367 / 1.0363 = 0.98538  ->  -1.462%/yr
+  //
+  // The severity and wage factors nearly cancel BY CONSTRUCTION (indemnity
+  // benefits are a statutory fraction of wage), which is why the rate trend is
+  // very close to the frequency trend alone. Dividing by wageFactor is what makes
+  // premium growth come out at freqTrend x sevTrend = +2.115%/yr INDEPENDENT of
+  // the wage rate — a useful check: if premium growth moves when only
+  // WAGE_INFLATION_PER_YEAR changes, one of these three is missing.
+  //
+  // Still HELD: WC_HELD_PURE_PREMIUM_PER_100 is derived once from the neutral
+  // full-roster expectation. All three factors are pure functions of the year and
+  // cannot see the roster, so k_line keeps sole responsibility for the
+  // roster/risk-quality-mix correction.
   const newPurePremiumPer100 = line === 'WC'
-    ? WC_HELD_PURE_PREMIUM_PER_100 * wcFrequencyTrend(yearNumber)
+    ? WC_HELD_PURE_PREMIUM_PER_100
+      * wcFrequencyTrend(yearNumber)
+      * wcSeverityTrend(yearNumber)
+      / wageFactor('WC', yearNumber)
     : line === 'GL'
     ? GL_HELD_PURE_PREMIUM_PER_100
     : lineState.purePremiumPer100 *
@@ -264,7 +290,7 @@ export function processLineYear(
   // Preliminary contribution estimate used only for member movement.
   // Final premium is recalculated after member movement because exposure changes.
   // (currentActiveMembers is now declared above, ahead of the CLF lookup.)
-  const estimatedExposure = currentActiveMembers.reduce((s, m) => s + getMemberExposure(m, line), 0);
+  const estimatedExposure = currentActiveMembers.reduce((s, m) => s + getMemberExposure(m, line, yearNumber), 0);
 
   const estimatedRateAtConfidenceLevelPer100 =
     newPurePremiumPer100 * selectedFundingCLF * pricingAdjustment;
@@ -653,7 +679,7 @@ export function processLineYear(
   } else {
     shockOccurred = commonLossFactor > catastropheThreshold;
     memberLossResults = memberResult.activeMembers.map(member => {
-      const memberExposureAmount = getMemberExposure(member, line);
+      const memberExposureAmount = getMemberExposure(member, line, yearNumber);
       const memberExpectedLoss = memberExposureAmount * newPurePremiumPer100 * 10_000;
       const riskQuality = Math.max(1, Math.min(10, member.riskQuality));
       const coefficientOfVariation = MEMBER_LOSS_VOLATILITY.worstRiskCV
@@ -821,7 +847,7 @@ export function processLineYear(
     // The share of THIS year's net loss that will report late, on the book and
     // the reinsurance placement as they actually are this year. Stored with the
     // accident year rather than recomputed later, because both change.
-    const pDelayedNet = dollarWeightedPDelayed(memberResult.activeMembers, placedLayers);
+    const pDelayedNet = dollarWeightedPDelayed(memberResult.activeMembers, placedLayers, yearNumber);
     // Net-down this accident year's own reported gross by the year's realized
     // cession ratio. Using the realized ratio rather than re-deriving the
     // waterfall keeps ONE definition of what was ceded.

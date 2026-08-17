@@ -1667,3 +1667,107 @@ than price, and cheapening the product by 21% did not slow it. Recorded, not cha
 Median 0.577 at Y10 against 0.529 before. The numerator is unchanged in construction; the denominator
 is a single year's gross loss, and the book shifted slightly with membership. Little's Law still
 converges from below (0.680 → 0.796 → 0.841 at Y2/Y5/Y10), which is the gated quantity.
+
+---
+
+## 39. Wage inflation on the exposure base — and the two things it does not do
+
+WC severity grows at almost exactly the rate wages grow, and **by construction rather than
+coincidence**: indemnity benefits are statutorily two-thirds of wage, so the indemnity half of severity
+tracks wages by definition.
+
+| | |
+|---|---|
+| WCIRB blended severity trend | **3.67%** (52% medical @ 3.70%, 48% indemnity @ 3.63%) |
+| Wage inflation | **3.63%** — read off the indemnity severity trend itself |
+| difference | +0.04% |
+
+So there is **no severity trend in rate terms** — the NCCI a priori assumption, confirmed by data. The
+model never needed one. What it was missing was the *other* half: payroll didn't grow, so exposure sat
+frozen while the frequency trend pulled the rate down 1.5%/yr and the pool shrank in nominal terms every
+year.
+
+Both halves are now applied. Framework is pool-wide with a per-line switch; **WC only** is on.
+
+### Measured, 50 games × 10 years
+
+| | before (332cae4) | after |
+|---|---|---|
+| rate trend | −1.50%/yr | **−1.46%/yr** |
+| premium trend (constant book) | −1.50% | **+2.115%** |
+| member charge Y1→Y10 | $14.30M → $11.02M | $14.30M → **$15.14M** |
+| enrolled exposure Y10 | $301.6M | **$412.9M** |
+| combined ratio | 101.03% | 101.13% |
+| underwriting, median | −0.161x | −0.020x |
+
+The pool now grows in nominal terms instead of shrinking by a fifth. The combined ratio is unmoved,
+which is the point — this is rate-neutral by construction, not a repricing.
+
+**Premium growth is `freqTrend × sevTrend` and is INDEPENDENT of the wage rate.** The payroll factor
+cancels against the deflated rate. That is asserted in the harness, and it is the cheapest test that all
+three pricing factors are present: if premium growth moves when only `WAGE_INFLATION_PER_YEAR` changes,
+one of them is missing or doubled.
+
+### The frequency half must NOT see the factor
+
+The roster is frozen, so this is *pure* wage inflation — same members, same workers, same injuries.
+Letting claim counts rise 3.63%/yr would assert that paying people more injures more of them, and it
+would move the rate trend from −1.46% to +2.12% and premium growth from 2.115% to 5.82% — a **1.38×
+larger pool by year 10**.
+
+The split needed no new architecture: `getMemberExposure` (rating, premium, display) already sat on one
+side and raw `exposureByLine.WC` (claim frequency) on the other. `getMemberExposure` takes a required
+`yearNumber` and returns nominal; the loss engines keep reading frozen payroll.
+
+### The CLF grid does not slide, and that is correct
+
+The grid is indexed on **CV**, and CV is invariant to both halves: the severity trend scales κ₁ by `s`
+and κ₂ by `s²`, leaving `√κ₂/κ₁` unchanged, and claim counts don't move at all. So an inflating book
+does **not** get cheaper margin. A pool whose members' wages rose has the same workers and has not
+become more credible; credibility comes from real growth, which enrolment already delivers.
+
+**The CV-vs-1/√exposure choice was made on a tied residual and is now load-bearing.** Indexing on
+exposure would let a purely nominal quantity slide the pool down the curve and hand it a margin discount
+for inflation alone. Recorded at the site so it isn't "improved" back.
+
+Consequence: the grid's `exposure` column is now a year-1-dollar label while live books are quoted
+nominal. `cv` is the lookup key; don't start matching books to rows by exposure.
+
+### Fixed attachments against inflating severity — NOT uniformly small
+
+The estimate going in was ~1% drift over a decade. That held for the bottom layer only:
+
+| layer | Y1 | Y10 | drift |
+|---|---|---|---|
+| $4M xs $1M | 0.6902 | 0.6865 | **−0.5%** |
+| $5M xs $5M | 0.1539 | 0.1674 | **+8.8%** |
+| $40M xs $10M | 0.1445 | 0.1693 | **+17.2%** |
+
+Severity inflation pushes each layer up; the per-$100 denominator inflates and counts fall. Those nearly
+cancel where most of the density sits and do not cancel out in the tail, because a fixed $10M attachment
+becomes progressively closer to the body of an inflating distribution. **The frozen constants under-price
+the upper layers by up to 17% by year 10.** Real treaties are re-quoted annually at current levels; this
+model's are measured once. Recorded as an open item, not fixed here.
+
+`wcIbnr`'s netting uses the same fixed bounds and drifts far less (16.91% → 16.85%), because it is
+dominated by the bottom of the distribution.
+
+### Judgment call: the pre-game is pinned at year-1 dollars
+
+`wageFactor` and `wcSeverityTrend` both **floor at year 1** rather than deflating for negative
+yearNumbers. Less symmetric with `wcFrequencyTrend`, which does let the pre-game run hotter — but the
+pre-game is an **initial-conditions generator**, not a wage history, and every dollar constant shaping it
+(`STARTING_FINANCIALS`, `STARTING_CAPITAL_TO_PREMIUM`, `OPENING_MULTIPLE_BAND`) is in year-1 dollars.
+Letting it deflate re-rated the opening position: measured at 5% lower starting surplus and 3 fewer
+starting members, for no modelling gain. The same mismatch is why `instanceGenerator` pins
+`OPENING_EXPOSURE_YEAR` to 1.
+
+With both pinned, **year 1 is byte-identical to the parent commit** — correct, since every factor is
+exactly 1.0 there, and it makes the diff purely about live-year behaviour.
+
+### The report lag stays trend-free, now asserted
+
+Severity is trended once at the accident-year draw and frozen onto the claim. A delayed claim emerging
+five years later carries its accident-year amount unchanged — asserted over 156 claims, worst change
+$0.00, against a 19.7% move had it been re-trended. This holds by construction, but `E[(1+r)^lag]` over
+an unbounded lognormal is divergent, so the construction is now defended by a test.

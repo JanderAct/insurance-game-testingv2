@@ -145,7 +145,7 @@ function updateRiskQuality(
 export function simulateMemberMovement(inputs: MemberMovementInputs): MemberMovementResult {
   const { currentMembers, allMarketMembers, line, yearNumber, calendarYear, rng } = inputs;
 
-  const totalMarketExposure = allMarketMembers.reduce((s, m) => s + getMemberExposure(m, line), 0);
+  const totalMarketExposure = allMarketMembers.reduce((s, m) => s + getMemberExposure(m, line, yearNumber), 0);
 
   const retentionProb = calcRetentionProbability(inputs);
   const expectedWithdrawals = currentMembers.length * (1 - retentionProb);
@@ -200,7 +200,7 @@ export function simulateMemberMovement(inputs: MemberMovementInputs): MemberMove
   }));
 
   const activeMembers: Member[] = [...retainedMembers, ...newMembers];
-  const activeExposure = activeMembers.reduce((s, m) => s + getMemberExposure(m, line), 0);
+  const activeExposure = activeMembers.reduce((s, m) => s + getMemberExposure(m, line, yearNumber), 0);
 
   const retentionRate = currentMembers.length > 0
     ? retainedMembers.length / currentMembers.length

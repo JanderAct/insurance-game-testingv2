@@ -114,10 +114,45 @@ export function wcFrequencyTrend(yearNumber: number): number {
   return Math.pow(1 + M.frequencyTrendPerYear, yearNumber - 1);
 }
 
+// WC SEVERITY TREND — the other half of the wage-inflation pair.
+//
+// ⚠ NEVER APPLY THIS WITHOUT THE PAYROLL FACTOR, OR THE PAYROLL FACTOR WITHOUT
+// THIS. They are a pair. Payroll growing while severity does not makes the rate
+// fall 5.1%/yr instead of 1.46%; severity growing while payroll does not makes
+// it rise 2.1%/yr. Together they nearly cancel and the rate trend is the
+// frequency trend alone, adjusted by their 0.04% difference:
+//
+//   rate trend = 0.985 x 1.0367 / 1.0363 = 0.98538  ->  -1.462%/yr
+//
+// SOURCED: WCIRB blended severity 3.67% (52% medical @ 3.70%, 48% indemnity @
+// 3.63%). See src/data/exposureTrend.ts for the full derivation, why the two
+// trends cancel BY CONSTRUCTION rather than coincidence, and why CAS's
+// prescribed separate medical/indemnity trends are not available to this model.
+export const WC_SEVERITY_TREND_PER_YEAR = 0.0367;
+
+// Live year 1 is the reference (factor 1.0).
+//
+// ⚠ FLOORS AT YEAR 1, exactly as wageFactor does, and for the same reason — see
+// the long note there. The pre-game is an initial-conditions generator whose
+// dollar constants are year-1 dollars, not a wage history. The two factors must
+// floor TOGETHER: pinning payroll while letting severity deflate would make the
+// drawn and priced loss diverge across the years that set opening reserves.
+export function wcSeverityTrend(yearNumber: number): number {
+  return Math.pow(1 + WC_SEVERITY_TREND_PER_YEAR, Math.max(1, yearNumber) - 1);
+}
+
+// A component's log-location shifted to a given year. exp(mu + ln(s)) = s x
+// exp(mu), so a location shift in log space IS a multiplicative scale — the same
+// trick wcIbnr.retainedComponentMean uses for regionMult, and it keeps sigma
+// (and therefore CV, and therefore the CLF grid's interpolation axis) untouched.
+export function trendedMu(mu: number, yearNumber: number): number {
+  return mu + Math.log(wcSeverityTrend(yearNumber));
+}
+
 // Mean of one mixture component. exp(mu + sigma^2 / 2).
-export function componentMean(key: WcComponentKey): number {
+export function componentMean(key: WcComponentKey, yearNumber = 1): number {
   const c = WC_SEVERITY_COMPONENTS[key];
-  return Math.exp(c.mu + (c.sigma * c.sigma) / 2);
+  return Math.exp(trendedMu(c.mu, yearNumber) + (c.sigma * c.sigma) / 2);
 }
 
 // THE RISK-QUALITY SEVERITY TILT. Multiplies the HEAVY component's weight and
@@ -159,11 +194,12 @@ export function expectedClaimSeverity(
   group: WcRatingGroup,
   weights: number[],
   regionMult: number,
+  yearNumber: number,
   params = M,
 ): number {
   const mix = params.ratingGroups[group].mix;
   let total = 0;
-  for (let i = 0; i < mix.length; i++) total += weights[i] * componentMean(mix[i].component);
+  for (let i = 0; i < mix.length; i++) total += weights[i] * componentMean(mix[i].component, yearNumber);
   return total * regionMult;
 }
 
@@ -231,7 +267,7 @@ function expectedWcGrossLossCore(
       if (options.componentFreqMultipliers) {
         componentLambda *= shockFactorFor(options.componentFreqMultipliers, g.mix[i].component);
       }
-      total += componentLambda * componentMean(g.mix[i].component) * regionMult;
+      total += componentLambda * componentMean(g.mix[i].component, options.yearNumber ?? 1) * regionMult;
     }
   }
   return total;
@@ -459,7 +495,17 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
         const spec = WC_SEVERITY_COMPONENTS[componentKey];
         for (let n = 0; n < count; n++) {
           // Severity: a single amount, no legs, no trend, no vintage.
-          const amount = sevRng.lognormal(spec.mu, spec.sigma) * regionMult;
+          // TRENDED AT THE ACCIDENT YEAR, and fixed there forever.
+          //
+          // ⚠ THE REPORT LAG MUST NOT SEE THIS. The amount is trended once, HERE,
+          // and then frozen onto the claim (and onto WcUnreportedClaim.amount for
+          // a delayed one). A claim emerging in a later year carries its
+          // accident-year level unchanged. Trending over the lag is what makes
+          // E[(1+r)^lag] over an unbounded lognormal DIVERGENT — the reason the
+          // retired presumption process had to truncate at 40 years, and the
+          // reason this model's lag was built trend-free. Asserted in
+          // wc-severity-rebuild-check.
+          const amount = sevRng.lognormal(trendedMu(spec.mu, yearNumber), spec.sigma) * regionMult;
           // Report lag: drawn AFTER severity and INDEPENDENT of it. The only
           // coupling between the two is that p_delayed differs by component,
           // which is what makes the inventory dollar-weighted.

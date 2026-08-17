@@ -55,6 +55,7 @@ import {
   regionMultiplier,
   thetaWc,
   tiltedWeights,
+  trendedMu,
   wcFrequencyTrend,
 } from './wcClaimEngine';
 
@@ -91,7 +92,11 @@ function memberRawCumulantSeeds(member: Member, kLine: number, yearNumber: numbe
     if (lambdaI <= 0) continue;
     const comp = WC_SEVERITY_COMPONENTS[spec.mix[i].component];
     for (let k = 1; k <= 4; k++) {
-      c[k - 1] += lambdaI * Math.pow(regionMult, k) * lognormalRawMoment(comp.mu, comp.sigma, k);
+      // TRENDED, so the cumulants describe the same distribution the draw
+      // produces. The k-th raw moment scales as s^k, so kappa_1 -> s x kappa_1
+      // and kappa_2 -> s^2 x kappa_2 — and CV = sqrt(kappa_2)/kappa_1 is
+      // therefore UNCHANGED. See the note on the CLF grid's interpolation axis.
+      c[k - 1] += lambdaI * Math.pow(regionMult, k) * lognormalRawMoment(trendedMu(comp.mu, yearNumber), comp.sigma, k);
     }
   }
   return c;

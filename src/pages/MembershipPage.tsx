@@ -12,6 +12,10 @@ interface MembershipPageProps {
 }
 
 export default function MembershipPage({ lockedResults, startingFinancials, initialMembers, startingYear }: MembershipPageProps) {
+  // Exposure is DISPLAYED NOMINAL — in the dollars of the latest completed year,
+  // matching the premium and member charge shown elsewhere. Roster payroll is
+  // frozen in year-1 dollars; wageFactor carries it forward. See lineHelpers.
+  const displayYear = lockedResults.length > 0 ? lockedResults[lockedResults.length - 1].yearNumber : 1;
   const [sortKey, setSortKey] = useState<'name' | 'exposure' | 'satisfaction' | 'riskQuality' | 'yearJoined'>('exposure');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
@@ -31,7 +35,7 @@ export default function MembershipPage({ lockedResults, startingFinancials, init
     let valA: number | string = 0;
     let valB: number | string = 0;
     if (sortKey === 'name') { valA = a.name; valB = b.name; }
-    else if (sortKey === 'exposure') { valA = getMemberExposure(a, 'WC'); valB = getMemberExposure(b, 'WC'); }
+    else if (sortKey === 'exposure') { valA = getMemberExposure(a, 'WC', displayYear); valB = getMemberExposure(b, 'WC', displayYear); }
     else if (sortKey === 'satisfaction') { valA = a.satisfaction; valB = b.satisfaction; }
     else if (sortKey === 'riskQuality') { valA = a.riskQuality; valB = b.riskQuality; }
     else if (sortKey === 'yearJoined') { valA = a.yearJoined; valB = b.yearJoined; }
@@ -99,7 +103,7 @@ export default function MembershipPage({ lockedResults, startingFinancials, init
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {sortedMembers.map(member => (<MemberRow key={member.id} member={member} />))}
+              {sortedMembers.map(member => (<MemberRow key={member.id} member={member} displayYear={displayYear} />))}
             </tbody>
           </table>
         </div>
@@ -109,7 +113,7 @@ export default function MembershipPage({ lockedResults, startingFinancials, init
   );
 }
 
-function MemberRow({ member }: { member: Member }) {
+function MemberRow({ member, displayYear }: { member: Member; displayYear: number }) {
   const qualityColor = member.riskQuality >= 7 ? 'text-emerald-600' : member.riskQuality >= 4 ? 'text-amber-600' : 'text-red-600';
   const satColor = member.satisfaction >= 7 ? 'text-emerald-600' : member.satisfaction >= 5 ? 'text-amber-600' : 'text-red-600';
 
@@ -118,7 +122,7 @@ function MemberRow({ member }: { member: Member }) {
       <td className="px-4 py-3 font-medium text-gray-900">{member.name}</td>
       <td className="px-4 py-3 text-gray-600"><span className="bg-gray-100 text-gray-700 text-xs px-2 py-0.5 rounded-full whitespace-nowrap">{member.type}</span></td>
       <td className="px-4 py-3 text-gray-600"><SizeBadge size={member.sizeCategory} /></td>
-      <td className="px-4 py-3 font-mono text-gray-800">{formatMillions(getMemberExposure(member, 'WC'))}</td>
+      <td className="px-4 py-3 font-mono text-gray-800">{formatMillions(getMemberExposure(member, 'WC', displayYear))}</td>
       <td className="px-4 py-3 text-gray-600">{member.calendarYearJoined > 0 ? member.calendarYearJoined : '—'}</td>
       <td className={`px-4 py-3 font-semibold ${qualityColor}`}>{member.riskQuality.toFixed(1)}</td>
       <td className={`px-4 py-3 font-semibold ${satColor}`}>{member.satisfaction.toFixed(1)}</td>

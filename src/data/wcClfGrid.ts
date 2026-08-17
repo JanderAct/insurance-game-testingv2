@@ -75,6 +75,33 @@
 // unchanged here; the rebuild changed which books anchor the grid, not how
 // the curve is indexed.
 //
+// ⚠⚠ THAT CHOICE IS NOW LOAD-BEARING FOR A REASON NOBODY ANTICIPATED, AND IT
+// MUST NOT BE "IMPROVED" TO EXPOSURE-INDEXING. It was made on a TIED residual,
+// so it looks arbitrary and reversible. It is not.
+//
+// WC's exposure base now inflates with wages (src/data/exposureTrend.ts). CV is
+// INVARIANT to that inflation and 1/sqrt(exposure) is not:
+//
+//   - the severity trend scales every raw moment by s^k, so kappa_1 -> s x
+//     kappa_1 and kappa_2 -> s^2 x kappa_2, leaving CV = sqrt(kappa_2)/kappa_1
+//     exactly unchanged;
+//   - claim COUNTS do not move at all, because frequency reads REAL (frozen)
+//     payroll while only the rating side sees the wage factor.
+//
+// So a book whose payroll inflates does NOT slide along this curve and does NOT
+// get cheaper margin — which is correct: a pool whose members' wages rose has
+// the same workers and the same injuries and has not become more credible.
+// Credibility improves with REAL growth, which enrolment already delivers.
+//
+// Indexing on 1/sqrt(exposure) instead would make a purely nominal quantity move
+// the pool along the curve, handing it a margin discount for inflation alone.
+//
+// ⚠ CONSEQUENCE FOR THE TABLE BELOW: the `exposure` field is now a YEAR-1-DOLLAR
+// LABEL while live books are quoted NOMINAL. A year-10 book showing $413M sits
+// at the CV of its $300M real exposure, not near the $304.1M grid row. `cv` is
+// the lookup key; `exposure` and `size` are documentation of how each reference
+// book was built. Do not start matching books to rows by exposure.
+//
 // HELD-OUT VALIDATION, DELIBERATELY IN THE SPARSE REGION. The previous grid's
 // validation sat at CV 0.568 with two grid points closely bracketing it — it
 // tested the easy case. This one holds out a $155.6M / 24-member book at

@@ -40,9 +40,13 @@ import type { CoverageLine } from '../types/simulation';
 function selectStartingLineMembers(
   allMembers: Member[],
   line: CoverageLine,
-  rng: SeededRandom
+  rng: SeededRandom,
+  // Threaded only so the two exposure reads below sit on ONE basis. The
+  // selection is a RATIO (targetShare x totalExposure), so the wage factor
+  // cancels exactly and the chosen book is year-invariant whatever is passed.
+  yearNumber: number,
 ): Set<string> {
-  const totalExposure = allMembers.reduce((s, m) => s + getMemberExposure(m, line), 0);
+  const totalExposure = allMembers.reduce((s, m) => s + getMemberExposure(m, line, yearNumber), 0);
   const targetShare = rng.range(STARTING_EXPOSURE_SHARE.min, STARTING_EXPOSURE_SHARE.max);
   const targetExposure = targetShare * totalExposure;
 
@@ -52,7 +56,7 @@ function selectStartingLineMembers(
 
   for (const member of order) {
     if (enrolled >= targetExposure) break;
-    const exposure = getMemberExposure(member, line);
+    const exposure = getMemberExposure(member, line, yearNumber);
     if (exposure <= 0 || enrolled + exposure > targetExposure) continue;
     selected.add(member.id);
     enrolled += exposure;
@@ -165,6 +169,21 @@ export function generateGameInstance(instanceId: string, seed: number): GameInst
   };
 }
 
+// THE OPENING STATE IS DEFINED IN YEAR-1 DOLLARS, and every exposure read in
+// this file uses it rather than `firstYearNumber`.
+//
+// ⚠ NOT AN OVERSIGHT — using firstYearNumber (-2 for the pre-game bootstrap)
+// deflates the opening book ~10% by wageFactor while STARTING_FINANCIALS'
+// premium/surplus ranges stay fixed dollars, which silently re-rates the whole
+// opening position and moves every seed's starting membership. Year 1 is the
+// reference year of the trend system (every factor is exactly 1.0 there) and it
+// is the vintage memberCatalog's payroll is authored in, so the dollar constants
+// calibrated against that roster keep meaning what they meant.
+//
+// The pre-game years still deflate — processYear applies the factor per year on
+// its own — so the past really is cheaper. Only the OPENING reference is pinned.
+const OPENING_EXPOSURE_YEAR = 1;
+
 export function generateStartingPoolState(
   instance: GameInstance,
   startingYear: number,
@@ -186,7 +205,8 @@ export function generateStartingPoolState(
     enrolledIdsByLine[line] = selectStartingLineMembers(
       allMarketMembers,
       line,
-      deriveSubRng(instance.seed, 0, enrollLabel(line))
+      deriveSubRng(instance.seed, 0, enrollLabel(line)),
+      OPENING_EXPOSURE_YEAR,
     );
   }
 
@@ -216,8 +236,8 @@ export function generateStartingPoolState(
   const wcMembers = lineMembers('WC');
   const activeMembers = wcMembers.filter(m => m.status === 'active');
 
-  let activeExposure = activeMembers.reduce((sum, m) => sum + getMemberExposure(m, 'WC'), 0);
-  let totalMarketExposure = allMarketMembers.reduce((sum, m) => sum + getMemberExposure(m, 'WC'), 0);
+  let activeExposure = activeMembers.reduce((sum, m) => sum + getMemberExposure(m, 'WC', OPENING_EXPOSURE_YEAR), 0);
+  let totalMarketExposure = allMarketMembers.reduce((sum, m) => sum + getMemberExposure(m, 'WC', OPENING_EXPOSURE_YEAR), 0);
 
   const targetPremium = rng.range(STARTING_FINANCIALS.annualPremium.min, STARTING_FINANCIALS.annualPremium.max);
   const annualPremium = targetPremium;
@@ -293,7 +313,7 @@ export function generateStartingPoolState(
         // The drawn value is used only locally: seededNetReserve = grossDraw - recoverableDraw.
         const glRecoverableDraw = rng.range(GL_STARTING_FINANCIALS.reinsuranceRecoverable.min, GL_STARTING_FINANCIALS.reinsuranceRecoverable.max);
         const glNetUnpaidReserve = glGrossReserveDraw - glRecoverableDraw;
-        const glTotalMarketExposure = allMarketMembers.reduce((sum, m) => sum + getMemberExposure(m, 'GL'), 0);
+        const glTotalMarketExposure = allMarketMembers.reduce((sum, m) => sum + getMemberExposure(m, 'GL', OPENING_EXPOSURE_YEAR), 0);
         const glStartingReserveCohorts = generateStartingReserveCohorts(
           glNetUnpaidReserve,
           startingYear,
@@ -337,7 +357,7 @@ export function generateStartingPoolState(
         // The drawn value is used only locally: seededNetReserve = grossDraw - recoverableDraw.
         const propertyRecoverableDraw = rng.range(PROPERTY_STARTING_FINANCIALS.reinsuranceRecoverable.min, PROPERTY_STARTING_FINANCIALS.reinsuranceRecoverable.max);
         const propertyNetUnpaidReserve = propertyGrossReserveDraw - propertyRecoverableDraw;
-        const propertyTotalMarketExposure = allMarketMembers.reduce((sum, m) => sum + getMemberExposure(m, 'Property'), 0);
+        const propertyTotalMarketExposure = allMarketMembers.reduce((sum, m) => sum + getMemberExposure(m, 'Property', OPENING_EXPOSURE_YEAR), 0);
         const propertyStartingReserveCohorts = generateStartingReserveCohorts(
           propertyNetUnpaidReserve,
           startingYear,
@@ -402,7 +422,7 @@ export function generateStartingPoolState(
     const ls = lineStateByLine[line];
     const activeExp = ls.members
       .filter(m => m.status === 'active')
-      .reduce((s, m) => s + getMemberExposure(m, line), 0);
+      .reduce((s, m) => s + getMemberExposure(m, line, OPENING_EXPOSURE_YEAR), 0);
     const linePremium = activeExp * ls.ratePer100 * 10_000;
     const targetSurplus = (STARTING_CAPITAL_TO_PREMIUM[line] ?? 1.0) * linePremium;
     const lineCash = OPERATING_CASH_PCT_OF_PREMIUM * linePremium;
