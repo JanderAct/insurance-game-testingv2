@@ -106,6 +106,20 @@
 // again. WC and GL are the control: value-identity-check confirms their
 // solo-game fields never move across any of these roster revisions, because
 // neither line's generator reads TIV.
+//
+// v10 retired here (moved to v11) by EIGHT ENGINE COMMITS, recaptured
+// together rather than after each one: aa0838a (per-occurrence reinsurance
+// tower for WC AND GL, replacing the old aggregate quota-share model on both
+// lines) through a08b88e (wage inflation on WC's exposure base) — full list
+// in the recapture commit and in value-identity-check.ts's matching v11 note.
+//
+// EXACTLY 9 OF 12 HASHES MOVED — WC-solo, GL-solo and tri on all three seeds.
+// PR-SOLO STAYED BYTE-IDENTICAL ON ALL THREE, which is the leak check: none
+// of the eight commits touch Property, and this proves it. GL-solo moving is
+// expected and not a leak — aa0838a rebuilt GL's reinsurance mechanism too,
+// not just WC's, so GL's export legitimately changed shape and value. See
+// value-identity-check.ts's v11 note for the field-level detail: this is a
+// real reinsurance-model movement, not a restructuring leak.
 import * as XLSX from 'xlsx';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -120,7 +134,7 @@ import { RESULT_METRICS } from '../../src/utils/resultMetrics';
 import type { GameState, CoverageLine, ResultSet } from '../../src/types/simulation';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v10.json');
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v11.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

@@ -108,7 +108,40 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // fields — NOT the sum of the two isolated runs (2,302 + 7,256 = 9,558),
 // because the two channels interact nonlinearly (satisfaction feeds
 // retention feeds exposure feeds premium, which the CLF fix also moves).
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v10.json');
+//
+// v11: EIGHT ENGINE COMMITS, RECAPTURED TOGETHER RATHER THAN AFTER EACH ONE.
+// aa0838a (per-occurrence reinsurance tower for WC AND GL) through a08b88e
+// (wage inflation on WC's exposure base) — see the recapture commit for the
+// full list. This baseline was allowed to go stale across all eight so that
+// intermediate work could be isolated against its own parent commit instead
+// (worktree + temporary capture script, five times); this is the first
+// recapture since v10.
+//
+// 14,910 -> 16,110 fields (1,200 added, 0 removed): eight new fields
+// (aggregateAttachment, aggregatePremium, aggregateRecovery,
+// emergedPriorYearLoss, ibnrAccrual, ibnrReserve, retainedAboveTower,
+// unreportedClaimCount) from the tower rebuild and the IBNR provision, each
+// present on every scope regardless of active line (Property carries them at
+// a fixed default — it is still on the legacy aggregate path).
+//
+// 7,863 of the 14,910 pre-existing fields changed, across 81 field names —
+// entirely pricing/loss/reserve/membership cascade fields, nothing
+// structural. By config: WC-solo 2,318/3,225 moved, GL-solo 2,045/3,225
+// moved, tri 3,500/6,450 moved, PR-solo 0/3,210 moved.
+//
+// GL-solo moving is NOT a leak: aa0838a explicitly rebuilt GL's reinsurance
+// from the old aggregate quota-share model to the same per-occurrence tower
+// shape as WC, so GL's attachment/poolLosses/excessLosses/quotaShareLosses/
+// netUltimateLoss/reinsuranceCost all changed model, and the resulting rate
+// change cascades into memberSatisfaction, averageRiskQuality, activeExposure
+// and marketShare through the ordinary retention/pricing feedback loop. The
+// other seven commits (3181b18, 19d04e7, b4805bc, d66e8fb, cd154e2, 332cae4,
+// a08b88e) touch WC only.
+//
+// PR-solo staying at 0/3,210 changed (0 added beyond the 240 shared new
+// fields) IS the leak check this recapture needed: Property's engine was not
+// touched by any of the eight commits, and this baseline proves it.
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v11.json');
 
 function seedOf(id: string) {
   let h = 5381;
