@@ -15,6 +15,8 @@ import {
   Scale,
   Building2,
   ScrollText,
+  BookOpen,
+  Landmark,
 } from 'lucide-react';
 
 import type { GameState, GameSetupSettings, DecisionSet, StartingFinancials, Member, LinePoolState, CoverageLine, LineView } from './types/simulation';
@@ -41,6 +43,8 @@ import MembershipPage from './pages/MembershipPage';
 import CalculationAuditPage from './pages/CalculationAuditPage';
 import ResultSpreadsheetPage from './pages/ResultSpreadsheetPage';
 import HistoryPage from './pages/HistoryPage';
+import IntroductionPage from './pages/IntroductionPage';
+import DepartmentsPage from './pages/DepartmentsPage';
 
 const AUDIT_TAB: TabId = 'audit';
 const SPREADSHEET_TAB: TabId = 'spreadsheet';
@@ -69,6 +73,8 @@ const LINE_VIEW_ICONS: Record<LineView, React.ReactNode> = {
 
 const TABS = [
   { id: 'setup' as TabId, label: 'Game Setup', icon: <Settings size={16} /> },
+  { id: 'introduction' as TabId, label: 'Introduction', icon: <BookOpen size={16} /> },
+  { id: 'departments' as TabId, label: 'Departments', icon: <Landmark size={16} /> },
   { id: 'history' as TabId, label: 'Pool History', icon: <HistoryIcon size={16} /> },
   { id: 'dashboard' as TabId, label: 'Dashboard', icon: <LayoutDashboard size={16} /> },
   { id: 'decisions' as TabId, label: 'Decisions', icon: <ClipboardList size={16} /> },
@@ -472,6 +478,14 @@ export default function App() {
       <main>
         {activeTab === 'setup' && (
           <SetupPage onStart={handleStartGame} />
+        )}
+
+        {activeTab === 'introduction' && gameState && (
+          <IntroductionPage gameState={gameState} />
+        )}
+
+        {activeTab === 'departments' && gameState && (
+          <DepartmentsPage gameState={gameState} />
         )}
 
         {activeTab === 'dashboard' && gameState && startingFinancials && (
