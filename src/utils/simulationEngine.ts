@@ -1381,7 +1381,9 @@ function computeContributionShares(
 export interface LoanOffer {
   line: CoverageLine;
   deficit: number;              // positive amount needed to bring the line to zero surplus
-  rateAtOrigination: number;    // the pool's asset-weighted blended investment return this year
+  rateAtOrigination: number;    // this year's pool return, floored at 0 (see poolReturnRateThisYear).
+                                // Genuinely a one-time value for the OFFER — becomes the new loan's
+                                // starting InterLineLoan.currentRate, which then re-floats every year.
   lenderShares: Partial<Record<CoverageLine, number>>; // each lender's share of the loan, sums to 1
 }
 
@@ -1455,13 +1457,6 @@ export function processYear(
   // interest, since interest is embedded in the growing balance). Credited to
   // the lenders after the line loop so processing order doesn't matter.
   const lenderCredits: Partial<Record<CoverageLine, number>> = {};
-  // For the asset-weighted blended pool return (the Stage 2.9 loan rate):
-  // each line's realized return weighted by its beginning invested assets.
-  // With the pool-wide allocation every line earns the same rate, so the
-  // blend trivially equals that shared rate — kept as a weighted blend so
-  // the loan rate stays correct-by-construction either way.
-  let totalInvestedForBlend = 0;
-  let totalInvestmentIncomeForBlend = 0;
 
   // Draw the shared market ONCE per year at the asset-class level (cash, bonds,
   // equities) and apply it to every line. Randomness lives at the asset class,
@@ -1471,6 +1466,42 @@ export function processYear(
   const marketReturns = simulateMarketReturns(
     deriveSubRng(instance.seed, yearNumber, 'invest')
   );
+
+  // THIS YEAR'S POOL RETURN RATE, for the inter-line loan (Stage 2.9): each
+  // active line's realized return weighted by its BEGINNING invested assets.
+  // With the pool-wide allocation every line earns the same rate, so the
+  // blend trivially equals that shared rate — kept as a weighted blend so the
+  // loan rate stays correct-by-construction either way. Computed in a pre-pass
+  // (blendInvestmentReturn is pure — no RNG, no dependency on the main loop's
+  // per-line mutations) because the loan's interest accrual, below, runs
+  // INSIDE the per-line loop and needs this year's rate before any line has
+  // been processed. It is deliberately recomputed from scratch every year,
+  // never carried over from a loan's origination year — the loan represents
+  // capital the lender could otherwise have invested, and that opportunity
+  // cost is a CURRENT-year quantity, not a fact frozen at the moment the loan
+  // was struck.
+  //
+  // FLOORED AT ZERO. A negative blended return is a real possibility (the
+  // uploaded WC seed alone showed a year at -1.08%), and letting a loan accrue
+  // at a negative rate would mean the debt SHRINKS on its own — the pool
+  // paying the borrower for having borrowed, in a bad market year, is wrong
+  // under any reading. The floor's worst case is "no interest this year," not
+  // "the lenders lose principal to a market downturn that wasn't theirs to
+  // absorb." DO NOT REMOVE THIS FLOOR as an unnecessary guard — it is the
+  // entire fix for the defect verify/interline-loan@c4a2ecc found.
+  const poolReturnRateThisYear = Math.max(0, (() => {
+    let invested = 0, income = 0;
+    for (const line of activeLines) {
+      const r = blendInvestmentReturn(
+        poolState.lines[line].investedAssets,
+        decisions.byLine[line].assetAllocation,
+        marketReturns
+      );
+      invested += poolState.lines[line].investedAssets;
+      income += r.income;
+    }
+    return invested > 0 ? income / invested : 0;
+  })());
 
   // The pool-wide loss factor for this year: ONE draw, SHARED by every line.
   // It has to live here rather than inside processLineYear because a per-line
@@ -1499,6 +1530,21 @@ export function processYear(
     const lineDecisions = decisions.byLine[line];
     // A line that carried a negative surplus in from last year (declined a
     // loan) has its dividend blocked this year.
+    //
+    // KNOWN GAP, RULED NOT WORTH FIXING (verify/interline-loan@c4a2ecc): this
+    // checks only the SIGN of last year's surplus, and a line that AUTHORIZED
+    // a loan lands at exactly zero, not negative (applyLoanAuthorizations
+    // makes endingSurplus = 0 an unconditional assignment) — so a line is NOT
+    // dividend-blocked the year immediately after it borrows, even though it
+    // is carrying the full loan balance as debt. Confirmed real: a line that
+    // borrowed and landed at $0 was not dividend-blocked the following year
+    // while still owing the loan. outstandingLoanBalance reaches no decision
+    // gate or solvency check anywhere in this file — it is read only for
+    // display, in resultMetrics.ts and the two results pages. Left as-is
+    // because the repayment skim already takes the money out of net income
+    // before a dividend could be declared from it, and a player who chooses
+    // to distribute while indebted is choosing to make the line's position
+    // worse, not exploiting an unintended path.
     const priorLineSurplus = priorPoolResult?.byLine[line]?.endingSurplus;
     const dividendBlocked = priorLineSurplus !== undefined && priorLineSurplus < 0;
 
@@ -1509,8 +1555,6 @@ export function processYear(
       lineDecisions.assetAllocation,
       marketReturns
     );
-    totalInvestedForBlend += lineState.investedAssets;
-    totalInvestmentIncomeForBlend += invResult.income;
 
     const ctx: LineYearContext = {
       instance,
@@ -1584,7 +1628,10 @@ export function processYear(
     // --- Inter-line loan repayment pass (existing loans only) ---
     const loan = interLineLoans.find(l => l.borrowingLine === line);
     if (loan) {
-      const interest = loan.remainingBalance * loan.rateAtOrigination;
+      // Re-blend at THIS year's floored pool return, not whatever rate the
+      // loan happened to carry last year — see poolReturnRateThisYear above.
+      loan.currentRate = poolReturnRateThisYear;
+      const interest = loan.remainingBalance * loan.currentRate;
       loan.remainingBalance += interest;
       const aggressiveness = Math.max(0, Math.min(1, lineDecisions.loanRepaymentAggressiveness));
       const skim = aggressiveness * Math.max(0, result.netIncome);
@@ -1654,10 +1701,6 @@ export function processYear(
     lenderState.investedAssets = entry.result.endingInvestments;
   }
 
-  const blendedReturnRate = totalInvestedForBlend > 0
-    ? totalInvestmentIncomeForBlend / totalInvestedForBlend
-    : 0;
-
   const updatedPoolState: PoolState = {
     cash: sharedCash,
     unearnedPremium: sharedUnearnedPremium,
@@ -1703,7 +1746,7 @@ export function processYear(
     loanOffers.push({
       line,
       deficit,
-      rateAtOrigination: blendedReturnRate,
+      rateAtOrigination: poolReturnRateThisYear,
       lenderShares,
     });
   }
@@ -1737,7 +1780,7 @@ export function applyLoanAuthorizations(
       borrowingLine: offer.line,
       principal: offer.deficit,
       remainingBalance: offer.deficit,
-      rateAtOrigination: offer.rateAtOrigination,
+      currentRate: offer.rateAtOrigination,
       yearOriginated: yearNumber,
       lenderShares: offer.lenderShares,
     });

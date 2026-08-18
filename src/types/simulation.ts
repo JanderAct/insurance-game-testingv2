@@ -345,8 +345,12 @@ export interface InterLineLoan {
   borrowingLine: CoverageLine;
   principal: number;              // original amount borrowed (the deficit that was covered)
   remainingBalance: number;       // outstanding principal + accrued interest, reduced by repayments
-  rateAtOrigination: number;      // the pool's asset-weighted blended investment return that year,
-                                  // fixed for the loan's life
+  currentRate: number;            // the pool's asset-weighted blended investment return, RE-BLENDED
+                                  // every year this loan is outstanding (not fixed at origination —
+                                  // it tracks the lenders' current opportunity cost), floored at 0 so
+                                  // a bad market year can charge no interest but never pay the
+                                  // borrower. Named rateAtOrigination before it was made to float;
+                                  // renamed so the field doesn't lie about what it holds.
   yearOriginated: number;
   lenderShares: Partial<Record<CoverageLine, number>>; // each lending line's share of the loan
                                                        // (sums to 1), fixed at origination

@@ -44,8 +44,9 @@ export default function LoanPromptModal({ offers, onResolve }: LoanPromptModalPr
                   </span>
                 </div>
                 <p className="text-xs text-gray-500 mb-1">
-                  Loan rate (the pool's asset-weighted blended investment return this year,
-                  fixed for the loan's life): <span className="font-semibold">{(o.rateAtOrigination * 100).toFixed(2)}%</span>
+                  Starting rate (the pool's asset-weighted blended investment return this year,
+                  floored at 0% — it re-floats to the current rate each year the loan is
+                  outstanding): <span className="font-semibold">{(o.rateAtOrigination * 100).toFixed(2)}%</span>
                 </p>
                 <p className="text-xs text-gray-500 mb-2">
                   Funded by: {Object.entries(o.lenderShares)
