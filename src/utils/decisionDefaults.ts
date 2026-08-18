@@ -10,6 +10,12 @@ import type { DecisionSet, LineDecisionSet } from '../types/simulation';
 export function defaultLineDecisionSet(): LineDecisionSet {
   return {
     fundingConfidenceLevel: SLIDER_RANGES.fundingConfidenceLevel.default,
+    // Default TRUE for every line, including Property (where it is inert —
+    // Property ignores the flag and always reads FUNDING_CLF_TABLE). Both WC
+    // and GL default to "fund exactly at expected loss", the same CONCEPT on
+    // both, rather than WC at 60% and GL at 65% (two numbers that meant two
+    // different, both wrong, things before their own derived grids existed).
+    fundingAtExpected: true,
     dividendPct: SLIDER_RANGES.dividendPct.default,
     assessmentPct: SLIDER_RANGES.assessmentPct.default,
     underwritingStrictness: SLIDER_RANGES.underwritingStrictness.default,

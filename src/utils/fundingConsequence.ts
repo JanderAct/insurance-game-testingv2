@@ -24,9 +24,9 @@
 import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, REINSURANCE_PROGRAMS, SLIDER_RANGES } from '../data/defaultAssumptions';
 import { lookupCLF } from './simulationEngine';
 import { computeKLine } from './wcClaimEngine';
-import { computeWcClf } from './wcLossDistribution';
+import { computeWcClf, wcClfCrossingPercentile } from './wcLossDistribution';
 import { computeKGl } from './glClaimEngine';
-import { computeGlClf } from './glLossDistribution';
+import { computeGlClf, glClfCrossingPercentile } from './glLossDistribution';
 import type { CoverageLine, Member } from '../types/simulation';
 
 // ⚠ THREADED, NOT GENERIC lookupCLF. This panel used to call lookupCLF
@@ -41,14 +41,37 @@ import type { CoverageLine, Member } from '../types/simulation';
 // explaining GL's price read a different curve would have been the same
 // failure class as a factor reaching the draw and not the price (finding 37) —
 // just on the display side instead of the pricing side.
-function clfFor(line: CoverageLine, confidenceLevel: number, members: Member[], yearNumber: number): number {
-  if (line === 'WC') return computeWcClf(confidenceLevel, members, computeKLine(members), yearNumber);
-  if (line === 'GL') return computeGlClf(confidenceLevel, members, computeKGl(members, yearNumber), yearNumber);
+//
+// atExpected: WC/GL ONLY — bypasses the grid and returns exactly 1.0, mirroring
+// simulationEngine.ts's selectedFundingCLF dispatch. Property ignores it.
+function clfFor(line: CoverageLine, confidenceLevel: number, members: Member[], yearNumber: number, atExpected: boolean): number {
+  if (line === 'WC') return atExpected ? 1.0 : computeWcClf(confidenceLevel, members, computeKLine(members), yearNumber);
+  if (line === 'GL') return atExpected ? 1.0 : computeGlClf(confidenceLevel, members, computeKGl(members, yearNumber), yearNumber);
   return lookupCLF(confidenceLevel);
 }
 
+// Where THIS book's own grid crosses CLF = 1.000, as a 0-1 fraction — the
+// "Expected" marker's true position. Built on the crossing finders in
+// wcLossDistribution.ts/glLossDistribution.ts, which themselves reuse the
+// SAME interpolateGridRatio computeWcClf/computeGlClf call — never computed
+// independently, so it cannot drift from what the grid itself would report.
+// Property has no grid of its own to cross (see clfFor above); its 60% stop
+// already coincides with CLF 1.000 in FUNDING_CLF_TABLE, so this returns 0.60
+// there rather than a meaningless "crossing".
+function expectedPercentileFor(line: CoverageLine, members: Member[], yearNumber: number): number {
+  if (line === 'WC') return wcClfCrossingPercentile(members, computeKLine(members), yearNumber);
+  if (line === 'GL') return glClfCrossingPercentile(members, computeKGl(members, yearNumber), yearNumber);
+  return 0.60;
+}
+
 export interface FundingConsequence {
+  // The "as displayed" confidence level: the raw slider fallback value, UNLESS
+  // atExpected is true, in which case this is overridden to expectedPercentile
+  // so "Adequate in ~X%" reads correctly against the CLF actually charged.
   confidenceLevel: number;
+  // Where this book's own grid crosses CLF = 1.000, computed unconditionally
+  // (not only while atExpected) — see expectedPercentileFor above.
+  expectedPercentile: number;
   clf: number;
   purePremiumPer100: number;
   poolPremiumRatePer100: number;
@@ -76,8 +99,8 @@ function reinsCostPctFor(reinsuranceLevel: number): number {
   return prog ? (prog.costPctOfPremiumMin + prog.costPctOfPremiumMax) / 2 : 0;
 }
 
-function ratesAt(purePremiumPer100: number, confidenceLevel: number, reinsuranceLevel: number, line: CoverageLine, members: Member[], yearNumber: number) {
-  const clf = clfFor(line, confidenceLevel, members, yearNumber);
+function ratesAt(purePremiumPer100: number, confidenceLevel: number, reinsuranceLevel: number, line: CoverageLine, members: Member[], yearNumber: number, atExpected: boolean) {
+  const clf = clfFor(line, confidenceLevel, members, yearNumber, atExpected);
   const poolPremiumRatePer100 = purePremiumPer100 * clf;
   const adminRatePer100 = purePremiumPer100 * ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM;
   const reinsRatePer100 = poolPremiumRatePer100 * reinsCostPctFor(reinsuranceLevel);
@@ -93,9 +116,14 @@ export function computeFundingConsequence(
   line: CoverageLine,
   members: Member[],
   yearNumber: number,
+  atExpected: boolean,
 ): FundingConsequence {
   const { clf, poolPremiumRatePer100, adminRatePer100, reinsRatePer100, totalMemberChargeRatePer100 } =
-    ratesAt(purePremiumPer100, confidenceLevel, reinsuranceLevel, line, members, yearNumber);
+    ratesAt(purePremiumPer100, confidenceLevel, reinsuranceLevel, line, members, yearNumber, atExpected);
+
+  // Computed UNCONDITIONALLY (not only while atExpected) — cheap, and useful
+  // for the UI to show "Expected (~X%)" even before the player selects it.
+  const expectedPercentile = expectedPercentileFor(line, members, yearNumber);
 
   const load = purePremiumPer100 > 0 ? totalMemberChargeRatePer100 / purePremiumPer100 : 0;
   const expectedLossRatio = load > 0 ? 1 / load : 0;
@@ -106,16 +134,24 @@ export function computeFundingConsequence(
     ? (totalMemberChargeRatePer100 / priorTotalMemberChargeRatePer100 - 1) * 100
     : null;
 
+  // The "next step" preview always steps from the raw slider fallback value
+  // and is never itself priced atExpected — it answers "what would the NEXT
+  // CONCRETE STOP cost", a question that stays well-defined even while the
+  // player is currently sitting on Expected rather than a stop.
   const step = SLIDER_RANGES.fundingConfidenceLevel.step;
   const max = SLIDER_RANGES.fundingConfidenceLevel.max;
   const nextLevel = Math.round((confidenceLevel + step) * 100) / 100;
   const isAtMax = nextLevel > max + 1e-9;
   const marginalCostPct = isAtMax
     ? null
-    : (ratesAt(purePremiumPer100, nextLevel, reinsuranceLevel, line, members, yearNumber).poolPremiumRatePer100 / Math.max(poolPremiumRatePer100, 1e-9) - 1) * 100;
+    : (ratesAt(purePremiumPer100, nextLevel, reinsuranceLevel, line, members, yearNumber, false).poolPremiumRatePer100 / Math.max(poolPremiumRatePer100, 1e-9) - 1) * 100;
 
   return {
-    confidenceLevel,
+    // Overridden to the crossing percentile while atExpected, so "Adequate in
+    // ~X%" reports the percentile actually being charged (CLF 1.000) rather
+    // than the stale fallback slider value.
+    confidenceLevel: atExpected ? expectedPercentile : confidenceLevel,
+    expectedPercentile,
     clf,
     purePremiumPer100,
     poolPremiumRatePer100,
@@ -126,7 +162,14 @@ export function computeFundingConsequence(
     expectedLossRatio,
     expectedExpenseRatio,
     expectedCombinedRatio,
-    isAdequate: confidenceLevel >= 0.60 - 1e-9,
+    // CLF-BASED, not a hardcoded confidenceLevel threshold. The old
+    // `confidenceLevel >= 0.60` test was already wrong the moment WC/GL got
+    // their own derived grids (WC's full-roster break-even runs as low as
+    // ~56.5%, GL's as high as ~75.2% — neither is "0.60"), and it would have
+    // been actively backwards once atExpected can override confidenceLevel
+    // above to a crossing value: CLF is always exactly 1.000 there by
+    // construction, so the adequacy test must key off CLF, not the label.
+    isAdequate: clf >= 1 - 1e-9,
     marginPct: (1 - expectedCombinedRatio) * 100,
     fundedPct: clf * 100,
     derivedRateChangePct,

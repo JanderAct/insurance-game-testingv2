@@ -421,6 +421,7 @@ export default function App() {
   // does not recompute when an unrelated line's or pool decision changes.
   const decisionLineFundingLevel = currentDecisions.byLine[decisionLine].fundingConfidenceLevel;
   const decisionLineReinsuranceLevel = currentDecisions.byLine[decisionLine].reinsuranceLevel;
+  const decisionLineFundingAtExpected = currentDecisions.byLine[decisionLine].fundingAtExpected;
   const fundingConsequence = React.useMemo(() => {
     if (!gameState) return null;
     const lineState = gameState.poolState.lines[decisionLine];
@@ -433,8 +434,9 @@ export default function App() {
       decisionLine,
       activeMembers,
       gameState.currentYearNumber,
+      decisionLineFundingAtExpected,
     );
-  }, [gameState, decisionLine, decisionLineFundingLevel, decisionLineReinsuranceLevel]);
+  }, [gameState, decisionLine, decisionLineFundingLevel, decisionLineReinsuranceLevel, decisionLineFundingAtExpected]);
 
   return (
     <div className="min-h-screen bg-gray-50">

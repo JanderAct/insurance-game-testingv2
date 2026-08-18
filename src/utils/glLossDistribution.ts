@@ -188,3 +188,24 @@ export function computeGlClf(confidenceLevel: number, members: Member[], kGl: nu
   const stop = nearestStop(confidenceLevel * 100);
   return interpolateGridRatio(lambda, stop);
 }
+
+// THE "Expected" MARKER'S POSITION — mirrors wcClfCrossingPercentile exactly,
+// on GL's own lambda-indexed grid. Built on the SAME interpolateGridRatio
+// computeGlClf calls, at every stop, then linearly interpolated between stops
+// on the (monotonic by construction) ratio-vs-percentile curve — never a
+// separately derived number, so it cannot drift from what computeGlClf itself
+// would report at that same percentile.
+//
+// Returns a 0-1 fraction, clamped to the grid's own stop range past either end.
+export function glClfCrossingPercentile(members: Member[], kGl: number, yearNumber: number): number {
+  const lambda = glAggregateCumulants(members, kGl, yearNumber).lambda;
+  const stops = GL_CLF_PERCENTILE_STOPS;
+  const ratios = stops.map(s => interpolateGridRatio(lambda, s));
+  for (let i = 0; i < ratios.length - 1; i++) {
+    if (ratios[i] <= 1 && ratios[i + 1] >= 1) {
+      const w = ratios[i + 1] === ratios[i] ? 0 : (1 - ratios[i]) / (ratios[i + 1] - ratios[i]);
+      return (stops[i] + w * (stops[i + 1] - stops[i])) / 100;
+    }
+  }
+  return (ratios[0] > 1 ? stops[0] : stops[stops.length - 1]) / 100;
+}

@@ -58,6 +58,7 @@ export function emptyLinePoolState(): LinePoolState {
 export function emptyLineDecisionSet(): LineDecisionSet {
   return {
     fundingConfidenceLevel: 0.60,
+    fundingAtExpected: true,
     dividendPct: 0,
     assessmentPct: 0,
     underwritingStrictness: 5,

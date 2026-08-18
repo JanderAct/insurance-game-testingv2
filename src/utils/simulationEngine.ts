@@ -197,10 +197,14 @@ export function processLineYear(
   const wcClfBookKLine = line === 'WC' ? computeKLine(currentActiveMembers)
     : line === 'GL' ? computeKGl(currentActiveMembers, yearNumber)
     : 1;
+  // fundingAtExpected bypasses the grid entirely: "Expected" is CLF = 1.000
+  // exactly, at every book size, every year — not an interpolated value that
+  // happens to land close (see the LineDecisionSet.fundingAtExpected comment).
+  // Property ignores the flag, same as before.
   const selectedFundingCLF = line === 'WC'
-    ? computeWcClf(selectedFundingConfidenceLevel, currentActiveMembers, wcClfBookKLine, yearNumber)
+    ? (lineDecisions.fundingAtExpected ? 1.0 : computeWcClf(selectedFundingConfidenceLevel, currentActiveMembers, wcClfBookKLine, yearNumber))
     : line === 'GL'
-    ? computeGlClf(selectedFundingConfidenceLevel, currentActiveMembers, wcClfBookKLine, yearNumber)
+    ? (lineDecisions.fundingAtExpected ? 1.0 : computeGlClf(selectedFundingConfidenceLevel, currentActiveMembers, wcClfBookKLine, yearNumber))
     : lookupCLF(selectedFundingConfidenceLevel);
 
   // --- Expected Actuarial Loss-Cost Rate ---

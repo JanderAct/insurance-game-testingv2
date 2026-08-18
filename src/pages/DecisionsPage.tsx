@@ -47,22 +47,31 @@ interface DecisionsPageProps {
 // 50%. 0.45 'Minimal' continues the existing descending scale; 0.40/0.35/0.30
 // are named to read as unmistakably underfunded, since that is the point of
 // making them selectable at all (see the consequence panel below).
-// 0.60 is labeled 'Expected', not a rung on the confidence ladder like its
-// neighbors — it is BOTH the default and the exact break-even/expected-loss
-// funding point (CLF 1.000), so 'Below Average' made the intended setting
-// read as a compromise rather than as the anchor it is. Sequence either side
-// still reads sensibly: ...Moderate-Low (65%) -> Expected (60%) -> Low
-// (55%)... — 'Expected' names a distinct concept (the funding-equals-expected
-// point), not a step in the same relative gradation as its neighbors, so it
-// does not need to fit that gradation.
+// 0.60 is labeled 'Expected' HERE, for PROPERTY ONLY — it is BOTH Property's
+// default and the exact break-even/expected-loss funding point in
+// FUNDING_CLF_TABLE (CLF 1.000 there), so 'Below Average' made the intended
+// setting read as a compromise rather than as the anchor it is. This map is
+// no longer used by WC or GL: their own derived grids' break-even is NOT at
+// 60% and moves with the book (see FUNDING_LEVEL_LABELS_LINE below and the
+// fundingAtExpected field), so keeping the "0.60 = Expected" label there would
+// mislabel the stop exactly the way the derived grids were built to prevent.
 const FUNDING_LEVEL_LABELS: Record<number, string> = {
   0.95: 'Maximum', 0.90: 'Very High', 0.85: 'High', 0.80: 'Above Average', 0.75: 'Balanced', 0.70: 'Moderate', 0.65: 'Moderate-Low', 0.60: 'Expected', 0.55: 'Low', 0.50: 'Very Low',
   0.45: 'Minimal', 0.40: 'Deficient', 0.35: 'Severely Deficient', 0.30: 'Critical',
 };
 
-function getFundingLabel(v: number): string {
+// WC and GL: the SAME descending gradation, minus the 60%='Expected' special
+// case above — 'Expected' now names a book-dependent concept surfaced
+// separately (fundingAtExpected), not a fixed rung at 60%. 0.60 reads as an
+// ordinary point in the ladder here, same as 0.65 or 0.55.
+const FUNDING_LEVEL_LABELS_LINE: Record<number, string> = {
+  0.95: 'Maximum', 0.90: 'Very High', 0.85: 'High', 0.80: 'Above Average', 0.75: 'Balanced', 0.70: 'Moderate', 0.65: 'Moderate-Low', 0.60: 'Below Average', 0.55: 'Low', 0.50: 'Very Low',
+  0.45: 'Minimal', 0.40: 'Deficient', 0.35: 'Severely Deficient', 0.30: 'Critical',
+};
+
+function getFundingLabel(v: number, labels: Record<number, string> = FUNDING_LEVEL_LABELS): string {
   const rounded = Math.round(v * 20) / 20;
-  return FUNDING_LEVEL_LABELS[rounded] ?? v.toFixed(2);
+  return labels[rounded] ?? v.toFixed(2);
 }
 
 const UW_LABELS = ['Very Flexible', 'Flexible', 'Somewhat Flexible', 'Moderate-Flexible', 'Moderate', 'Moderate-Strict', 'Somewhat Strict', 'Strict', 'Very Strict', 'Extremely Strict', 'Maximum Strict'];
@@ -93,8 +102,15 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
   const d = decisions.byLine[selectedLine];
   const selectedLoanInfo = lineLoanInfo[selectedLine];
 
-  const set = (key: keyof LineDecisionSet, val: number | boolean[] | LineDecisionSet['assetAllocation']) =>
+  const set = (key: keyof LineDecisionSet, val: number | boolean | boolean[] | LineDecisionSet['assetAllocation']) =>
     onChange({ ...decisions, byLine: { ...decisions.byLine, [selectedLine]: { ...d, [key]: val } } });
+
+  // WC/GL ONLY: dragging the slider always exits Expected mode (a manual
+  // percentile choice), landing exactly on the dragged value. Selecting
+  // "Expected" back is the separate button rendered below the slider.
+  const setFundingLevel = (v: number) =>
+    onChange({ ...decisions, byLine: { ...decisions.byLine, [selectedLine]: { ...d, fundingConfidenceLevel: v, fundingAtExpected: false } } });
+  const setFundingAtExpected = () => set('fundingAtExpected', true);
 
   const reinsStructure = getReinsuranceStructure(d.reinsuranceLevel, estimatedPremium, estimatedExpectedLoss);
   const prog = REINSURANCE_PROGRAMS[d.reinsuranceLevel];
@@ -151,7 +167,15 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
           {/* Rate Change REMOVED — CLF-only pricing. Funding Confidence Level
               is now the sole pricing lever; the consequence panel below
               replaces the information the deleted lever used to carry. */}
-          <SliderInput label="Funding Confidence Level" value={d.fundingConfidenceLevel} min={SLIDER_RANGES.fundingConfidenceLevel.min} max={SLIDER_RANGES.fundingConfidenceLevel.max} step={SLIDER_RANGES.fundingConfidenceLevel.step} onChange={v => set('fundingConfidenceLevel', v)} formatValue={v => `${getFundingLabel(v)} (${(v * 100).toFixed(0)}%)`} leftLabel="Underfunded" rightLabel="Higher Confidence" valueColor={d.fundingConfidenceLevel < 0.60 ? 'text-red-600' : 'text-gray-700'} disabled={disabled} helpText="Sets the funding confidence level, applied as a multiplier (CLF) on expected losses to set pool premium. 60% is expected — pool premium equals expected losses. Below it the pool funds less than expected losses by design." />
+          <FundingLevelControl
+            line={selectedLine}
+            d={d}
+            fundingConsequence={fundingConsequence}
+            setFundingLevel={setFundingLevel}
+            setFundingAtExpected={setFundingAtExpected}
+            set={set}
+            disabled={disabled}
+          />
           <FundingConsequencePanel c={fundingConsequence} lastLineResult={lastLineResult} />
           <SliderInput label="Dividend / Assessment" value={dividendAssessmentValue} min={SLIDER_RANGES.dividendAssessment.min} max={dividendAssessmentMax} step={SLIDER_RANGES.dividendAssessment.step} onChange={setDividendAssessment} formatValue={dividendAssessmentDisplay} leftLabel="Assessment" rightLabel="Dividend" valueColor={dividendAssessmentValue > 0 ? 'text-emerald-600' : dividendAssessmentValue < 0 ? 'text-red-600' : 'text-gray-500'} disabled={disabled} helpText="One combined control: positive returns value to members as a dividend; negative calls additional funds beyond premium as an assessment. Exactly one may apply in a given year — this is structural, not a suggestion. Assessments are never counted toward the loss ratio of the members being billed." />
           {selectedLoanInfo.dividendBlocked && (
@@ -303,6 +327,79 @@ function outstandingLoanSlider(
         helpText="Share of this line's positive net income used to repay the loan before it flows to the line's own surplus."
       />
     </SectionCard>
+  );
+}
+
+// THE FUNDING CONFIDENCE LEVEL CONTROL. Property renders its ORIGINAL slider
+// unchanged (0.60 already reads 'Expected' correctly there — see
+// FUNDING_LEVEL_LABELS above). WC and GL get a second control: the native
+// range input's thumb renders at whatever `value` it is given even when that
+// value is not a multiple of `step` (only manual dragging snaps to the step
+// grid), so while fundingAtExpected is true the slider's value is bound to
+// fundingConsequence.expectedPercentile — the marker sits at its TRUE,
+// book-dependent position on the track, labeled 'Expected (~X%)', without any
+// custom slider component. Dragging the thumb calls setFundingLevel, which
+// lands exactly on the dragged value AND clears fundingAtExpected in the same
+// update — the natural, and only, way to leave Expected mode. A separate
+// button re-selects Expected directly, since a dragged slider can never land
+// back on an arbitrary fractional percentage on its own.
+function FundingLevelControl({ line, d, fundingConsequence, setFundingLevel, setFundingAtExpected, set, disabled }: {
+  line: CoverageLine;
+  d: LineDecisionSet;
+  fundingConsequence: FundingConsequence | null;
+  setFundingLevel: (v: number) => void;
+  setFundingAtExpected: () => void;
+  set: (key: keyof LineDecisionSet, val: number) => void;
+  disabled: boolean;
+}) {
+  if (line === 'Property') {
+    return (
+      <SliderInput
+        label="Funding Confidence Level"
+        value={d.fundingConfidenceLevel}
+        min={SLIDER_RANGES.fundingConfidenceLevel.min} max={SLIDER_RANGES.fundingConfidenceLevel.max} step={SLIDER_RANGES.fundingConfidenceLevel.step}
+        onChange={v => set('fundingConfidenceLevel', v)}
+        formatValue={v => `${getFundingLabel(v)} (${(v * 100).toFixed(0)}%)`}
+        leftLabel="Underfunded" rightLabel="Higher Confidence"
+        valueColor={d.fundingConfidenceLevel < 0.60 ? 'text-red-600' : 'text-gray-700'}
+        disabled={disabled}
+        helpText="Sets the funding confidence level, applied as a multiplier (CLF) on expected losses to set pool premium. 60% is expected — pool premium equals expected losses. Below it the pool funds less than expected losses by design."
+      />
+    );
+  }
+
+  // WC/GL: break-even is not a fixed percent — it moves with the enrolled
+  // book's own CV (WC) or expected claim count (GL). expectedPercentile is
+  // cross-checked against the same grid computeWcClf/computeGlClf use (see
+  // wcClfCrossingPercentile/glClfCrossingPercentile), never derived separately.
+  const expectedPct = fundingConsequence?.expectedPercentile ?? d.fundingConfidenceLevel;
+  const sliderValue = d.fundingAtExpected ? expectedPct : d.fundingConfidenceLevel;
+  const isAdequate = !fundingConsequence || fundingConsequence.isAdequate;
+
+  return (
+    <div className="flex flex-col gap-1">
+      <SliderInput
+        label="Funding Confidence Level"
+        value={sliderValue}
+        min={SLIDER_RANGES.fundingConfidenceLevel.min} max={SLIDER_RANGES.fundingConfidenceLevel.max} step={SLIDER_RANGES.fundingConfidenceLevel.step}
+        onChange={setFundingLevel}
+        formatValue={v => d.fundingAtExpected ? `Expected (~${Math.round(v * 100)}%)` : `${getFundingLabel(v, FUNDING_LEVEL_LABELS_LINE)} (${(v * 100).toFixed(0)}%)`}
+        leftLabel="Underfunded" rightLabel="Higher Confidence"
+        valueColor={isAdequate ? 'text-gray-700' : 'text-red-600'}
+        disabled={disabled}
+        helpText="Sets the funding confidence level, applied as a multiplier (CLF) on expected losses to set pool premium. This line's break-even (CLF exactly 1.000) is not a fixed percent — it moves with the enrolled book's size and composition. 'Expected' tracks that true position directly; a percentile stop instead prices at that exact confidence level regardless of where break-even currently falls."
+      />
+      {!d.fundingAtExpected && (
+        <button
+          type="button"
+          onClick={setFundingAtExpected}
+          disabled={disabled}
+          className="self-start text-xs text-blue-600 hover:text-blue-800 disabled:opacity-50 disabled:cursor-not-allowed -mt-1"
+        >
+          Reset to Expected (~{Math.round(expectedPct * 100)}%)
+        </button>
+      )}
+    </div>
   );
 }
 

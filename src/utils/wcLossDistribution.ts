@@ -198,3 +198,28 @@ export function computeWcClf(confidenceLevel: number, members: Member[], kLine: 
   const stop = nearestStop(confidenceLevel * 100);
   return interpolateGridRatio(cv, stop);
 }
+
+// THE "Expected" MARKER'S POSITION — where does this book's own grid curve
+// cross ratio = 1.000? Built on the SAME interpolateGridRatio the percentile
+// stops above use, at every stop, then linearly interpolated BETWEEN stops on
+// the (monotonic, by construction — see wcClfGrid.ts) ratio-vs-percentile
+// curve. Deliberately NOT a separate formula: computeWcClf and this function
+// must never be able to drift apart, since "Expected" is defined as "wherever
+// this line's own grid says CLF=1.000 falls," not as an independently
+// estimated number that happens to usually agree.
+//
+// Returns a 0-1 fraction (0.672 for "67.2%"), clamped to the grid's own stop
+// range if the book's CV puts break-even outside the measured curve (the same
+// clamp-past-the-ends contract interpolateGridRatio itself uses).
+export function wcClfCrossingPercentile(members: Member[], kLine: number, yearNumber: number): number {
+  const cv = wcAggregateCumulants(members, kLine, yearNumber).cv;
+  const stops = WC_CLF_PERCENTILE_STOPS;
+  const ratios = stops.map(s => interpolateGridRatio(cv, s));
+  for (let i = 0; i < ratios.length - 1; i++) {
+    if (ratios[i] <= 1 && ratios[i + 1] >= 1) {
+      const w = ratios[i + 1] === ratios[i] ? 0 : (1 - ratios[i]) / (ratios[i + 1] - ratios[i]);
+      return (stops[i] + w * (stops[i + 1] - stops[i])) / 100;
+    }
+  }
+  return (ratios[0] > 1 ? stops[0] : stops[stops.length - 1]) / 100;
+}

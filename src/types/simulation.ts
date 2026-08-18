@@ -309,6 +309,23 @@ export interface LineDecisionSet {
   // deliberately, each commented: membershipEngine.ts's updateSatisfaction,
   // calcRetentionProbability and calcExpectedNewMembers.
   fundingConfidenceLevel: number; // 0.30 to 0.95
+  // "EXPECTED" IS A MODE, NOT A NUMBER. WC's and GL's derived grids are
+  // percentile curves, so break-even (CLF exactly 1.000) falls BETWEEN
+  // percentile stops and moves with the enrolled book's own CV/lambda — WC
+  // from ~56.5% (full roster) to ~67.0% (smallest book), GL from ~60.8% to
+  // ~75.2%. It cannot be represented as a fixed number in
+  // fundingConfidenceLevel: that field would go stale the moment the book's
+  // composition shifted, silently drifting off CLF 1.000 while still reading
+  // as "the chosen value". WC and GL ONLY: true means the engine bypasses the
+  // grid stop-lookup entirely and uses CLF = 1.000 exactly, at every book
+  // size, every year — not an interpolated value that happens to land close.
+  // Property IGNORES this field — it still reads FUNDING_CLF_TABLE, whose
+  // 60% entry already is exactly 1.000, so Property's "Expected" and its 60%
+  // stop already coincide and nothing new is needed there.
+  // fundingConfidenceLevel is NOT read for pricing while this is true (it is
+  // only the fallback the slider lands on if the player later drags away from
+  // Expected to a specific percentile stop).
+  fundingAtExpected: boolean;
   dividendPct: number;            // 0.00 to 0.15 of premium
   assessmentPct: number;          // 0.00 to 0.25 of premium
   underwritingStrictness: number; // 0-10
