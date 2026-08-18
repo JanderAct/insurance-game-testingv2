@@ -125,8 +125,8 @@ for (const id of SEEDS) {
         .filter((m): m is Member => !!m);
       if (enrolled.length === lr.memberLossResults.length && lr.kLineApplied !== undefined) {
         trap1Checked++;
-        const kEnrolled = line === 'WC' ? computeKLine(enrolled) : computeKGl(enrolled);
-        const kRoster = line === 'WC' ? computeKLine(roster) : computeKGl(roster);
+        const kEnrolled = line === 'WC' ? computeKLine(enrolled) : computeKGl(enrolled, y);
+        const kRoster = line === 'WC' ? computeKLine(roster) : computeKGl(roster, y);
         // Bit-equal against the enrolled book. Exact, not a tolerance: the
         // engine calls the same function on the same list.
         if (lr.kLineApplied !== kEnrolled) {
@@ -156,7 +156,7 @@ for (const id of SEEDS) {
         trap2Checked++;
         const expAtOne = line === 'WC'
           ? expectedWcGrossLossForPricing([m], { kLine: 1, yearNumber: y })
-          : expectedGlGrossLossForPricing([m], { kGl: 1 });
+          : expectedGlGrossLossForPricing([m], { yearNumber: y, kGl: 1 });
         if (Math.abs(pr.expectedLoss - expAtOne) > Math.max(1e-6, expAtOne * 1e-9)) {
           note(false, `${line} Y${y} seed ${id}: prospect ${pr.memberId} expectedLoss ${pr.expectedLoss.toFixed(2)} != expectation at k=1 ${expAtOne.toFixed(2)} — the pool's k or rc reached a prospect`);
         }
@@ -179,12 +179,12 @@ for (const id of SEEDS) {
       // be near neutral, which is luck, not a test.
       const exp = line === 'WC'
         ? expectedWcGrossLossForKLine(enrolled, { kLine: lr.kLineApplied ?? 1, yearNumber: y })
-        : expectedGlGrossLossForKLine(enrolled, { kGl: lr.kLineApplied ?? 1 });
+        : expectedGlGrossLossForKLine(enrolled, { yearNumber: y, kGl: lr.kLineApplied ?? 1 });
       if (exp > 0) ratio[line].push(lr.grossUltimateLoss / exp);
       // The $1M-CAPPED counterpart — the quantity GL's gate is on. See the gate
       // block below for why the gate cannot be on the ground-up figure.
       if (line === 'GL') {
-        const expCapped = expectedGlGrossLossForKLine(enrolled, { kGl: lr.kLineApplied ?? 1, severityLimit: CAP });
+        const expCapped = expectedGlGrossLossForKLine(enrolled, { yearNumber: y, kGl: lr.kLineApplied ?? 1, severityLimit: CAP });
         const drawnCapped = (lr.claims ?? []).reduce((s, c) => s + Math.min(c.grossUltimate, CAP), 0);
         if (expCapped > 0) ratioCapped[line].push(drawnCapped / expCapped);
       }

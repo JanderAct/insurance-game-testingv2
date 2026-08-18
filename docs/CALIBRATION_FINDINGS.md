@@ -1977,3 +1977,149 @@ than the pricing invariant.
 - **The shock recalibration was right.** 1.217 and 1.057 preserve each event's original share-of-line
   magnitude (21.70% / 5.70% of GL, verified against draws to <1%); carrying 2.0 and 1.25 across unchanged
   would have made `#22` 4.6× larger.
+
+## 42. GL gets a severity trend and payroll growth — the two halves that only work together
+
+WC's wage-inflation work established the rule: a severity trend and payroll growth arrive **together or
+neither works**. Severity alone makes a line's rate rise; payroll alone makes it fall by the full wage
+rate. WC's first pass put the trend in the draw and not the price and its combined ratio went to 104.6%
+(finding 37). GL had **neither** half — no calendar trend of any kind, and `WAGE_INFLATION_APPLIES.GL`
+false. It now has both.
+
+| | |
+|---|---|
+| GL severity trend | **5.7026%/yr** = `1.0363 x 1.020` (wage x long-run social inflation) |
+| wage inflation | **3.63%/yr** — `WAGE_INFLATION_APPLIES.GL` flipped to true |
+| resulting rate trend | **+2.00%/yr**, exactly the social-inflation half |
+
+Over nine compounding periods: rate **x1.1951**, member charge **x1.6473**, real cost **x1.1951**. WC's
+rate stays flat by contrast, because its own severity and wage rates nearly cancel by construction.
+
+**⚠ THE FIGURES COMPOSE MULTIPLICATIVELY, NOT ADDITIVELY**, despite social inflation being *defined* as an
+additive excess over economic drivers. `3.63 + 2.00 = 5.63`, but `1.0363 x 1.020 = 1.057026`. Only the
+product reconciles, and only the product makes the rate-trend identity come out at exactly 1.020.
+
+### Why the baseline is 2.0% social inflation and not Swiss Re's 4.6%
+
+**Sourced** (Swiss Re Institute, sigma 4/2024, Social Inflation Index): 57% cumulative over the decade
+(4.6%/yr), 5.4%/yr average 2017-2022, peaking at 7% in 2023. Social inflation observed since the 1980s,
+with prior episodes in the 1980s and 2000s and the current one beginning in the mid-2010s; the index has
+been above zero every year since 2014.
+
+**The 2.0% is a JUDGMENT, not a Swiss Re figure** — an estimate of a long-run average across episodes *and
+quiet periods*. The reason is structural rather than a calibration convenience: **4.6% is the current
+episode's average, not a long-run rate.** Baking it in permanently asserts the episode never ends, and
+then the hard-market event adds another episode on top of it — double-counting. If the event is the
+episode, the baseline has to be the between-episode rate. **Displaced by:** a social-inflation index
+covering the pre-2014 period, or a public-entity liability severity trend from a rate filing.
+
+### The social-inflation event is a RATCHET, and that is the physics
+
+`#19 Social Inflation Hard Market` — future horizon, `sevMultiplier`, **x1.1004 permanently**.
+
+Sizing: the excess of Swiss Re's 2023 peak over the baseline is `1.07 / 1.02 = 1.04902`, i.e. +4.90%/yr
+while the episode runs. Compounded: 2yr **1.1004**, 3yr 1.1544, 4yr 1.2110. **Two years chosen**, because
+(a) 7% is a *peak*, not a plateau — the elevated 2017-2022 stretch averaged 5.4%, so holding the maximum
+observed value for three or four years asserts a plateau the data does not show; and (b) the ratchet is
+permanent, so even x1.1004 is ~$1.79M every remaining year against GL's ~$17.8M enrolled gross — roughly
+3.7x the lifetime cost of `#22`, which is why it sits in the `high` band.
+
+**Why a ratchet rather than a bounded episode:** Swiss Re's index has been above zero every year since
+2014. When a hard market ends, severity does not fall back — the *level* it reached stays. A future-horizon
+multiplier reproduces that exactly and needs no new mechanism.
+
+**⚠ RECORDED AS THE EVENTUAL ANSWER, NOT BUILT:** an elevated *trend rate* that runs for N years and then
+reverts to baseline with the accumulated level retained. That is the physically correct model. It needs a
+new effect kind, because the resolver has **no bounded-duration horizon at all** — `active` is
+`horizon === 'future' || firedYear === yearNumber`, so an effect is either one year or permanent. The
+ratchet reproduces an episode's *end state* exactly and only approximates its *path*, front-loading the
+whole step into the firing year.
+
+### `sevMultiplier` implemented — the first severity effect in the catalogue
+
+It was already typed and marked NOT IMPLEMENTED. Now: added to `IMPLEMENTED_EFFECTS`, a resolver case that
+**compounds** (two episodes leave a compounded level behind), a `sevMultipliers` bucket, `ownSevMultipliers`
+for attribution, and the load-time throw if a GL `sevMultiplier` carries a `sub` — matching the
+`freqMultiplier` validator, and for a worse reason: both GL's draw and GL's analytic read only `WHOLE_LINE`,
+so a mis-keyed severity effect would be inert in **both halves at once**.
+
+Folded into the same log-location shift as the trend (`trendedMuGl`), so trend and shock are one mechanism
+and sigma — and therefore per-claim CV — is untouched by either. `paramOverride` stays deleted: a trend is
+a function of the year, not a stored constant, so there is nothing for a path-override to reach.
+
+Verified end-to-end in `shock-check.ts` §9, because a new effect kind that is typed and catalogued but not
+wired reads exactly like a working one: drawn severity ratio **1.1004** against its factor, claim count
+**bit-identical** (a severity effect must not touch lambda), and Y2-Y5 all moved after a Y2 firing while Y1
+is untouched — the ratchet does not unwind.
+
+### The four invariants, all asserted
+
+| invariant | result |
+|---|---|
+| rate trend = social-inflation half exactly | 1.020000 |
+| **premium trend = severity trend, INDEPENDENT of the wage rate** | 1.057026 at wage 0% / 3.63% / 8% |
+| k_GL trend-invariant (scalar cancels both sides) | 0.971422402336 at year 1 and year 10 |
+| per-claim CV invariant to the trend | 29.547397 at year 1 and year 10 |
+| frequency reads REAL payroll | count expectation 1033.001486 at both years, while nominal payroll grew x1.3784 |
+
+The premium-trend one is the cheapest test that **both** pricing factors are present — GL's frequency is
+flat, so premium = `(real x wage) x (held x sev / wage)` and the wage factor cancels algebraically. Drop
+either factor and it breaks. It is how WC's finding-37 defect would have been caught.
+
+**⚠ A FIRST VERSION OF THE FREQUENCY CHECK WAS INVALID AND FAILED ON CORRECT CODE.** It drew at year 1 and
+year 10 "on the same seeds" and gated on exact equality of the counts. But `deriveSubRng` keys the
+per-member streams on `yearNumber`, so the two years draw from *different streams by construction* and
+their counts differ by ordinary sampling noise (~0.19% over 400 replicates) whatever the frequency basis
+is. Replaced with the deterministic form: recover the engine's own count expectation as
+`expectedGlGrossLossForPricing / expectedClaimSeverity` — the severity trend cancels between numerator and
+denominator, leaving frequency alone.
+
+### `ExpectedGlLossOptions.yearNumber` is REQUIRED, deliberately unlike WC's
+
+WC's is `yearNumber?: number` with a default of 1. GL's is required, with no default, so `options` itself
+cannot be omitted either. **A default here is finding 37's failure class exactly**: it lets a call site
+silently price at year 1 forever while the draw trends away from it. WC's signature predates that finding;
+GL's is written after it.
+
+It earned its keep immediately. Making it required surfaced a **latent defect in
+`loss-level-diagnostic.ts`**, where line-year records carried no year at all and every analytic was
+therefore computed at year 1 against draws from years 1-5. That was already wrong for **WC** — whose
+frequency and severity both trend — and would have silently reported a spurious GL gap. The record now
+carries `yearNumber` and both lines' calls use it.
+
+Draw loops in `gl-claim-check.ts` also had to pin `yearNumber: 1` and vary only the seed, matching
+`wc-severity-rebuild-check`'s existing precedent: looping the year now samples a *different severity level*
+each replicate, and the pooled mean would answer no question.
+
+### Tower drift at the new baseline — REPORTED, NOT FIXED
+
+`D = A x R` (attachment geometry x real severity growth), sevFactor **1.6473**, wageFactor **1.3784**,
+**R = 1.1951**:
+
+| layer | A | R | **D** |
+|---|---|---|---|
+| $4M xs $1M | +2.4% | +19.5% | **+22.3%** |
+| $5M xs $5M | +11.5% | +19.5% | **+33.2%** |
+| $15M xs $10M | +18.3% | +19.5% | **+41.4%** |
+| retained >$25M (unlimited) | +35.8% | +19.5% | **+62.2%** |
+
+(At the retired 4.6% baseline these were +53.3 / +73.4 / +89.1 / +131.5%.) Occurrence counts move with
+severity alone, frequency being flat: **>$1M +59.2%, >$5M +79.0%, >$25M +102.1%** over the decade.
+
+WC's entire +17.2% was **A** — its R is 1.0035. GL's drift is mostly **R**, which is real growth, not a
+stale constant. Runtime-computed constants would fix A; nothing fixes R except re-pricing.
+
+**⚠ THE UNDER-CHARGING EFFECT, RECORDED NOW SO IT IS NOT REDISCOVERED.** `occurrenceProgramCost` prices off
+frozen `expectedCededPer100 x NOMINAL exposure`, so reinsurance premium grows at the **wage** rate (x1.3784
+over nine years) while actual ceded grows by **D** above. By year 10 the reinsurer hands over **22.3% /
+33.2% / 41.4%** more than it charged for, by layer. This belongs in the tower re-derivation.
+
+### Sequencing: trend, then tower, then CLF
+
+Both downstream pieces are measured at year 1 where every factor is exactly 1.0, so narrowly the constants
+are the same either way. That is not the point. Doing the trend **first** forces the frozen-constant
+decision at the moment the constants are set — GL's drift is large enough that freezing may not be
+defensible the way WC's +17.2% was — and it makes the CLF grid's **CV-vs-exposure axis choice testable**
+rather than untestable: nominal exposure inflates x1.3784 over a decade while CV is provably invariant
+(29.547397 at both years). Build the grid before the trend exists and an exposure-indexed grid would look
+fine and then silently slide a whole game's worth of margin.

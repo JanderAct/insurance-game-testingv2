@@ -5,7 +5,7 @@
 // and the effect vocabulary in src/types/shocks.ts.
 //
 // IDs are the design-matrix numbers so the table and the matrix stay mapped to
-// each other. Five of the ~40 events are present: four representative events
+// each other. Six of the ~40 events are present: five representative events
 // chosen to exercise the machinery, plus #2, which is present as DATA ONLY.
 //
 // EVERY MAGNITUDE HERE IS PROVISIONAL AND CALIBRATION IS DEFERRED. These are
@@ -169,6 +169,67 @@ export const SHOCK_CATALOG: Record<string, ShockDefinition> = {
   },
 
   // -------------------------------------------------------------------------
+  // #19 — FUTURE horizon. Tests sevMultiplier, and it is the first SEVERITY
+  // effect in the catalogue.
+  //
+  // THE SOCIAL-INFLATION HARD MARKET. GL's baseline severity trend already
+  // carries LONG-RUN social inflation at 2.0%/yr (glClaimEngine's
+  // GL_SEVERITY_TREND_PER_YEAR). This event is the EPISODE on top of it —
+  // nuclear verdicts, litigation funding, eroding damages caps — running
+  // severity toward Swiss Re's 2023 peak of 7% social while it lasts.
+  //
+  // ⚠ IT IS A RATCHET, NOT A TEMPORARY SPIKE, AND THAT IS THE WHOLE MODELLING
+  // POINT. Swiss Re's Social Inflation Index has been above zero EVERY YEAR
+  // since 2014: when a hard market ends, severity does not fall back: the LEVEL
+  // it reached stays. So this is future-horizon and permanent, and its factor is
+  // sized as the CUMULATIVE EXCESS an episode leaves behind rather than as a
+  // per-year rate. The episode's duration is an authoring-time input to that
+  // number, not a runtime mechanic.
+  //
+  // MAGNITUDE, DERIVED: the excess of the peak over the baseline is
+  // 1.07 / 1.02 = 1.04902, i.e. +4.90%/yr while the episode runs. Compounded:
+  //     2 years  1.1004      3 years  1.1544      4 years  1.2110
+  //
+  // TWO YEARS (x1.1004) IS CHOSEN, for two reasons:
+  //   1. 7% IS A PEAK, NOT A PLATEAU. Swiss Re's index peaked at 7% in 2023; the
+  //      elevated 2017-2022 stretch averaged 5.4%. Holding the maximum observed
+  //      value for three or four years asserts a plateau the data does not show.
+  //      Two years at the peak is the defensible end of the range.
+  //   2. THE RATCHET IS PERMANENT, so even 1.1004 is not a small event. GL's
+  //      enrolled gross runs ~$17.8M/yr, so +10.04% is ~$1.79M EVERY REMAINING
+  //      YEAR. Firing mid-game that is ~$14M cumulative against a ~$30M starting
+  //      surplus — roughly 3.7x the lifetime cost of #22, which is a one-year
+  //      +21.7% of line. Hence the `high` band rather than `moderate`.
+  //
+  // ⚠ WHAT THIS IS NOT, AND WHAT SHOULD REPLACE IT EVENTUALLY: an elevated TREND
+  // RATE that runs for N years and then reverts to baseline with the accumulated
+  // level retained. That is the physically correct model. It needs a new effect
+  // kind (a trend-rate delta with a duration) because the resolver has NO
+  // bounded-duration horizon — an effect is either one year (`current`) or
+  // permanent (`future`). The ratchet reproduces the END STATE of an episode
+  // exactly and only approximates its path, front-loading the whole step into
+  // the firing year. Recorded so the approximation is not mistaken for the
+  // finished design. See types/shocks.ts on sevMultiplier.
+  //
+  // DISPLACED BY: a social-inflation index covering the pre-2014 period, which
+  // would let both this magnitude and the 2.0% baseline be measured rather than
+  // judged.
+  // -------------------------------------------------------------------------
+  '#19': {
+    id: '#19',
+    name: 'Social Inflation Hard Market',
+    horizon: 'future',
+    band: 'high',
+    description:
+      'Nuclear verdicts, third-party litigation funding and eroding damages caps drive a liability hard '
+      + 'market. General Liability claim severity steps up permanently — when the episode passes, the '
+      + 'level it reached does not come back down.',
+    effects: [
+      { kind: 'sevMultiplier', line: 'GL', factor: 1.1004 },
+    ],
+  },
+
+  // -------------------------------------------------------------------------
   // #22 — CURRENT horizon. Tests freqMultiplier at whole-line scope.
   //
   // ⚠ RE-TARGETED BY THE GL SUB-COVERAGE REBUILD. This used to be
@@ -314,6 +375,14 @@ for (const def of Object.values(SHOCK_CATALOG)) {
     if (effect.kind === 'freqMultiplier' && effect.line === 'GL' && effect.sub !== undefined) {
       throw new Error(
         `shockCatalog ${def.id}: freqMultiplier on GL names sub '${effect.sub}', but GL has no `
+        + `sub-coverages since the severity rebuild — both the draw and the analytic read only `
+        + `'${WHOLE_LINE}'. Omit ` + '`sub`' + ` to target the whole line. As written this effect would be silently inert.`,
+      );
+    }
+    // sevMultiplier has the identical trap and the identical fix.
+    if (effect.kind === 'sevMultiplier' && effect.line === 'GL' && effect.sub !== undefined) {
+      throw new Error(
+        `shockCatalog ${def.id}: sevMultiplier on GL names sub '${effect.sub}', but GL has no `
         + `sub-coverages since the severity rebuild — both the draw and the analytic read only `
         + `'${WHOLE_LINE}'. Omit ` + '`sub`' + ` to target the whole line. As written this effect would be silently inert.`,
       );

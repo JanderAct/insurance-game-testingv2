@@ -200,7 +200,7 @@ console.log('\n--- 3. THE ASYMMETRY: expected includes k_line, excludes risk con
     const enrolledIds = new Set(lr.memberLossResults.map(m => m.memberId));
     const expectFor = (m: Member, kUsed: number) => line === 'WC'
       ? expectedWcGrossLossForPricing([m], { kLine: kUsed, yearNumber: 1 })
-      : expectedGlGrossLossForPricing([m], { kGl: kUsed });
+      : expectedGlGrossLossForPricing([m], { yearNumber: 1, kGl: kUsed });
 
     // ENROLLED: stored expected must equal the expectation AT kLineApplied, and
     // must NOT equal it at k = 1 — which is what proves k is genuinely included
@@ -282,7 +282,7 @@ console.log('\n--- 3. THE ASYMMETRY: expected includes k_line, excludes risk con
         if (!stored) continue;
         const at = line === 'WC'
           ? expectedWcGrossLossForPricing([m], { kLine: k, yearNumber: 1 })
-          : expectedGlGrossLossForPricing([m], { kGl: k });
+          : expectedGlGrossLossForPricing([m], { yearNumber: 1, kGl: k });
         worst = Math.max(worst, Math.abs(stored.expected - at));
         n++;
       }

@@ -1,4 +1,4 @@
-// WAGE INFLATION ON THE EXPOSURE BASE — pool-wide framework, wired for WC only.
+// WAGE INFLATION ON THE EXPOSURE BASE — pool-wide framework, wired for WC and GL.
 //
 // The roster is FROZEN and stays frozen: member payroll in memberCatalog is a
 // permanent year-1-dollar figure. This factor rides on top at read time, the
@@ -54,33 +54,36 @@ import type { CoverageLine } from '../types/simulation';
 // SOURCED — see the derivation above.
 export const WAGE_INFLATION_PER_YEAR = 0.0363;
 
-// ⚠ THE PER-LINE SWITCH. WC ONLY IN THIS COMMIT. The framework is built
-// line-agnostic because GL and Property will both need it, but turning either on
-// is a REPRICING, not a toggle:
+// ⚠ THE PER-LINE SWITCH. WC AND GL LIVE; PROPERTY OFF. Turning a line on is a
+// REPRICING, not a toggle — it must arrive paired with that line's own sourced
+// severity trend, or the rate moves by the full wage rate with nothing
+// offsetting it:
 //
-//   GL — CARRIES NO SEVERITY OR FREQUENCY TREND OF ANY KIND (the GL
-//        sub-coverage rebuild deleted GL_SOCIAL_INFLATION entirely — see
-//        GL_LOSS_MODEL in defaultAssumptions.ts). An EARLIER version of this
-//        comment claimed GL's rate trend would become "+3.25%/yr rather than
-//        +7%" once payroll grows — that assumed a 7% trend GL no longer has,
-//        and was wrong even before the rebuild (it never paired frequency's
-//        flatness with any severity trend correctly). With no trend at all,
-//        flipping this switch on GL as-is would make GL's rate FALL by the
-//        full wage rate (payroll grows, nothing offsets it) — the mirror
-//        image of the defect WC's own wage-inflation work fixed. Do not flip
-//        this switch until GL has a sourced severity trend to pair against it,
-//        exactly as WC's wcSeverityTrend pairs with this factor.
+//   GL — LIVE. Paired with GL_SEVERITY_TREND_PER_YEAR (5.7026%/yr, itself
+//        1.0363 x 1.020 — wage times long-run social inflation), so GL's rate
+//        trend is +2.00%/yr, exactly the social-inflation half. Payroll grows
+//        with the economic half; severity grows with both; the difference is
+//        what members actually feel. See glClaimEngine.ts for the sourcing and
+//        for why the 2.0% is tagged a judgment rather than a Swiss Re figure.
+//
+//        ⚠ THE TWO HALVES ARRIVED TOGETHER AND MUST STAY TOGETHER. Severity
+//        alone makes GL's rate rise 5.70%/yr; payroll alone makes it FALL
+//        3.63%/yr. An earlier version of this note said GL's rate trend would
+//        become "+3.25%/yr rather than +7%" — that assumed a 7% trend GL did
+//        not have, and was wrong even before the sub-coverage rebuild deleted
+//        GL_SOCIAL_INFLATION. Removing either half now reintroduces the same
+//        class of defect finding 37 corrected on WC.
 //
 //   PROPERTY — its exposure base is TIV, not payroll, and TIV inflates with
 //        CONSTRUCTION COST, not wages. 3.63% IS NOT PROPERTY'S RATE. Turning
 //        Property on requires its own sourced figure and its own severity
 //        pairing; reusing this constant would be a category error.
 //
-// GL-solo and Property-solo being byte-identical across this change is the
-// proof the switch is genuinely off, not merely nominally off.
+// Property-solo being byte-identical across a change to this file is the proof
+// its switch is genuinely off, not merely nominally off.
 export const WAGE_INFLATION_APPLIES: Record<CoverageLine, boolean> = {
   WC: true,
-  GL: false,
+  GL: true,
   Property: false,
 };
 
@@ -105,10 +108,10 @@ export const WAGE_INFLATION_APPLIES: Record<CoverageLine, boolean> = {
 // The same mismatch, caught earlier in the same change, is why
 // instanceGenerator pins OPENING_EXPOSURE_YEAR to 1.
 //
-// ⚠ wcSeverityTrend FLOORS THE SAME WAY AND MUST CONTINUE TO. The two are a
-// pair: if payroll pins at year 1 pre-game while severity deflates, the drawn
-// loss and the priced loss diverge across exactly the years that set the
-// opening reserves.
+// ⚠ wcSeverityTrend AND glSeverityTrend FLOOR THE SAME WAY AND MUST CONTINUE TO.
+// Each is a pair with this factor: if payroll pins at year 1 pre-game while a
+// line's severity deflates, that line's drawn loss and priced loss diverge across
+// exactly the years that set the opening reserves.
 export function wageFactor(line: CoverageLine, yearNumber: number): number {
   if (!WAGE_INFLATION_APPLIES[line]) return 1;
   return Math.pow(1 + WAGE_INFLATION_PER_YEAR, Math.max(1, yearNumber) - 1);

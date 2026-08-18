@@ -95,13 +95,13 @@ for (const id of SEEDS) {
     // ANALYTIC basis: this enrolled book's OWN expected GL loss, no draw noise.
     // kGl=1 with RQ pinned to neutral reproduces E[draw] exactly, because the
     // engine's kGl (= neutral/adjusted) cancels the actual-RQ tilt in the draw.
-    const expNeutral = expectedGlGrossLossForPricing(gl.memberList, { riskQualityOverride: 5, kGl: 1 });
+    const expNeutral = expectedGlGrossLossForPricing(gl.memberList, { yearNumber: y, riskQualityOverride: 5, kGl: 1 });
     glAnalyticLR.push(expNeutral / Math.max(gl.poolPremiumAndAdminExpense, 1));
     glEnrolledPP.push(expNeutral / (gl.memberList.reduce((s: number, m: any) => s + (m.exposureByLine.GL ?? 0), 0) * 10_000));
     glDrawOverExp.push(gl.grossUltimateLoss / Math.max(expNeutral, 1));
     // The capped pair, on the SAME neutral/held basis as expNeutral above.
     const drawnCapped = (gl.claims ?? []).reduce((s2, c) => s2 + Math.min(c.grossUltimate, CAP), 0);
-    const expNeutralCapped = expectedGlGrossLossForPricing(gl.memberList, { riskQualityOverride: 5, kGl: 1, severityLimit: CAP });
+    const expNeutralCapped = expectedGlGrossLossForPricing(gl.memberList, { yearNumber: y, riskQualityOverride: 5, kGl: 1, severityLimit: CAP });
     const glCapLR = drawnCapped / Math.max(gl.poolPremiumAndAdminExpense, 1);
     glCappedLR.push(glCapLR); seedGlCapped.push(glCapLR);
     glCappedAnalyticLR.push(expNeutralCapped / Math.max(gl.poolPremiumAndAdminExpense, 1));

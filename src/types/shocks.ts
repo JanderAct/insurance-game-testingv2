@@ -91,7 +91,31 @@ export type ShockEffect =
   // component's share of loss (the heavy component is ~94.9% of it), so
   // `k = 1 + target / 0.949`.
   | { kind: 'componentFreqMultiplier'; line: CoverageLine; component: string; factor: number }
-  // NOT IMPLEMENTED.
+  // IMPLEMENTED for GL. Multiplies drawn SEVERITY for one year (current
+  // horizon) or permanently from the firing year (future horizon). `sub`
+  // omitted means the whole line, and for GL that is the ONLY valid form —
+  // shockCatalog throws at load on a GL sevMultiplier carrying a `sub`, because
+  // GL has no sub-coverages and both its draw and its analytic read only '*'.
+  //
+  // ⚠ A FUTURE-HORIZON sevMultiplier IS A RATCHET, and that is the intended
+  // shape for a social-inflation episode. Swiss Re's index has been above zero
+  // every year since 2014 — a hard market does not unwind when it ends, it
+  // leaves the severity LEVEL permanently higher. So the factor is sized as the
+  // CUMULATIVE excess an episode leaves behind, and the episode's duration is an
+  // authoring-time input to that number rather than a runtime mechanic.
+  //
+  // ⚠ WHAT THIS IS NOT: an elevated TREND RATE that runs for N years and then
+  // returns to baseline with the accumulated level retained. That is the
+  // physically correct model and it is the eventual answer, but it needs a new
+  // effect kind (a trend-rate delta with a duration) and the resolver has no
+  // bounded-duration horizon at all today — `active` is
+  // `horizon === 'future' || firedYear === yearNumber`, so an effect is either
+  // one year or permanent. Recorded here so the ratchet is not mistaken for the
+  // finished design.
+  //
+  // Applied through glClaimEngine's trendedMuGl log-location shift, so it shares
+  // one mechanism with the severity trend and leaves sigma — and therefore the
+  // per-claim CV — untouched.
   | { kind: 'sevMultiplier'; line: CoverageLine; sub?: string; factor: number }
   // NOT IMPLEMENTED.
   | { kind: 'investmentShock'; assetClass: 'cash' | 'bonds' | 'equities'; returnDelta: number }
@@ -130,6 +154,7 @@ export const IMPLEMENTED_EFFECTS: ReadonlySet<ShockEffectKind> = new Set<ShockEf
   'injectClaim',
   'freqMultiplier',
   'componentFreqMultiplier',
+  'sevMultiplier',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -204,6 +229,7 @@ export interface LineShockEffects {
   // WC mixture component -> COMPOUNDED arrival-rate factor. Same compounding
   // rule. '*' means every component.
   componentFreqMultipliers?: Record<string, number>;
+  sevMultipliers?: Record<string, number>;
   // shockId is carried so an injected claim's cost maps back to the event that
   // caused it. Frequency multipliers carry no such tag because their cost is
   // not exactly attributable in the first place — see ShockRecord.

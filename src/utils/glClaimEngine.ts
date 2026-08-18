@@ -15,11 +15,12 @@
 //    from WC's, recomputed annually against the enrolled book. It neutralises
 //    BOTH risk-quality channels, so the drawn expected loss equals the held
 //    priced expectation whatever the book's RQ mix.
-// 4. NO DOLLAR VINTAGE CONVERSION. The fitted mixture's amounts come from a
-//    real pool's real claim experience and are booked exactly as drawn, at
-//    accident-year value. GL carries no severity or frequency trend of any
-//    kind (see exposureTrend.ts's GL note) and no report lag — every claim
-//    reports in its own accident year.
+// 4. DOLLAR VINTAGE IS THE ACCIDENT YEAR, ONCE. Severity is trended to the
+//    accident year at the draw (glSeverityTrend) and frozen onto the claim.
+//    GL has NO REPORT LAG — every claim reports in its own accident year — so
+//    there is no emergence to re-value and no lag for the trend to compound
+//    over. Frequency is FLAT and reads REAL payroll; the wage factor is a
+//    rating/premium/display quantity only (see lineHelpers.getMemberExposure).
 //
 // OCCURRENCE == CLAIM, exactly like WC. GL's batch mechanism is deleted, not
 // layered differently — see GL_LOSS_MODEL's header comment for why.
@@ -33,6 +34,79 @@ import { limitedExpectedValue } from './claimMath';
 const M = GL_LOSS_MODEL;
 const LINE: CoverageLine = 'GL';
 const NEUTRAL_RQ = 5;
+
+// --- severity trend ------------------------------------------------------------
+
+// GL SEVERITY TREND — wage inflation compounded with LONG-RUN social inflation.
+//
+//   wage inflation            3.63%   (see exposureTrend.ts for its derivation)
+//   long-run social inflation 2.00%   JUDGMENT — see below
+//   composed                  1.0363 x 1.0200 = 1.057026  ->  5.7026%/yr
+//
+// ⚠ COMPOSED MULTIPLICATIVELY, NOT SUMMED. Swiss Re define social inflation as
+// severity growth BEYOND economic drivers — an additive excess as a CONCEPT —
+// but the figures only reconcile as a product: 3.63 + 2.00 = 5.63, whereas
+// 1.0363 x 1.020 = 1.057026. Summing the rates would understate the trend and
+// break the rate-trend identity below.
+//
+// THE IDENTITY THAT MAKES THIS PAIR CORRECT: GL's rate is per $100 of NOMINAL
+// payroll, so
+//   rate trend = severityTrend / wageFactor = 1.057026 / 1.0363 = 1.0200
+// exactly the social-inflation half. Payroll grows with the economic half,
+// severity with both, and members feel the difference. Over a ten-year game
+// (nine compounding periods) the rate rises x1.1951 and the member charge
+// x1.6473, against WC's rate which stays flat.
+//
+// ===========================================================================
+// SOURCING, AND WHICH NUMBER IS NOT SOURCED
+// ===========================================================================
+//
+// SOURCED — Swiss Re Institute, sigma 4/2024, Social Inflation Index:
+//   57% cumulative over the decade (4.6%/yr), 5.4%/yr average 2017-2022,
+//   peaking at 7% in 2023. Social inflation observed since the 1980s, with
+//   prior episodes in the 1980s and 2000s and the current one beginning in the
+//   mid-2010s; the index has been above zero every year since 2014.
+//
+// ⚠ THE 2.0% IS A JUDGMENT, NOT A SWISS RE FIGURE. The 4.6%, 5.4% and 7.0%
+// figures above are theirs; 2.0% is an estimate of a LONG-RUN AVERAGE ACROSS
+// EPISODES AND QUIET PERIODS.
+//
+// WHY NOT USE 4.6% AS THE BASELINE. It is the CURRENT EPISODE'S average, not a
+// long-run rate. Baking it in permanently asserts the episode never ends — and
+// then the hard-market event (shockCatalog #19) adds another episode on top of
+// it, double-counting. If the EVENT is the episode, the BASELINE has to be the
+// between-episode rate. That is a structural argument, not a calibration one:
+// it would hold even if the resulting numbers were convenient.
+//
+// WHAT WOULD DISPLACE IT: a social-inflation index covering the pre-2014
+// period, or a public-entity liability severity trend from a rate filing.
+// ===========================================================================
+export const GL_SEVERITY_TREND_PER_YEAR = 0.057026;
+
+// Live year 1 is the reference (factor 1.0).
+//
+// ⚠ FLOORS AT YEAR 1, exactly as wageFactor does, and for the same reason. The
+// pre-game is an INITIAL-CONDITIONS GENERATOR whose dollar constants are
+// year-1 dollars, not a severity history. The two factors must floor TOGETHER:
+// pinning payroll while letting severity deflate would make the drawn and
+// priced loss diverge across the years that set opening reserves.
+export function glSeverityTrend(yearNumber: number): number {
+  return Math.pow(1 + GL_SEVERITY_TREND_PER_YEAR, Math.max(1, yearNumber) - 1);
+}
+
+// A component's log-location shifted to a given year, and optionally by a
+// severity SHOCK factor on top.
+//
+// exp(mu + ln(s)) = s x exp(mu), so a location shift in log space IS a
+// multiplicative scale on the drawn amount — it leaves sigma untouched, and
+// therefore leaves the per-claim CV untouched, and therefore does not slide a
+// CV-indexed CLF grid. Same trick as wcClaimEngine's trendedMu.
+//
+// THE SHOCK RIDES THE SAME SHIFT rather than scaling the drawn amount
+// afterwards, so there is ONE mechanism and one place for it to be wrong.
+export function trendedMuGl(mu: number, yearNumber: number, severityShock = 1): number {
+  return mu + Math.log(glSeverityTrend(yearNumber) * severityShock);
+}
 
 // --- risk quality ------------------------------------------------------------
 
@@ -111,18 +185,28 @@ function untiltedGlWeights(): number[] {
 
 // --- severity means (analytic side of the matched pair) ----------------------
 
-function componentMean(c: GlSeverityComponent): number {
-  return Math.exp(c.mu + (c.sigma * c.sigma) / 2);
+function componentMean(c: GlSeverityComponent, yearNumber: number): number {
+  const mu = trendedMuGl(c.mu, yearNumber);
+  return Math.exp(mu + (c.sigma * c.sigma) / 2);
 }
 
-// Expected severity of one claim under a given weight vector. `limit` caps each
-// claim at that amount (E[min(X, limit)] per component) — see
-// ExpectedGlLossOptions.severityLimit for why that exists.
-export function expectedClaimSeverity(weights: number[], limit?: number): number {
+// Expected severity of one claim under a given weight vector, IN THAT YEAR'S
+// DOLLARS. `limit` caps each claim at that amount (E[min(X, limit)] per
+// component) — see ExpectedGlLossOptions.severityLimit for why that exists.
+//
+// ⚠ THE LIMIT IS A FIXED DOLLAR AMOUNT AND THE SEVERITY INFLATES PAST IT. That
+// is deliberate and is the whole point of the capped basis: a $1M cap in year 10
+// is a smaller share of the distribution than in year 1, exactly as a fixed
+// reinsurance attachment is. The capped ANALYTIC here trends the same way the
+// capped DRAW does, so the two stay matched.
+export function expectedClaimSeverity(weights: number[], yearNumber: number, limit?: number): number {
   let total = 0;
   for (let i = 0; i < GL_SEVERITY_COMPONENTS.length; i++) {
     const c = GL_SEVERITY_COMPONENTS[i];
-    total += weights[i] * (limit === undefined ? componentMean(c) : limitedExpectedValue(c.mu, c.sigma, limit));
+    const mu = trendedMuGl(c.mu, yearNumber);
+    total += weights[i] * (limit === undefined
+      ? Math.exp(mu + (c.sigma * c.sigma) / 2)
+      : limitedExpectedValue(mu, c.sigma, limit));
   }
   return total;
 }
@@ -130,6 +214,15 @@ export function expectedClaimSeverity(weights: number[], limit?: number): number
 // --- exported: analytic expectation --------------------------------------------
 
 export interface ExpectedGlLossOptions {
+  // The year whose DOLLARS this expectation is in. REQUIRED, WITH NO DEFAULT,
+  // AND DELIBERATELY UNLIKE wcClaimEngine's optional `yearNumber?: number`.
+  //
+  // ⚠ A DEFAULT HERE IS FINDING 37's FAILURE CLASS EXACTLY: it lets a call site
+  // silently price at year 1 forever while the draw trends away from it, which
+  // is the defect that left WC's frequency trend unpriced for months. WC's
+  // signature predates that finding; GL's is written after it. Required means
+  // `options` itself cannot be omitted either — every caller states its year.
+  yearNumber: number;
   // Force every member to this risk quality (used for the neutral book and for
   // k_GL's numerator). Omit to use each member's actual risk quality.
   riskQualityOverride?: number;
@@ -181,7 +274,7 @@ function expectedGlGrossLossCore(
   const kGl = options.kGl ?? 1;
   const wholeLineMult = options.freqMultipliers?.[WHOLE_LINE] ?? 1;
   // Hoisted for 'pricing', where severity does not depend on the member.
-  const untiltedSeverity = expectedClaimSeverity(untiltedGlWeights(), options.severityLimit);
+  const untiltedSeverity = expectedClaimSeverity(untiltedGlWeights(), options.yearNumber, options.severityLimit);
 
   let total = 0;
   for (const member of members) {
@@ -190,7 +283,7 @@ function expectedGlGrossLossCore(
     const rq = rqOverride ?? member.riskQuality;
     const lambda = payroll * M.ratePer1M * thetaGl(rq) * kGl * wholeLineMult;
     const severity = basis === 'kLine'
-      ? expectedClaimSeverity(tiltedGlWeights(rq), options.severityLimit)
+      ? expectedClaimSeverity(tiltedGlWeights(rq), options.yearNumber, options.severityLimit)
       : untiltedSeverity;
     total += lambda * severity;
   }
@@ -201,7 +294,7 @@ function expectedGlGrossLossCore(
 // included in the mixture). Frequency theta only — see the GlLossBasis comment.
 // This is what purePremiumPer100 and every displayed expected loss derive from.
 // Excludes risk control (invariant 2); E[member noise] = E[gPool] = 1.
-export function expectedGlGrossLossForPricing(members: Member[], options: ExpectedGlLossOptions = {}): number {
+export function expectedGlGrossLossForPricing(members: Member[], options: ExpectedGlLossOptions): number {
   return expectedGlGrossLossCore(members, 'pricing', options);
 }
 
@@ -209,7 +302,7 @@ export function expectedGlGrossLossForPricing(members: Member[], options: Expect
 // channels, so it is also the DRAW's own expectation. computeKGl needs it;
 // exported so the diagnostics can assert the two bases differ in the direction
 // expected and that k_GL's identity holds.
-export function expectedGlGrossLossForKLine(members: Member[], options: ExpectedGlLossOptions = {}): number {
+export function expectedGlGrossLossForKLine(members: Member[], options: ExpectedGlLossOptions): number {
   return expectedGlGrossLossCore(members, 'kLine', options);
 }
 
@@ -241,9 +334,15 @@ export function expectedGlGrossLossForKLine(members: Member[], options: Expected
 // rather than only at neutral, in gl-claim-check.ts: for any book,
 //   expectedGlGrossLossForKLine(book, { kGl: computeKGl(book) })
 //     === expectedGlGrossLossForPricing(book, { riskQualityOverride: 5, kGl: 1 })
-export function computeKGl(members: Member[]): number {
-  const neutral = expectedGlGrossLossForKLine(members, { riskQualityOverride: NEUTRAL_RQ });
-  const adjusted = expectedGlGrossLossForKLine(members, {});
+// ⚠ TREND-INVARIANT BY CONSTRUCTION, and asserted as such. glSeverityTrend is a
+// scalar multiplier on both sides, so it cancels exactly out of the ratio — k_GL
+// measures the roster's risk-quality mix and nothing else. yearNumber is still
+// threaded rather than pinned, so that if a future trend ever became
+// member-dependent the cancellation would visibly stop holding instead of being
+// hidden by a hardcoded year.
+export function computeKGl(members: Member[], yearNumber: number): number {
+  const neutral = expectedGlGrossLossForKLine(members, { yearNumber, riskQualityOverride: NEUTRAL_RQ });
+  const adjusted = expectedGlGrossLossForKLine(members, { yearNumber });
   if (!(adjusted > 0)) return 1;
   return neutral / adjusted;
 }
@@ -251,8 +350,15 @@ export function computeKGl(members: Member[]): number {
 // GL's purePremiumPer100: derived ONCE from the full canonical roster at
 // neutral risk quality and then HELD (Correction 1 discipline). Per $100 of
 // payroll — GL's exposure base.
+// ⚠ PINNED TO YEAR 1, and that pin is load-bearing. The held pick is the
+// REFERENCE-YEAR pure premium; simulationEngine then multiplies it by
+// glSeverityTrend(year) / wageFactor('GL', year) at pricing time. Deriving it at
+// any other year would bake the trend in twice — once here and once there.
+export const HELD_PURE_PREMIUM_YEAR = 1;
 export function deriveNeutralGlPurePremiumPer100(fullRoster: Member[]): number {
-  const expected = expectedGlGrossLossForPricing(fullRoster, { riskQualityOverride: NEUTRAL_RQ, kGl: 1 });
+  const expected = expectedGlGrossLossForPricing(fullRoster, {
+    yearNumber: HELD_PURE_PREMIUM_YEAR, riskQualityOverride: NEUTRAL_RQ, kGl: 1,
+  });
   const payrollUnits = fullRoster.reduce((s, m) => s + (m.exposureByLine.GL ?? 0), 0) * 10_000;
   if (!(payrollUnits > 0)) return 0;
   return expected / payrollUnits;
@@ -274,6 +380,10 @@ export interface GlGenerationInputs {
   // realized event, not a repricing, so it must move the loss ratio rather
   // than cancel out of it.
   freqMultipliers?: Record<string, number>;
+  // Shock-event SEVERITY multipliers, same key convention and the same
+  // DRAW-ONLY rule. Applied through trendedMuGl's log-location shift, so a
+  // severity shock and the severity trend are one mechanism.
+  sevMultipliers?: Record<string, number>;
 }
 
 export interface GlGenerationResult {
@@ -288,6 +398,7 @@ export interface GlGenerationResult {
 export function generateGlClaims(inputs: GlGenerationInputs): GlGenerationResult {
   const { members, yearNumber, calendarYear, instanceSeed, kGl, gPool, riskControlEffectiveness } = inputs;
   const wholeLineMult = inputs.freqMultipliers?.[WHOLE_LINE] ?? 1;
+  const severityShock = inputs.sevMultipliers?.[WHOLE_LINE] ?? 1;
   const rcFactor = Math.max(0, 1 - riskControlEffectiveness);
 
   const claims: Claim[] = [];
@@ -328,7 +439,11 @@ export function generateGlClaims(inputs: GlGenerationInputs): GlGenerationResult
             sequence++;
             const componentIdx = sevRng.categorical(weights);
             const component = GL_SEVERITY_COMPONENTS[componentIdx];
-            const grossUltimate = sevRng.lognormal(component.mu, component.sigma);
+            // TRENDED TO THE ACCIDENT YEAR AND FROZEN. GL has no report lag, so
+            // this is the only vintage the claim ever has. The shock rides the
+            // same log-location shift.
+            const grossUltimate = sevRng.lognormal(
+              trendedMuGl(component.mu, yearNumber, severityShock), component.sigma);
 
             const occurrenceId = `gl-${yearNumber}-${member.id}-${sequence}`;
             const claimId = `${occurrenceId}-c1`;
@@ -372,7 +487,7 @@ export function generateGlClaims(inputs: GlGenerationInputs): GlGenerationResult
       riskQuality: rq,
       // PRICING basis, matching wcClaimEngine's memberLossResults: this figure is
       // what the member is charged against, not what the draw expects of them.
-      expectedLoss: expectedGlGrossLossForPricing([member], { kGl }),
+      expectedLoss: expectedGlGrossLossForPricing([member], { yearNumber, kGl }),
       // Dispersion is emergent (frequency x severity mixture), not a
       // per-member CV — same convention as the WC generator.
       coefficientOfVariation: 0,

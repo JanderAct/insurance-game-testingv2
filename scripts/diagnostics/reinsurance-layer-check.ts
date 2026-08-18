@@ -198,7 +198,7 @@ function drawYear(line: CoverageLine, members: Member[], k: number, seed: number
 interface ExtraAcc { over25: number; over25WithBigClaim: number; glRetainedAbove: number[]; glRetainedEvents: number; glLargest: number; retainedBelow: number[] }
 
 function runA(line: CoverageLine, members: Member[], years: number, layers: Layer[], seedBase: number) {
-  const k = line === 'WC' ? computeKLine(members) : computeKGl(members);
+  const k = line === 'WC' ? computeKLine(members) : computeKGl(members, 1);
   const accs = layers.map(newAcc);
   const extra: ExtraAcc = { over25: 0, over25WithBigClaim: 0, glRetainedAbove: [], glRetainedEvents: 0, glLargest: 0, retainedBelow: [] };
   for (let y = 0; y < years; y++) {

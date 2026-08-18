@@ -137,6 +137,16 @@ export function resolveShocks(instance: GameInstance, yearNumber: number): Shock
           bucket.freqMultipliers[key] = (bucket.freqMultipliers[key] ?? 1) * effect.factor;
           break;
         }
+        case 'sevMultiplier': {
+          const bucket = lineBucket(byLine, effect.line);
+          const key = effect.sub ?? WHOLE_LINE;
+          bucket.sevMultipliers = bucket.sevMultipliers ?? {};
+          // COMPOUND, like the frequency multipliers. Two independent causes
+          // each raising severity genuinely do both — and for a ratchet that is
+          // the right arithmetic: two episodes leave a compounded level behind.
+          bucket.sevMultipliers[key] = (bucket.sevMultipliers[key] ?? 1) * effect.factor;
+          break;
+        }
         case 'componentFreqMultiplier': {
           const bucket = lineBucket(byLine, effect.line);
           bucket.componentFreqMultipliers = bucket.componentFreqMultipliers ?? {};
@@ -207,6 +217,20 @@ export function ownFreqMultipliers(shockId: string, line: CoverageLine): Record<
 // The same, for component arrival-rate multipliers — one event's own, for cost
 // attribution, read back from the catalog rather than from the compounded
 // bucket.
+// The same, for SEVERITY multipliers — one event's own, for cost attribution.
+export function ownSevMultipliers(shockId: string, line: CoverageLine): Record<string, number> | undefined {
+  const def = SHOCK_CATALOG[shockId];
+  if (!def) return undefined;
+  let out: Record<string, number> | undefined;
+  for (const effect of def.effects) {
+    if (effect.kind !== 'sevMultiplier' || effect.line !== line) continue;
+    out = out ?? {};
+    const key = effect.sub ?? WHOLE_LINE;
+    out[key] = (out[key] ?? 1) * effect.factor;
+  }
+  return out;
+}
+
 export function ownComponentFreqMultipliers(shockId: string, line: CoverageLine): Record<string, number> | undefined {
   const def = SHOCK_CATALOG[shockId];
   if (!def) return undefined;

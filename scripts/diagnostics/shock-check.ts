@@ -30,7 +30,7 @@ import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
-import { resolveShocks, ownFreqMultipliers, ownComponentFreqMultipliers } from '../../src/utils/shockResolver';
+import { resolveShocks, ownFreqMultipliers, ownComponentFreqMultipliers, ownSevMultipliers } from '../../src/utils/shockResolver';
 import { WHOLE_LINE } from '../../src/utils/shockEffects';
 import { computeKGl, expectedGlGrossLossForPricing, generateGlClaims } from '../../src/utils/glClaimEngine';
 import { computeKLine, componentMean, expectedWcGrossLossForPricing, generateWcClaims } from '../../src/utils/wcClaimEngine';
@@ -220,17 +220,17 @@ console.log('\n--- 5. #22 Employment Practices Surge — measured at both bases 
   // treaty- or premium-facing figure quoted at full-market scale runs ~4x high,
   // and this project has made that mistake more than once.
   const roster = getPredefinedMarketMembers();
-  const kFull = computeKGl(roster);
+  const kFull = computeKGl(roster, 1);
   const own = ownFreqMultipliers('#22', 'GL')!;
-  const fullBase = expectedGlGrossLossForPricing(roster, { kGl: kFull });
-  const fullShocked = expectedGlGrossLossForPricing(roster, { kGl: kFull, freqMultipliers: own });
+  const fullBase = expectedGlGrossLossForPricing(roster, { yearNumber: 1, kGl: kFull });
+  const fullShocked = expectedGlGrossLossForPricing(roster, { yearNumber: 1, kGl: kFull, freqMultipliers: own });
   console.log(`  effect: ${JSON.stringify(own)}`);
   console.log(`  FULL MARKET   GL expected gross ${fmt$(fullBase)} -> ${fmt$(fullShocked)}   added ${fmt$(fullShocked - fullBase)} (+${((fullShocked / fullBase - 1) * 100).toFixed(1)}% of GL)`);
 
   const pool = enrolledBook('MAMC6EA4', 'GL');
-  const kPool = computeKGl(pool);
-  const poolBase = expectedGlGrossLossForPricing(pool, { kGl: kPool });
-  const poolShocked = expectedGlGrossLossForPricing(pool, { kGl: kPool, freqMultipliers: own });
+  const kPool = computeKGl(pool, 1);
+  const poolBase = expectedGlGrossLossForPricing(pool, { yearNumber: 1, kGl: kPool });
+  const poolShocked = expectedGlGrossLossForPricing(pool, { yearNumber: 1, kGl: kPool, freqMultipliers: own });
   const share = pool.reduce((s, m) => s + (m.exposureByLine.GL ?? 0), 0) / roster.reduce((s, m) => s + (m.exposureByLine.GL ?? 0), 0);
   console.log(`  ENROLLED POOL ${pool.length} members at ${(share * 100).toFixed(1)}% of market payroll`);
   console.log(`                GL expected gross ${fmt$(poolBase)} -> ${fmt$(poolShocked)}   added ${fmt$(poolShocked - poolBase)} (+${((poolShocked / poolBase - 1) * 100).toFixed(1)}% of GL)`);
@@ -263,7 +263,7 @@ console.log('\n--- 5. #22 Employment Practices Surge — measured at both bases 
 
   // INVARIANT 2, the shock version: the multiplier must move the DRAW and stay
   // out of the PRICING expectation. Nothing that prices GL passes it.
-  console.log(`  pricing expectation is shock-blind: ${fmt$(expectedGlGrossLossForPricing(pool, { kGl: kPool }))} unchanged  ${note(expectedGlGrossLossForPricing(pool, { kGl: kPool }) === poolBase, 'the priced expectation moved with the shock')}`);
+  console.log(`  pricing expectation is shock-blind: ${fmt$(expectedGlGrossLossForPricing(pool, { yearNumber: 1, kGl: kPool }))} unchanged  ${note(expectedGlGrossLossForPricing(pool, { yearNumber: 1, kGl: kPool }) === poolBase, 'the priced expectation moved with the shock')}`);
 }
 
 console.log('\n--- 6. #15 Catastrophic WC Mega-Claim — measured at both bases ---');
@@ -498,6 +498,59 @@ console.log('\n--- 8. #28 Pandemic — THE CROSS-LINE TEST ---');
   const wcBoth = y2both.byLine.WC!.grossUltimateLoss;
   const wc28 = results[1].byLine.WC!.grossUltimateLoss;
   console.log(`    WC Y2 gross: clean ${fmt$(clean[1].byLine.WC!.grossUltimateLoss)}, #28 only ${fmt$(wc28)}, both ${fmt$(wcBoth)}`);
+}
+
+console.log('\n--- 9. #19 Social Inflation Hard Market — the first sevMultiplier ---');
+{
+  // WHY THIS SECTION EXISTS: sevMultiplier is a NEW effect kind, and a new kind
+  // that is typed and catalogued but not wired reads exactly like a working one
+  // — the event fires, records, and costs nothing. That is the failure mode the
+  // GL `sub` validator guards against for a mis-keyed effect; a whole-line
+  // effect needs the end-to-end test instead.
+  const own = ownSevMultipliers('#19', 'GL')!;
+  const keys = own ? Object.keys(own) : [];
+  console.log(`  resolves to ${JSON.stringify(own)}  ${note(!!own && keys.length === 1 && keys[0] === WHOLE_LINE, '#19 does not resolve to a single WHOLE_LINE severity key')}`);
+
+  // THE DRAW must move by the factor. Severity is a scalar multiplier on every
+  // claim, so the CAPPED total is the wrong instrument (the cap truncates the
+  // scaling); the raw total moves by exactly the factor in expectation. Counts
+  // must NOT move — this is a severity effect, not a frequency one.
+  const roster9 = getPredefinedMarketMembers();
+  const k9 = computeKGl(roster9, 1);
+  const YEARS = 800;
+  const run = (mult?: Record<string, number>) => {
+    let gross = 0, count = 0;
+    for (let y = 1; y <= YEARS; y++) {
+      const g = generateGlClaims({
+        members: roster9, yearNumber: 1, calendarYear: 2026, instanceSeed: 5150 + y * 7919,
+        kGl: k9, gPool: 1, riskControlEffectiveness: 0, sevMultipliers: mult,
+      });
+      gross += g.grossUltimateLoss; count += g.claimCount;
+    }
+    return { gross: gross / YEARS, count: count / YEARS };
+  };
+  const base = run(undefined), shocked = run(own);
+  const factor = own[WHOLE_LINE];
+  console.log(`  drawn gross ${fmt$(base.gross)} -> ${fmt$(shocked.gross)}  ratio ${(shocked.gross / base.gross).toFixed(4)} vs factor ${factor}`);
+  console.log(`    ${note(Math.abs(shocked.gross / base.gross - factor) / factor < 0.01, `#19's drawn severity ratio ${(shocked.gross / base.gross).toFixed(4)} does not match its factor ${factor} — the sevMultiplier is not reaching the draw`)}`);
+  console.log(`  drawn claim COUNT ${base.count.toFixed(2)} -> ${shocked.count.toFixed(2)}  ${note(base.count === shocked.count, 'a SEVERITY multiplier moved the claim COUNT — it is being applied to lambda, not to the amount')}`);
+  console.log(`    (bit-identical: severity rides trendedMuGl and never touches the frequency stream)`);
+
+  // ATTRIBUTION: the analytic must report the cost, or the event is free.
+  const poolBook = enrolledBook('MAMC6EA4', 'GL');
+  const kPool9 = computeKGl(poolBook, 1);
+  const baseExp = expectedGlGrossLossForPricing(poolBook, { yearNumber: 1, kGl: kPool9 });
+  console.log(`  enrolled expected gross ${fmt$(baseExp)} -> ${fmt$(baseExp * factor)}  added ${fmt$(baseExp * (factor - 1))} (+${((factor - 1) * 100).toFixed(2)}% of GL)`);
+
+  // AND IT IS A RATCHET: future horizon means it persists every year after firing.
+  const results = play('MAMC6EA4', 5, [{ shockId: '#19', yearNumber: 2 }]);
+  const clean = play('MAMC6EA4', 5, []);
+  const moved = [0, 1, 2, 3, 4].map(i => results[i].byLine.GL!.grossUltimateLoss !== clean[i].byLine.GL!.grossUltimateLoss);
+  console.log(`  GL gross moved in years: ${moved.map((m, i) => (m ? i + 1 : null)).filter(Boolean).join(', ') || 'none'}`);
+  console.log(`    Y1 (pre-shock) untouched: ${note(!moved[0], '#19 moved a year BEFORE it fired')}`);
+  console.log(`    Y2-Y5 ALL moved — the ratchet does not unwind: ${note(moved[1] && moved[2] && moved[3] && moved[4], '#19 does not persist after its firing year — a future-horizon ratchet must apply every subsequent year')}`);
+  console.log(`    (a hard market leaves the severity LEVEL higher; Swiss Re's index has been above zero`);
+  console.log(`     every year since 2014. A one-year spike would be the wrong physics — see types/shocks.ts.)`);
 }
 
 console.log(problems.length === 0

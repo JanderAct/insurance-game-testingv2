@@ -35,6 +35,7 @@
 
 import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
 import { GL_HEAVY_COMPONENT_INDEX, GL_LOSS_MODEL, GL_SEVERITY_COMPONENTS } from '../../src/data/defaultAssumptions';
+import { WAGE_INFLATION_PER_YEAR, wageFactor } from '../../src/data/exposureTrend';
 import {
   computeKGl,
   deriveNeutralGlPurePremiumPer100,
@@ -43,7 +44,10 @@ import {
   expectedGlGrossLossForPricing,
   generateGlClaims,
   glInternals,
+  glSeverityTrend,
+  GL_SEVERITY_TREND_PER_YEAR,
   tiltedGlWeights,
+  trendedMuGl,
 } from '../../src/utils/glClaimEngine';
 import { limitedExpectedValue, normalCdf } from '../../src/utils/claimMath';
 import type { Claim } from '../../src/types/simulation';
@@ -90,7 +94,7 @@ let ANALYTIC_GROUND_MEAN = 0, ANALYTIC_1M_LIMITED_MEAN = 0;
 
   // Validate the replica against the real exported expectedClaimSeverity
   // (untilted weights — the pricing basis) before trusting anything downstream.
-  const engineGroundMean = expectedClaimSeverity(GL_SEVERITY_COMPONENTS.map(c => c.weight));
+  const engineGroundMean = expectedClaimSeverity(GL_SEVERITY_COMPONENTS.map(c => c.weight), 1);
   console.log(`  replica vs expectedClaimSeverity: ${engineGroundMean.toFixed(6)} vs ${ANALYTIC_GROUND_MEAN.toFixed(6)}  ${note(Math.abs(engineGroundMean - ANALYTIC_GROUND_MEAN) < 1e-6, 'expectedClaimSeverity disagrees with the independent replica')}`);
 }
 
@@ -117,7 +121,10 @@ console.log('\n--- 2. the frequency anchor: DERIVED, and checked BY SIMULATION n
   const capped: number[] = [];
   for (let y = 1; y <= YEARS; y++) {
     const r = generateGlClaims({
-      members: neutralBook, yearNumber: y, calendarYear: 2025 + y,
+      // yearNumber HELD AT 1 and the SEED varied — GL now carries a +5.7026%/yr
+      // severity trend, so looping the year would sample a DIFFERENT severity
+      // level each replicate and the pooled mean would answer no question.
+      members: neutralBook, yearNumber: 1, calendarYear: 2026,
       instanceSeed: 555_001 + y * 7919, kGl: 1, gPool: 1, riskControlEffectiveness: 0,
     });
     capped.push(r.claims.reduce((s, c) => s + Math.min(c.grossUltimate, 1_000_000), 0));
@@ -149,24 +156,94 @@ console.log('\n--- 2b. k_GL NEUTRALISES BOTH RQ CHANNELS (the held-pure-premium 
   let worst = 0, worstRq = 0;
   for (const q of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) {
     const book = roster.map(m => ({ ...m, riskQuality: q }));
-    const kGl = computeKGl(book);
-    const drawnBasis = expectedGlGrossLossForKLine(book, { kGl });
-    const heldPriced = expectedGlGrossLossForPricing(book, { riskQualityOverride: 5, kGl: 1 });
+    const kGl = computeKGl(book, 1);
+    const drawnBasis = expectedGlGrossLossForKLine(book, { yearNumber: 1, kGl });
+    const heldPriced = expectedGlGrossLossForPricing(book, { yearNumber: 1, riskQualityOverride: 5, kGl: 1 });
     const dev = Math.abs(drawnBasis / heldPriced - 1);
     if (dev > worst) { worst = dev; worstRq = q; }
   }
   console.log(`  uniform books RQ 1..10: worst |drawn-basis / held-priced - 1| = ${worst.toExponential(2)} at RQ ${worstRq}`);
   console.log(`  ${note(worst < 1e-12, `k_GL does not neutralise both RQ channels: drawn expected loss diverges from the held priced expectation by ${(worst * 100).toFixed(2)}% at RQ ${worstRq}. computeKGl must use the k_GL basis (tilted) on BOTH sides — see its comment.`)}`);
   // And on the real, non-uniform roster.
-  const kFull = computeKGl(roster);
-  const devFull = Math.abs(expectedGlGrossLossForKLine(roster, { kGl: kFull })
-    / expectedGlGrossLossForPricing(roster, { riskQualityOverride: 5, kGl: 1 }) - 1);
+  const kFull = computeKGl(roster, 1);
+  const devFull = Math.abs(expectedGlGrossLossForKLine(roster, { yearNumber: 1, kGl: kFull })
+    / expectedGlGrossLossForPricing(roster, { yearNumber: 1, riskQualityOverride: 5, kGl: 1 }) - 1);
   console.log(`  full canonical roster (mixed RQ): deviation ${devFull.toExponential(2)}  ${note(devFull < 1e-12, `k_GL identity fails on the real roster by ${(devFull * 100).toFixed(2)}%`)}`);
   // The two bases MUST differ away from neutral, or the tilt is not reaching the
   // draw at all — the converse failure, and just as silent.
   const at1 = roster.map(m => ({ ...m, riskQuality: 1 }));
-  const spread = expectedGlGrossLossForKLine(at1, { kGl: 1 }) / expectedGlGrossLossForPricing(at1, { kGl: 1 });
+  const spread = expectedGlGrossLossForKLine(at1, { yearNumber: 1, kGl: 1 }) / expectedGlGrossLossForPricing(at1, { yearNumber: 1, kGl: 1 });
   console.log(`  the two bases DO differ at RQ 1 (ratio ${spread.toFixed(4)}): ${note(Math.abs(spread - 1) > 0.05, 'the k_GL and pricing bases are identical away from neutral — the severity tilt is not in the k_GL basis, so k_GL is correcting nothing extra')}`);
+}
+
+console.log('\n--- 2c. THE TREND PAIR: severity and payroll growth, and the four invariants ---');
+{
+  const SEV = GL_SEVERITY_TREND_PER_YEAR, WAGE = WAGE_INFLATION_PER_YEAR;
+  console.log(`  [ANALYTIC] severity ${(SEV * 100).toFixed(4)}%/yr = wage ${(WAGE * 100).toFixed(2)}% x social 2.00% (multiplicative)`);
+  const composed = 1.0363 * 1.020 - 1;
+  console.log(`    composed check: 1.0363 x 1.020 - 1 = ${composed.toFixed(6)} vs stored ${SEV}  ${note(Math.abs(composed - SEV) < 1e-9, `GL_SEVERITY_TREND_PER_YEAR ${SEV} != 1.0363 x 1.020 - 1`)}`);
+  console.log(`    (SUMMING would give ${(0.0363 + 0.020).toFixed(4)} — the figures only reconcile as a product)`);
+
+  // (i) RATE TREND = the social-inflation half, exactly.
+  const rate = (1 + SEV) / (1 + WAGE);
+  console.log(`  [ANALYTIC] rate trend = sev / wage = ${rate.toFixed(6)} -> ${((rate - 1) * 100).toFixed(4)}%/yr  ${note(Math.abs(rate - 1.02) < 1e-9, `rate trend ${rate} != 1.02 — the severity/wage pair no longer leaves exactly the social-inflation half`)}`);
+  console.log(`    over 9 compounding periods: rate x${Math.pow(rate, 9).toFixed(4)}, member charge x${Math.pow(1 + SEV, 9).toFixed(4)}`);
+
+  // (ii) PREMIUM TREND = SEVERITY TREND, INDEPENDENT OF THE WAGE RATE.
+  // GL's frequency is flat, so premium = nominal exposure x rate
+  //   = (real x wage) x (held x sev / wage) = real x held x sev.
+  // The wage factor cancels ALGEBRAICALLY. This is the cheapest test that BOTH
+  // factors are present in the pricing formula: drop either one and it breaks.
+  // It is how WC's equivalent defect (finding 37) would have been caught.
+  const premiumTrendAt = (wageRate: number) => (1 + SEV) / (1 + wageRate) * (1 + wageRate);
+  const spread = [0, WAGE, 0.08].map(premiumTrendAt);
+  console.log(`  [ANALYTIC] premium trend at wage 0% / ${(WAGE * 100).toFixed(2)}% / 8%: ${spread.map(x => x.toFixed(6)).join(' / ')}`);
+  console.log(`    all equal the severity trend ${(1 + SEV).toFixed(6)}: ${note(spread.every(x => Math.abs(x - (1 + SEV)) < 1e-12), 'premium trend depends on the wage rate — a factor is missing from the pricing formula')}`);
+
+  // (iii) k_GL IS TREND-INVARIANT — the scalar cancels from both sides.
+  const kAt1 = computeKGl(roster, 1), kAt10 = computeKGl(roster, 10);
+  console.log(`  [ANALYTIC] k_GL year 1 ${kAt1.toFixed(12)} vs year 10 ${kAt10.toFixed(12)}  ${note(Math.abs(kAt1 - kAt10) < 1e-12, `k_GL moved with the year (${kAt1} -> ${kAt10}) — the trend is not cancelling out of the ratio`)}`);
+
+  // (iv) CV IS INVARIANT — a log-location shift scales k1 by s and k2 by s^2.
+  // This is what keeps a CV-indexed CLF grid from sliding as the book inflates.
+  const cvAt = (yearNumber: number) => {
+    let m1 = 0, m2 = 0;
+    for (const c of GL_SEVERITY_COMPONENTS) {
+      const mu = trendedMuGl(c.mu, yearNumber);
+      m1 += c.weight * Math.exp(mu + c.sigma ** 2 / 2);
+      m2 += c.weight * Math.exp(2 * mu + 2 * c.sigma ** 2);
+    }
+    return Math.sqrt(m2 - m1 * m1) / m1;
+  };
+  console.log(`  [ANALYTIC] per-claim CV year 1 ${cvAt(1).toFixed(6)} vs year 10 ${cvAt(10).toFixed(6)}  ${note(Math.abs(cvAt(1) - cvAt(10)) < 1e-9, 'CV moved with the trend — a CV-indexed CLF grid would slide')}`);
+
+  // (v) FREQUENCY READS REAL PAYROLL: the wage switch must not move claim COUNTS.
+  //
+  // ⚠ THIS CANNOT BE TESTED BY DRAWING AT TWO YEARS ON "THE SAME SEEDS".
+  // deriveSubRng keys the per-member streams on yearNumber, so year 1 and year 10
+  // draw from DIFFERENT streams by construction and their counts differ by
+  // ordinary sampling noise (measured ~0.19% over 400 replicates) no matter what
+  // the frequency basis is. A first version of this check gated on exact equality
+  // of two drawn counts and failed on correct code for exactly that reason.
+  //
+  // The deterministic form: recover the engine's own COUNT expectation as
+  // (expected gross loss) / (expected severity per claim) — both engine
+  // functions, both on the pricing basis — and assert it is year-invariant. The
+  // severity trend cancels between numerator and denominator, so what is left is
+  // frequency alone, and frequency is year-invariant if and only if it reads REAL
+  // payroll.
+  const countExpectationAt = (yearNumber: number) =>
+    expectedGlGrossLossForPricing(roster, { yearNumber, kGl: 1 })
+      / expectedClaimSeverity(glInternals.untiltedGlWeights(), yearNumber);
+  const n1 = countExpectationAt(1), n10 = countExpectationAt(10);
+  console.log(`  [ANALYTIC] engine count expectation year 1 ${n1.toFixed(6)} vs year 10 ${n10.toFixed(6)}`);
+  console.log(`    ${note(Math.abs(n1 - n10) < 1e-9, `the engine's claim-count expectation moved from year 1 to year 10 (${n1} -> ${n10}) — frequency is reading NOMINAL payroll. It must read member.exposureByLine.GL raw; the wage factor is a rating/premium/display quantity only (lineHelpers.getMemberExposure).`)}  — while NOMINAL payroll grew x${Math.pow(1 + WAGE, 9).toFixed(4)}`);
+  const nominalGrew = Math.abs(wageFactor('GL', 10) - Math.pow(1 + WAGE, 9)) < 1e-12 && wageFactor('GL', 10) > 1.3;
+  console.log(`    and the wage switch really is ON for GL (wageFactor year 10 = ${wageFactor('GL', 10).toFixed(4)}): ${note(nominalGrew, 'WAGE_INFLATION_APPLIES.GL is off — the rating side is not inflating at all')}`);
+
+  // (vi) BOTH FACTORS FLOOR AT YEAR 1 — the pre-game is year-1 dollars.
+  const floors = [-2, -1, 0, 1].every(y => glSeverityTrend(y) === 1 && wageFactor('GL', y) === 1);
+  console.log(`  [ANALYTIC] both factors floor at year 1 (pre-game years -2..0): ${note(floors, 'glSeverityTrend or wageFactor does not floor at year 1 — the pre-game re-rates against year-1 dollar constants')}`);
 }
 
 console.log('\n--- 3. [ANALYTIC] full-market claims, gross, loss by band, occurrence counts ---');
@@ -181,7 +258,7 @@ console.log('\n--- 3. [ANALYTIC] full-market claims, gross, loss by band, occurr
 
   // Validate against the real exported expectedGlGrossLossForPricing (neutral RQ, kGl=1
   // — the exact pricing basis deriveNeutralGlPurePremiumPer100 uses).
-  const engineGross = expectedGlGrossLossForPricing(roster, { riskQualityOverride: 5, kGl: 1 });
+  const engineGross = expectedGlGrossLossForPricing(roster, { yearNumber: 1, riskQualityOverride: 5, kGl: 1 });
   console.log(`  engine expectedGlGrossLossForPricing (RQ=5, kGl=1): ${fmt$(engineGross)}  ${note(Math.abs(engineGross - fullMarketGross) / fullMarketGross < 1e-6, 'expectedGlGrossLossForPricing disagrees with the independent replica')}`);
 
   const bandMean = (lo: number, hi: number) => {
@@ -235,8 +312,8 @@ console.log('\n--- 4. [ANALYTIC] RQ channels: frequency unchanged, severity tilt
   // INVARIANT 2: the tilt must NEVER reach the pricing expectation. RQ0 and
   // RQ10 severity means (via expectedGlGrossLossForPricing with an RQ override) must be
   // identical, because the analytic always uses untilted weights.
-  const grossRQ0 = expectedGlGrossLossForPricing(roster, { riskQualityOverride: 0, kGl: 1 });
-  const grossRQ10 = expectedGlGrossLossForPricing(roster, { riskQualityOverride: 10, kGl: 1 });
+  const grossRQ0 = expectedGlGrossLossForPricing(roster, { yearNumber: 1, riskQualityOverride: 0, kGl: 1 });
+  const grossRQ10 = expectedGlGrossLossForPricing(roster, { yearNumber: 1, riskQualityOverride: 10, kGl: 1 });
   const freqOnlyRatio = grossRQ0 / grossRQ10;
   const expectedFreqOnlyRatio = Math.exp(-b * (0 - 5)) / Math.exp(-b * (10 - 5));
   console.log(`  pricing expectation RQ0/RQ10 ratio ${freqOnlyRatio.toFixed(4)} vs FREQUENCY-ONLY ${expectedFreqOnlyRatio.toFixed(4)} (severity tilt absent from pricing): ${note(Math.abs(freqOnlyRatio - expectedFreqOnlyRatio) < 1e-6, 'pricing expectation carries the severity tilt — invariant 2 violated')}`);
@@ -251,7 +328,7 @@ console.log('\n--- 5. [DRAWN] every section-3 target measured from the generator
   // (capped at $1M), so a normal CI is valid there however heavy the
   // underlying tail is — same reasoning the tower diagnostics use for a
   // finite reinsurance layer.
-  const kGl = computeKGl(roster);
+  const kGl = computeKGl(roster, 1);
   const YEARS = 1500;
   const Z99 = 2.5758;
   const groundPerYear: number[] = [];
@@ -260,7 +337,8 @@ console.log('\n--- 5. [DRAWN] every section-3 target measured from the generator
   let allClaims: Claim[] = [];
   for (let y = 1; y <= YEARS; y++) {
     const r = generateGlClaims({
-      members: roster, yearNumber: y, calendarYear: 2025 + y,
+      // yearNumber HELD AT 1, seed varied — see section 2.
+      members: roster, yearNumber: 1, calendarYear: 2026,
       instanceSeed: 4242 + y * 7919, kGl, gPool: 1, riskControlEffectiveness: 0,
     });
     groundPerYear.push(r.grossUltimateLoss);
@@ -280,8 +358,8 @@ console.log('\n--- 5. [DRAWN] every section-3 target measured from the generator
   //     subject is the draw.
   // Using expectedGlGrossLossForKLine(..., { severityLimit }) rather than a
   // hand-rolled loop keeps ONE definition of GL's capped expectation.
-  const analyticGround = expectedGlGrossLossForKLine(roster, { kGl });
-  const analyticCapped = expectedGlGrossLossForKLine(roster, { kGl, severityLimit: 1_000_000 });
+  const analyticGround = expectedGlGrossLossForKLine(roster, { yearNumber: 1, kGl });
+  const analyticCapped = expectedGlGrossLossForKLine(roster, { yearNumber: 1, kGl, severityLimit: 1_000_000 });
 
   const drawnGround = mean(groundPerYear);
   const drawnCapped = mean(cappedPerYear);
@@ -304,7 +382,8 @@ console.log('\n--- 5. [DRAWN] every section-3 target measured from the generator
   let claimSample: number[] = [];
   for (let y = 1; y <= NEUTRAL_YEARS; y++) {
     const r = generateGlClaims({
-      members: neutral, yearNumber: y, calendarYear: 2025 + y,
+      // yearNumber HELD AT 1, seed varied — see section 2.
+      members: neutral, yearNumber: 1, calendarYear: 2026,
       instanceSeed: 909_101 + y * 7919, kGl: 1, gPool: 1, riskControlEffectiveness: 0,
     });
     nCounts.push(r.claimCount);
@@ -369,7 +448,7 @@ console.log('\n--- 6. determinism, integrity, shock signal, held pure premium --
   let shockYears = 0;
   const SIGNAL_YEARS = 300;
   for (let y = 1; y <= SIGNAL_YEARS; y++) {
-    const r = generateGlClaims({ members: roster, yearNumber: y, calendarYear: 2025 + y, instanceSeed: 909 + y * 7919, kGl: 1, gPool: 1, riskControlEffectiveness: 0 });
+    const r = generateGlClaims({ members: roster, yearNumber: 1, calendarYear: 2026, instanceSeed: 909 + y * 7919, kGl: 1, gPool: 1, riskControlEffectiveness: 0 });
     if (r.maxOccurrenceGross > 1_000_000) shockYears++;
   }
   console.log(`  years with an occurrence > $1M (shock signal, J11): ${shockYears}/${SIGNAL_YEARS} (${(shockYears / SIGNAL_YEARS * 100).toFixed(0)}%)  ${note(shockYears > 0, 'shock signal never fires')}`);

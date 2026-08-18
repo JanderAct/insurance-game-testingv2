@@ -108,12 +108,16 @@ function play(id: string, lines: CoverageLine[], years: number) {
     setup: setup as never, instance, currentYearNumber: 1, isStarted: true, isComplete: false,
     poolState, lockedResults: [], currentDecisions: defaultDecisionSet(1), priorHistory,
   };
-  const out: { line: CoverageLine; gross: number; expected: number; members: Member[]; exposure: number; gPool: number }[] = [];
+  // ⚠ yearNumber IS CARRIED because both lines now trend. Computing a line-year's
+  // analytic at year 1 against a year-5 draw would report a spurious gap — GL's
+  // severity trends +5.7026%/yr and WC's frequency and severity both move. This
+  // was latent for WC before GL's trend forced every call site to state its year.
+  const out: { line: CoverageLine; yearNumber: number; gross: number; expected: number; members: Member[]; exposure: number; gPool: number }[] = [];
   for (let y = 1; y <= years; y++) {
     const p = processYear(gs, defaultDecisionSet(y));
     for (const l of lines) {
       const x = p.result.byLine[l];
-      out.push({ line: l, gross: x.grossUltimateLoss, expected: x.expectedLoss, members: x.memberList, exposure: x.writtenExposure, gPool: x.commonLossFactor });
+      out.push({ line: l, yearNumber: y, gross: x.grossUltimateLoss, expected: x.expectedLoss, members: x.memberList, exposure: x.writtenExposure, gPool: x.commonLossFactor });
     }
     gs = { ...gs, currentYearNumber: y + 1, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result] };
   }
@@ -182,10 +186,10 @@ console.log('\n\n=== TEST 2 — composition: enrolled book vs what the held pure
       if (r.line === 'WC') {
         // (a) the enrolled book's OWN analytic expected loss, with its actual
         // class mix, theta at actual RQ, and k_line.
-        const own = expectedWcGrossLossForPricing(r.members, { kLine: computeKLine(r.members) });
+        const own = expectedWcGrossLossForPricing(r.members, { kLine: computeKLine(r.members), yearNumber: r.yearNumber });
         wcRatios.push(own / r.expected);   // (b) = exported Pure Premium
       } else {
-        const own = expectedGlGrossLossForPricing(r.members, { kGl: computeKGl(r.members) });
+        const own = expectedGlGrossLossForPricing(r.members, { yearNumber: r.yearNumber, kGl: computeKGl(r.members, r.yearNumber) });
         glRatios.push(own / r.expected);
       }
     }
@@ -219,15 +223,15 @@ console.log('\n\n=== TEST 3 — does k_line / k_GL fully neutralise RQ on the EN
       // Naive exposure-weighted mean theta — the quantity that would have to be
       // cancelled if k acted on a simple exposure average.
       const wTheta = r.members.reduce((s, m) => s + expo(m) * Math.exp(-beta * (m.riskQuality - 5)), 0) / totalExpo;
-      const k = r.line === 'WC' ? computeKLine(r.members) : computeKGl(r.members);
+      const k = r.line === 'WC' ? computeKLine(r.members) : computeKGl(r.members, r.yearNumber);
       // The EXACT statement of neutralisation: expected loss at actual RQ,
       // scaled by k, must equal expected loss at neutral RQ.
       const eAct = r.line === 'WC'
-        ? expectedWcGrossLossForPricing(r.members, { kLine: k })
-        : expectedGlGrossLossForPricing(r.members, { kGl: k });
+        ? expectedWcGrossLossForPricing(r.members, { kLine: k, yearNumber: r.yearNumber })
+        : expectedGlGrossLossForPricing(r.members, { yearNumber: r.yearNumber, kGl: k });
       const eNeu = r.line === 'WC'
-        ? expectedWcGrossLossForPricing(r.members, { riskQualityOverride: 5 })
-        : expectedGlGrossLossForPricing(r.members, { riskQualityOverride: 5 });
+        ? expectedWcGrossLossForPricing(r.members, { riskQualityOverride: 5, yearNumber: r.yearNumber })
+        : expectedGlGrossLossForPricing(r.members, { yearNumber: r.yearNumber, riskQualityOverride: 5 });
       rows.push({ line: r.line, rq: wRq, k, product: wTheta * k, exact: eAct / eNeu });
     }
   }

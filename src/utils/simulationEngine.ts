@@ -3,7 +3,8 @@
 
 import type { Claim, WcUnreportedClaim, GameState, Occurrence, PoolState, DecisionSet, LinePoolState, LineDecisionSet, ResultSet, LineResultSet, ReserveCohort, Member, MemberLossResult, MembershipHistory, CoverageLine, GameInstance, AssetAllocation } from '../types/simulation';
 import type { LineShockEffects, ShockFiring, ShockRecord } from '../types/shocks';
-import { resolveShocks, ownFreqMultipliers, ownComponentFreqMultipliers } from './shockResolver';
+import { resolveShocks, ownFreqMultipliers, ownComponentFreqMultipliers, ownSevMultipliers } from './shockResolver';
+import { WHOLE_LINE } from './shockEffects';
 
 // Collapse the per-line shock records into one row per EVENT for the pool
 // result, summing each cost across the lines that event touched and unioning
@@ -41,7 +42,7 @@ import { cloneMemberLossHistory, recordMemberLossYear } from './memberLossHistor
 import { computeKLine, deriveNeutralPurePremiumPer100, expectedWcGrossLossForPricing, generateWcClaims, wcFrequencyTrend, wcSeverityTrend } from './wcClaimEngine';
 import { dollarWeightedPDelayed, ldfToUltimate, wcIbnrBalance } from './wcIbnr';
 import { computeWcClf } from './wcLossDistribution';
-import { computeKGl, deriveNeutralGlPurePremiumPer100, expectedGlGrossLossForPricing, generateGlClaims } from './glClaimEngine';
+import { computeKGl, deriveNeutralGlPurePremiumPer100, expectedGlGrossLossForPricing, generateGlClaims, glSeverityTrend } from './glClaimEngine';
 import { generateNarrative } from './narrativeEngine';
 import { getMemberExposure } from './lineHelpers';
 import { wageFactor } from '../data/exposureTrend';
@@ -282,7 +283,31 @@ export function processLineYear(
       * wcSeverityTrend(yearNumber)
       / wageFactor('WC', yearNumber)
     : line === 'GL'
+    // GL CARRIES TWO OF THE THREE, and both must be here for the same reason
+    // WC's three must (finding 37). GL has NO frequency trend — its frequency is
+    // flat by design — so:
+    //
+    //   x glSeverityTrend     +5.7026%/yr  each claim costs more
+    //   / wageFactor          +3.63%/yr    the rate is per $100 of NOMINAL
+    //                                      payroll, and the denominator grew
+    //
+    //   net: 1.057026 / 1.0363 = 1.0200  ->  +2.000%/yr, exactly the
+    //   social-inflation half of the severity trend.
+    //
+    // Because frequency is flat, PREMIUM growth comes out at the severity trend
+    // alone, +5.7026%/yr, INDEPENDENT of the wage rate — the cheapest available
+    // test that both factors are present, and asserted in gl-claim-check. If
+    // premium growth moves when only WAGE_INFLATION_PER_YEAR changes, one of
+    // these two is missing.
+    //
+    // Still HELD: GL_HELD_PURE_PREMIUM_PER_100 is derived once at
+    // HELD_PURE_PREMIUM_YEAR (= 1) from the neutral full-roster expectation, so
+    // the trend rides on top here rather than being baked in twice. Both factors
+    // are pure functions of the year and cannot see the roster, so k_GL keeps
+    // sole responsibility for the roster/risk-quality-mix correction.
     ? GL_HELD_PURE_PREMIUM_PER_100
+      * glSeverityTrend(yearNumber)
+      / wageFactor('GL', yearNumber)
     : lineState.purePremiumPer100 *
       (1 + lossTrend) *
       (1 - newRCEffectiveness);
@@ -616,7 +641,7 @@ export function processLineYear(
     // correction against the currently enrolled book; the pure premium itself
     // is held (step 6b) rather than chasing enrollment.
     // ⚠ ENROLLED BOOK, NOT THE FULL ROSTER — same trap as WC's k_line above.
-    const kGl = computeKGl(memberResult.activeMembers);
+    const kGl = computeKGl(memberResult.activeMembers, yearNumber);
     const generated = generateGlClaims({
       members: memberResult.activeMembers,
       yearNumber,
@@ -629,6 +654,7 @@ export function processLineYear(
       // Shock frequency multipliers, also DRAW ONLY and for the same reason: a
       // shock is a realized event, not a repricing.
       freqMultipliers: ctx.shock?.freqMultipliers,
+      sevMultipliers: ctx.shock?.sevMultipliers,
     });
     // PROSPECTS at kGl = 1, rc = 0 — see the marketplaceProspects note above.
     const prospectGenerated = marketplaceProspects.length > 0
@@ -640,6 +666,7 @@ export function processLineYear(
         kGl: 1,
         riskControlEffectiveness: 0,
         freqMultipliers: ctx.shock?.freqMultipliers,
+        sevMultipliers: ctx.shock?.sevMultipliers,
         gPool: ctx.gPool,
       })
       : undefined;
@@ -668,13 +695,22 @@ export function processLineYear(
     // their individual figures therefore do not sum to the combined effect,
     // which is correct — each answers "what did this event add", not "how do
     // we split the interaction".
-    if (ctx.shock?.freqMultipliers && ctx.shockFirings?.length) {
-      const baseline = expectedGlGrossLossForPricing(memberResult.activeMembers, { kGl });
+    if ((ctx.shock?.freqMultipliers || ctx.shock?.sevMultipliers) && ctx.shockFirings?.length) {
+      const baseline = expectedGlGrossLossForPricing(memberResult.activeMembers, { yearNumber, kGl });
       for (const firing of ctx.shockFirings) {
-        const own = ownFreqMultipliers(firing.shockId, 'GL');
-        if (!own) continue;
-        shockExpectedAdded[firing.shockId] =
-          expectedGlGrossLossForPricing(memberResult.activeMembers, { kGl, freqMultipliers: own }) - baseline;
+        const ownFreq = ownFreqMultipliers(firing.shockId, 'GL');
+        const ownSev = ownSevMultipliers(firing.shockId, 'GL');
+        if (!ownFreq && !ownSev) continue;
+        // A SEVERITY multiplier scales the whole expectation linearly, so it is
+        // applied here rather than threaded into the expectation's options: the
+        // analytic has no severity-shock parameter, and giving it one would put
+        // a shock inside the PRICING function, which is exactly what must not
+        // happen. This stays a measurement of the event's cost.
+        const sevFactor = ownSev?.[WHOLE_LINE] ?? 1;
+        const shocked = expectedGlGrossLossForPricing(memberResult.activeMembers, {
+          yearNumber, kGl, ...(ownFreq ? { freqMultipliers: ownFreq } : {}),
+        }) * sevFactor;
+        shockExpectedAdded[firing.shockId] = shocked - baseline;
       }
     }
   } else {
