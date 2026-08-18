@@ -120,6 +120,38 @@
 // not just WC's, so GL's export legitimately changed shape and value. See
 // value-identity-check.ts's v11 note for the field-level detail: this is a
 // real reinsurance-model movement, not a restructuring leak.
+//
+// v11 retired here (moved to v12) by SIX COMMITS, recaptured together:
+// 23da65c (GL's four sub-coverages replaced by a fitted per-claim mixture —
+// claimCountsBySub removed, claimCount added), 72ecaa0 (k_GL neutralises the
+// severity tilt, matching WC), 4f695a0 (GL severity trend + payroll growth),
+// 326e275 (GL severity capped at $100M, both draw and analytic side), c1cec1b
+// (GL's own derived CLF grid, replacing the generic FUNDING_CLF_TABLE for
+// GL), and a21d01b (an "Expected" funding option added to WC AND GL,
+// defaulting BOTH lines to a computed CLF = 1.000 in place of a fixed
+// percentile stop). Also absorbs 8c0ae6f (the Welcome-to-Ripple setup-screen
+// squash-merge) — CONFIRMED GATE-INERT before this recapture: this script's
+// and value-identity-check's full stdout were diffed byte-for-byte against
+// a21d01b and came back empty, so 8c0ae6f contributes nothing here.
+//
+// EXACTLY 9 OF 12 HASHES MOVED — WC-solo, GL-solo and tri on all three seeds.
+// PR-SOLO STAYED BYTE-IDENTICAL ON ALL THREE, the leak check: none of the six
+// commits (nor the UI squash) touch Property.
+//
+// WC-SOLO'S MOVEMENT IS ATTRIBUTABLE TO EXACTLY ONE MECHANISM, confirmed by
+// bisection in a worktree: WC-solo still MATCHED v11 through c1cec1b (the
+// first five of the six commits are GL-only — by inspection of each diff and
+// by the hash holding) and diverged for the first time at a21d01b. That
+// commit's only WC-facing code change is one ternary in
+// simulationEngine.ts's selectedFundingCLF dispatch —
+// `lineDecisions.fundingAtExpected ? 1.0 : computeWcClf(...)` — the Expected
+// funding default replacing WC's old 60%-stop default. Nothing else in that
+// commit touches WC.
+//
+// GL-solo moving is not a leak: five of the six commits ARE GL's own rebuild
+// (fitted-mixture severity, k_GL neutralisation, severity trend, the $100M
+// cap, GL's own CLF grid), and the sixth (a21d01b) moves GL's default the
+// same way it moves WC's.
 import * as XLSX from 'xlsx';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -134,7 +166,7 @@ import { RESULT_METRICS } from '../../src/utils/resultMetrics';
 import type { GameState, CoverageLine, ResultSet } from '../../src/types/simulation';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v11.json');
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v12.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

@@ -141,7 +141,41 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // PR-solo staying at 0/3,210 changed (0 added beyond the 240 shared new
 // fields) IS the leak check this recapture needed: Property's engine was not
 // touched by any of the eight commits, and this baseline proves it.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v11.json');
+//
+// v12: SIX MORE COMMITS, RECAPTURED TOGETHER: 23da65c, 72ecaa0, 4f695a0,
+// 326e275, c1cec1b (GL's own rebuild — fitted-mixture severity, k_GL
+// neutralised, severity trend, the $100M cap, GL's own CLF grid) and a21d01b
+// (an "Expected" funding option, defaulting BOTH WC and GL to CLF = 1.000 in
+// place of a fixed percentile stop). Plus 8c0ae6f, a UI-only squash-merge
+// (the Welcome-to-Ripple setup modal) — CONFIRMED GATE-INERT: this script's
+// full stdout, diffed byte-for-byte against a21d01b before the merge and
+// after, came back empty.
+//
+// 16,110 -> 16,140 fields (30 added, 0 removed BY THIS TOOL'S COUNT — but
+// that undercounts what actually changed shape: 23da65c replaced GL's
+// claimCountsBySub (an object) with a scalar claimCount, and this script only
+// ever tracks `typeof v === 'number'` fields, so the object-valued field's
+// removal is invisible to it. The 30 additions are all one field name,
+// claimCount, at 15 instances each in GL-solo and tri (3 seeds x 5 years).
+//
+// 6,393 of the 16,110 pre-existing fields changed, across 79 field names. By
+// config: WC-solo 1,315/3,225 moved (0 new fields), GL-solo 2,155/3,225 moved
+// (15 new), tri 2,923/6,450 moved (15 new), PR-solo 0/3,210 moved (0 new).
+//
+// WC-SOLO'S MOVEMENT IS ATTRIBUTABLE TO EXACTLY ONE MECHANISM — cross-checked
+// against solo-export-guard.ts's v12 note, which bisected it directly: WC-solo
+// held byte-identical through c1cec1b (the first five of the six commits are
+// GL-only) and only started moving at a21d01b, whose sole WC-facing change is
+// the fundingAtExpected ternary in simulationEngine.ts's selectedFundingCLF
+// dispatch. GL-solo's 2,155/3,225 reflects the CUMULATIVE effect of all five
+// GL-only commits plus a21d01b's GL-side default change — not isolated
+// per-commit here, since none of the five were recaptured on their own (the
+// same "recapture together, not after each" choice v11 made).
+//
+// PR-solo staying at 0/3,210 changed (0 new fields) IS the leak check this
+// recapture needed: none of the six commits, nor the UI squash, touch
+// Property.
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v12.json');
 
 function seedOf(id: string) {
   let h = 5381;
