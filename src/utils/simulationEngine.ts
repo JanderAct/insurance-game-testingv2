@@ -42,6 +42,7 @@ import { cloneMemberLossHistory, recordMemberLossYear } from './memberLossHistor
 import { computeKLine, deriveNeutralPurePremiumPer100, expectedWcGrossLossForPricing, generateWcClaims, wcFrequencyTrend, wcSeverityTrend } from './wcClaimEngine';
 import { dollarWeightedPDelayed, ldfToUltimate, wcIbnrBalance } from './wcIbnr';
 import { computeWcClf } from './wcLossDistribution';
+import { computeGlClf } from './glLossDistribution';
 import { computeKGl, deriveNeutralGlPurePremiumPer100, expectedGlGrossLossForPricing, generateGlClaims, glCappedSeverityTrend } from './glClaimEngine';
 import { generateNarrative } from './narrativeEngine';
 import { getMemberExposure } from './lineHelpers';
@@ -176,19 +177,30 @@ export function processLineYear(
   // --- Selected Funding Confidence ---
   // CLF is selected by the player and applied after the expected actuarial loss-cost rate is calculated.
   //
-  // WC READS ITS OWN DERIVED DISTRIBUTION, NOT FUNDING_CLF_TABLE (finding 38).
-  // FUNDING_CLF_TABLE is the real pool's measured curve at $20-30B of payroll,
-  // where process risk gives an annual CV near 0.063 against the table's
-  // implied ~0.80 — the table is measuring parameter/trend uncertainty this
-  // model has no channel for, not claim variance, and cannot validate this
-  // model's own distribution (see src/data/wcClfGrid.ts). GL and Property are
-  // unaffected: GL's severity is Pareto (infinite variance, no finite-cumulant
-  // treatment applies) and gets its own derivation in a later commit;
-  // Property has no Claim/Occurrence objects and was never in scope.
+  // WC AND GL READ THEIR OWN DERIVED DISTRIBUTIONS, NOT FUNDING_CLF_TABLE
+  // (finding 38, then repeated for GL). FUNDING_CLF_TABLE is the real pool's
+  // measured curve at $20-30B of payroll, where process risk gives an annual
+  // CV near 0.063 against the table's implied ~0.80 — the table is measuring
+  // parameter/trend uncertainty this model has no channel for, not claim
+  // variance, and cannot validate either line's own distribution (see
+  // src/data/wcClfGrid.ts and src/data/glClfGrid.ts). GL's severity being
+  // capped (GL_SEVERITY_CAP) is what MADE its own cumulants module derivable
+  // and verifiable — see glLossDistribution.ts's header; the Pareto/infinite-
+  // variance obstacle that deferred this was retired at the severity cap.
+  // Property is unaffected: it has no Claim/Occurrence objects and was never
+  // in scope.
   const selectedFundingConfidenceLevel = lineDecisions.fundingConfidenceLevel;
-  const wcClfBookKLine = line === 'WC' ? computeKLine(currentActiveMembers) : 1;
+  // NAME KEPT (not renamed to something line-neutral) even though it now holds
+  // k_GL for GL, not k_line — this is the same roster/RQ-mix normaliser role on
+  // both lines, just each line's own function, and the two CLF dispatch sites
+  // below read it the same way regardless of which one it is.
+  const wcClfBookKLine = line === 'WC' ? computeKLine(currentActiveMembers)
+    : line === 'GL' ? computeKGl(currentActiveMembers, yearNumber)
+    : 1;
   const selectedFundingCLF = line === 'WC'
     ? computeWcClf(selectedFundingConfidenceLevel, currentActiveMembers, wcClfBookKLine, yearNumber)
+    : line === 'GL'
+    ? computeGlClf(selectedFundingConfidenceLevel, currentActiveMembers, wcClfBookKLine, yearNumber)
     : lookupCLF(selectedFundingConfidenceLevel);
 
   // --- Expected Actuarial Loss-Cost Rate ---
@@ -1059,12 +1071,15 @@ export function processLineYear(
   const indicatedNetReserveAtConfidenceLevel = netFundingTarget;
 
   // Required reserve margin is always measured at the 90% CLF, independent of
-  // the player's selected annual pricing confidence level. WC uses its own
-  // derived distribution here too, for the same reason as selectedFundingCLF
-  // above — leaving this on FUNDING_CLF_TABLE while pricing used the derived
-  // curve would silently misstate WC's own reserve confidence view.
+  // the player's selected annual pricing confidence level. WC and GL use their
+  // own derived distributions here too, for the same reason as
+  // selectedFundingCLF above — leaving this on FUNDING_CLF_TABLE while pricing
+  // used the derived curve would silently misstate that line's own reserve
+  // confidence view.
   const reserveMarginCLF = line === 'WC'
     ? computeWcClf(0.90, currentActiveMembers, wcClfBookKLine, yearNumber)
+    : line === 'GL'
+    ? computeGlClf(0.90, currentActiveMembers, wcClfBookKLine, yearNumber)
     : lookupCLF(0.90);
   const reserveRiskMarginNeeded = Math.max(
     0,

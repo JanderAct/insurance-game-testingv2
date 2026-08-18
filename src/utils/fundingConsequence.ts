@@ -23,6 +23,29 @@
 
 import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, REINSURANCE_PROGRAMS, SLIDER_RANGES } from '../data/defaultAssumptions';
 import { lookupCLF } from './simulationEngine';
+import { computeKLine } from './wcClaimEngine';
+import { computeWcClf } from './wcLossDistribution';
+import { computeKGl } from './glClaimEngine';
+import { computeGlClf } from './glLossDistribution';
+import type { CoverageLine, Member } from '../types/simulation';
+
+// ⚠ THREADED, NOT GENERIC lookupCLF. This panel used to call lookupCLF
+// unconditionally for every line, while simulationEngine.ts priced WC (and now
+// GL) off their own derived distributions — silently showing the player a
+// FUNDING_CLF_TABLE-based load/margin/crossing for a line the engine was not
+// actually pricing that way. Already ~22-27% off at the 90% confidence
+// setting for WC before GL's grid existed to double the problem: GL's own
+// curve runs 2-9x WIDER than the generic table (glClfGrid.ts), so the same
+// unconditional call would have understated GL's true load severely at any
+// confidence level above the crossing. Shipping GL's grid while the panel
+// explaining GL's price read a different curve would have been the same
+// failure class as a factor reaching the draw and not the price (finding 37) —
+// just on the display side instead of the pricing side.
+function clfFor(line: CoverageLine, confidenceLevel: number, members: Member[], yearNumber: number): number {
+  if (line === 'WC') return computeWcClf(confidenceLevel, members, computeKLine(members), yearNumber);
+  if (line === 'GL') return computeGlClf(confidenceLevel, members, computeKGl(members, yearNumber), yearNumber);
+  return lookupCLF(confidenceLevel);
+}
 
 export interface FundingConsequence {
   confidenceLevel: number;
@@ -53,8 +76,8 @@ function reinsCostPctFor(reinsuranceLevel: number): number {
   return prog ? (prog.costPctOfPremiumMin + prog.costPctOfPremiumMax) / 2 : 0;
 }
 
-function ratesAt(purePremiumPer100: number, confidenceLevel: number, reinsuranceLevel: number) {
-  const clf = lookupCLF(confidenceLevel);
+function ratesAt(purePremiumPer100: number, confidenceLevel: number, reinsuranceLevel: number, line: CoverageLine, members: Member[], yearNumber: number) {
+  const clf = clfFor(line, confidenceLevel, members, yearNumber);
   const poolPremiumRatePer100 = purePremiumPer100 * clf;
   const adminRatePer100 = purePremiumPer100 * ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM;
   const reinsRatePer100 = poolPremiumRatePer100 * reinsCostPctFor(reinsuranceLevel);
@@ -67,9 +90,12 @@ export function computeFundingConsequence(
   confidenceLevel: number,
   reinsuranceLevel: number,
   priorTotalMemberChargeRatePer100: number | null,
+  line: CoverageLine,
+  members: Member[],
+  yearNumber: number,
 ): FundingConsequence {
   const { clf, poolPremiumRatePer100, adminRatePer100, reinsRatePer100, totalMemberChargeRatePer100 } =
-    ratesAt(purePremiumPer100, confidenceLevel, reinsuranceLevel);
+    ratesAt(purePremiumPer100, confidenceLevel, reinsuranceLevel, line, members, yearNumber);
 
   const load = purePremiumPer100 > 0 ? totalMemberChargeRatePer100 / purePremiumPer100 : 0;
   const expectedLossRatio = load > 0 ? 1 / load : 0;
@@ -86,7 +112,7 @@ export function computeFundingConsequence(
   const isAtMax = nextLevel > max + 1e-9;
   const marginalCostPct = isAtMax
     ? null
-    : (ratesAt(purePremiumPer100, nextLevel, reinsuranceLevel).poolPremiumRatePer100 / Math.max(poolPremiumRatePer100, 1e-9) - 1) * 100;
+    : (ratesAt(purePremiumPer100, nextLevel, reinsuranceLevel, line, members, yearNumber).poolPremiumRatePer100 / Math.max(poolPremiumRatePer100, 1e-9) - 1) * 100;
 
   return {
     confidenceLevel,

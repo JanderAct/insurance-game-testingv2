@@ -424,11 +424,15 @@ export default function App() {
   const fundingConsequence = React.useMemo(() => {
     if (!gameState) return null;
     const lineState = gameState.poolState.lines[decisionLine];
+    const activeMembers = lineState.members.filter(m => m.status === 'active');
     return computeFundingConsequence(
       lineState.purePremiumPer100,
       decisionLineFundingLevel,
       decisionLineReinsuranceLevel,
       lineState.ratePer100,
+      decisionLine,
+      activeMembers,
+      gameState.currentYearNumber,
     );
   }, [gameState, decisionLine, decisionLineFundingLevel, decisionLineReinsuranceLevel]);
 

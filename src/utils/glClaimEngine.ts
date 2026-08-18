@@ -149,7 +149,7 @@ export function glCappedSeverityTrend(yearNumber: number): number {
 
 // --- risk quality ------------------------------------------------------------
 
-function thetaGl(riskQuality: number): number {
+export function thetaGl(riskQuality: number): number {
   return Math.exp(-M.rqFrequencyBeta * (riskQuality - NEUTRAL_RQ));
 }
 
