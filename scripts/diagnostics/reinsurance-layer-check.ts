@@ -291,7 +291,12 @@ for (const [basis, key] of [['FULL-MARKET', 'GL|FULL-MARKET'], ['ENROLLED', 'GL|
   console.log(`  ${basis}: expected ${fmt$(m)}/yr, ${(e.glRetainedEvents / GL_YEARS).toFixed(4)} events/yr, largest occurrence ${fmt$(e.glLargest)}`);
   console.log(`    median in a year that has one: ${fmt$(quantile(e.glRetainedAbove.filter(x => x > 0), 0.5))}` +
     `, P99 of annual retained-above: ${fmt$(quantile(e.glRetainedAbove, 0.99))}`);
-  console.log(`    mean INDICATIVE ONLY — unbounded band, no valid CI.`);
+  // GL's retained-above-tower band is now BOUNDED at GL_SEVERITY_CAP minus the
+  // tower top ($100M - $25M = $75M per occurrence), where it used to be
+  // unlimited. The mean therefore DOES have a valid CI for the first time. The
+  // wording is left cautious rather than rewritten into a gate: the GL tower
+  // re-derivation is the commit that should decide what to assert here.
+  console.log(`    mean INDICATIVE ONLY — but the band is now BOUNDED at $75.00M/occurrence by GL_SEVERITY_CAP.`);
 }
 
 console.log('\n=== OCCURRENCES OVER $25M: regression guard — occurrence == claim on both lines now ===');

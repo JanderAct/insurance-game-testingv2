@@ -42,7 +42,7 @@ import { cloneMemberLossHistory, recordMemberLossYear } from './memberLossHistor
 import { computeKLine, deriveNeutralPurePremiumPer100, expectedWcGrossLossForPricing, generateWcClaims, wcFrequencyTrend, wcSeverityTrend } from './wcClaimEngine';
 import { dollarWeightedPDelayed, ldfToUltimate, wcIbnrBalance } from './wcIbnr';
 import { computeWcClf } from './wcLossDistribution';
-import { computeKGl, deriveNeutralGlPurePremiumPer100, expectedGlGrossLossForPricing, generateGlClaims, glSeverityTrend } from './glClaimEngine';
+import { computeKGl, deriveNeutralGlPurePremiumPer100, expectedGlGrossLossForPricing, generateGlClaims, glCappedSeverityTrend } from './glClaimEngine';
 import { generateNarrative } from './narrativeEngine';
 import { getMemberExposure } from './lineHelpers';
 import { wageFactor } from '../data/exposureTrend';
@@ -287,18 +287,24 @@ export function processLineYear(
     // WC's three must (finding 37). GL has NO frequency trend — its frequency is
     // flat by design — so:
     //
-    //   x glSeverityTrend     +5.7026%/yr  each claim costs more
-    //   / wageFactor          +3.63%/yr    the rate is per $100 of NOMINAL
-    //                                      payroll, and the denominator grew
+    //   x glCappedSeverityTrend  ~+5.48%/yr  each claim costs more
+    //   / wageFactor              +3.63%/yr  the rate is per $100 of NOMINAL
+    //                                        payroll, and the denominator grew
     //
-    //   net: 1.057026 / 1.0363 = 1.0200  ->  +2.000%/yr, exactly the
-    //   social-inflation half of the severity trend.
+    // ⚠ THE SEVERITY FACTOR IS glCappedSeverityTrend, NOT glSeverityTrend, AND
+    // THAT IS LOAD-BEARING. GL_SEVERITY_CAP is a FIXED $100M ceiling that does
+    // not inflate, so the capped expected claim grows strictly slower than the
+    // raw trend — 1.6112 rather than 1.6473 by year 10. Pricing on the raw trend
+    // would charge for dollars the capped generator cannot produce: +2.24% by
+    // year 10, +5.82% by year 20. See glCappedSeverityTrend's own header; it is
+    // still a deterministic ROSTER-BLIND function of the year, so it may ride on
+    // top of a held pure premium exactly as the raw trend did.
     //
-    // Because frequency is flat, PREMIUM growth comes out at the severity trend
-    // alone, +5.7026%/yr, INDEPENDENT of the wage rate — the cheapest available
-    // test that both factors are present, and asserted in gl-claim-check. If
-    // premium growth moves when only WAGE_INFLATION_PER_YEAR changes, one of
-    // these two is missing.
+    // Because frequency is flat, PREMIUM growth comes out at the CAPPED severity
+    // trend alone, INDEPENDENT of the wage rate — the cheapest available test
+    // that both factors are present, and asserted in gl-claim-check. If premium
+    // growth moves when only WAGE_INFLATION_PER_YEAR changes, one of these two
+    // is missing.
     //
     // Still HELD: GL_HELD_PURE_PREMIUM_PER_100 is derived once at
     // HELD_PURE_PREMIUM_YEAR (= 1) from the neutral full-roster expectation, so
@@ -306,7 +312,7 @@ export function processLineYear(
     // are pure functions of the year and cannot see the roster, so k_GL keeps
     // sole responsibility for the roster/risk-quality-mix correction.
     ? GL_HELD_PURE_PREMIUM_PER_100
-      * glSeverityTrend(yearNumber)
+      * glCappedSeverityTrend(yearNumber)
       / wageFactor('GL', yearNumber)
     : lineState.purePremiumPer100 *
       (1 + lossTrend) *

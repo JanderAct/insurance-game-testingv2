@@ -162,7 +162,8 @@ function buildWcSheetRows(rows: LineClaimRow[]): Row[] {
 // This changes the sheet's SHAPE, so solo-export-guard's GL hash moves. That
 // is expected and is a shape change, not a value change.
 const GL_COMPONENT_NOTE =
-  'One amount per claim: GL severity is a flat 3-component lognormal mixture with no sub-coverage, ' +
+  'One amount per claim: GL severity is a flat 3-component lognormal mixture CLAMPED AT A $100M ' +
+  'PER-CLAIM CEILING (GL_SEVERITY_CAP), with no sub-coverage, ' +
   'gate, litigation stage, or indemnity/ALAE split (ALAE is included in the drawn amount). Tier is ' +
   'the MIXTURE COMPONENT the claim was drawn from (component1 / component2 / component3) — these are ' +
   'NOT the retired general / epl / lawEnforcement / abuse sub-coverages. Reported Year always equals ' +

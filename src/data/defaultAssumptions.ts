@@ -469,6 +469,45 @@ export const GL_SEVERITY_COMPONENTS: GlSeverityComponent[] = [
 ];
 export const GL_HEAVY_COMPONENT_INDEX = 0;
 
+// ASSERTED, NOT SOURCED. The hard ceiling on any single GL claim.
+//
+// WHY IT EXISTS. The uncapped mixture puts HALF ITS VARIANCE ABOVE $1.42
+// BILLION — under the x^2-weighted measure ln X is Normal(mu + 2 sigma^2,
+// sigma^2) for component 1, whose median is exp(8.799445 + 2 x 6.136277) =
+// $1.41B. A single claim at that level is roughly THIRTY TIMES the pool's
+// entire annual GL loss. That is not a public-entity liability outcome; it is
+// an artifact of extrapolating a lognormal tail far past the claims it was
+// fitted to. The pool has seen nothing near $100M.
+//
+// WHAT THE CAP COSTS AND BUYS (derived, and asserted in gl-claim-check.ts):
+//   ground-up loss cost   5.886 -> 5.632 per $100   (-4.33%)
+//   mean claim            $74,714 -> $71,480
+//   severity CV           29.55 -> 13.68
+//   above-$25M share      12.0% -> 8.0% of loss
+//   binds                 1 per ~137 years at the enrolled book
+// The POINT IS THE VARIANCE, not the mean: it removes 4.3% of expected loss
+// and MORE THAN HALF the annual CV.
+//
+// ⚠ THE ANCHOR IS UNTOUCHED, AND THAT IS CHECKED. GL's frequency was derived
+// from the 0-$1M loss cost of 2.83 per $100, and E[min(X,$1M)] cannot see a
+// $100M cap: min(min(X, 100M), 1M) === min(X, 1M) identically. So
+// E[min(X,$1M)] stays $35,920 and ratePer1M stays 0.7879. NOT re-derived.
+//
+// ⚠ NOT A PRECEDENT FROM WC, contrary to how this ruling was framed. WC's
+// $15.51M ceiling was a property of the RETIRED annuity model (see
+// reinsuranceTower.ts:145 and CALIBRATION_FINDINGS "the mixture has no
+// ceiling"); the CURRENT WC mixture is explicitly UNCAPPED, with its 1-in-250
+// -year claim at $71.2M and the absence of a cap recorded as an open item at
+// WC_SEVERITY_COMPONENTS.large. This is therefore the FIRST severity cap in
+// the live model, and it leaves WC and GL on different footings. Bounding WC
+// is a separate decision that has NOT been taken.
+//
+// WHAT WOULD DISPLACE IT: a public-entity liability claim distribution with
+// observed maxima, or a verdict study establishing a realistic ceiling. A
+// different number is a one-line change here — every consumer routes through
+// expectedClaimSeverity (analytic) and the single draw site in glClaimEngine.
+export const GL_SEVERITY_CAP = 100_000_000;
+
 export const GL_LOSS_MODEL = {
   // --- frequency -------------------------------------------------------------
   // lambda = totalPayroll x ratePer1M x theta_GL(RQ) x k_GL x epsilon x gPool.
