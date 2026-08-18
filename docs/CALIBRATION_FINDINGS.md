@@ -10,7 +10,8 @@ tuning. None of these are code-structure bugs; they're 🎚️ assumption/calibr
 ## 1. GL goes into deficit in COMBINED runs but not solo — possible multi-line engine issue
 **Status:** ✅ RESOLVED & VERIFIED (fixed in instanceGenerator.ts surplus allocation; confirmed
 by v4 baselines — tie-out 0 all configs, GL starts at +$9,275,461 matching the predicted value,
-WC-only byte-identical to v3). See BASELINE_v4_ALL_CONFIGS.md.
+WC-only byte-identical to v3). See BASELINE_v4_ALL_CONFIGS.md — removed from the working tree
+2026-08-19, recoverable from git history; see baselines/BASELINE_LINEAGE_v4_to_v11.md.
 **Found:** during Stage 1.6 playtesting.
 
 **Key discovery (same seed MAMC6EA4, baseline decisions both times):**

@@ -14,9 +14,11 @@ repo root. Then commit everything.
 ## Folder layout
 - **docs/** — build plan and tracking: PHASES.md, CLAUDE_CODE_PLAYBOOK.md, UI_REFINEMENTS.md,
   CALIBRATION_FINDINGS.md, STAGE_2.8_spec.md
-- **baselines/** — all regression baselines. Current references: BASELINE_v5_* (defaults anchor,
-  WC-only matches this) and BASELINE_v6_* (divergent per-line decisions anchor). Earlier
-  v1–v4 kept for lineage.
+- **baselines/** — all regression baselines. ⚠️ STALE AS WRITTEN (this file describes a one-time
+  2026-07-22 sync, not current state): it named BASELINE_v5_* and BASELINE_v6_* as the "current
+  references", but the live gate baselines are now v12 (`VALUE_IDENTITY_v12.json`,
+  `SOLO_EXPORT_GUARD_v12.json`), and the v4–v9 artifacts were removed from the working tree on
+  2026-08-19 — recoverable from git history, see baselines/BASELINE_LINEAGE_v4_to_v11.md.
 - **decisions/** — decision-design docs: DECISIONS.md (source of truth), the per-line investments
   change, the editing-UX brainstorm, the decisions-chat START_HERE, and the interactive
   decision_tree.html.

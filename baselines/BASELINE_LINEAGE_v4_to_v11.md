@@ -240,3 +240,32 @@ action, not a fault in the removal.
   seeds; which line is largest changes seed to seed). Optional calibration via narrowing rate ranges.
 - Phase 3 reserves; Phase 4 shock events (which will carry market crashes now that the downside
   regime is gone).
+
+---
+
+## ⚠️ The v4–v9 artifacts described above are HISTORY-ONLY as of 2026-08-19
+
+The workbooks, CSVs and per-version `.md` summaries this document narrates —
+`BASELINE_v4_ALL_CONFIGS.md` through the `BASELINE_v9_*.xlsx` set, the v2/v3/v4
+seed CSVs, `BASELINE_v6_DIVERGENT.md` and its workbook, and the retired
+`VALUE_IDENTITY_v5/v9/v10.json` and `SOLO_EXPORT_GUARD_v5/v9/v10.json` gate
+baselines — **were removed from the working tree** (28 files, ~3.24 MiB) in the
+same commit that added this note. Nothing read them: the only live baseline
+references in `scripts/` and `src/` are the two v12 constants in
+`solo-export-guard.ts` and `value-identity-check.ts`.
+
+**They are not gone.** Git retains every one permanently. To recover any of
+them:
+
+```
+git show f93a87c:baselines/BASELINE_v7_WC_GL_PR.xlsx > /tmp/recovered.xlsx
+git log --all --diff-filter=D -- 'baselines/*'     # find the removing commit
+```
+
+`f93a87c` is the last commit at which all of them were present.
+
+**This document is why the removal was safe** — it records what each retired
+version represented and what moved between them, which is the part worth
+keeping. What remains in `baselines/` is the current gate pair (v12), its
+immediate predecessor (v11, the one to reach for if a v12 capture ever needs
+checking), and the v10/v11 workbook sets.

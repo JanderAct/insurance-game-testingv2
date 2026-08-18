@@ -36,8 +36,15 @@
 //   npx tsx scripts/diagnostics/solo-export-guard.ts            # compare to baseline
 //   npx tsx scripts/diagnostics/solo-export-guard.ts --write    # re-capture baseline
 //
-// Baseline: baselines/SOLO_EXPORT_GUARD_v6.json. v5 was retired by TWO changes
-// landing together, and the order matters for reading the movement:
+// ⚠ THE LIVE BASELINE PATH IS THE `BASELINE` CONSTANT BELOW — never this
+// comment block. This line used to read "Baseline:
+// baselines/SOLO_EXPORT_GUARD_v6.json" and was left behind by six subsequent
+// recaptures, pointing at a file that no longer exists while the code read
+// v12. Everything from here to the constant is VERSION HISTORY, narrating why
+// each baseline was retired; do not read any of it as "the current baseline".
+//
+// v5 was retired (to v6) by TWO changes landing together, and the order
+// matters for reading the movement:
 //
 //   1. PER-MEMBER RNG STREAMS. Member-level streams moved from one stream per
 //      purpose per year (consumed in member order) to one keyed per member, so

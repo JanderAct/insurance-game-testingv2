@@ -234,9 +234,11 @@ so the pool's loss-absorption structure is known-wrong for the tails two lines a
 
 ## 6. HOUSEKEEPING / OPEN ITEMS
 - **DOC SYNC (partial):** CALIBRATION_FINDINGS.md is current through finding 21 (WC/GL generator
-  work synced). UI_REFINEMENTS.md, baseline docs (BASELINE_v8_ALL_CONFIGS.md,
-  BASELINE_LINEAGE_v4_to_v10.md — needs v11 extension), and the two SPEC files remain behind the
-  /mnt/user-data/outputs versions.
+  work synced). UI_REFINEMENTS.md, baseline docs and the two SPEC files remain behind the
+  /mnt/user-data/outputs versions. (This item previously cited BASELINE_v8_ALL_CONFIGS.md and
+  BASELINE_LINEAGE_v4_to_v10.md — neither has ever existed at those paths in this repo; the
+  lineage doc is baselines/BASELINE_LINEAGE_v4_to_v11.md, and it now carries a closing note on
+  the v4–v9 artifacts removed from the tree on 2026-08-19.)
 - **Pass to distribution chat:** E[commonLossFactor] prediction; the draw-vs-pure-premium constraint;
   existing dead scaffolding (shockProbability etc.); catastropheFactor hook (restore, don't delete).
 - **KNOWN, before baseline recapture (REWRITTEN at roster v2):** the old form of this note said
