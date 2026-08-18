@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Shuffle } from 'lucide-react';
+import { Shuffle, BookOpen } from 'lucide-react';
 import type { GameSetupSettings, CoverageLine } from '../types/simulation';
 import RippleLogo from '../assets/RippleLogo';
+import WelcomeModal from '../components/WelcomeModal';
 
 interface SetupPageProps {
   onStart: (settings: GameSetupSettings) => void;
@@ -39,6 +40,7 @@ export default function SetupPage({ onStart }: SetupPageProps) {
   const [startingYear, setStartingYear] = useState(2026);
   const [instanceId, setInstanceId] = useState(() => randomInstanceId());
   const [activeLines, setActiveLines] = useState<CoverageLine[]>(['WC']);
+  const [showWelcome, setShowWelcome] = useState(false);
 
   function toggleLine(line: CoverageLine) {
     setActiveLines(prev =>
@@ -73,6 +75,19 @@ export default function SetupPage({ onStart }: SetupPageProps) {
           </div>
 
           <div className="p-8 space-y-7">
+            {/* Welcome guide */}
+            <button
+              type="button"
+              onClick={() => setShowWelcome(true)}
+              className="w-full flex items-center gap-2.5 text-left border border-blue-200 bg-blue-50 hover:bg-blue-100 rounded-lg px-4 py-3 transition-colors"
+            >
+              <BookOpen size={18} className="text-blue-600 flex-shrink-0" />
+              <span>
+                <span className="block text-sm font-semibold text-blue-800">New here? Read this first</span>
+                <span className="block text-xs text-blue-600">A quick, optional guide to how Ripple works</span>
+              </span>
+            </button>
+
             {/* Pool Name */}
             <div>
               <label className="block text-base font-semibold text-gray-700 mb-2">Pool Name</label>
@@ -215,6 +230,8 @@ export default function SetupPage({ onStart }: SetupPageProps) {
           All member names and entities are fictional. No real public entity names are used.
         </p>
       </div>
+
+      {showWelcome && <WelcomeModal onClose={() => setShowWelcome(false)} />}
     </div>
   );
 }
