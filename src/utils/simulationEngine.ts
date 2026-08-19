@@ -41,8 +41,7 @@ import { cloneMembershipHistory, openInterval, closeInterval } from './membershi
 import { cloneMemberLossHistory, recordMemberLossYear } from './memberLossHistory';
 import { computeKLine, deriveNeutralPurePremiumPer100, expectedWcGrossLossForPricing, generateWcClaims, wcFrequencyTrend, wcSeverityTrend } from './wcClaimEngine';
 import { dollarWeightedPDelayed, ldfToUltimate, wcIbnrBalance } from './wcIbnr';
-import { computeWcClf } from './wcLossDistribution';
-import { computeGlClf } from './glLossDistribution';
+import { hasStaticClf, staticClf } from '../data/clfTables';
 import { computeKGl, deriveNeutralGlPurePremiumPer100, expectedGlGrossLossForPricing, generateGlClaims, glCappedSeverityTrend } from './glClaimEngine';
 import { generateNarrative } from './narrativeEngine';
 import { getMemberExposure } from './lineHelpers';
@@ -177,34 +176,39 @@ export function processLineYear(
   // --- Selected Funding Confidence ---
   // CLF is selected by the player and applied after the expected actuarial loss-cost rate is calculated.
   //
-  // WC AND GL READ THEIR OWN DERIVED DISTRIBUTIONS, NOT FUNDING_CLF_TABLE
-  // (finding 38, then repeated for GL). FUNDING_CLF_TABLE is the real pool's
-  // measured curve at $20-30B of payroll, where process risk gives an annual
-  // CV near 0.063 against the table's implied ~0.80 — the table is measuring
-  // parameter/trend uncertainty this model has no channel for, not claim
-  // variance, and cannot validate either line's own distribution (see
-  // src/data/wcClfGrid.ts and src/data/glClfGrid.ts). GL's severity being
-  // capped (GL_SEVERITY_CAP) is what MADE its own cumulants module derivable
-  // and verifiable — see glLossDistribution.ts's header; the Pareto/infinite-
-  // variance obstacle that deferred this was retired at the severity cap.
-  // Property is unaffected: it has no Claim/Occurrence objects and was never
-  // in scope.
+  // WC AND GL READ THEIR OWN MEASURED TABLES, NOT FUNDING_CLF_TABLE (finding 38,
+  // then repeated for GL). FUNDING_CLF_TABLE is the real pool's measured curve
+  // at $20-30B of payroll and cannot describe either line's own distribution.
+  //
+  // ⚠ THOSE TABLES ARE NOW STATIC AND MEASURED FROM THIS ENGINE — see
+  // src/data/clfTables.ts. They replace the interpolated CV-indexed (WC) and
+  // lambda-indexed (GL) Monte Carlo grids, which were derived from a MODEL of
+  // the draw rather than the draw: measured against the engine, WC's grid
+  // over-delivered at every one of nine stops. A static table backtested on the
+  // engine cannot carry that class of error.
+  //
+  // Two consequences of the table being one curve per line: it takes NO book
+  // argument (the book holds near 62 members since the membership equilibrium
+  // fix, so the size axis bought little), and it is calibrated at the DEFAULT
+  // layer placement (declining layers costs up to ~8.9pp of label accuracy —
+  // measured, and recorded at clfTables.ts).
+  //
+  // Property is unaffected: it has no Claim/Occurrence objects, was never in
+  // scope, and still reads FUNDING_CLF_TABLE.
   const selectedFundingConfidenceLevel = lineDecisions.fundingConfidenceLevel;
-  // NAME KEPT (not renamed to something line-neutral) even though it now holds
-  // k_GL for GL, not k_line — this is the same roster/RQ-mix normaliser role on
-  // both lines, just each line's own function, and the two CLF dispatch sites
-  // below read it the same way regardless of which one it is.
-  const wcClfBookKLine = line === 'WC' ? computeKLine(currentActiveMembers)
-    : line === 'GL' ? computeKGl(currentActiveMembers, yearNumber)
-    : 1;
-  // fundingAtExpected bypasses the grid entirely: "Expected" is CLF = 1.000
+  // ⚠ THE PRE-MOVEMENT k_line / k_GL THAT USED TO BE COMPUTED HERE IS GONE.
+  // It existed only to index the retired CV/lambda grids, and the static tables
+  // take no book argument. The DRAW's own k is unaffected and is still computed
+  // further down (computeKLine / computeKGl on memberResult.activeMembers) —
+  // that is a different quantity on a different book, and deleting this one does
+  // not touch it. Net effect: one full pass over the book, computing two
+  // expected-loss sums, removed from the pricing path each line-year.
+  // fundingAtExpected bypasses the table entirely: "Expected" is CLF = 1.000
   // exactly, at every book size, every year — not an interpolated value that
   // happens to land close (see the LineDecisionSet.fundingAtExpected comment).
   // Property ignores the flag, same as before.
-  const selectedFundingCLF = line === 'WC'
-    ? (lineDecisions.fundingAtExpected ? 1.0 : computeWcClf(selectedFundingConfidenceLevel, currentActiveMembers, wcClfBookKLine, yearNumber))
-    : line === 'GL'
-    ? (lineDecisions.fundingAtExpected ? 1.0 : computeGlClf(selectedFundingConfidenceLevel, currentActiveMembers, wcClfBookKLine, yearNumber))
+  const selectedFundingCLF = hasStaticClf(line)
+    ? (lineDecisions.fundingAtExpected ? 1.0 : staticClf(line, selectedFundingConfidenceLevel))
     : lookupCLF(selectedFundingConfidenceLevel);
 
   // --- Expected Actuarial Loss-Cost Rate ---
@@ -1228,15 +1232,31 @@ export function processLineYear(
   const indicatedNetReserveAtConfidenceLevel = netFundingTarget;
 
   // Required reserve margin is always measured at the 90% CLF, independent of
-  // the player's selected annual pricing confidence level. WC and GL use their
-  // own derived distributions here too, for the same reason as
-  // selectedFundingCLF above — leaving this on FUNDING_CLF_TABLE while pricing
-  // used the derived curve would silently misstate that line's own reserve
-  // confidence view.
-  const reserveMarginCLF = line === 'WC'
-    ? computeWcClf(0.90, currentActiveMembers, wcClfBookKLine, yearNumber)
-    : line === 'GL'
-    ? computeGlClf(0.90, currentActiveMembers, wcClfBookKLine, yearNumber)
+  // the player's selected annual pricing confidence level. WC and GL read their
+  // own tables here too, for the same reason as selectedFundingCLF above.
+  //
+  // ⚠ THIS SITE BECAME BASIS-CONSISTENT FOR THE FIRST TIME WITH THE STATIC
+  // TABLES, and the effect is large enough to name. expectedNetUnpaidLoss is a
+  // NET reserve, and the retired grids' 90% CLF was a percentile of the GROSS
+  // annual loss distribution — a net quantity multiplied by a gross-basis
+  // loading. The static tables are measured on RETAINED loss, so both sides of
+  // this product are now net. GL's 90% CLF falls from ~1.79 to 1.3642 and WC's
+  // from ~1.54 to 1.3893 as a result.
+  //
+  // ⚠ IT MOVES OPENING SURPLUS, because runPriorHistory's reject-and-redraw
+  // accepts a pre-game only if the opening surplus lands inside
+  // OPENING_MULTIPLE_BAND x THIS margin. Median opening surplus falls from
+  // $15.09M to $11.65M on WC and from $21.29M to $11.72M on GL. The enrolled
+  // book is unchanged (61/62 members). Those band multipliers were chosen
+  // against the old gross-based margin and now want re-centring: the pre-game
+  // reject-and-redraw needs a MEDIAN OF 28 ATTEMPTS on GL to land in band (p90
+  // 116, max 158) against WC's median of 4. Nothing is broken — no game exhausts
+  // MAX_HISTORY_ATTEMPTS (500) and none falls back to the closest-miss path — but
+  // a band hit one try in 28 is fragile, and it makes the pre-game roughly 4x
+  // slower on GL. Flagged rather than re-tuned here: moving OPENING_MULTIPLE_BAND
+  // changes every game's starting surplus and belongs in its own commit.
+  const reserveMarginCLF = hasStaticClf(line)
+    ? staticClf(line, 0.90)
     : lookupCLF(0.90);
   const reserveRiskMarginNeeded = Math.max(
     0,

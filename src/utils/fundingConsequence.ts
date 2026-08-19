@@ -23,11 +23,8 @@
 
 import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, REINSURANCE_PROGRAMS, SLIDER_RANGES } from '../data/defaultAssumptions';
 import { lookupCLF } from './simulationEngine';
-import { computeKLine } from './wcClaimEngine';
-import { computeWcClf, wcClfCrossingPercentile } from './wcLossDistribution';
-import { computeKGl } from './glClaimEngine';
-import { computeGlClf, glClfCrossingPercentile } from './glLossDistribution';
-import type { CoverageLine, Member } from '../types/simulation';
+import { hasStaticClf, staticClf, staticClfCrossing } from '../data/clfTables';
+import type { CoverageLine } from '../types/simulation';
 
 // ⚠ THREADED, NOT GENERIC lookupCLF. This panel used to call lookupCLF
 // unconditionally for every line, while simulationEngine.ts priced WC (and now
@@ -44,23 +41,27 @@ import type { CoverageLine, Member } from '../types/simulation';
 //
 // atExpected: WC/GL ONLY — bypasses the grid and returns exactly 1.0, mirroring
 // simulationEngine.ts's selectedFundingCLF dispatch. Property ignores it.
-function clfFor(line: CoverageLine, confidenceLevel: number, members: Member[], yearNumber: number, atExpected: boolean): number {
-  if (line === 'WC') return atExpected ? 1.0 : computeWcClf(confidenceLevel, members, computeKLine(members), yearNumber);
-  if (line === 'GL') return atExpected ? 1.0 : computeGlClf(confidenceLevel, members, computeKGl(members, yearNumber), yearNumber);
+function clfFor(line: CoverageLine, confidenceLevel: number, atExpected: boolean): number {
+  if (hasStaticClf(line)) return atExpected ? 1.0 : staticClf(line, confidenceLevel);
   return lookupCLF(confidenceLevel);
 }
 
-// Where THIS book's own grid crosses CLF = 1.000, as a 0-1 fraction — the
-// "Expected" marker's true position. Built on the crossing finders in
-// wcLossDistribution.ts/glLossDistribution.ts, which themselves reuse the
-// SAME interpolateGridRatio computeWcClf/computeGlClf call — never computed
-// independently, so it cannot drift from what the grid itself would report.
-// Property has no grid of its own to cross (see clfFor above); its 60% stop
+// Where the line's table crosses CLF = 1.000, as a 0-1 fraction — the
+// "Expected" marker's true position. Read straight off STATIC_CLF_TABLE by
+// interpolation, so it cannot drift from the CLF the same table charges.
+//
+// ⚠ NO LONGER BOOK-DEPENDENT, and the signature says so. The retired grids
+// computed a per-book crossing because they interpolated on the book's own
+// CV/lambda; the static tables are one curve per line, so the crossing is one
+// number per line — WC 47.2%, GL 68.6% as measured. The `members` and
+// `yearNumber` arguments both helpers used to take are gone rather than left
+// unused, so nothing suggests a book-dependence that no longer exists.
+//
+// Property has no table of its own to cross (see clfFor above); its 60% stop
 // already coincides with CLF 1.000 in FUNDING_CLF_TABLE, so this returns 0.60
 // there rather than a meaningless "crossing".
-function expectedPercentileFor(line: CoverageLine, members: Member[], yearNumber: number): number {
-  if (line === 'WC') return wcClfCrossingPercentile(members, computeKLine(members), yearNumber);
-  if (line === 'GL') return glClfCrossingPercentile(members, computeKGl(members, yearNumber), yearNumber);
+function expectedPercentileFor(line: CoverageLine): number {
+  if (hasStaticClf(line)) return staticClfCrossing(line);
   return 0.60;
 }
 
@@ -99,8 +100,8 @@ function reinsCostPctFor(reinsuranceLevel: number): number {
   return prog ? (prog.costPctOfPremiumMin + prog.costPctOfPremiumMax) / 2 : 0;
 }
 
-function ratesAt(purePremiumPer100: number, confidenceLevel: number, reinsuranceLevel: number, line: CoverageLine, members: Member[], yearNumber: number, atExpected: boolean) {
-  const clf = clfFor(line, confidenceLevel, members, yearNumber, atExpected);
+function ratesAt(purePremiumPer100: number, confidenceLevel: number, reinsuranceLevel: number, line: CoverageLine, atExpected: boolean) {
+  const clf = clfFor(line, confidenceLevel, atExpected);
   const poolPremiumRatePer100 = purePremiumPer100 * clf;
   const adminRatePer100 = purePremiumPer100 * ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM;
   const reinsRatePer100 = poolPremiumRatePer100 * reinsCostPctFor(reinsuranceLevel);
@@ -114,16 +115,19 @@ export function computeFundingConsequence(
   reinsuranceLevel: number,
   priorTotalMemberChargeRatePer100: number | null,
   line: CoverageLine,
-  members: Member[],
-  yearNumber: number,
+  // ⚠ NO members / yearNumber ANY MORE. Both were needed only to index the
+  // retired CV/lambda grids; the static tables in clfTables.ts are one curve per
+  // line and take neither. Dropping them from the signature rather than leaving
+  // them unused keeps the panel from implying a book-dependence the pricing no
+  // longer has.
   atExpected: boolean,
 ): FundingConsequence {
   const { clf, poolPremiumRatePer100, adminRatePer100, reinsRatePer100, totalMemberChargeRatePer100 } =
-    ratesAt(purePremiumPer100, confidenceLevel, reinsuranceLevel, line, members, yearNumber, atExpected);
+    ratesAt(purePremiumPer100, confidenceLevel, reinsuranceLevel, line, atExpected);
 
   // Computed UNCONDITIONALLY (not only while atExpected) — cheap, and useful
   // for the UI to show "Expected (~X%)" even before the player selects it.
-  const expectedPercentile = expectedPercentileFor(line, members, yearNumber);
+  const expectedPercentile = expectedPercentileFor(line);
 
   const load = purePremiumPer100 > 0 ? totalMemberChargeRatePer100 / purePremiumPer100 : 0;
   const expectedLossRatio = load > 0 ? 1 / load : 0;
@@ -144,7 +148,7 @@ export function computeFundingConsequence(
   const isAtMax = nextLevel > max + 1e-9;
   const marginalCostPct = isAtMax
     ? null
-    : (ratesAt(purePremiumPer100, nextLevel, reinsuranceLevel, line, members, yearNumber, false).poolPremiumRatePer100 / Math.max(poolPremiumRatePer100, 1e-9) - 1) * 100;
+    : (ratesAt(purePremiumPer100, nextLevel, reinsuranceLevel, line, false).poolPremiumRatePer100 / Math.max(poolPremiumRatePer100, 1e-9) - 1) * 100;
 
   return {
     // Overridden to the crossing percentile while atExpected, so "Adequate in

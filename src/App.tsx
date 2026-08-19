@@ -433,11 +433,9 @@ export default function App() {
       decisionLineReinsuranceLevel,
       lineState.ratePer100,
       decisionLine,
-      decisionLineActiveMembers,
-      gameState.currentYearNumber,
       decisionLineFundingAtExpected,
     );
-  }, [gameState, decisionLine, decisionLineActiveMembers, decisionLineFundingLevel, decisionLineReinsuranceLevel, decisionLineFundingAtExpected]);
+  }, [gameState, decisionLine, decisionLineFundingLevel, decisionLineReinsuranceLevel, decisionLineFundingAtExpected]);
 
   return (
     <div className="min-h-screen bg-gray-50">
