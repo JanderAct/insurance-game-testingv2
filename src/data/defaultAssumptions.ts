@@ -565,9 +565,115 @@ export const GL_LOSS_MODEL = {
 // Base retention probability per member per year — high by default for realistic public entity pools
 export const BASE_RETENTION = 0.95;
 
-// Expected new members per year under neutral conditions (count-based, not fraction-based)
-// Normal year: 0-2 new members. Favorable year: up to 4.
+// RETIRED as the join base — kept only because CalculationAuditPage still
+// displays it and removing it would silently blank an audit row. Nothing in
+// membershipEngine reads it any more. See MEMBERSHIP_EQUILIBRIUM_ENROLLMENT
+// below for what replaced it and why.
 export const BASE_NEW_MEMBERS_PER_YEAR = 1.0;
+
+// --- the join base: marketplace-scaled, not a fixed count -------------------
+//
+// THE DEFECT THIS REPLACES. Joins used to be a flat BASE_NEW_MEMBERS_PER_YEAR
+// (1.0) while departures are proportional (a member leaves with probability
+// 1 - BASE_RETENTION, so a book of N sheds 0.05N per year). A flat join count
+// against a proportional leave rate has exactly one equilibrium,
+//
+//     BASE_NEW_MEMBERS_PER_YEAR / (1 - BASE_RETENTION) = 1.0 / 0.05 = 20 members,
+//
+// and it is the SAME 20 for every line whatever that line's book actually is.
+// Measured starting books are 56 (WC), 57 (GL), 58 (Property), so every line
+// began roughly 2.9 members/yr out and drifted down toward 20 no matter what
+// the player did. Every GL and WC run's 10-12% "decline" was this, not a
+// decision — which made decline uninterpretable, since a badly-run pool looked
+// exactly like the default.
+//
+// THE RULE. Joins now scale with the REMAINING marketplace:
+//
+//     expectedNewMembers = k x (roster - enrolled)
+//
+// which is self-correcting in the way a fixed count is not: a bigger book has
+// fewer prospects left to recruit, so growth slows on its own, and there is a
+// natural ceiling at the roster. A shrinking book frees prospects and recovers.
+//
+// k IS NOT A FREE PARAMETER. It is pinned by requiring TOTAL expected joins to
+// equal expected departures at the enrolled book the game actually starts from:
+//
+//     k x (roster - N*) + adj = N* x d
+//     k = (N* x d - adj) / (roster - N*)
+//
+// where d is MEMBERSHIP_DEFAULT_DEPARTURE_RATE — the REALISED departure rate at
+// defaults (4.2%), NOT the nominal 1 - BASE_RETENTION (5.0%). See that constant
+// for why the two differ and why using the nominal one would re-tilt the fix.
+//
+// It is derived at the call site from the LIVE roster length rather than frozen
+// as a literal, so it stays correct if BASE_RETENTION moves or the roster is
+// ever resized — the basis of a calibrated rate is part of its value (the
+// sdOverExpected lesson).
+//
+// ⚠ THE CONDITION IS ON TOTAL JOINS, NOT ON THE BASE ALONE, and the `adj` term
+// is why. The adjustment ladder in membershipEngine's newMemberAdjustment does
+// NOT sit at zero when every decision is at its default: measured at +0.60
+// members/yr, stable across all ten years and near-identical on all three lines
+// (WC +0.617, GL +0.639, Property +0.549). Two channels drive it —
+// competitivePressure, drawn in [0.3, 0.8], contributes (1 - cp) x 0.5, mean
+// +0.225; and satisfaction starts in [6.5, 8.5], so the >= 7.5 branch fires
+// about half the time. Pinning k on the base alone would therefore leave the
+// pool growing at defaults, which fails the whole point of the fix.
+//
+// Folding it in is not a fudge, it is what makes the adjustments DIFFERENTIAL:
+// all-defaults is now the neutral point, so a player who raises assessments or
+// tightens underwriting moves the book relative to a book that would otherwise
+// have held still. Decline becomes attributable to a decision, which is the
+// entire objective. Leaving `adj` out would measure every decision against a
+// silently growing baseline instead.
+//
+// N* = 62 is the pooled median starting book over 60 seeds with all three lines
+// active (WC 59, GL 64, Property 63). Starting books are drawn as an exposure
+// SHARE (STARTING_EXPOSURE_SHARE, 25-35%), never as a count, so the count is
+// emergent. The three per-line medians span 1.085x — well inside the range one
+// k can serve — so no per-line calibration is warranted.
+//
+// ⚠ N* IS MILDLY SELF-REFERENTIAL, and that is understood rather than
+// overlooked: runPriorHistory simulates three pre-game years through this same
+// membership engine, so the book handed to year 1 already reflects whatever k
+// is in force. Measured under the shipped k the starting book settles at 58-61
+// rather than the 62 it was calibrated from — a fixed point self-consistent to
+// about two members, which is well inside seed noise (the per-seed starting
+// book spans 45 to 88). It does not iterate away: the measured ten-year
+// trajectory holds flat from wherever it opens, which is the property that
+// actually matters and is verified directly in
+// scripts/diagnostics/membership-equilibrium-check.ts.
+//
+//     k = (62 x 0.042 - 0.60) / (200 - 62) = 2.004 / 138 = 0.014522
+export const MEMBERSHIP_EQUILIBRIUM_ENROLLMENT = 62;
+
+// The measured contribution of the adjustment ladder at ALL-DEFAULT decisions,
+// in members/yr. Folded into k so that defaults are the neutral point — see the
+// note above. Measured, not chosen: 40 games x 10 years x 3 lines, calling the
+// engine's own newMemberAdjustment.
+//
+// ⚠ If any adjustment branch's coefficient changes, or a dormant channel (the
+// pending bill-based satisfaction and rate-change replacements) is switched on,
+// THIS NUMBER MUST BE RE-MEASURED. It is a property of the ladder, not a
+// constant of nature, and a stale value here silently re-tilts the equilibrium.
+export const MEMBERSHIP_DEFAULT_ADJUSTMENT = 0.60;
+
+// The REALISED share of the book that leaves per year at all-default decisions.
+//
+// ⚠ THIS IS NOT 1 - BASE_RETENTION, AND USING THAT INSTEAD IS THE SAME MISTAKE
+// AS IGNORING THE JOIN ADJUSTMENT. BASE_RETENTION 0.95 is only the base of
+// calcRetentionProbability, which then adds a satisfaction term and a
+// financial-strength term — both POSITIVE at defaults, since satisfaction
+// starts in [6.5, 8.5] against a 5.0 reference and the surplus ratio climbs
+// through the 0.6 reference as the pool builds surplus. MAX_WITHDRAWN_PER_YEAR
+// then truncates the top of the noise distribution on top of that. The measured
+// result is 4.2%, not 5.0% — WC 4.1%, GL 4.2%, Property 4.2%, over 40 games x
+// 10 years x 3 lines at defaults.
+//
+// Both sides of the equilibrium therefore have to be taken as they actually
+// behave at defaults, not as their nominal constants read. Pinning k on 5.0%
+// while the book only sheds 4.2% builds in a permanent upward tilt.
+export const MEMBERSHIP_DEFAULT_DEPARTURE_RATE = 0.042;
 
 // Hard caps on annual membership movement
 export const MAX_NEW_MEMBERS_PER_YEAR = 4;

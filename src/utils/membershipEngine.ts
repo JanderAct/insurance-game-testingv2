@@ -8,7 +8,9 @@ import { getMemberExposure } from './lineHelpers';
 import {
   MEMBER_MOVEMENT_WEIGHTS,
   BASE_RETENTION,
-  BASE_NEW_MEMBERS_PER_YEAR,
+  MEMBERSHIP_EQUILIBRIUM_ENROLLMENT,
+  MEMBERSHIP_DEFAULT_ADJUSTMENT,
+  MEMBERSHIP_DEFAULT_DEPARTURE_RATE,
   MAX_NEW_MEMBERS_PER_YEAR,
   MAX_WITHDRAWN_PER_YEAR,
 } from '../data/defaultAssumptions';
@@ -72,34 +74,104 @@ function calcRetentionProbability(inputs: MemberMovementInputs): number {
   return Math.max(0.80, Math.min(0.99, BASE_RETENTION + adjustment));
 }
 
-function calcExpectedNewMembers(inputs: MemberMovementInputs): number {
-  const { decisions, currentMemberSatisfaction, surplus, annualPremium, competitivePressure } = inputs;
+// The marketplace-scaled join rate, k, derived from the LIVE roster rather than
+// frozen as a literal — see MEMBERSHIP_EQUILIBRIUM_ENROLLMENT for the full
+// derivation and for why the default adjustment is netted off here.
+//
+// Returns 0 for a roster too small to hold the calibration book (degenerate
+// rather than meaningful), and clamps at 0 if the adjustment ladder were ever
+// re-tuned above the departure rate — a negative capture rate would make a
+// SMALLER book recruit FEWER members, inverting the self-correction.
+export function prospectCaptureRate(rosterSize: number): number {
+  const headroom = rosterSize - MEMBERSHIP_EQUILIBRIUM_ENROLLMENT;
+  if (headroom <= 0) return 0;
+  const netDepartures =
+    MEMBERSHIP_EQUILIBRIUM_ENROLLMENT * MEMBERSHIP_DEFAULT_DEPARTURE_RATE
+    - MEMBERSHIP_DEFAULT_ADJUSTMENT;
+  return Math.max(0, netDepartures / headroom);
+}
 
-  let expected = BASE_NEW_MEMBERS_PER_YEAR;
+// The marketplace-scaled BASE, before any adjustment.
+//
+// Prospects are counted as (roster - enrolled), NOT as the post-cooldown
+// candidate pool. The 2-year canReenroll cooldown still binds, but it binds
+// downstream in simulateMemberMovement, where the join count is truncated to
+// the pool that actually exists — keeping it out of the base leaves the base a
+// clean function of book size, which is what the equilibrium algebra is
+// written against.
+export function baseNewMembers(rosterSize: number, enrolledCount: number): number {
+  const prospects = Math.max(0, rosterSize - enrolledCount);
+  return prospectCaptureRate(rosterSize) * prospects;
+}
+
+// Everything that is NOT the base, split out so it can be measured on its own.
+//
+// ⚠ THESE DO NOT SUM TO ZERO AT DEFAULT DECISIONS, and the calibration of k
+// depends on knowing by how much. underwritingStrictness 5, assessmentPct 0 and
+// riskControlPct 0 all sit on inert branches, but two channels are live and
+// both are positive at defaults: competitivePressure is drawn in [0.3, 0.8], so
+// its term contributes +0.10 to +0.35 (mean +0.225); and satisfaction starts in
+// [6.5, 8.5], so the >= 7.5 branch fires about half the time. The surplusRatio
+// term starts mostly inert but turns positive later in a game as surplus
+// builds. See MEMBERSHIP_EQUILIBRIUM_ENROLLMENT for how the measured total is
+// folded into k.
+export function newMemberAdjustment(a: {
+  underwritingStrictness: number;
+  assessmentPct: number;
+  riskControlPct: number;
+  memberSatisfaction: number;
+  surplus: number;
+  annualPremium: number;
+  competitivePressure: number;
+}): number {
+  let adj = 0;
 
   // The five-branch rateChange ladder REMOVED — the Rate Change decision it
   // read is gone (CLF-only pricing). DELIBERATE: a bill-based replacement is
   // pending, not a silent zeroing. This channel currently contributes nothing
   // to expected new members.
 
-  if (decisions.underwritingStrictness <= 2) expected += 0.8;
-  else if (decisions.underwritingStrictness <= 4) expected += 0.3;
-  else if (decisions.underwritingStrictness >= 8) expected -= 0.4;
+  if (a.underwritingStrictness <= 2) adj += 0.8;
+  else if (a.underwritingStrictness <= 4) adj += 0.3;
+  else if (a.underwritingStrictness >= 8) adj -= 0.4;
 
-  if (currentMemberSatisfaction >= 8.5) expected += 0.5;
-  else if (currentMemberSatisfaction >= 7.5) expected += 0.2;
-  else if (currentMemberSatisfaction < 5.0) expected -= 0.5;
+  if (a.memberSatisfaction >= 8.5) adj += 0.5;
+  else if (a.memberSatisfaction >= 7.5) adj += 0.2;
+  else if (a.memberSatisfaction < 5.0) adj -= 0.5;
 
-  const surplusRatio = surplus / Math.max(annualPremium, 1);
-  if (surplusRatio >= 1.20) expected += 0.3;
-  else if (surplusRatio < 0.40) expected -= 0.3;
+  const surplusRatio = a.surplus / Math.max(a.annualPremium, 1);
+  if (surplusRatio >= 1.20) adj += 0.3;
+  else if (surplusRatio < 0.40) adj -= 0.3;
 
-  if (decisions.assessmentPct > 0.15) expected -= 0.8;
-  else if (decisions.assessmentPct > 0.05) expected -= 0.3;
+  if (a.assessmentPct > 0.15) adj -= 0.8;
+  else if (a.assessmentPct > 0.05) adj -= 0.3;
 
-  if (decisions.riskControlPct >= 0.05) expected += 0.2;
+  if (a.riskControlPct >= 0.05) adj += 0.2;
 
-  expected += (1 - competitivePressure) * 0.5;
+  adj += (1 - a.competitivePressure) * 0.5;
+
+  return adj;
+}
+
+function calcExpectedNewMembers(inputs: MemberMovementInputs): number {
+  const {
+    decisions, currentMemberSatisfaction, surplus, annualPremium, competitivePressure,
+    allMarketMembers, currentMembers,
+  } = inputs;
+
+  // BASE: scales with what is left of the marketplace, so the book is
+  // self-limiting upward and self-recovering downward. Every adjustment is
+  // unchanged and still applies ON TOP of this — only the base moved.
+  const expected = baseNewMembers(allMarketMembers.length, currentMembers.length)
+    + newMemberAdjustment({
+      underwritingStrictness: decisions.underwritingStrictness,
+      assessmentPct: decisions.assessmentPct,
+      riskControlPct: decisions.riskControlPct,
+      memberSatisfaction: currentMemberSatisfaction,
+      surplus,
+      annualPremium,
+      competitivePressure,
+    });
 
   return Math.max(0, Math.min(MAX_NEW_MEMBERS_PER_YEAR, expected));
 }
