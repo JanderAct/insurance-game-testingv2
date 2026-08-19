@@ -63,56 +63,54 @@ export interface TowerLayer {
   name: string;
   attachment: number;
   limit: number;
-  // E[ceded] PER $100 OF ENROLLED EXPOSURE. See the derivation note below for
-  // why a per-exposure constant is the correct shape rather than a dollar one.
-  expectedCededPer100: number;
-  // Ratio SD/E of ANNUAL ceded loss for this layer, measured. Drives the risk
-  // load; stored rather than recomputed so the price is a pure lookup-and-scale.
-  sdOverExpected: number;
   // Layers that exist but cannot currently be bought. See WC's top layer.
   purchasable: boolean;
 }
 
 // ============================================================================
-// ⚠ EVERY expectedCededPer100 AND sdOverExpected BELOW WAS MEASURED FROM THE
-// GENERATORS, NOT DERIVED IN CLOSED FORM. Same status as the Property mu
-// constants: inert values with a recorded derivation, not live computation.
+// ⚠ THERE ARE NO PRICING CONSTANTS IN THIS FILE ANY MORE. A LAYER IS ITS BOUNDS.
 //
-// HOW THEY WERE MEASURED: scripts/diagnostics/reinsurance-layer-check.ts drives
-// generateWcClaims / generateGlClaims directly on a real year-1 ENROLLED book
-// (WC 45 members / $290M exposure, GL 54 / $379M), buckets by occurrence total
-// with the cap-then-sum rule above, and averages ceded loss per layer over
-// 3,000 WC years and 20,000 GL years. gPool held at 1.
+// `expectedCededPer100` and `sdOverExpected` used to live on TowerLayer, measured
+// from the generators and frozen. Both are gone; the price is computed at runtime
+// from the enrolled book and the current year in src/utils/towerMoments.ts. The
+// full argument is in that module's header, but the short version, because the
+// second half of it is the part that was missed for a long time:
 //
-// WHY PER-$100-OF-EXPOSURE IS THE RIGHT SHAPE — and this is load-bearing, not a
-// convenience. A per-occurrence layer's expected ceded loss is LINEAR in
-// exposure, because only the occurrence FREQUENCY scales with the book while
-// E[ceded per occurrence] is exposure-invariant. Verified across a 4.4x exposure
-// range (enrolled vs full-market), ratio of ceded against ratio of exposure:
-//   WC 4xs1   0.225 vs 0.223     GL 4xs1    0.284 vs 0.292
-//   WC 5xs5   0.221 vs 0.223     GL 5xs5    0.286 vs 0.292
-//   WC 15xs10 0.228 vs 0.223     GL 15xs10  0.290 vs 0.292
-// Linear to within 2%. So these constants stay correct as the book grows,
-// shrinks, or is re-underwritten — which a dollar constant would not.
+//   expectedCededPer100 FROZE LEGITIMATELY BUT WENT STALE. A per-occurrence
+//   layer's expected ceded loss really is LINEAR in exposure (verified across a
+//   4.4x range, within 2%), so a per-$100 constant was the right SHAPE. But it
+//   was multiplied by NOMINAL exposure, which grows at the wage rate, while the
+//   actual ceded loss grows with the SEVERITY trend through a convex layer.
+//   Over a decade: GL +22% / +33% / +41% by layer, WC +17% on its top layer.
 //
-// (An AGGREGATE stop-loss is NOT linear in exposure, which is exactly why the
-// aggregate below is computed at runtime instead of stored. See its comment.)
+//   sdOverExpected NEVER FROZE LEGITIMATELY AT ALL. SD/E scales as
+//   ~1/sqrt(exposure) — its basis IS its value, so a single stored number is
+//   wrong at every book size but one. Frozen at GL's stored 0.97, an $82M pool
+//   was undercharged 19.9% and the full market overcharged 24.5%. The pools with
+//   the least surplus standing behind the retention were paying the least for it.
+//   The two lines were not even on the same basis: GL's figures came from a
+//   ~$380M enrolled book, WC's from full market.
 //
-// WHAT INVALIDATES THESE — re-run the diagnostic and re-derive if any of:
-//   - any WC or GL severity, frequency or tier-mix parameter moves
-//   - the canonical roster changes (a new roster version)
-//   - GL_STATUTORY_CAP moves, or the cap's scope changes from indemnity-only
-//   - medicalTrend or indemnityTrend moves
-//   - the catastrophic annuity costing changes (medicalFirstYear, the discount
-//     rate, the age range, the disability adjustment)
-//   - the layer attachments or limits below change
-// Underwriting strictness does NOT invalidate them: the per-exposure form
-// absorbs book-size and book-selection changes, which is the point of the shape.
+// WHAT STILL INVALIDATES THE *STRUCTURE* (attachments, limits, purchasability) —
+// these are judgment calls, not measurements, and should be revisited if:
+//   - the layer attachments or limits change
+//   - a band's pierce frequency moves far enough to change whether it is a real
+//     purchase decision (WC merged its top two layers when $25M xs $25M fell to
+//     once per 27 years; GL's top layer pierces every 1.2 years and stays)
+//   - market capacity above GL's $25M changes
+// Severity, frequency, trend and roster changes NO LONGER invalidate anything
+// here — that is the point of computing the price. GL_SEVERITY_CAP in particular
+// is EXACTLY irrelevant to every band inside the tower: every GL layer bound is
+// <= $25M and the cap is $100M, so min(X, cap) > 25M exactly when X > 25M and a
+// cession is bit-identical either way (measured: 0.0e+0 relative difference). It
+// reaches only the retained band above the tower, which it bounds at $75M.
 // ============================================================================
 
 export const REINSURANCE_TOWER: Record<TowerLine, TowerLayer[]> = {
   // ⚠ RE-DERIVED FOR THE WC SEVERITY REBUILD, THEN RESTRUCTURED TO THREE LAYERS
-  // (scripts/diagnostics/wc-tower-rederive.ts).
+  // (the retired scripts/diagnostics/wc-tower-rederive.ts; its Monte Carlo
+  // machinery now lives in tower-runtime-check.ts, which validates the runtime
+  // pricing that replaced the constants that script used to emit).
   //
   // THE TOP TWO LAYERS ARE MERGED. `$15M xs $10M` and `$25M xs $25M` are now one
   // `$40M xs $10M` band covering the same $10M-$50M. Two reasons, and the second
@@ -124,53 +122,47 @@ export const REINSURANCE_TOWER: Record<TowerLine, TowerLayer[]> = {
   //      purchase decision — a player would never see it pay inside a game.
   //      Merged, the band fires ONCE EVERY 4.7 YEARS.
   //
-  // THE PRICES ARE THE CLOSED FORM, NOT THE SIMULATION. Layer expectation over a
-  // lognormal mixture has an exact solution (limitedExpectedValue on each
-  // component, differenced across the layer bounds), so the constant carries no
-  // sampling error. Simulation over 12,000 full-market years agrees within ~4%;
-  // the residual is the simulation being short of a sigma-2.0 tail, not the
-  // analytic being wrong. sdOverExpected has no convenient closed form and IS
-  // the measured figure.
+  // THE LOADING MULTIPLE RISES MONOTONICALLY WITH ATTACHMENT and it EMERGES from
+  // SD/E rather than being chosen — that is the whole point of the SD risk load.
+  // It survived the restructure (a merged $10M-$50M band is more remote than the
+  // $15M xs $10M it absorbs, so its SD/E and its multiple both rise) and it
+  // survives the move to runtime pricing. Asserted in reinsurance-tower-check.
   //
-  // ⚠ NEUTRAL-RISK-QUALITY BASIS, AND THIS CHANGED AT THE MERGE. The previous
-  // values were computed at each member's ACTUAL risk quality, which embeds both
-  // the frequency theta and the severity tilt of one particular roster — 3.9%
-  // above neutral on the canonical 200, and a different number on any enrolled
-  // subset. A per-$100 rate card should not carry one book's risk-quality mix, for
-  // the same reason it is measured full-market rather than on one seed's enrolled
-  // book: the constant has to be reproducible. Neutral RQ is also the basis
-  // deriveNeutralPurePremiumPer100 already uses for the pure premium pick.
-  //
-  // WHAT MOVED FROM THE RETIRED FOUR-TIER MODEL. That model's catastrophic annuity
-  // had a HARD CEILING of $15.51M present value; the mixture has none.
-  //   $4M xs $1M     0.4662 -> 0.6620   +42%   more claims pierce $1M
-  //   $5M xs $5M     0.2697 -> 0.1474   -45%   the old annuity clustered here
-  //   $40M xs $10M   0.0873 -> 0.1383   +58%   (vs the two old layers summed)
-  //
-  // THE LOADING MULTIPLE STILL RISES MONOTONICALLY WITH ATTACHMENT — 1.32x, 1.83x,
-  // 3.00x — and it EMERGES from SD/E rather than being chosen. That is the whole
-  // point of the SD risk load, and it had to survive the restructure: a merged
-  // layer spanning $10M-$50M is more remote than the $15M xs $10M it absorbs, so
-  // its SD/E and therefore its multiple both rise. Asserted in
-  // reinsurance-tower-check.
+  // ⚠ THE MULTIPLES ARE NO LONGER FIXED NUMBERS, because SD/E is no longer a
+  // fixed number: a small book is more volatile per dollar of expected ceded loss
+  // and now correctly pays a higher multiple for the same layer. At the full
+  // market in year 1 they are 1.33x / 1.87x / 3.02x on WC and 1.27x / 1.51x /
+  // 1.82x on GL; on a $82M GL book the working layer's rises to ~1.98x.
   WC: [
-    { name: '$4M xs $1M', attachment: 1e6, limit: 4e6, expectedCededPer100: 0.6620, sdOverExpected: 0.54, purchasable: true },
-    { name: '$5M xs $5M', attachment: 5e6, limit: 5e6, expectedCededPer100: 0.1474, sdOverExpected: 1.44, purchasable: true },
+    { name: '$4M xs $1M', attachment: 1e6, limit: 4e6, purchasable: true },
+    { name: '$5M xs $5M', attachment: 5e6, limit: 5e6, purchasable: true },
     // THE MERGED BAND, $10M-$50M. Absorbs the retired `$15M xs $10M` and
     // `$25M xs $25M`. Pierced 0.22/yr — once every 4.6 years, against the
     // 1-per-26-years of the `$25M xs $25M` layer it swallowed, which is what
     // makes it a real purchase decision rather than a line item.
     //
-    // Above it the pool retains 0.0252 per $100, unreinsurable and unbounded:
-    // one occurrence over $50M per ~109 years.
-    { name: '$40M xs $10M', attachment: 10e6, limit: 40e6, expectedCededPer100: 0.1383, sdOverExpected: 3.38, purchasable: true },
+    // Above it the pool retains, unreinsurable and UNBOUNDED (WC has no severity
+    // cap): one occurrence over $50M per ~109 years.
+    { name: '$40M xs $10M', attachment: 10e6, limit: 40e6, purchasable: true },
   ],
+  // GL KEEPS THREE LAYERS — re-confirmed at the runtime-pricing change against
+  // the rebuilt severity model. The merge test WC failed is pierce frequency, and
+  // GL passes it comfortably: its top band is pierced 0.833/yr (once every 1.2
+  // years) against the 1-per-27-years that got WC's top layer merged away. All
+  // three GL bands are working layers.
   GL: [
-    { name: '$4M xs $1M', attachment: 1e6, limit: 4e6, expectedCededPer100: 0.9050, sdOverExpected: 0.97, purchasable: true },
-    { name: '$5M xs $5M', attachment: 5e6, limit: 5e6, expectedCededPer100: 0.5311, sdOverExpected: 1.51, purchasable: true },
-    { name: '$15M xs $10M', attachment: 10e6, limit: 15e6, expectedCededPer100: 0.7043, sdOverExpected: 2.16, purchasable: true },
+    { name: '$4M xs $1M', attachment: 1e6, limit: 4e6, purchasable: true },
+    { name: '$5M xs $5M', attachment: 5e6, limit: 5e6, purchasable: true },
+    { name: '$15M xs $10M', attachment: 10e6, limit: 15e6, purchasable: true },
     // No fourth layer. Market capacity — see the header. The pool retains above
-    // $25M, unlimited, and it is DISPLAYED as retainedAboveTower.
+    // $25M and it is DISPLAYED as retainedAboveTower.
+    //
+    // ⚠ THE REASON NARROWED WHEN THE SEVERITY CAP LANDED, and the header above
+    // still needs reading with that in mind. It used to be capacity AND
+    // pricing-honesty: an unbounded band cannot be priced with a straight face.
+    // GL_SEVERITY_CAP bounds this band at $75M per occurrence, so it is now
+    // priceable — the remaining objection is capacity alone, which has not
+    // changed. Adding the layer would still assert a market exists to write it.
   ],
 };
 
@@ -213,11 +205,14 @@ export const RISK_LOAD_LAMBDA = 0.60;
 // to the layer selection at all, and the interaction below is the whole reason
 // the cover exists.
 //
-// WHY THE PRICE IS COMPUTED AND NOT LOOKED UP. The per-occurrence constants
-// above freeze safely because a per-occurrence layer is LINEAR in exposure. An
-// aggregate is neither: its expected cost depends on the VOLATILITY of retained
-// loss, which pools as 1/sqrt(exposure), and it additionally depends on a
-// decision made in the same turn — which occurrence layers the player bought.
+// WHY THE PRICE IS COMPUTED AND NOT LOOKED UP. Its expected cost depends on the
+// VOLATILITY of retained loss, which pools as 1/sqrt(exposure), and it
+// additionally depends on a decision made in the same turn — which occurrence
+// layers the player bought.
+//
+// ⚠ THIS NOTE USED TO SAY "the per-occurrence constants above freeze safely" as
+// the contrast. They did not, and they are gone — see the header. The aggregate
+// was right to be computed; the occurrence layers have now joined it.
 //
 // Declining occurrence layers puts catastrophic claims back into the retention,
 // raising retained volatility, raising the aggregate's expected cost. Measured
@@ -237,56 +232,48 @@ export const RISK_LOAD_LAMBDA = 0.60;
 // up to +195% wrong on GL. A pricing model that cannot price the cover honestly
 // is a reason not to sell it.
 //
-// THE MODEL. Annual retained loss R is treated as compound-Poisson and then
-// lognormal-approximated:
-//   lambda   = AGG_OCC_FREQ_PER_1M x enrolled exposure ($M)
-//   E[R]     = lambda x m1(selection)
-//   SD[R]    = AGG_OVERDISPERSION x sqrt(lambda x m2(selection))
+// THE MODEL. Annual retained loss R is a compound sum, then
+// lognormal-approximated for the layer integral:
+//   E[R]     = E[gross] - E[ceded by the placed occurrence layers]
+//   CV[R]    = from towerMoments.retainedRiskMoments, at the current year
+//   SD[R]    = E[R] x CV[R]
 // then the aggregate layer expectation and its SD come from lognormal partial
 // moments in closed form (claimMath.lognormalPartialMoment).
 //
-// VALIDATION vs the empirical, WC, all 16 selections at three attachments: the
+// VALIDATION vs the empirical, WC, all selections at three attachments: the
 // closed form tracked the simulation closely at low attachments and low CV
 // (e.g. no layers at 110%: $1,434k empirical vs $1,445k closed form; all layers
 // at 125%: $50k vs $52k). It drifts where the value is small and the tail thin,
 // which is the safe direction to be wrong.
 //
-// AGG_OVERDISPERSION 1.05: the draw is wider than pure Poisson because of the
-// per-member Gamma frequency noise (k=16). Measured SD/Poisson-SD ranged 1.009
-// (no layers) to 1.049 (all layers), so 1.05 covers the worst case and errs
-// toward a slightly HIGHER price, which is the conservative direction for the
-// pool. m2 below was back-solved through this same factor, so the round trip
-// reproduces the measured SD exactly at the reference exposure and scales as
-// 1/sqrt(exposure) away from it.
-// RE-DERIVED: 1.4310 -> 1.3733. Measured FULL-MARKET now (1,785.3 occurrences/yr
-// over $1,300M) rather than on one seed's enrolled book; the name keeps
-// "PER_1M" because it is still applied to enrolled exposure at the call site.
-export const AGG_OCC_FREQ_PER_1M = 1.3733;   // WC occurrences per $1M of exposure
-export const AGG_OVERDISPERSION = 1.05;
-
-// Per-occurrence RETAINED second moment, indexed by the occurrence-layer
-// BITMASK (bit i = layer i placed). Measured over 4,000 enrolled WC years.
-// m1 is deliberately NOT stored — it is derived as
-// (E[gross] - sum of placed E[ceded]) / lambda, from the constants above, so the
-// two cannot drift apart.
+// ============================================================================
+// ⚠ TWO CONSTANTS WERE DELETED HERE, AND THE SECOND DELETION FIXED A REAL BUG.
 //
-// RE-DERIVED over 12,000 full-market years, and RE-INDEXED for three layers.
+// AGG_OCC_FREQ_PER_1M (1.3733) was WC occurrences per $1M, applied at the call
+// site to NOMINAL (wage-inflated) exposure. WC's occurrence COUNT tracks REAL
+// (frozen) payroll x wcFrequencyTrend — payroll growth is pure wage inflation and
+// letting claim counts ride it asserts that paying people more injures more of
+// them. So modelled lambda grew 3.63%/yr while true lambda grew at the frequency
+// trend. This was NOT a staleness problem and would have survived any
+// re-measurement of the table: the constant was fine, the basis it was applied
+// to was wrong. Worse, E[R] came from the correctly-trended expectedGrossLoss
+// while SD[R] came from this lambda, so the CV handed to the lognormal was wrong
+// in a way neither input revealed on its own.
 //
-// ⚠ THE MASK SET HALVED, 16 -> 8. It is 2^(number of layers), so merging the top
-// two layers changed the index space, not just the values. Bit 2 is now the
-// merged $40M xs $10M band; the old bit 3 is gone. Any stored 16-entry table read
-// against this index would silently address the wrong mask — quoteAggregate falls
-// back to WC_RETAINED_SECOND_MOMENT[0] on an out-of-range index, which would have
-// priced every selection as if NO layers were placed.
+// AGG_OVERDISPERSION (1.05) was a fudge back-solved to widen a pure-Poisson SD
+// into the measured one, standing in for per-member Gamma frequency noise the
+// stored table could not represent. retainedRiskMoments carries that noise
+// analytically (its B2 term), so keeping the multiplier would double-count it.
 //
-// Every mask is far above the retired four-tier model's: that model's catastrophic
-// annuity was capped at $15.51M present value, so the retained second moment was
-// capped with it, and the mixture's tail is unbounded. Mask 7 (all three placed)
-// is 2.23e10 against the old all-placed 5.39e9.
-export const WC_RETAINED_SECOND_MOMENT: number[] = [
-  1.1792e11, 7.7680e10, 9.0537e10, 5.9075e10,
-  6.2558e10, 3.0598e10, 4.5523e10, 2.2339e10,
-];
+// WC_RETAINED_SECOND_MOMENT was an 8-entry table indexed by placement bitmask,
+// frozen at year-1 dollars. Retained loss is a SECOND moment, so it grows roughly
+// as trend^2 and the table understated SD[R] by more every year — the aggregate
+// got cheaper in real terms exactly as the risk grew. It is now integrated in
+// closed form band by band (retained loss is piecewise linear in the occurrence
+// total, so this is exact, not an approximation), which also retires the
+// bitmask-index hazard the old comment warned about: there is no index to get
+// wrong, because there is no table.
+// ============================================================================
 
 // ATTACHMENT SET, as a multiple of EXPECTED RETAINED LOSS — recalculated from
 // the player's occurrence-layer selection every year, never a fixed dollar

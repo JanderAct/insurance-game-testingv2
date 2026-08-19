@@ -423,10 +423,14 @@ export function processLineYear(
   if (isClaimLine && (isWcClaimLine || isGlClaimLine)) {
     const towerLine = line as TowerLine;
     const placedForCost = normalizeLayersPlaced(towerLine, lineDecisions.layersPlaced);
-    reinsuranceCost = occurrenceProgramCost(towerLine, placedForCost, activeExposure * 10_000);
+    // COMPUTED FROM THE BOOK AND THE YEAR, not a frozen per-$100 rate times
+    // nominal exposure. The old form charged a premium that grew at the wage rate
+    // while the cover's value grew with the severity trend, and it applied one
+    // book's SD/E to every book size. See towerMoments.ts.
+    reinsuranceCost = occurrenceProgramCost(towerLine, placedForCost, currentActiveMembers, yearNumber);
     if (towerLine === 'WC' && lineDecisions.aggregateStopLevel >= 0) {
       reinsuranceCost += quoteAggregate(
-        placedForCost, activeExposure, expectedLoss, lineDecisions.aggregateStopLevel,
+        placedForCost, currentActiveMembers, expectedLoss, lineDecisions.aggregateStopLevel, yearNumber,
       ).premium;
     }
   } else {
@@ -810,9 +814,10 @@ export function processLineYear(
     if (towerLine === 'WC' && lineDecisions.aggregateStopLevel >= 0) {
       const quote = quoteAggregate(
         placed,
-        activeExposure,
+        currentActiveMembers,
         expectedLoss,
         lineDecisions.aggregateStopLevel,
+        yearNumber,
       );
       aggregatePremium = quote.premium;
       aggregateAttachment = quote.attachment;

@@ -18,16 +18,14 @@
 import {
   AGG_ATTACHMENT_LEVELS,
   AGG_LIMIT_MULTIPLE,
-  AGG_OCC_FREQ_PER_1M,
-  AGG_OVERDISPERSION,
   REINSURANCE_TOWER,
   RISK_LOAD_LAMBDA,
   TOWER_TOP,
-  WC_RETAINED_SECOND_MOMENT,
   type TowerLine,
 } from '../data/reinsuranceTower';
 import { lognormalPartialMoment } from './claimMath';
-import type { Claim, CoverageLine, Occurrence } from '../types/simulation';
+import { allLayerRiskMoments, layerRiskMoments, retainedRiskMoments } from './towerMoments';
+import type { Claim, CoverageLine, Member, Occurrence } from '../types/simulation';
 
 export const isTowerLine = (line: CoverageLine): line is TowerLine => line === 'WC' || line === 'GL';
 
@@ -98,23 +96,40 @@ export function cedeOccurrences(
 }
 
 // --- occurrence-layer pricing ----------------------------------------------
-
-// premium = E[ceded] + lambda x SD[ceded], with both scaled off the measured
-// per-$100-of-exposure constants. Linear in exposure, which is exactly why the
-// constants can be frozen (see their derivation note).
-export function layerPremium(line: TowerLine, layerIndex: number, exposurePer100: number): number {
-  const l = REINSURANCE_TOWER[line][layerIndex];
-  const expected = l.expectedCededPer100 * exposurePer100;
-  return expected * (1 + RISK_LOAD_LAMBDA * l.sdOverExpected);
+//
+// premium = E[ceded] + lambda x SD[ceded], BOTH COMPUTED AT RUNTIME from the
+// enrolled book and the current year (src/utils/towerMoments.ts), in real drawn
+// dollars. This replaced two stored per-layer constants, and the reason is in
+// towerMoments.ts's header: `expectedCededPer100` froze legitimately (a
+// per-occurrence layer is linear in exposure) but drifted with the severity
+// trend, while `sdOverExpected` never froze legitimately at all — it scales as
+// ~1/sqrt(exposure), so freezing it undercharged small pools by ~20% and
+// overcharged the full market by ~25%.
+//
+// ⚠ NO exposurePer100 ARGUMENT ANY MORE, and that is the trend fix. The old
+// signature multiplied a frozen per-$100 rate by NOMINAL (wage-inflated)
+// exposure, so the premium grew at the wage rate (3.63%/yr) while the actual
+// ceded loss grew with the SEVERITY trend through a convex layer — 22% to 41%
+// faster over a decade on GL, 17% on WC's top layer. The reinsurer handed over
+// increasing value for free and the gap widened every year. Computing E[ceded]
+// directly from the book removes the mismatch by construction: there is no
+// longer a second, differently-trending quantity for the price to be stated in.
+export function layerPremium(line: TowerLine, layerIndex: number, members: Member[], yearNumber: number): number {
+  const m = layerRiskMoments(line, layerIndex, members, yearNumber);
+  return m.expected + RISK_LOAD_LAMBDA * m.sd;
 }
 
-export function expectedCededForLayer(line: TowerLine, layerIndex: number, exposurePer100: number): number {
-  return REINSURANCE_TOWER[line][layerIndex].expectedCededPer100 * exposurePer100;
+export function expectedCededForLayer(line: TowerLine, layerIndex: number, members: Member[], yearNumber: number): number {
+  return layerRiskMoments(line, layerIndex, members, yearNumber).expected;
 }
 
-export function occurrenceProgramCost(line: TowerLine, placed: boolean[], exposurePer100: number): number {
+// ONE pass over the book for the whole program, not one per layer — see
+// allLayerRiskMoments. Pricing three layers separately walked the member list
+// three times and re-resolved each member's rating group and lambda each time.
+export function occurrenceProgramCost(line: TowerLine, placed: boolean[], members: Member[], yearNumber: number): number {
+  const moments = allLayerRiskMoments(line, members, yearNumber);
   return REINSURANCE_TOWER[line].reduce((s, l, i) =>
-    s + (placed[i] && l.purchasable ? layerPremium(line, i, exposurePer100) : 0), 0);
+    s + (placed[i] && l.purchasable ? moments[i].expected + RISK_LOAD_LAMBDA * moments[i].sd : 0), 0);
 }
 
 // --- the aggregate stop-loss, priced from the selected configuration --------
@@ -149,24 +164,70 @@ function layerMoments(mean: number, cv: number, a: number, b: number) {
 
 // Quote the WC aggregate for a given occurrence-layer selection. `level` indexes
 // AGG_ATTACHMENT_LEVELS; expectedGrossLoss is the line's own E[gross].
+//
+// ============================================================================
+// TWO DEFECTS FIXED HERE, AND THE SECOND ONE IS NOT A TREND PROBLEM.
+//
+// 1. THE STORED SECOND MOMENT WAS FROZEN AT YEAR-1 DOLLARS.
+//    WC_RETAINED_SECOND_MOMENT[mask] was measured once and indexed by placement
+//    bitmask. Retained loss is a SECOND moment, so it grows roughly as trend^2 —
+//    the stored table understated SD[R] by more every year, making the aggregate
+//    progressively cheaper in real terms exactly as the risk it covers grew.
+//    Now computed from retainedRiskMoments, which integrates the piecewise-linear
+//    retained function band by band in closed form at the current year.
+//
+// 2. lambda WAS ON THE WRONG EXPOSURE BASIS — independent of trend, and it would
+//    have survived any re-measurement of the table.
+//    The old line was `lambda = AGG_OCC_FREQ_PER_1M x exposureMillions`, where
+//    exposureMillions is NOMINAL (wage-inflated) exposure. But WC's occurrence
+//    COUNT tracks REAL (frozen) payroll x wcFrequencyTrend — payroll growth here
+//    is pure wage inflation, and letting claim counts rise with it would assert
+//    that paying people more injures more of them (the exact defect lineHelpers'
+//    getMemberExposure header warns about, and finding 37's class). So modelled
+//    lambda grew at 3.63%/yr while true lambda grew at the frequency trend.
+//    Worse, E[R] was derived from the correctly-trended expectedGrossLoss while
+//    SD[R] came from this incorrectly-trended lambda, so the CV fed to the
+//    lognormal was wrong in a way NEITHER INPUT REVEALED ALONE.
+//    retainedRiskMoments reads each member's real payroll and the line's own
+//    wcFrequencyTrend, so there is no separate frequency constant to be on the
+//    wrong basis.
+//
+// WHAT IS DELIBERATELY UNCHANGED: E[R] is still derived as
+// (expectedGrossLoss - ceded by the placed layers) rather than taken from
+// retainedRiskMoments directly. That keeps the existing "the two cannot drift"
+// property — E[R] and the layer prices come from one arithmetic — and keeps E[R]
+// on the engine's own actual-risk-quality basis. Only the CV comes from the
+// neutral-RQ moment machinery, because a RATIO is far less basis-sensitive than
+// either moment alone: the neutral and actual bases differ by a few percent on
+// each moment and by very little on their quotient.
+//
+// AGG_OVERDISPERSION IS GONE. It was a 1.05 fudge back-solved to widen a pure
+// -Poisson SD into the measured one, compensating for per-member Gamma frequency
+// noise that the stored table could not represent. retainedRiskMoments carries
+// that noise analytically (the B2 term), so multiplying by 1.05 on top would now
+// double-count it.
+// ============================================================================
 export function quoteAggregate(
   placed: boolean[],
-  exposureMillions: number,
+  members: Member[],
   expectedGrossLoss: number,
   level: number,
+  yearNumber: number,
 ): AggregateQuote {
-  const exposurePer100 = exposureMillions * 1e6 / 100;
-  const lambda = AGG_OCC_FREQ_PER_1M * exposureMillions;
-  const mask = layerMask(placed.map((on, i) => on && REINSURANCE_TOWER.WC[i].purchasable));
+  const effective = placed.map((on, i) => on && REINSURANCE_TOWER.WC[i].purchasable);
 
-  // m1 is DERIVED from the frozen per-layer constants rather than stored, so the
+  // m1 is DERIVED from the layer prices rather than measured separately, so the
   // two cannot drift: retained = gross - everything the occurrence layers cede.
-  const cededByPlaced = REINSURANCE_TOWER.WC.reduce((s, l, i) =>
-    s + ((mask & (1 << i)) ? l.expectedCededPer100 * exposurePer100 : 0), 0);
+  // ONE moment pass for all layers — expectedCededForLayer per layer would walk
+  // the book three times for the same numbers.
+  const layerMoms = allLayerRiskMoments('WC', members, yearNumber);
+  const cededByPlaced = REINSURANCE_TOWER.WC.reduce((s, _l, i) =>
+    s + (effective[i] ? layerMoms[i].expected : 0), 0);
   const expectedRetained = Math.max(1, expectedGrossLoss - cededByPlaced);
 
-  const m2 = WC_RETAINED_SECOND_MOMENT[mask] ?? WC_RETAINED_SECOND_MOMENT[0];
-  const sdRetained = AGG_OVERDISPERSION * Math.sqrt(lambda * m2);
+  // CV from the runtime moments; SD rescaled onto the engine's own E[R].
+  const retained = retainedRiskMoments('WC', effective, members, yearNumber);
+  const sdRetained = expectedRetained * retained.sdOverExpected;
 
   const attachment = expectedRetained * AGG_ATTACHMENT_LEVELS[level];
   const limit = expectedRetained * AGG_LIMIT_MULTIPLE;

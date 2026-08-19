@@ -9,17 +9,31 @@
 // the price no longer moves with the funding confidence level.
 
 import {
-  AGG_ATTACHMENT_LEVELS, REINSURANCE_TOWER, RISK_LOAD_LAMBDA, TOWER_TOP, WC_RETAINED_SECOND_MOMENT,
+  AGG_ATTACHMENT_LEVELS, REINSURANCE_TOWER, RISK_LOAD_LAMBDA, TOWER_TOP,
 } from '../../src/data/reinsuranceTower';
 import {
   cedeOccurrences, claimContribution, layerMask, layerPremium,
   occurrenceProgramCost, occurrenceTotals, quoteAggregate,
 } from '../../src/utils/reinsuranceTower';
+import { layerRiskMoments } from '../../src/utils/towerMoments';
+import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
 import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import type { Claim, CoverageLine, DecisionSet, GameState, ResultSet } from '../../src/types/simulation';
+
+const ROSTER = getPredefinedMarketMembers();
+
+// A reference book of roughly `targetM` of that line's exposure, taken from the
+// canonical roster. The tower prices off the BOOK now rather than a per-$100
+// rate, so every pricing check needs members instead of an exposure scalar.
+const REF_YEAR = 1;
+function bookFor(line: 'WC' | 'GL', targetM: number) {
+  const out: typeof ROSTER = []; let e = 0;
+  for (const m of ROSTER) { if (e >= targetM) break; out.push(m); e += (m.exposureByLine[line] ?? 0); }
+  return out;
+}
 
 const problems: string[] = [];
 const note = (ok: boolean, msg: string) => { if (!ok) problems.push(msg); return ok ? 'OK' : 'FAIL'; };
@@ -83,16 +97,22 @@ console.log('\n=== 2. EROSION AND CORRIDOR RETENTION FALL OUT OF THE ARITHMETIC 
 
 console.log('\n=== 3. THE RISK LOAD RISES WITH ATTACHMENT (one lambda, not four multiples) ===');
 {
-  const per100 = 2.9e6; // $290M exposure
   for (const line of ['WC', 'GL'] as const) {
-    const mults = REINSURANCE_TOWER[line].map(l => 1 + RISK_LOAD_LAMBDA * l.sdOverExpected);
+    const book = bookFor(line, 290);
+    const mults = REINSURANCE_TOWER[line].map((_l, i) => {
+      const m = layerRiskMoments(line, i, book, REF_YEAR);
+      return 1 + RISK_LOAD_LAMBDA * m.sdOverExpected;
+    });
     const rising = mults.every((m, i) => i === 0 || m > mults[i - 1]);
     console.log(`  ${line}: ${REINSURANCE_TOWER[line].map((l, i) => `${l.name} ${mults[i].toFixed(2)}x`).join('  ')}`);
     console.log(`     monotonically rising with attachment: ${note(rising, `${line} loading multiples not monotonic`)}`);
   }
   // The behaviour that validates the whole approach: GL's top layer costs MORE
   // per $100 than WC's despite a LOWER multiple, because it is more exposed.
-  const glTop = layerPremium('GL', 2, per100) / per100, wcTop = layerPremium('WC', 2, per100) / per100;
+  const glBook = bookFor('GL', 290), wcBook = bookFor('WC', 290);
+  const glExpU = glBook.reduce((s2, m) => s2 + (m.exposureByLine.GL ?? 0), 0) * 1e4;
+  const wcExpU = wcBook.reduce((s2, m) => s2 + (m.exposureByLine.WC ?? 0), 0) * 1e4;
+  const glTop = layerPremium('GL', 2, glBook, REF_YEAR) / glExpU, wcTop = layerPremium('WC', 2, wcBook, REF_YEAR) / wcExpU;
   console.log(`  GL top layer ${glTop.toFixed(4)} per $100 vs WC top ${wcTop.toFixed(4)} — GL dearer on a LOWER multiple: ` +
     `${note(glTop > wcTop, 'GL top layer is not dearer than WC top')}`);
   // ⚠ WAS "the unpurchasable WC layer is excluded from program cost", then "WC's
@@ -110,12 +130,15 @@ console.log('\n=== 3. THE RISK LOAD RISES WITH ATTACHMENT (one lambda, not four 
     `${note(wcCount === glCount, `WC has ${wcCount} layers and GL ${glCount}; if that diverges again, do NOT reintroduce a count-based line test`)}`);
   console.log(`  every WC layer purchasable: ${note(REINSURANCE_TOWER.WC.every(l => l.purchasable), 'a WC layer is flagged non-purchasable without a stated reason')}`);
   console.log(`  merged top band spans $10M-$50M: ${note(REINSURANCE_TOWER.WC[2].attachment === 10e6 && REINSURANCE_TOWER.WC[2].limit === 40e6, 'the merged WC top layer is not $40M xs $10M')}`);
-  console.log(`  and it is charged when placed: ${note(occurrenceProgramCost('WC', [false, false, true], per100) > 0, 'the merged top layer is not being charged')}`);
-  // THE MASK TABLE IS INDEXED 2^layers. Merging halved it; an out-of-range index
-  // silently falls back to mask 0 (no layers placed), pricing every selection as
-  // full retention.
-  console.log(`  WC_RETAINED_SECOND_MOMENT has 2^${wcCount} = ${1 << wcCount} entries: ${WC_RETAINED_SECOND_MOMENT.length}  ` +
-    `${note(WC_RETAINED_SECOND_MOMENT.length === (1 << wcCount), `mask table has ${WC_RETAINED_SECOND_MOMENT.length} entries for ${wcCount} layers — quoteAggregate would fall back to mask 0 and price every selection as full retention`)}`)
+  console.log(`  and it is charged when placed: ${note(occurrenceProgramCost('WC', [false, false, true], wcBook, REF_YEAR) > 0, 'the merged top layer is not being charged')}`);
+  // ⚠ THE MASK-TABLE ASSERTION THAT USED TO SIT HERE IS GONE WITH ITS TABLE.
+  // WC_RETAINED_SECOND_MOMENT was an 8-entry array indexed by placement bitmask,
+  // and this check guarded against an out-of-range index silently falling back to
+  // mask 0 (pricing every selection as full retention). retainedRiskMoments
+  // integrates the retained band structure directly from `placed`, so there is no
+  // index to get wrong and no fallback to hide a mistake. The hazard was retired,
+  // not merely stopped being checked — see tower-runtime-check.ts for what
+  // replaced it (a memo-key guard, which is this change's equivalent risk).
 }
 
 console.log('\n=== 4. THE AGGREGATE RESPONDS TO THE OCCURRENCE-LAYER SELECTION ===');
@@ -135,12 +158,15 @@ console.log('\n=== 4. THE AGGREGATE RESPONDS TO THE OCCURRENCE-LAYER SELECTION =
 // premium from $2.43M to $4.01M at a 110% attachment. The price responds; it just
 // responds less, because the underlying risk transfer is less.
 {
-  const EXPOSURE = 290, EGROSS = 12.83e6;
+  const EGROSS = 12.83e6;
+  const AGG_BOOK = bookFor('WC', 290);
+  const AGG_SMALL = bookFor('WC', 145), AGG_BIG = bookFor('WC', 580);
+  const unitsOf = (bk: typeof ROSTER) => bk.reduce((s2, m) => s2 + (m.exposureByLine.WC ?? 0), 0) * 1e4;
   const all = REINSURANCE_TOWER.WC.map(l => l.purchasable);
   const none = REINSURANCE_TOWER.WC.map(() => false);
   console.log('  att%   all layers premium    none placed premium    ratio');
   for (let lv = 0; lv < AGG_ATTACHMENT_LEVELS.length; lv++) {
-    const qa = quoteAggregate(all, EXPOSURE, EGROSS, lv), qn = quoteAggregate(none, EXPOSURE, EGROSS, lv);
+    const qa = quoteAggregate(all, AGG_BOOK, EGROSS, lv, REF_YEAR), qn = quoteAggregate(none, AGG_BOOK, EGROSS, lv, REF_YEAR);
     const ratio = qn.premium / Math.max(qa.premium, 1);
     console.log(`  ${(AGG_ATTACHMENT_LEVELS[lv] * 100).toFixed(0)}%   ${fmt$(qa.premium).padStart(18)}    ${fmt$(qn.premium).padStart(18)}    x${ratio.toFixed(1)}  ` +
       `${note(ratio > 1.4, `aggregate barely responds to selection at ${AGG_ATTACHMENT_LEVELS[lv]} (x${ratio.toFixed(1)})`)}`);
@@ -149,8 +175,8 @@ console.log('\n=== 4. THE AGGREGATE RESPONDS TO THE OCCURRENCE-LAYER SELECTION =
   console.log('     raising retained volatility and so the aggregate\'s price. Without this,');
   console.log('     "decline everything, buy the aggregate" would be free volatility transfer.');
   // Not linear in exposure — the reason this price is computed, not frozen.
-  const small = quoteAggregate(all, 145, EGROSS / 2, 1), big = quoteAggregate(all, 580, EGROSS * 2, 1);
-  const rs = small.premium / (145e6 / 100), rb = big.premium / (580e6 / 100);
+  const small = quoteAggregate(all, AGG_SMALL, EGROSS / 2, 1, REF_YEAR), big = quoteAggregate(all, AGG_BIG, EGROSS * 2, 1, REF_YEAR);
+  const rs = small.premium / unitsOf(AGG_SMALL), rb = big.premium / unitsOf(AGG_BIG);
   console.log(`  premium per $100 at $145M exposure ${rs.toFixed(4)} vs $580M ${rb.toFixed(4)} — FALLS as the book grows: ` +
     `${note(rb < rs, 'aggregate price per $100 did not fall with exposure — linearity bug')}`);
   // ⚠ WAS `layerMask([true, false, true, true]) === 13` with the label "16 entries
@@ -158,9 +184,14 @@ console.log('\n=== 4. THE AGGREGATE RESPONDS TO THE OCCURRENCE-LAYER SELECTION =
   // input still produced 13 after the merge — layerMask does not know how many
   // layers exist — so the check kept PASSING while describing a tower that no
   // longer existed, and the label was simply false. Sized off the array now.
-  const nWc = REINSURANCE_TOWER.WC.length;
-  console.log(`  mask indexing is total (${1 << nWc} entries for ${nWc} layers): ` +
-    `${note(layerMask([true, false, true]) === 5 && WC_RETAINED_SECOND_MOMENT.length === (1 << nWc), 'layerMask or the mask table is not sized to the tower')}`);
+  // ⚠ THE TABLE THIS USED TO SIZE AGAINST IS GONE. It asserted
+  // WC_RETAINED_SECOND_MOMENT.length === 2^layers, guarding an out-of-range mask
+  // silently falling back to "no layers placed". retainedRiskMoments reads
+  // `placed` directly, so the index hazard no longer exists. layerMask itself
+  // survives (cedeOccurrences and the UI still use placement arrays) and is
+  // still worth a bit-order check.
+  console.log(`  layerMask bit order is little-endian (layer 0 = bit 0): ` +
+    `${note(layerMask([true, false, true]) === 5, 'layerMask bit order changed')}`);
 }
 
 console.log('\n=== 5. PRICE IS NO LONGER A FUNCTION OF THE FUNDING CONFIDENCE LEVEL ===');

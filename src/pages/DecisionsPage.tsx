@@ -1,6 +1,6 @@
 import React from 'react';
 import { DollarSign, TrendingUp, BarChart2, Shield, RotateCcw, Lock, Info } from 'lucide-react';
-import type { DecisionSet, LineDecisionSet, CoverageLine, LineView, LineResultSet } from '../types/simulation';
+import type { DecisionSet, LineDecisionSet, CoverageLine, LineView, LineResultSet, Member } from '../types/simulation';
 import SliderInput from '../components/SliderInput';
 import AllocationBar from '../components/AllocationBar';
 import { SLIDER_RANGES, REINSURANCE_PROGRAMS, ASSET_ALLOCATION_DEFAULT } from '../data/defaultAssumptions';
@@ -8,8 +8,9 @@ import { formatCurrency } from '../utils/formatters';
 import { getReinsuranceStructure } from '../utils/reinsuranceEngine';
 import { defaultLineDecisionSet } from '../utils/decisionDefaults';
 import { usesTower } from '../utils/reinsuranceDisplay';
-import { AGG_ATTACHMENT_LEVELS, AGG_LIMIT_MULTIPLE, REINSURANCE_TOWER, TOWER_TOP } from '../data/reinsuranceTower';
-import { layerPremium, expectedCededForLayer, normalizeLayersPlaced, occurrenceProgramCost, quoteAggregate } from '../utils/reinsuranceTower';
+import { AGG_ATTACHMENT_LEVELS, AGG_LIMIT_MULTIPLE, REINSURANCE_TOWER, RISK_LOAD_LAMBDA, TOWER_TOP } from '../data/reinsuranceTower';
+import { normalizeLayersPlaced, quoteAggregate } from '../utils/reinsuranceTower';
+import { allLayerRiskMoments } from '../utils/towerMoments';
 import { lineDisplayName } from '../utils/lineDisplay';
 import { lookupCLF } from '../utils/simulationEngine';
 import type { FundingConsequence } from '../utils/fundingConsequence';
@@ -25,9 +26,6 @@ interface DecisionsPageProps {
   yearNumber: number;
   estimatedPremium: number;
   estimatedExpectedLoss: number;
-  // Active exposure for the line being edited, in EXPOSURE UNITS ($M of payroll
-  // or TIV). The tower prices per $100 of exposure, so the control needs it.
-  estimatedExposure: number;
   disabled?: boolean;
   // 'pool' hosts the two pool-wide decisions (investment allocation, risk
   // control); each coverage line's tab edits that line's own decisions.
@@ -41,6 +39,10 @@ interface DecisionsPageProps {
   // SELECTED funding confidence level and reinsurance level. Null only
   // before a game exists.
   fundingConsequence: FundingConsequence | null;
+  // The line's ACTIVE enrolled members. The reinsurance tower prices off the
+  // book itself now, not off a frozen per-$100 rate card times exposure — both
+  // E[ceded] and SD[ceded] depend on who is actually enrolled and on the year.
+  activeMembers: Member[];
 }
 
 // 0.30-0.45 ADDED alongside the funding-confidence range's extension down from
@@ -88,7 +90,7 @@ function resetLineToDefaults(decisions: DecisionSet, line: CoverageLine): Decisi
   };
 }
 
-export default function DecisionsPage({ decisions, onChange, yearNumber, estimatedPremium, estimatedExpectedLoss, estimatedExposure, disabled = false, lineView, lineLoanInfo, lastLineResult, fundingConsequence }: DecisionsPageProps) {
+export default function DecisionsPage({ decisions, onChange, yearNumber, estimatedPremium, estimatedExpectedLoss, disabled = false, lineView, lineLoanInfo, lastLineResult, fundingConsequence, activeMembers }: DecisionsPageProps) {
   // Pool tab: the two pool-wide decisions. One allocation policy and one
   // risk-control intensity for the whole pool — each line applies them to its
   // OWN base (own segregated portfolio / own premium).
@@ -202,8 +204,9 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
               d={d}
               set={set}
               disabled={disabled}
-              exposure={estimatedExposure}
               expectedLoss={estimatedExpectedLoss}
+              members={activeMembers}
+              yearNumber={yearNumber}
             />
           ) : (
           <>
@@ -611,18 +614,18 @@ function DataRow({ label, value }: { label: string; value: string }) {
 // market but real, and choosing which bands to keep is the point.
 // ===========================================================================
 function TowerControls({
-  line, d, set, disabled, exposure, expectedLoss,
+  line, d, set, disabled, expectedLoss, members, yearNumber,
 }: {
   line: CoverageLine;
   d: LineDecisionSet;
   set: (key: keyof LineDecisionSet, val: number | boolean[]) => void;
   disabled: boolean;
-  exposure: number;
   expectedLoss: number;
+  members: Member[];
+  yearNumber: number;
 }) {
   const layers = REINSURANCE_TOWER[line as 'WC' | 'GL'];
   const placed = normalizeLayersPlaced(line as 'WC' | 'GL', d.layersPlaced);
-  const per100 = exposure * 10_000;
 
   const toggle = (i: number) => {
     if (disabled || !layers[i].purchasable) return;
@@ -631,14 +634,18 @@ function TowerControls({
     set('layersPlaced', next);
   };
 
-  const occCost = occurrenceProgramCost(line as 'WC' | 'GL', placed, per100);
+  // One moment pass for the whole tower, reused by every row below — calling
+  // layerPremium/expectedCededForLayer per row walked the book six times.
+  const layerMoms = allLayerRiskMoments(line as 'WC' | 'GL', members, yearNumber);
+  const occCost = layers.reduce((s, l, i) =>
+    s + (placed[i] && l.purchasable ? layerMoms[i].expected + RISK_LOAD_LAMBDA * layerMoms[i].sd : 0), 0);
   // LIVE, not cached: the aggregate is re-quoted from the CURRENT placements on
   // every render, so declining a layer immediately raises its price. That
   // responsiveness is the whole reason the price is computed rather than stored —
   // without it, "decline everything and buy the aggregate" is free volatility
   // transfer.
   const aggQuote = line === 'WC' && d.aggregateStopLevel >= 0
-    ? quoteAggregate(placed, exposure, expectedLoss, d.aggregateStopLevel)
+    ? quoteAggregate(placed, members, expectedLoss, d.aggregateStopLevel, yearNumber)
     : null;
   const totalCost = occCost + (aggQuote?.premium ?? 0);
 
@@ -650,8 +657,8 @@ function TowerControls({
         </p>
         <div className="space-y-1.5">
           {layers.map((l, i) => {
-            const price = layerPremium(line as 'WC' | 'GL', i, per100);
-            const expected = expectedCededForLayer(line as 'WC' | 'GL', i, per100);
+            const price = layerMoms[i].expected + RISK_LOAD_LAMBDA * layerMoms[i].sd;
+            const expected = layerMoms[i].expected;
             const multiple = expected > 0 ? price / expected : 0;
             if (!l.purchasable) {
               return (
@@ -732,7 +739,7 @@ function TowerControls({
               <span className="font-bold">None</span>
             </button>
             {AGG_ATTACHMENT_LEVELS.map((mult, lv) => {
-              const q = quoteAggregate(placed, exposure, expectedLoss, lv);
+              const q = quoteAggregate(placed, members, expectedLoss, lv, yearNumber);
               return (
                 <button
                   key={lv}
@@ -778,8 +785,10 @@ function TowerControls({
           <DataRow label="Retained Above Tower" value={`Above ${TOWER_TOP[line as 'WC' | 'GL'] / 1e6}M — unlimited`} />
         </div>
         <p className="text-blue-700 mt-2 text-xs leading-relaxed border-t border-blue-200 pt-2">
-          Priced as expected ceded loss plus a risk load, per $100 of exposure — <strong>not</strong> as a
-          percentage of premium, so the cost no longer moves when you change the funding confidence level.
+          Priced as expected ceded loss plus a risk load on its standard deviation, both computed from
+          <strong> your own book and this year's severity</strong> — not as a percentage of premium, so the
+          cost does not move when you change the funding confidence level. A smaller book is more volatile
+          per dollar of expected loss, so it pays a higher multiple for the same layer.
         </p>
       </div>
     </div>

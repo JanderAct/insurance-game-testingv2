@@ -1478,7 +1478,9 @@ WC reports exactly 1, GL still varies.
 
 ## 35. The tower re-derivation: the top layer became real, and the aggregate got weaker
 
-Measured over 12,000 full-market years with `scripts/diagnostics/wc-tower-rederive.ts`.
+Measured over 12,000 full-market years with `scripts/diagnostics/wc-tower-rederive.ts` (since
+retired along with the frozen constants it emitted — the tower is priced at runtime now; see
+`scripts/diagnostics/tower-runtime-check.ts`).
 
 **Prices are the CLOSED FORM, not the simulation.** Layer expectation over a lognormal mixture has an
 exact solution, so the constant carries no sampling error; the simulation agreed to within 4% on every

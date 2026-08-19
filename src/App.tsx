@@ -374,16 +374,10 @@ export default function App() {
     return exposure * lineState.ratePer100 * 10_000;
   }, [gameState, decisionLine]);
 
-  // Active exposure for the line being edited. The reinsurance tower prices per
-  // $100 of exposure, so the decision control needs the exposure itself rather
-  // than a premium or a loss figure derived from it.
-  const estimatedExposure = React.useMemo(() => {
-    if (!gameState) return 0;
-    const lineState = gameState.poolState.lines[decisionLine];
-    return lineState.members
-      .filter(m => m.status === 'active')
-      .reduce((s, m) => s + getMemberExposure(m, decisionLine, gameState.currentYearNumber), 0);
-  }, [gameState, decisionLine]);
+  // (The `estimatedExposure` memo that used to live here is gone. It existed
+  // solely to feed the reinsurance tower a per-$100 exposure base; the tower now
+  // prices off `decisionLineActiveMembers` and the year directly, so a nominal
+  // exposure figure is no longer an input to any price.)
 
   const estimatedExpectedLoss = React.useMemo(() => {
     if (!gameState) return 3_500_000;
@@ -419,24 +413,31 @@ export default function App() {
   // estimatedPremium above reads — so it doubles as the "vs last year" basis
   // with no separate lookup. Narrow deps (not all of currentDecisions) so this
   // does not recompute when an unrelated line's or pool decision changes.
+  // The decision line's active book. Shared by the funding-consequence panel and
+  // by the reinsurance tower, which now prices off the members themselves rather
+  // than off a frozen per-$100 rate card times exposure.
+  const decisionLineActiveMembers = React.useMemo(() => {
+    if (!gameState) return [];
+    return gameState.poolState.lines[decisionLine].members.filter(m => m.status === 'active');
+  }, [gameState, decisionLine]);
+
   const decisionLineFundingLevel = currentDecisions.byLine[decisionLine].fundingConfidenceLevel;
   const decisionLineReinsuranceLevel = currentDecisions.byLine[decisionLine].reinsuranceLevel;
   const decisionLineFundingAtExpected = currentDecisions.byLine[decisionLine].fundingAtExpected;
   const fundingConsequence = React.useMemo(() => {
     if (!gameState) return null;
     const lineState = gameState.poolState.lines[decisionLine];
-    const activeMembers = lineState.members.filter(m => m.status === 'active');
     return computeFundingConsequence(
       lineState.purePremiumPer100,
       decisionLineFundingLevel,
       decisionLineReinsuranceLevel,
       lineState.ratePer100,
       decisionLine,
-      activeMembers,
+      decisionLineActiveMembers,
       gameState.currentYearNumber,
       decisionLineFundingAtExpected,
     );
-  }, [gameState, decisionLine, decisionLineFundingLevel, decisionLineReinsuranceLevel, decisionLineFundingAtExpected]);
+  }, [gameState, decisionLine, decisionLineActiveMembers, decisionLineFundingLevel, decisionLineReinsuranceLevel, decisionLineFundingAtExpected]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -498,12 +499,12 @@ export default function App() {
             yearNumber={gameState.currentYearNumber}
             estimatedPremium={estimatedPremium}
             estimatedExpectedLoss={estimatedExpectedLoss}
-            estimatedExposure={estimatedExposure}
             disabled={gameState.isComplete}
             lineView={effectiveLineView}
             lineLoanInfo={lineLoanInfo}
             lastLineResult={lastLineResult}
             fundingConsequence={fundingConsequence}
+            activeMembers={decisionLineActiveMembers}
           />
         )}
 

@@ -218,7 +218,11 @@ export function tiltedGlWeights(riskQuality: number): number[] {
 // base is, so the two bases agree at neutral RQ to float precision. Kept as a
 // named function so callers read "pricing basis" rather than reaching into
 // GL_SEVERITY_COMPONENTS directly.
-function untiltedGlWeights(): number[] {
+//
+// EXPORTED for towerMoments.ts, which prices the reinsurance tower on the same
+// pricing basis (invariant 2: the severity tilt is draw-and-k_GL only, and must
+// not reach a price — including a reinsurance price).
+export function untiltedGlWeights(): number[] {
   return NORMALISED_WEIGHTS.slice();
 }
 
