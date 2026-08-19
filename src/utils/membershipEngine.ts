@@ -13,6 +13,11 @@ import {
   MEMBERSHIP_DEFAULT_DEPARTURE_RATE,
   MAX_NEW_MEMBERS_PER_YEAR,
   MAX_WITHDRAWN_PER_YEAR,
+  RATE_NEUTRAL_CHANGE_PCT,
+  RATE_NEUTRAL_LOAD,
+  RATE_RETENTION_SENSITIVITY,
+  RATE_SATISFACTION_SENSITIVITY,
+  RATE_LEVEL_SENSITIVITY,
 } from '../data/defaultAssumptions';
 
 export interface MemberMovementInputs {
@@ -28,6 +33,12 @@ export interface MemberMovementInputs {
   surplus: number;
   annualPremium: number;
   priorYearLossRatio?: number;
+  // % change in this line's TOTAL MEMBER CHARGE RATE per $100 vs last year.
+  // Null when there is no usable prior rate — see priceSignalFor.
+  rateChangePct?: number | null;
+  // This line's total member charge rate over its pure premium rate. Null when
+  // the pure premium is not positive.
+  rateLoad?: number | null;
   competitivePressure: number;
   memberSensitivity: number;
   yearNumber: number;
@@ -46,6 +57,37 @@ export interface MemberMovementResult {
   totalMarketExposure: number;
 }
 
+// --- the price signal, in the two forms the three sites need ----------------
+//
+// NULL HANDLING, one rule for both. A missing signal means NEUTRAL — deviation
+// exactly 0, no penalty and no bonus — never a default of "zero rate change",
+// which is a different and wrong thing on a line whose neutral is not zero.
+// Treating a null as a literal 0% change on Property, whose neutral is +4.83%,
+// would read as a 4.83-point rate CUT and hand out a bonus for missing data.
+//
+// In practice null is nearly unreachable: runPriorHistory simulates three
+// pre-game years through this same engine, so lineState.ratePer100 is already
+// populated when year 1 runs — measured 30/30 line-instances with a prior rate
+// in year 1, on every line. The branch exists for a save restored mid-stream or
+// a line switched on late, not for the normal opening.
+function priceSignalFor(inputs: MemberMovementInputs): {
+  changeDeviationPct: number;
+  levelDeviationPct: number;
+} {
+  const neutralChange = RATE_NEUTRAL_CHANGE_PCT[inputs.line] ?? 0;
+  const neutralLoad = RATE_NEUTRAL_LOAD[inputs.line] ?? 0;
+
+  const changeDeviationPct = inputs.rateChangePct === null || inputs.rateChangePct === undefined
+    ? 0
+    : inputs.rateChangePct - neutralChange;
+
+  const levelDeviationPct = inputs.rateLoad === null || inputs.rateLoad === undefined || neutralLoad <= 0
+    ? 0
+    : (inputs.rateLoad / neutralLoad - 1) * 100;
+
+  return { changeDeviationPct, levelDeviationPct };
+}
+
 function calcRetentionProbability(inputs: MemberMovementInputs): number {
   const { decisions, currentMemberSatisfaction, surplus, annualPremium, priorYearLossRatio } = inputs;
 
@@ -54,11 +96,15 @@ function calcRetentionProbability(inputs: MemberMovementInputs): number {
   const financialImpact = Math.min(0.02, Math.max(-0.02, (surplusRatio - 0.6) / 30));
   const dividendImpact = decisions.dividendPct * 0.20;
   const assessmentPenalty = decisions.assessmentPct * 0.15;
-  // rateIncreasePenalty REMOVED — the Rate Change decision it read is gone
-  // (CLF-only pricing). DELIBERATE: a bill-based replacement (reading the
-  // derived rate change the funding-consequence panel now shows) is pending,
-  // not a silent zeroing. W.rateIncreasePenalty (0.15 of the retention weight
-  // budget) currently contributes nothing.
+  // rateIncreasePenalty RECONNECTED. Reads the derived rate change — this
+  // year's total member charge rate per $100 against last year's — measured
+  // as a DEVIATION from this line's own neutral, because at defaults the
+  // neutral is not zero and differs per line (see RATE_NEUTRAL_CHANGE_PCT).
+  //
+  // PENALTY ONLY: a cut below neutral earns nothing back here. Members notice
+  // increases; the goodwill from a cut runs through satisfaction instead.
+  const { changeDeviationPct } = priceSignalFor(inputs);
+  const rateIncreasePenalty = Math.max(0, changeDeviationPct) * RATE_RETENTION_SENSITIVITY;
   const poorResultPenalty = priorYearLossRatio
     ? Math.max(0, priorYearLossRatio - 0.85) * 0.05
     : 0;
@@ -69,6 +115,7 @@ function calcRetentionProbability(inputs: MemberMovementInputs): number {
     + W.financialStrength * financialImpact
     + W.dividend * dividendImpact
     - W.assessmentPenalty * assessmentPenalty
+    - W.rateIncreasePenalty * rateIncreasePenalty
     - poorResultPenalty;
 
   return Math.max(0.80, Math.min(0.99, BASE_RETENTION + adjustment));
@@ -123,13 +170,23 @@ export function newMemberAdjustment(a: {
   surplus: number;
   annualPremium: number;
   competitivePressure: number;
+  levelDeviationPct?: number;
 }): number {
   let adj = 0;
 
-  // The five-branch rateChange ladder REMOVED — the Rate Change decision it
-  // read is gone (CLF-only pricing). DELIBERATE: a bill-based replacement is
-  // pending, not a silent zeroing. This channel currently contributes nothing
-  // to expected new members.
+  // The five-branch rateChange ladder is REPLACED, not restored: prospects
+  // compare LEVELS, not year-over-year changes. A pool that has been overpriced
+  // for five straight years has no rate change left to show and would escape a
+  // change-based ladder entirely, while still being the pool nobody joins.
+  //
+  // Scaled by competitivePressure because that is what the existing hook below
+  // already means here — high pressure is a market where members are harder to
+  // win, so being overpriced costs more in one. Symmetric: below-neutral pricing
+  // attracts, which is what makes declining the tower visible as an upside.
+  adj -= MEMBER_MOVEMENT_WEIGHTS.attraction.rateLevel
+    * a.competitivePressure
+    * RATE_LEVEL_SENSITIVITY
+    * (a.levelDeviationPct ?? 0);
 
   if (a.underwritingStrictness <= 2) adj += 0.8;
   else if (a.underwritingStrictness <= 4) adj += 0.3;
@@ -171,17 +228,26 @@ function calcExpectedNewMembers(inputs: MemberMovementInputs): number {
       surplus,
       annualPremium,
       competitivePressure,
+      levelDeviationPct: priceSignalFor(inputs).levelDeviationPct,
     });
 
   return Math.max(0, Math.min(MAX_NEW_MEMBERS_PER_YEAR, expected));
 }
 
-function updateSatisfaction(current: number, decisions: LineDecisionSet): number {
+function updateSatisfaction(
+  current: number,
+  decisions: LineDecisionSet,
+  changeDeviationPct: number,
+): number {
   let delta = 0;
-  // The rateChange satisfaction term REMOVED — the Rate Change decision it
-  // read is gone (CLF-only pricing). DELIBERATE: a bill-based replacement is
-  // pending, not a silent zeroing. Already inert at the old default (0), so
-  // this removal changes nothing at defaults.
+  // The rateChange satisfaction term RECONNECTED, reading the same derived rate
+  // change the retention term reads, as a deviation from this line's neutral.
+  //
+  // SYMMETRIC here, unlike retention: satisfaction is a slow-moving stock
+  // clamped to [1, 10], and a penalty-only form would ratchet it downward at
+  // defaults on rate noise alone. Letting it move both ways keeps it centred on
+  // its starting value when the pool prices at its neutral.
+  delta -= changeDeviationPct * RATE_SATISFACTION_SENSITIVITY;
   delta += decisions.dividendPct * 10.0;
   delta -= decisions.assessmentPct * 8.0;
   // NEUTRALISED — coefficient set to 0, not sign-flipped. This term zeroed at
@@ -278,7 +344,9 @@ export function simulateMemberMovement(inputs: MemberMovementInputs): MemberMove
     ? retainedMembers.length / currentMembers.length
     : 1;
 
-  const newSatisfaction = updateSatisfaction(inputs.currentMemberSatisfaction, inputs.decisions);
+  const newSatisfaction = updateSatisfaction(
+    inputs.currentMemberSatisfaction, inputs.decisions, priceSignalFor(inputs).changeDeviationPct,
+  );
   const newRiskQuality = updateRiskQuality(inputs.currentRiskQuality, inputs.decisions.underwritingStrictness, newMembers, activeMembers);
 
   return {

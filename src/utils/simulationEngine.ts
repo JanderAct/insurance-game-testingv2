@@ -345,6 +345,83 @@ export function processLineYear(
   const estimatedPremium =
     estimatedExposure * estimatedRateAtConfidenceLevelPer100 * 10_000;
 
+  // --- THE PRICE SIGNAL MEMBERS RESPOND TO ---------------------------------
+  //
+  // Members react to what they are CHARGED, which is the total member charge
+  // rate — pool premium + admin + reinsurance, per $100 of exposure — not the
+  // pool premium rate alone. Two derived quantities go into member movement,
+  // and they deliberately drive different things:
+  //
+  //   RATE CHANGE, vs last year's rate, drives RETENTION and SATISFACTION.
+  //     Members notice increases year over year.
+  //   RATE LEVEL, as the load over pure premium, drives NEW BUSINESS.
+  //     Prospects compare levels. A pool overpriced for five straight years
+  //     shows no rate CHANGE at all and would otherwise escape entirely.
+  //
+  // ⚠ A RATE COMPARISON, NOT A BILL COMPARISON, and that is the whole point.
+  // Payroll grows every year, so bills grow every year; a member whose payroll
+  // rose 4% and whose bill rose 4% has not been asked for more. The rate has
+  // the exposure growth already divided out. This is the same basis and the
+  // same field pairing fundingConsequence.ts's derivedRateChangePct uses —
+  // this year's total member charge rate against lineState.ratePer100, which
+  // IS last year's total member charge rate. It is not a second definition of
+  // the quantity; it is the same one, sourced inside the engine where the
+  // reinsurance cost is tower-aware. fundingConsequence's own reinsurance term
+  // is still the legacy percentage-of-premium one and is therefore blind to
+  // layersPlaced — calling it here would have made the tower, the single
+  // biggest price event in the game, invisible to the channel built to see it.
+  //
+  // PRELIMINARY, exactly like estimatedPremium above and for the same reason:
+  // movement has to run before the final exposure is known, so it is priced off
+  // the book we have. For WC/GL the occurrence tower cost is not an estimate at
+  // all — occurrenceProgramCost reads the pre-movement book and the year, so
+  // the value hoisted here is bit-identical to the one the final charge uses,
+  // and it is reused below rather than recomputed.
+  const isWcClaimLine = line === 'WC';
+  const isGlClaimLine = line === 'GL';
+  const isClaimLine = isWcClaimLine || isGlClaimLine;
+
+  const placedForCost = isClaimLine
+    ? normalizeLayersPlaced(line as TowerLine, lineDecisions.layersPlaced)
+    : null;
+  const towerOccurrenceCost = isClaimLine && placedForCost
+    ? occurrenceProgramCost(line as TowerLine, placedForCost, currentActiveMembers, yearNumber)
+    : null;
+
+  const estimatedAdminRatePer100 = newPurePremiumPer100 * ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM;
+  // The WC aggregate is the one component that cannot be hoisted exactly — it
+  // prices off expectedLoss, which needs the post-movement exposure. Estimated
+  // here on the pre-movement book, and inert at defaults (aggregateStopLevel -1).
+  const estimatedAggregateCost = isWcClaimLine && placedForCost && lineDecisions.aggregateStopLevel >= 0
+    ? quoteAggregate(
+        placedForCost, currentActiveMembers,
+        estimatedExposure * newPurePremiumPer100 * 10_000,
+        lineDecisions.aggregateStopLevel, yearNumber,
+      ).premium
+    : 0;
+  const estimatedReinsuranceCost = towerOccurrenceCost !== null
+    ? towerOccurrenceCost + estimatedAggregateCost
+    : calculateReinsuranceCost(
+        lineDecisions.reinsuranceLevel, estimatedPremium, instance.marketEnvironment.competitivePressure,
+      );
+
+  const estimatedTotalMemberRatePer100 =
+    estimatedRateAtConfidenceLevelPer100
+    + estimatedAdminRatePer100
+    + estimatedReinsuranceCost / Math.max(estimatedExposure * 10_000, 1);
+
+  // vs last year's total member charge rate. NULL when there is no usable
+  // prior — see priceSignalFor in membershipEngine for how null is treated.
+  const priorTotalMemberRatePer100 = lineState.ratePer100 > 0 ? lineState.ratePer100 : null;
+  const rateChangePct = priorTotalMemberRatePer100 !== null
+    ? (estimatedTotalMemberRatePer100 / priorTotalMemberRatePer100 - 1) * 100
+    : null;
+  // Scale-free, so it is comparable across lines and years: what the pool
+  // charges per dollar of expected loss.
+  const rateLoad = newPurePremiumPer100 > 0
+    ? estimatedTotalMemberRatePer100 / newPurePremiumPer100
+    : null;
+
   const memberRng = deriveSubRng(instance.seed, yearNumber, lineRngLabel('members', line));
 
   const memberResult = simulateMemberMovement({
@@ -358,6 +435,8 @@ export function processLineYear(
     surplus: lineState.surplus,
     annualPremium: estimatedPremium,
     priorYearLossRatio,
+    rateChangePct,
+    rateLoad,
     competitivePressure: instance.marketEnvironment.competitivePressure,
     memberSensitivity: instance.marketEnvironment.memberSensitivity,
     yearNumber,
@@ -396,12 +475,9 @@ export function processLineYear(
   const adminRatePer100 = newPurePremiumPer100 * ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM;
   const poolPremiumAndAdminExpense = poolPremium + adminExpense;
 
-  // Hoisted above the pricing block: these are pure derivations from `line` and
-  // the reinsurance COST now branches on them, which happens before the loss
-  // simulation where they used to be declared.
-  const isWcClaimLine = line === 'WC';
-  const isGlClaimLine = line === 'GL';
-  const isClaimLine = isWcClaimLine || isGlClaimLine;
+  // isWcClaimLine / isGlClaimLine / isClaimLine are now declared further up,
+  // above member movement, because the price signal fed into movement needs the
+  // reinsurance cost and therefore needs to know which product this line buys.
 
   const reinsStructure = getReinsuranceStructure(
     lineDecisions.reinsuranceLevel,
@@ -420,14 +496,18 @@ export function processLineYear(
   //
   // Property: unchanged, still a percentage of premium off REINSURANCE_PROGRAMS.
   let reinsuranceCost: number;
-  if (isClaimLine && (isWcClaimLine || isGlClaimLine)) {
+  if (towerOccurrenceCost !== null && placedForCost) {
     const towerLine = line as TowerLine;
-    const placedForCost = normalizeLayersPlaced(towerLine, lineDecisions.layersPlaced);
     // COMPUTED FROM THE BOOK AND THE YEAR, not a frozen per-$100 rate times
     // nominal exposure. The old form charged a premium that grew at the wage rate
     // while the cover's value grew with the severity trend, and it applied one
     // book's SD/E to every book size. See towerMoments.ts.
-    reinsuranceCost = occurrenceProgramCost(towerLine, placedForCost, currentActiveMembers, yearNumber);
+    //
+    // The occurrence component is REUSED from above rather than recomputed: it
+    // reads only the pre-movement book and the year, so hoisting it to build the
+    // price signal did not change it. The aggregate still prices here, off the
+    // real post-movement expectedLoss.
+    reinsuranceCost = towerOccurrenceCost;
     if (towerLine === 'WC' && lineDecisions.aggregateStopLevel >= 0) {
       reinsuranceCost += quoteAggregate(
         placedForCost, currentActiveMembers, expectedLoss, lineDecisions.aggregateStopLevel, yearNumber,

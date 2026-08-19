@@ -1,7 +1,7 @@
 // Centralized assumptions for Risk Pool Simulation v1
 // V2: Allow admin-editable assumptions from a backend config
 
-import type { Region } from '../types/simulation';
+import type { Region, CoverageLine } from '../types/simulation';
 
 // Administrative expense is 15% of Pure Premium at CLF 1.000. It is added
 // after the selected CLF is applied and is not itself multiplied by the CLF.
@@ -612,13 +612,16 @@ export const BASE_NEW_MEMBERS_PER_YEAR = 1.0;
 //
 // ⚠ THE CONDITION IS ON TOTAL JOINS, NOT ON THE BASE ALONE, and the `adj` term
 // is why. The adjustment ladder in membershipEngine's newMemberAdjustment does
-// NOT sit at zero when every decision is at its default: measured at +0.60
-// members/yr, stable across all ten years and near-identical on all three lines
-// (WC +0.617, GL +0.639, Property +0.549). Two channels drive it —
-// competitivePressure, drawn in [0.3, 0.8], contributes (1 - cp) x 0.5, mean
-// +0.225; and satisfaction starts in [6.5, 8.5], so the >= 7.5 branch fires
-// about half the time. Pinning k on the base alone would therefore leave the
-// pool growing at defaults, which fails the whole point of the fix.
+// NOT sit at zero when every decision is at its default: measured at +0.619
+// members/yr, near-identical on all three lines (WC +0.569, GL +0.652,
+// Property +0.636). Two channels drive it — competitivePressure, drawn in
+// [0.3, 0.8], contributes (1 - cp) x 0.5, mean +0.225; and satisfaction starts
+// in [6.5, 8.5], so the >= 7.5 branch fires about half the time. The rate-LEVEL
+// term added with the price channel contributes essentially nothing here BY
+// CONSTRUCTION, since RATE_NEUTRAL_LOAD is measured at defaults — the residual
+// level deviation at defaults is -0.05% on WC, +0.19% on GL and -0.00% on
+// Property. Pinning k on the base alone would leave the pool growing at
+// defaults, which fails the whole point of the fix.
 //
 // Folding it in is not a fudge, it is what makes the adjustments DIFFERENTIAL:
 // all-defaults is now the neutral point, so a player who raises assessments or
@@ -627,36 +630,43 @@ export const BASE_NEW_MEMBERS_PER_YEAR = 1.0;
 // entire objective. Leaving `adj` out would measure every decision against a
 // silently growing baseline instead.
 //
-// N* = 62 is the pooled median starting book over 60 seeds with all three lines
-// active (WC 59, GL 64, Property 63). Starting books are drawn as an exposure
-// SHARE (STARTING_EXPOSURE_SHARE, 25-35%), never as a count, so the count is
-// emergent. The three per-line medians span 1.085x — well inside the range one
-// k can serve — so no per-line calibration is warranted.
+// N* = 61 is the pooled median starting book with all three lines active
+// (WC 60, GL 60, Property 63), re-measured after the price channel. Starting
+// books are drawn as an exposure SHARE (STARTING_EXPOSURE_SHARE, 25-35%), never
+// as a count, so the count is emergent.
+//
+// ONE k STILL SERVES ALL THREE, and this was re-checked rather than assumed.
+// The price channel is the first mechanism here with a genuinely per-line
+// neutral point, so the question was reopened. Per-line k values come out at
+// WC 0.014951, GL 0.014431, Property 0.015234 — a 1.056x spread, TIGHTER than
+// the 1.147x spread in the adjustment alone, because each line's higher
+// adjustment is offset by its own departure rate and starting book. The pooled
+// k sits inside that range on every line.
 //
 // ⚠ N* IS MILDLY SELF-REFERENTIAL, and that is understood rather than
 // overlooked: runPriorHistory simulates three pre-game years through this same
 // membership engine, so the book handed to year 1 already reflects whatever k
-// is in force. Measured under the shipped k the starting book settles at 58-61
-// rather than the 62 it was calibrated from — a fixed point self-consistent to
-// about two members, which is well inside seed noise (the per-seed starting
-// book spans 45 to 88). It does not iterate away: the measured ten-year
-// trajectory holds flat from wherever it opens, which is the property that
-// actually matters and is verified directly in
-// scripts/diagnostics/membership-equilibrium-check.ts.
+// is in force — and now the pre-game runs the price channel too. Measured under
+// the shipped k the starting book settles within a member or two of the value it
+// was calibrated from, well inside seed noise (the per-seed starting book spans
+// 45 to 88). It does not iterate away: the measured ten-year trajectory holds
+// flat from wherever it opens, which is the property that actually matters and
+// is verified directly in scripts/diagnostics/membership-equilibrium-check.ts.
 //
-//     k = (62 x 0.042 - 0.60) / (200 - 62) = 2.004 / 138 = 0.014522
-export const MEMBERSHIP_EQUILIBRIUM_ENROLLMENT = 62;
+//     k = (61 x 0.044 - 0.619) / (200 - 61) = 2.065 / 139 = 0.014856
+export const MEMBERSHIP_EQUILIBRIUM_ENROLLMENT = 61;
 
 // The measured contribution of the adjustment ladder at ALL-DEFAULT decisions,
 // in members/yr. Folded into k so that defaults are the neutral point — see the
 // note above. Measured, not chosen: 40 games x 10 years x 3 lines, calling the
 // engine's own newMemberAdjustment.
 //
-// ⚠ If any adjustment branch's coefficient changes, or a dormant channel (the
-// pending bill-based satisfaction and rate-change replacements) is switched on,
-// THIS NUMBER MUST BE RE-MEASURED. It is a property of the ladder, not a
-// constant of nature, and a stale value here silently re-tilts the equilibrium.
-export const MEMBERSHIP_DEFAULT_ADJUSTMENT = 0.60;
+// ⚠ If any adjustment branch's coefficient changes, THIS NUMBER MUST BE
+// RE-MEASURED. It is a property of the ladder, not a constant of nature, and a
+// stale value here silently re-tilts the equilibrium. It has already had to move
+// once for exactly that reason: reconnecting the price channel added the
+// rate-LEVEL term to this ladder and took it from 0.60 to 0.619.
+export const MEMBERSHIP_DEFAULT_ADJUSTMENT = 0.619;
 
 // The REALISED share of the book that leaves per year at all-default decisions.
 //
@@ -667,13 +677,20 @@ export const MEMBERSHIP_DEFAULT_ADJUSTMENT = 0.60;
 // starts in [6.5, 8.5] against a 5.0 reference and the surplus ratio climbs
 // through the 0.6 reference as the pool builds surplus. MAX_WITHDRAWN_PER_YEAR
 // then truncates the top of the noise distribution on top of that. The measured
-// result is 4.2%, not 5.0% — WC 4.1%, GL 4.2%, Property 4.2%, over 40 games x
-// 10 years x 3 lines at defaults.
+// result is 4.4%, not 5.0% — WC 4.44%, GL 4.45%, Property 4.32%, over 40 games
+// x 10 years x 3 lines at defaults.
 //
 // Both sides of the equilibrium therefore have to be taken as they actually
 // behave at defaults, not as their nominal constants read. Pinning k on 5.0%
-// while the book only sheds 4.2% builds in a permanent upward tilt.
-export const MEMBERSHIP_DEFAULT_DEPARTURE_RATE = 0.042;
+// while the book only sheds 4.4% builds in a permanent upward tilt.
+//
+// ⚠ RE-MEASURE THIS TOO whenever the retention ladder changes. It moved from
+// 0.042 to 0.044 when the price channel was reconnected, and the mechanism is
+// worth naming: the rate-change retention penalty is PENALTY-ONLY, so ordinary
+// year-to-year rate noise around the neutral point produces penalties in up
+// years and nothing in down years. That asymmetry is a genuine, permanent
+// increase in the departure rate at defaults, not a measurement artefact.
+export const MEMBERSHIP_DEFAULT_DEPARTURE_RATE = 0.044;
 
 // Hard caps on annual membership movement
 export const MAX_NEW_MEMBERS_PER_YEAR = 4;
@@ -841,6 +858,109 @@ export const MEMBER_MOVEMENT_WEIGHTS = {
     assessmentPenalty: 0.10,
   },
 };
+
+// --- THE PRICE CHANNEL ------------------------------------------------------
+//
+// What a member is CHARGED now affects whether they stay and whether prospects
+// join. Three sites had their price term deleted when CLF pricing replaced the
+// Rate Change decision, each with a comment saying a bill-based replacement was
+// pending rather than silently zeroed; these constants are that replacement.
+//
+// THE SPLIT, and it is load-bearing:
+//   RATE CHANGE (vs last year) -> retention and satisfaction. Members notice
+//     increases year over year.
+//   RATE LEVEL (load over pure premium) -> new business, through the existing
+//     competitivePressure hook. Prospects compare levels.
+// A pool overpriced for five straight years shows NO rate change and would
+// otherwise take no penalty at all. That is the case the level term exists for,
+// and it is exactly the case the reinsurance tower creates: the tower is bought
+// once and held, so it raises the level permanently while producing a rate
+// change only in the year it is first placed.
+
+// ⚠ THE NEUTRAL POINT IS PER LINE AND IT IS NOT ZERO. At all-default decisions
+// each line's rate already moves on its trends alone, before any player does
+// anything: WC's falls, GL's rises modestly, Property's rises hard because its
+// TIV exposure base does not inflate while its losses do (WAGE_INFLATION_APPLIES
+// .Property is false). Penalising the RAW rate change would therefore be a
+// permanent tax on Property and a permanent subsidy to WC, at defaults — which
+// would re-break the very property the membership equilibrium fix established,
+// that all-defaults is the neutral point and any drift is attributable to a
+// decision. The penalty is applied to the DEVIATION from these.
+//
+// Measured at all-default decisions (which INCLUDE the full occurrence tower —
+// DEFAULT_LAYERS_PLACED places every purchasable layer), 30 games x 10 years,
+// medians, in % per year.
+//
+// ⚠ RE-MEASURE THESE if any trend constant moves, if DEFAULT_LAYERS_PLACED
+// changes, or if the admin ratio changes. They are properties of the pricing
+// path, not constants of nature.
+export const RATE_NEUTRAL_CHANGE_PCT: Record<CoverageLine, number> = {
+  WC: -1.39,
+  GL: 1.35,
+  Property: 4.83,
+};
+
+// The load — total member charge rate / pure premium rate — at all-default
+// decisions, per line. Same measurement run as above.
+//
+// Without any tower both WC and GL sit at exactly 1.1500, which is
+// 1 + ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM at CLF 1.000 — the cleanest possible
+// confirmation that the load is reading what it is meant to read. The full
+// tower is what lifts them to these values, and that gap IS the tower's price
+// signal to prospects.
+export const RATE_NEUTRAL_LOAD: Record<CoverageLine, number> = {
+  WC: 1.757,
+  GL: 1.897,
+  Property: 1.525,
+};
+
+// Retention response, per percentage point of rate increase ABOVE the line's
+// neutral, BEFORE the MEMBER_MOVEMENT_WEIGHTS.retention.rateIncreasePenalty
+// weight of 0.15 is applied. 0.02 x 0.15 = 0.0030 of retention per point, i.e.
+// a 10-point rise costs 3.0 points of retention:
+//
+//     deviation    retention
+//         0%          0.950
+//        +5%          0.935
+//       +10%          0.920
+//       +20%          0.890
+//       +50%          0.800  (the existing [0.80, 0.99] clamp binds here)
+//
+// That is the requested starting scale, adopted as given rather than re-derived
+// — there is no measurement in this model that could pin a member's price
+// elasticity, so it is a judgment, and it is recorded as one. The clamp at 0.80
+// arrives at +50% rather than +59%; the difference is the clamp, not the slope.
+export const RATE_RETENTION_SENSITIVITY = 0.02;
+
+// PENALTY ONLY — a rate cut below neutral earns no retention bonus here.
+// Deliberate, and the asymmetry is the realistic half of it (members notice
+// increases far more than decreases), but it has a measurable cost: year-to-year
+// rate noise around the neutral point produces penalties in up years and nothing
+// in down years, so it is a small net drag even at defaults. That drag is real,
+// is absorbed into the re-measured MEMBERSHIP_DEFAULT_DEPARTURE_RATE, and is the
+// reason that constant had to be re-measured rather than carried over.
+
+// Satisfaction response, in satisfaction points per percentage point of rate
+// deviation. SYMMETRIC, unlike the retention term: satisfaction is a slow stock
+// that already clamps to [1, 10], and making it penalty-only would have it decay
+// monotonically at defaults on rate noise alone, which is worse than letting it
+// drift both ways around its starting value. A 10-point rise costs 0.15
+// satisfaction, which then feeds retention and new business through the existing
+// satisfaction channels rather than as a second direct price term.
+export const RATE_SATISFACTION_SENSITIVITY = 0.015;
+
+// New-business response to the rate LEVEL, per percentage point of load above
+// the line's neutral, before MEMBER_MOVEMENT_WEIGHTS.attraction.rateLevel (0.20)
+// and before the competitivePressure scaling. Symmetric: a pool that is cheaper
+// than its neutral genuinely does attract more members, and that is the arm that
+// makes NOT buying the tower visible.
+//
+// Scaled so that the full tower — which lifts GL's load about 65% above the
+// no-tower level — moves new business by roughly 0.6-0.7 members/yr at the mean
+// competitive pressure of 0.55: 0.20 x 0.55 x 0.10 x 65 = 0.72. Against a base
+// of about 2.5 joins/yr that is a material but not dominating penalty, which is
+// the intended weight for a deliberate risk-transfer decision.
+export const RATE_LEVEL_SENSITIVITY = 0.10;
 
 // Risk control rolling effectiveness parameters
 export const RISK_CONTROL_PARAMS = {
