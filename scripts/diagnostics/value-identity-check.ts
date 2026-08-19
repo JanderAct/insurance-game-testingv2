@@ -175,7 +175,35 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // PR-solo staying at 0/3,210 changed (0 new fields) IS the leak check this
 // recapture needed: none of the six commits, nor the UI squash, touch
 // Property.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v12.json');
+//
+// v13: ONE COMMIT, f5ece4d — moved WC and GL from frozen per-layer
+// reinsurance constants to runtime computation of E[ceded] and SD[ceded] from
+// the enrolled book and the current year, plus a fix to the WC aggregate's
+// occurrence-frequency basis (nominal exposure -> real payroll x
+// wcFrequencyTrend). A PRICING-BASIS change: no claim generator, severity,
+// frequency or roster parameter moved, so every field that changed did so
+// through the reinsuranceCost -> totalMemberCharge -> premium/reserve/
+// membership cascade, not through a different loss draw.
+//
+// 16,140 -> 16,140 fields, 0 added, 0 removed. The six retired constants
+// (expectedCededPer100, sdOverExpected, AGG_OCC_FREQ_PER_1M,
+// AGG_OVERDISPERSION, WC_RETAINED_SECOND_MOMENT and its bitmask index) were
+// all INTERNAL to reinsuranceTower.ts / towerMoments.ts — none was itself an
+// exported LineResultSet/ResultSet field, so retiring them could not change
+// export shape, only the values downstream of them. Confirmed rather than
+// assumed: this scan's own added/removed counts are both zero.
+//
+// 3,820 of the 16,140 fields changed, across 71 field names. By config:
+// WC-solo 953/3,225 moved, GL-solo 1,146/3,240 moved, tri 1,721/6,465 moved,
+// PR-solo 0/3,210 moved. Led by reinsuranceCost itself (105 instances, e.g.
+// $5,681,786 -> $8,025,186 on one WC line-year) and its cascade into
+// totalMemberCharge, ratePer100, the loss/expense/combined ratios, and from
+// there into retention, exposure and market share the ordinary way.
+//
+// PR-solo staying at 0/3,210 (0 new fields) IS the leak check this recapture
+// needed: Property runs the legacy REINSURANCE_PROGRAMS path, untouched by
+// f5ece4d, and this proves it was not reached.
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v13.json');
 
 function seedOf(id: string) {
   let h = 5381;

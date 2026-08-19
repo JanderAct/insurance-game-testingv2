@@ -1,4 +1,4 @@
-# Baseline Lineage — v4 through v11
+# Baseline Lineage — v4 through v13
 
 A genealogy of the multi-line baselines: what each version represents, what change caused the jump
 to it, which numbers moved and why. Covers the multi-line-meaningful baselines (v4–v11). Earlier
@@ -213,6 +213,41 @@ action, not a fault in the removal.
 
 ---
 
+## v12 — not separately narrated here
+Recaptured by six engine commits (23da65c through a21d01b: GL's fitted-mixture severity rebuild, k_GL
+neutralised, GL severity trend + payroll growth, the $100M severity cap, GL's own CLF grid, and the
+"Expected" funding option on both WC and GL) plus a gate-inert UI squash-merge (8c0ae6f). Full detail
+lives in the v12 notes inside `scripts/diagnostics/solo-export-guard.ts` and `value-identity-check.ts`
+rather than here — this file's per-version narrative resumed at v13; the gap is a documentation omission
+at recapture time, not a missing baseline. PR-solo 0/3,210 moved throughout.
+
+## v13 — reinsurance tower priced at runtime, both lines
+**Trigger:** the tower's `expectedCededPer100`/`sdOverExpected` were frozen per-layer constants measured
+from the generators. `sdOverExpected` was never a legitimate rate-card quantity — SD/E scales as
+~1/sqrt(exposure), so a single stored value was wrong at every book size but the one it was measured on
+(an $82M GL pool undercharged ~20%, the full market overcharged ~25%, on different bases per line: GL's
+figure came from a ~$380M enrolled book, WC's from full market). `expectedCededPer100` froze legitimately
+(a per-occurrence layer is genuinely linear in exposure) but was multiplied by NOMINAL exposure, so
+premium grew at the wage rate while actual ceded loss grew with the severity trend through a convex layer
+(GL +22–41% by layer, WC +17% on its top layer, over a decade). The WC aggregate had a second, independent
+defect: its occurrence frequency read nominal exposure where the true count tracks real payroll x
+wcFrequencyTrend — a basis error, not a staleness one, that no re-measurement of the frozen table would
+have caught.
+
+**What changed:** one commit, f5ece4d. Six frozen constants retired (`expectedCededPer100`,
+`sdOverExpected`, `AGG_OCC_FREQ_PER_1M`, `AGG_OVERDISPERSION`, `WC_RETAINED_SECOND_MOMENT` and its bitmask
+index); `src/utils/towerMoments.ts` added, computing E[ceded]/SD[ceded] for both lines from the enrolled
+book and the current year, at neutral risk quality (the same basis the retired constants used — this is a
+pricing-basis change, not a risk-quality-mix change). A PRICING-BASIS change, not a loss-model change: no
+claim generator, severity, frequency or roster parameter moved, so every field that changed did so through
+the `reinsuranceCost` -> `totalMemberCharge` -> premium/reserve/membership cascade. 16,140 -> 16,140
+fields, 0 added, 0 removed (the six retired constants were internal, never themselves exported fields).
+3,820 of 16,140 changed across 71 names — WC-solo 953/3,225, GL-solo 1,146/3,240, tri 1,721/6,465, **PR-solo
+0/3,210** (Property runs the legacy `REINSURANCE_PROGRAMS` path and was not reached — the leak check for
+this recapture, and it held).
+
+---
+
 ## Quick "why did the numbers change" reference
 | Jump | Cause | WC-only affected? |
 |---|---|---|
@@ -224,6 +259,8 @@ action, not a fault in the removal.
 | v8 → v9 | Reinsurance recoverable removed (net-basis reserves) | Barely — 160/162 scopes identical; MAMC6EA4 exact |
 | v9 → v10 | otherAssets/otherLiabilities removed | Slightly — investment income on shifted invested base (≤0.50%) |
 | v10 → v11 | Self-funded discount removed | Premium +1%; **9/72 seed-lines re-rolled, incl. MAMC6EA4 GL** |
+| v11 → v12 | Six GL engine commits (fitted-mixture rebuild, $100M cap, own CLF grid) + Expected funding option | Yes — both lines' default moved |
+| v12 → v13 | Reinsurance tower priced at runtime (both lines); WC aggregate lambda basis fixed | Yes — pricing-basis only, no loss-model change |
 
 ## Still pending (would drive a future v11)
 - **⚠️ Systematic underpricing (finding 6)** — actual loss ratio ~46% against a 66.8% expected

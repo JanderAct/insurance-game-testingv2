@@ -159,6 +159,22 @@
 // (fitted-mixture severity, k_GL neutralisation, severity trend, the $100M
 // cap, GL's own CLF grid), and the sixth (a21d01b) moves GL's default the
 // same way it moves WC's.
+//
+// v12 retired here (moved to v13) by ONE COMMIT: f5ece4d, which moved BOTH
+// lines from frozen per-layer reinsurance constants (expectedCededPer100,
+// sdOverExpected) to runtime computation of E[ceded] and SD[ceded] from the
+// enrolled book and the current year, plus a fix to the WC aggregate's
+// occurrence-frequency basis (nominal exposure -> real payroll x
+// wcFrequencyTrend). This is a PRICING-BASIS change, not a loss-model change —
+// no claim generator, severity, frequency or roster parameter moved. See
+// towerMoments.ts's header for the full argument.
+//
+// EXACTLY 9 OF 12 HASHES MOVED — WC-solo, GL-solo and tri on all three seeds,
+// the same shape as v11->v12 despite this being a single commit rather than
+// six, because a reinsurance-cost change reaches the same three configs a
+// funding-default change does. PR-SOLO STAYED BYTE-IDENTICAL ON ALL THREE —
+// Property runs the legacy REINSURANCE_PROGRAMS path and was not reached. That
+// is the leak check for this recapture, and it held.
 import * as XLSX from 'xlsx';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -173,7 +189,7 @@ import { RESULT_METRICS } from '../../src/utils/resultMetrics';
 import type { GameState, CoverageLine, ResultSet } from '../../src/types/simulation';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v12.json');
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v13.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');
