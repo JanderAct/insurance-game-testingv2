@@ -34,7 +34,7 @@ import type { Claim, CoverageLine, Member, MemberLossResult, Occurrence } from '
 import { deriveSubRng } from './random';
 import { WHOLE_LINE } from './shockEffects';
 import { GL_HEAVY_COMPONENT_INDEX, GL_LOSS_MODEL, GL_SEVERITY_CAP, GL_SEVERITY_COMPONENTS, type GlSeverityComponent } from '../data/defaultAssumptions';
-import { limitedExpectedValue } from './claimMath';
+import { limitedExpectedValue, memoizeByYear } from './claimMath';
 
 const M = GL_LOSS_MODEL;
 const LINE: CoverageLine = 'GL';
@@ -95,9 +95,16 @@ export const GL_SEVERITY_TREND_PER_YEAR = 0.057026;
 // year-1 dollars, not a severity history. The two factors must floor TOGETHER:
 // pinning payroll while letting severity deflate would make the drawn and
 // priced loss diverge across the years that set opening reserves.
-export function glSeverityTrend(yearNumber: number): number {
-  return Math.pow(1 + GL_SEVERITY_TREND_PER_YEAR, Math.max(1, yearNumber) - 1);
-}
+// MEMOIZED, FLOORED AT THE CACHE KEY. Fires once per DRAWN CLAIM in
+// generateGlClaims's severity draw (the grossUltimate = ... line, via
+// trendedMuGl below) — ~1,024/yr at full market, every game-year — plus once
+// per (member, component) inside glAggregateCumulants's cappedRawMoments.
+// Floors at year 1 exactly like wcSeverityTrend, for the same reason (see
+// wageFactor's header).
+export const glSeverityTrend = memoizeByYear(
+  (yearNumber: number) => Math.pow(1 + GL_SEVERITY_TREND_PER_YEAR, Math.max(1, yearNumber) - 1),
+  yearNumber => Math.max(1, yearNumber),
+);
 
 // A component's log-location shifted to a given year, and optionally by a
 // severity SHOCK factor on top.
@@ -141,11 +148,31 @@ export function trendedMuGl(mu: number, yearNumber: number, severityShock = 1): 
 // cap, never the enrolled book — so it is exactly the kind of year factor that
 // may ride on top of a held pure premium. k_GL keeps sole responsibility for the
 // roster/risk-quality-mix correction.
-export function glCappedSeverityTrend(yearNumber: number): number {
-  const base = expectedClaimSeverity(untiltedGlWeights(), HELD_PURE_PREMIUM_YEAR);
-  if (!(base > 0)) return 1;
-  return expectedClaimSeverity(untiltedGlWeights(), yearNumber) / base;
+// THE DENOMINATOR IS A CONSTANT, not merely year-invariant — HELD_PURE_PREMIUM_
+// YEAR never changes, so `base` was being recomputed identically on EVERY call
+// before this fix, independent of the per-year memoization below. Computed
+// lazily, once, ever.
+let cachedHeldBaseSeverity: number | undefined;
+function heldBaseSeverity(): number {
+  if (cachedHeldBaseSeverity === undefined) {
+    cachedHeldBaseSeverity = expectedClaimSeverity(untiltedGlWeights(), HELD_PURE_PREMIUM_YEAR);
+  }
+  return cachedHeldBaseSeverity;
 }
+
+// MEMOIZED, FLOORED AT THE CACHE KEY, same reasoning as glSeverityTrend above
+// — this is glClaimEngine's own pricing-year factor and the most expensive of
+// the five per raw call: expectedClaimSeverity evaluates limitedExpectedValue
+// (two normalCdf calls each) across all three GL severity components, not one
+// Math.pow.
+export const glCappedSeverityTrend = memoizeByYear(
+  (yearNumber: number) => {
+    const base = heldBaseSeverity();
+    if (!(base > 0)) return 1;
+    return expectedClaimSeverity(untiltedGlWeights(), yearNumber) / base;
+  },
+  yearNumber => Math.max(1, yearNumber),
+);
 
 // --- risk quality ------------------------------------------------------------
 

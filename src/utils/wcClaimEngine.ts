@@ -51,7 +51,7 @@ import type {
   WcUnreportedClaim,
 } from '../types/simulation';
 import { deriveSubRng, type SeededRandom } from './random';
-import { lognormalParams } from './claimMath';
+import { lognormalParams, memoizeByYear } from './claimMath';
 import {
   WC_LOSS_MODEL,
   WC_RATING_GROUPS,
@@ -110,9 +110,15 @@ export function thetaWc(riskQuality: number): number {
 // RECOMPUTING the pick annually (that double-corrects against k_line and makes
 // pricing chase the roster); it does not forbid a deterministic factor that
 // cannot see who is enrolled.
-export function wcFrequencyTrend(yearNumber: number): number {
-  return Math.pow(1 + M.frequencyTrendPerYear, yearNumber - 1);
-}
+// MEMOIZED. Pure function of yearNumber, called once per DRAWN CLAIM inside
+// expectedWcGrossLossCore's/generateWcClaims's member loops and once per
+// member inside wcAggregateCumulants — up to ~1,825 calls/yr at full market on
+// the claim-generation path alone. NO FLOOR here (the default identity key),
+// deliberately unlike wageFactor/wcSeverityTrend — see this function's own
+// header just above for why the pre-game is allowed to run frequency hotter.
+export const wcFrequencyTrend = memoizeByYear(
+  (yearNumber: number) => Math.pow(1 + M.frequencyTrendPerYear, yearNumber - 1),
+);
 
 // WC SEVERITY TREND — the other half of the wage-inflation pair.
 //
@@ -137,9 +143,17 @@ export const WC_SEVERITY_TREND_PER_YEAR = 0.0367;
 // dollar constants are year-1 dollars, not a wage history. The two factors must
 // floor TOGETHER: pinning payroll while letting severity deflate would make the
 // drawn and priced loss diverge across the years that set opening reserves.
-export function wcSeverityTrend(yearNumber: number): number {
-  return Math.pow(1 + WC_SEVERITY_TREND_PER_YEAR, Math.max(1, yearNumber) - 1);
-}
+// MEMOIZED, FLOORED AT THE CACHE KEY. This is the one that fires once per
+// DRAWN CLAIM in generateWcClaims's severity draw (the amount = ... line) —
+// ~1,825/yr at full market, every single game-year, not just diagnostics —
+// plus once per (member, component, k=1..4) inside wcAggregateCumulants. Both
+// floor at year 1 (see the header on wageFactor for why the pre-game floors
+// while wcFrequencyTrend above deliberately does not), so years -2, -1, 0 and
+// 1 share one cache entry.
+export const wcSeverityTrend = memoizeByYear(
+  (yearNumber: number) => Math.pow(1 + WC_SEVERITY_TREND_PER_YEAR, Math.max(1, yearNumber) - 1),
+  yearNumber => Math.max(1, yearNumber),
+);
 
 // A component's log-location shifted to a given year. exp(mu + ln(s)) = s x
 // exp(mu), so a location shift in log space IS a multiplicative scale — the same

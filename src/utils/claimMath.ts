@@ -217,3 +217,48 @@ export function patternTrendFactor(pattern: number[], rate: number, accidentYear
   }
   return factor;
 }
+
+// --- pure-function-of-year memoization ---------------------------------------
+
+// Wraps a function of a single year into one backed by a module-level Map, so
+// a function evaluated repeatedly at the SAME year — the per-claim severity
+// draw in both claim generators, the per-member cumulant loops behind the CLF
+// grids, the tower's own pricing pass before it got its own cache — costs one
+// hash lookup after the first call for that year, forever.
+//
+// A plain Map keyed on the exact number, not a fixed-size array, because the
+// year range is unbounded and includes NEGATIVE years (the pre-game runs at
+// year -2): a Map lazily grows to hold only the years actually requested, with
+// no offset arithmetic and no upper bound to guess wrong.
+//
+// `keyOf` lets the caller fold a floor into the CACHE KEY, not just the
+// returned value. wcSeverityTrend/glSeverityTrend/wageFactor all floor at year
+// 1 (`Math.pow(rate, Math.max(1, year) - 1)`), so years -2, -1, 0 and 1
+// already return an IDENTICAL number — passing `keyOf: y => Math.max(1, y)`
+// makes them share one cache entry instead of four. wcFrequencyTrend does NOT
+// floor (the pre-game is deliberately allowed to run frequency hotter — see
+// its own header), so it is memoized with the default identity key: year -2
+// gets its own entry because it genuinely is a different value.
+//
+// ⚠ keyOf IS A CACHE-EFFICIENCY OPTIMISATION ONLY, NEVER THE SOURCE OF
+// CORRECTNESS. On a miss, `fn` is called with the RAW year, not the key — so
+// `fn` MUST apply its own floor internally, exactly as the original
+// unmemoized body did (`Math.pow(rate, Math.max(1, year) - 1)`, not
+// `Math.pow(rate, year - 1)` with the floor left to `keyOf`). If `fn` trusted
+// `keyOf` to have already floored, whichever raw year happened to populate a
+// given slot first — -2, -1, 0 or 1, in whatever order the game calls them —
+// would silently decide that slot's value from the wrong exponent.
+export function memoizeByYear(
+  fn: (year: number) => number,
+  keyOf: (year: number) => number = year => year,
+): (year: number) => number {
+  const cache = new Map<number, number>();
+  return (year: number) => {
+    const key = keyOf(year);
+    const hit = cache.get(key);
+    if (hit !== undefined) return hit;
+    const value = fn(year);
+    cache.set(key, value);
+    return value;
+  };
+}

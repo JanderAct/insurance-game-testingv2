@@ -50,6 +50,7 @@
 // legs would restore.
 
 import type { CoverageLine } from '../types/simulation';
+import { memoizeByYear } from '../utils/claimMath';
 
 // SOURCED — see the derivation above.
 export const WAGE_INFLATION_PER_YEAR = 0.0363;
@@ -112,7 +113,27 @@ export const WAGE_INFLATION_APPLIES: Record<CoverageLine, boolean> = {
 // Each is a pair with this factor: if payroll pins at year 1 pre-game while a
 // line's severity deflates, that line's drawn loss and priced loss diverge across
 // exactly the years that set the opening reserves.
+// MEMOIZED PER LINE. wageFactor is a pure function of (line, yearNumber), but
+// it is called from inside member-list loops at 7+ sites (getMemberExposure's
+// every caller — instanceGenerator.ts, membershipEngine.ts,
+// simulationEngine.ts), several walking the full 200-member market roster
+// every year. One Map per line turns every call after the first, for a given
+// floored year, into a hash lookup. Floors at the cache-key level too (see
+// memoizeByYear's header) — the pre-game's years -2/-1/0 collapse onto the
+// same entry as year 1, since the underlying Math.pow already floors there.
+// ⚠ fn FLOORS INTERNALLY, exactly like the original unmemoized body — the
+// `keyOf` floor below is a cache-key optimisation only, not the source of
+// correctness. memoizeByYear calls fn with the RAW year on a cache miss, so
+// if fn trusted keyOf to have already floored, whichever raw year happened to
+// populate a given slot first (-2, -1, 0 or 1 — order is call-dependent) would
+// silently decide that slot's value from the wrong exponent.
+const wageFactorByLine: Record<CoverageLine, (year: number) => number> = {
+  WC: memoizeByYear(year => Math.pow(1 + WAGE_INFLATION_PER_YEAR, Math.max(1, year) - 1), year => Math.max(1, year)),
+  GL: memoizeByYear(year => Math.pow(1 + WAGE_INFLATION_PER_YEAR, Math.max(1, year) - 1), year => Math.max(1, year)),
+  Property: () => 1,
+};
+
 export function wageFactor(line: CoverageLine, yearNumber: number): number {
   if (!WAGE_INFLATION_APPLIES[line]) return 1;
-  return Math.pow(1 + WAGE_INFLATION_PER_YEAR, Math.max(1, yearNumber) - 1);
+  return wageFactorByLine[line](yearNumber);
 }
