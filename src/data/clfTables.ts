@@ -1,7 +1,23 @@
-// STATIC CLF TABLES for WC and GL — measured from the engine, not modelled.
+// STATIC CLF TABLES for WC and GL.
 //
 // CLF(p) is the multiplier applied to the pool premium so that the funded
 // amount covers the year's retained loss p% of the time.
+//
+// ============================================================================
+// ⚠ READ THIS FIRST: THE TWO LINES NO LONGER COME FROM THE SAME PLACE.
+//
+//   WC  DERIVED  — backtested on this engine. Everything in the derivation
+//                  note below applies to it, and its stop labels mean what
+//                  they say against WC's own retained distribution.
+//   GL  SUPPLIED — a real pool's measured curve at a scale this model does not
+//                  have. It is IN FORCE for GL, it does NOT describe GL's own
+//                  distribution, and it over-delivers by about 10pp through the
+//                  working range. See GL_SUPPLIED below for the measured cost;
+//                  GL's own derived curve is kept beside it as GL_DERIVED.
+//
+// The derivation note that follows describes how the DERIVED tables were made.
+// It is the provenance of WC's shipped curve and of GL_DERIVED — NOT of the
+// GL curve the engine actually reads.
 //
 // ============================================================================
 // HOW THESE WERE DERIVED, AND WHY IT IS A BACKTEST.
@@ -76,10 +92,15 @@
 // engine's loss or pricing path invalidates it.
 //
 // ============================================================================
-// THE MEASURED CROSSING — where the ratio reaches 1.000, i.e. what "Expected"
-// (CLF exactly 1.000) actually delivers:
+// THE MEASURED CROSSING of the DERIVED curves — where the ratio reaches 1.000,
+// i.e. what "Expected" (CLF exactly 1.000) delivers against each line's own
+// distribution:
 //
 //     WC 47.2%  (95% CI 46.6-47.8)      GL 68.6%  (95% CI 68.1-69.1)
+//
+// ⚠ GL's SHIPPED crossing is 57.7%, not 68.6%, because the supplied curve is in
+// force. 68.6% remains the truth about GL's distribution; 57.7% is what the
+// supplied curve reports. See GL_SUPPLIED.
 //
 // THE SANITY CHECK AGAINST REAL EXPERIENCE, and it needs the right basis to
 // read. Real public-entity pools put the mean year near the 55th percentile.
@@ -131,70 +152,168 @@
 
 import type { CoverageLine } from '../types/simulation';
 
-// Percentile stops, ascending. 5-point intervals from 10 to 95, then the two
-// tail stops. The funding slider's own range (0.30-0.95, step 0.05) lands
-// exactly on stops, so the interpolation below is a safety net rather than the
-// normal path.
-export const CLF_TABLE_STOPS = [
-  10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 97.5, 99,
-] as const;
-
 export type StaticClfLine = 'WC' | 'GL';
 
-// Index-aligned to CLF_TABLE_STOPS.
+// A line's curve. `stops` and `clf` are index-aligned and ascending.
 //
-// ⚠ GL's TOP TWO STOPS ARE IMPRECISE AND THAT IS THE DISTRIBUTION, NOT THE
-// SAMPLE. At 30,000 line-years the 95% CI half-width is +/-0.0085 on WC's 95th
-// stop but +/-0.0815 on GL's, +/-0.19 at GL's 97.5th. GL's retained tail carries
-// the above-tower band, so its upper percentiles are genuinely unstable; more
-// draws narrow them slowly. Treat GL's 97.5 and 99 stops as indicative.
-export const STATIC_CLF_TABLE: Record<StaticClfLine, number[]> = {
-  WC: [
+// STOPS ARE PER LINE, not shared, because the two lines' curves no longer come
+// from the same place: WC's is derived from this engine over 10-99, GL's is a
+// supplied real-pool curve over 25-95. A single shared stop array would have
+// forced GL's curve to be extrapolated into a range it does not cover.
+export interface ClfTable {
+  stops: number[];
+  clf: number[];
+  source: 'derived' | 'supplied';
+}
+
+// ============================================================================
+// WC — DERIVED from this engine. Unchanged. See the derivation note above.
+//
+// ⚠ WC's TOP STOPS ARE PRECISE; GL's DERIVED ONES WERE NOT. At 30,000 line-years
+// WC's 95th stop has a 95% CI half-width of +/-0.0085.
+const WC_DERIVED: ClfTable = {
+  source: 'derived',
+  stops: [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 97.5, 99],
+  clf: [
     0.7106, 0.7644, 0.8098, 0.8481, 0.8855, 0.9198, 0.9523, 0.9846, 1.0184, 1.0514,
     1.0854, 1.1226, 1.1610, 1.2036, 1.2519, 1.3108, 1.3893, 1.5082, 1.6130, 1.7790,
   ],
-  GL: [
+};
+
+// ============================================================================
+// GL — SUPPLIED, NOT DERIVED. THIS IS THE ONE IN FORCE.
+//
+// A real public-entity pool's measured curve, at a scale this model does not
+// have. It REPLACES GL's own derived table (kept below as GL_DERIVED), and the
+// substitution is a deliberate placeholder rather than a correction — the
+// derived curve is the more accurate description of THIS model's GL book.
+//
+// ⚠ IT DESCRIBES A BIGGER, SMOOTHER BOOK. Its implied annual CV is about 0.40
+// against GL's own measured 0.79. Everything below follows from that one fact.
+//
+// MEASURED CONSEQUENCE — this curve OVER-DELIVERS against GL's own distribution
+// by roughly 10pp through the working range, because it is priced off a less
+// volatile book than the one the engine draws. Measured, not predicted (see
+// scripts/diagnostics/gl-supplied-clf-check.ts):
+//
+//     label      30%    40%    50%    60%    70%    80%    90%    95%
+//     delivers  35.5%  47.8%  59.6%  70.5%  80.1%  87.4%  92.4%  94.0%
+//     error     +5.5   +7.8   +9.6  +10.5  +10.1   +7.4   +2.4   -1.0
+//
+// Peak over-delivery is +10.5pp at the 60% stop. It converges at the top and
+// slightly UNDER-delivers at 95%. And its top stop of 1.701 covers only 94.0% of
+// GL line-years against GL's own 99th percentile of 5.60, so on this curve
+// NEAR-CERTAINTY IS NOT PURCHASABLE at any slider position — the most a player
+// can buy is about the 94th percentile of the real retained distribution.
+//
+// THE CROSSING MOVES 68.6% -> 57.7% AS DISPLAYED, and the difference is BOOK
+// SIZE. Note what does NOT move: "Expected" still covers 68.1% of GL line-years
+// in measurement, because it bypasses the table entirely. So the displayed
+// figure now UNDERSTATES GL's real coverage at Expected by 10.4pp. GL's
+// derived curve crosses at 68.6% because a 62-member pool's retained loss is
+// genuinely more volatile and more skewed than the pool this curve came from;
+// a skewed distribution has its median well below its mean, so funding at the
+// mean covers more than half the years. The supplied curve, from a larger and
+// smoother book, crosses much closer to the middle.
+//
+// ⚠ RAISING GL'S FREQUENCY IS THE LEVER THAT WOULD CLOSE THE GAP — more claims
+// per year at the same expected loss lowers the annual CV toward the supplied
+// curve's 0.40 and moves the crossing down toward 57.7% on the model's own
+// terms. That is the real fix. This table is not it.
+//
+// RANGE: 25-95, narrower than the derived table's 10-99. No slider change was
+// needed: SLIDER_RANGES.fundingConfidenceLevel is 0.30-0.95, and the only other
+// request in the engine is reserveMarginCLF at 0.90, so every reachable request
+// already falls inside 25-95. staticClf still clamps outside the range, but on
+// GL that clamp is unreachable from any UI control.
+const GL_SUPPLIED: ClfTable = {
+  source: 'supplied',
+  stops: [25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95],
+  clf: [
+    0.704, 0.750, 0.794, 0.837, 0.881, 0.926, 0.973, 1.023, 1.075,
+    1.135, 1.201, 1.279, 1.376, 1.502, 1.701,
+  ],
+};
+
+// ============================================================================
+// GL — DERIVED from this engine. NOT IN FORCE, KEPT DELIBERATELY.
+//
+// This is a measured property of the model and must not be lost: it is what
+// GL's retained loss distribution actually does at the equilibrium book, and
+// anyone revisiting the supplied curve needs both to compare. Derived by the
+// same backtest and the same iteration-to-fixed-point as WC's — see the header.
+//
+// Crosses at 68.6%. Its 97.5 and 99 stops (3.5440, 5.6018) are imprecise and
+// that is the distribution rather than the sample: GL's retained tail carries
+// the unhedgeable above-tower band, so its upper percentiles are genuinely
+// unstable (95% CI half-width +/-0.19 at the 97.5th against WC's +/-0.011).
+//
+// EXPORTED, and it has a real consumer: gl-supplied-clf-check.ts measures the
+// supplied curve against it. That keeps it type-checked and honest rather than
+// rotting in a comment.
+export const GL_DERIVED: ClfTable = {
+  source: 'derived',
+  stops: [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 97.5, 99],
+  clf: [
     0.5397, 0.5924, 0.6385, 0.6778, 0.7139, 0.7492, 0.7812, 0.8161, 0.8509, 0.8874,
     0.9264, 0.9672, 1.0136, 1.0667, 1.1331, 1.2222, 1.3642, 1.8897, 3.5440, 5.6018,
   ],
 };
 
+// WHAT THE ENGINE ACTUALLY READS.
+export const STATIC_CLF_TABLE: Record<StaticClfLine, ClfTable> = {
+  WC: WC_DERIVED,
+  GL: GL_SUPPLIED,
+};
+
 export const hasStaticClf = (line: CoverageLine): line is StaticClfLine =>
   line === 'WC' || line === 'GL';
 
-// CLF at a requested confidence level (0-1), linearly interpolated between
-// stops and clamped to the table's own range.
-export function staticClf(line: StaticClfLine, confidenceLevel: number): number {
-  const table = STATIC_CLF_TABLE[line];
+// CLF at a requested confidence level (0-1), linearly interpolated between the
+// LINE'S OWN stops and clamped to that line's range.
+export function clfFromTable(table: ClfTable, confidenceLevel: number): number {
+  const { stops, clf } = table;
   const target = confidenceLevel * 100;
-  if (target <= CLF_TABLE_STOPS[0]) return table[0];
-  const last = CLF_TABLE_STOPS.length - 1;
-  if (target >= CLF_TABLE_STOPS[last]) return table[last];
+  const last = stops.length - 1;
+  if (target <= stops[0]) return clf[0];
+  if (target >= stops[last]) return clf[last];
   for (let i = 0; i < last; i++) {
-    const a = CLF_TABLE_STOPS[i], b = CLF_TABLE_STOPS[i + 1];
+    const a = stops[i], b = stops[i + 1];
     if (target >= a && target <= b) {
       const w = b === a ? 0 : (target - a) / (b - a);
-      return table[i] + w * (table[i + 1] - table[i]);
+      return clf[i] + w * (clf[i + 1] - clf[i]);
     }
   }
-  return table[last];
+  return clf[last];
 }
 
-// The percentile at which the table crosses 1.000 — what "Expected" delivers.
+export function staticClf(line: StaticClfLine, confidenceLevel: number): number {
+  return clfFromTable(STATIC_CLF_TABLE[line], confidenceLevel);
+}
+
+// The percentile at which a table crosses 1.000 — what "Expected" delivers.
 //
 // DERIVED FROM THE TABLE, never stored alongside it, so the two cannot drift.
-// This is the same property the retired grid's crossing functions had, and it
-// reproduces the directly measured crossings (WC 47.2%, GL 68.6%) because the
-// table and the crossing come from one sample.
+// WC 47.2% (its own measured crossing, since its table is derived from that same
+// sample); GL 57.7% on the supplied curve, against 68.6% on its derived one.
+//
+// ⚠ ON GL THIS IS NOW A DISPLAY FIGURE FOR A CURVE THAT IS NOT THE MODEL'S OWN.
+// It correctly reports where the SUPPLIED table crosses, which is what the pool
+// is actually being charged against; it is NOT where GL's real retained
+// distribution crosses. Those differ by 10.9pp and the gap is recorded above.
 //
 // Returns a 0-1 fraction, clamped to the table's stop range.
-export function staticClfCrossing(line: StaticClfLine): number {
-  const table = STATIC_CLF_TABLE[line];
-  for (let i = 0; i < table.length - 1; i++) {
-    if (table[i] <= 1 && table[i + 1] >= 1) {
-      const w = table[i + 1] === table[i] ? 0 : (1 - table[i]) / (table[i + 1] - table[i]);
-      return (CLF_TABLE_STOPS[i] + w * (CLF_TABLE_STOPS[i + 1] - CLF_TABLE_STOPS[i])) / 100;
+export function crossingOf(table: ClfTable): number {
+  const { stops, clf } = table;
+  for (let i = 0; i < clf.length - 1; i++) {
+    if (clf[i] <= 1 && clf[i + 1] >= 1) {
+      const w = clf[i + 1] === clf[i] ? 0 : (1 - clf[i]) / (clf[i + 1] - clf[i]);
+      return (stops[i] + w * (stops[i + 1] - stops[i])) / 100;
     }
   }
-  return (table[0] > 1 ? CLF_TABLE_STOPS[0] : CLF_TABLE_STOPS[table.length - 1]) / 100;
+  return (clf[0] > 1 ? stops[0] : stops[clf.length - 1]) / 100;
+}
+
+export function staticClfCrossing(line: StaticClfLine): number {
+  return crossingOf(STATIC_CLF_TABLE[line]);
 }
