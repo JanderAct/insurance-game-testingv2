@@ -123,13 +123,38 @@ export function expectedCededForLayer(line: TowerLine, layerIndex: number, membe
   return layerRiskMoments(line, layerIndex, members, yearNumber).expected;
 }
 
+export interface OccurrenceProgramQuote {
+  // What the reinsurer charges: E[ceded] + lambda x SD[ceded], summed over the
+  // PLACED layers.
+  premium: number;
+  // The SAME E[ceded], WITHOUT the risk load, summed over the same placed
+  // layers. Returned rather than recomputed by the caller because it is already
+  // the first term of `premium` — one number, one derivation, and the two can
+  // therefore never drift apart.
+  //
+  // ⚠ THIS IS WHAT THE POOL PREMIUM IS NETTED DOWN BY. The pool funds the loss
+  // it will actually keep, so expected ceded has to come off the contribution;
+  // charging it AND the reinsurance premium on top collected the ceded portion
+  // twice. It reflects `placed`, which is the load-bearing part: decline a layer
+  // and its expected ceded stays in the pool premium, because the pool is then
+  // keeping that loss.
+  expectedCeded: number;
+}
+
 // ONE pass over the book for the whole program, not one per layer — see
 // allLayerRiskMoments. Pricing three layers separately walked the member list
 // three times and re-resolved each member's rating group and lambda each time.
-export function occurrenceProgramCost(line: TowerLine, placed: boolean[], members: Member[], yearNumber: number): number {
+export function occurrenceProgramCost(
+  line: TowerLine, placed: boolean[], members: Member[], yearNumber: number,
+): OccurrenceProgramQuote {
   const moments = allLayerRiskMoments(line, members, yearNumber);
-  return REINSURANCE_TOWER[line].reduce((s, l, i) =>
-    s + (placed[i] && l.purchasable ? moments[i].expected + RISK_LOAD_LAMBDA * moments[i].sd : 0), 0);
+  let premium = 0, expectedCeded = 0;
+  REINSURANCE_TOWER[line].forEach((l, i) => {
+    if (!(placed[i] && l.purchasable)) return;
+    premium += moments[i].expected + RISK_LOAD_LAMBDA * moments[i].sd;
+    expectedCeded += moments[i].expected;
+  });
+  return { premium, expectedCeded };
 }
 
 // --- the aggregate stop-loss, priced from the selected configuration --------

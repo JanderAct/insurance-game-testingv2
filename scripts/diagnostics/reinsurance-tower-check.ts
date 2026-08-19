@@ -130,7 +130,7 @@ console.log('\n=== 3. THE RISK LOAD RISES WITH ATTACHMENT (one lambda, not four 
     `${note(wcCount === glCount, `WC has ${wcCount} layers and GL ${glCount}; if that diverges again, do NOT reintroduce a count-based line test`)}`);
   console.log(`  every WC layer purchasable: ${note(REINSURANCE_TOWER.WC.every(l => l.purchasable), 'a WC layer is flagged non-purchasable without a stated reason')}`);
   console.log(`  merged top band spans $10M-$50M: ${note(REINSURANCE_TOWER.WC[2].attachment === 10e6 && REINSURANCE_TOWER.WC[2].limit === 40e6, 'the merged WC top layer is not $40M xs $10M')}`);
-  console.log(`  and it is charged when placed: ${note(occurrenceProgramCost('WC', [false, false, true], wcBook, REF_YEAR) > 0, 'the merged top layer is not being charged')}`);
+  console.log(`  and it is charged when placed: ${note(occurrenceProgramCost('WC', [false, false, true], wcBook, REF_YEAR).premium > 0, 'the merged top layer is not being charged')}`);
   // ⚠ THE MASK-TABLE ASSERTION THAT USED TO SIT HERE IS GONE WITH ITS TABLE.
   // WC_RETAINED_SECOND_MOMENT was an 8-entry array indexed by placement bitmask,
   // and this check guarded against an out-of-range index silently falling back to

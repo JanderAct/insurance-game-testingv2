@@ -339,12 +339,6 @@ export function processLineYear(
   // (currentActiveMembers is now declared above, ahead of the CLF lookup.)
   const estimatedExposure = currentActiveMembers.reduce((s, m) => s + getMemberExposure(m, line, yearNumber), 0);
 
-  const estimatedRateAtConfidenceLevelPer100 =
-    newPurePremiumPer100 * selectedFundingCLF * pricingAdjustment;
-
-  const estimatedPremium =
-    estimatedExposure * estimatedRateAtConfidenceLevelPer100 * 10_000;
-
   // --- THE PRICE SIGNAL MEMBERS RESPOND TO ---------------------------------
   //
   // Members react to what they are CHARGED, which is the total member charge
@@ -384,7 +378,7 @@ export function processLineYear(
   const placedForCost = isClaimLine
     ? normalizeLayersPlaced(line as TowerLine, lineDecisions.layersPlaced)
     : null;
-  const towerOccurrenceCost = isClaimLine && placedForCost
+  const towerQuote = isClaimLine && placedForCost
     ? occurrenceProgramCost(line as TowerLine, placedForCost, currentActiveMembers, yearNumber)
     : null;
 
@@ -392,15 +386,65 @@ export function processLineYear(
   // The WC aggregate is the one component that cannot be hoisted exactly — it
   // prices off expectedLoss, which needs the post-movement exposure. Estimated
   // here on the pre-movement book, and inert at defaults (aggregateStopLevel -1).
-  const estimatedAggregateCost = isWcClaimLine && placedForCost && lineDecisions.aggregateStopLevel >= 0
+  //
+  // ⚠ IT CEDES EXPECTED LOSS TOO, and its expected recovery comes from a
+  // different function than the occurrence layers' — quoteAggregate's own
+  // `expectedCeded`. Netting only the occurrence tower would leave the aggregate
+  // double-collected, which is the easiest piece of this to miss.
+  const estimatedAggregateQuote = isWcClaimLine && placedForCost && lineDecisions.aggregateStopLevel >= 0
     ? quoteAggregate(
         placedForCost, currentActiveMembers,
         estimatedExposure * newPurePremiumPer100 * 10_000,
         lineDecisions.aggregateStopLevel, yearNumber,
-      ).premium
-    : 0;
-  const estimatedReinsuranceCost = towerOccurrenceCost !== null
-    ? towerOccurrenceCost + estimatedAggregateCost
+      )
+    : null;
+
+  // --- NET FUNDING BASIS ----------------------------------------------------
+  //
+  // The pool premium funds the loss the pool will actually KEEP, so expected
+  // ceded comes off the contribution before the CLF is applied.
+  //
+  // WHAT THIS FIXES. The premium used to fund GROSS expected loss while the P&L
+  // charged NET ultimate loss, so the ceded portion was collected twice — once
+  // inside the pool premium and again as the reinsurance premium members pay on
+  // top — and the pool banked the difference. Measured at bdc98ec, that was
+  // $11.84M/yr on GL and $4.22M/yr on WC of margin nobody had decided to charge.
+  // It also inverted the reinsurance decision: the more the pool ceded, the more
+  // expected ceded it collected and kept, so buying the maximum tower was always
+  // correct for the pool regardless of what it cost members.
+  //
+  // ⚠ IT REFLECTS WHICH LAYERS ARE ACTUALLY PLACED. `towerQuote.expectedCeded`
+  // sums only the placed layers, so declining a layer leaves that layer's
+  // expected ceded inside the pool premium — correctly, because the pool is then
+  // keeping that loss. This is what finally makes declining a layer a real
+  // two-sided choice: the member charge falls by the layer's PREMIUM but rises
+  // by its EXPECTED CEDED, and the net saving is the risk load alone.
+  //
+  // ⚠ PROPERTY IS DELIBERATELY NOT NETTED, and this is a known residual rather
+  // than an oversight. Property's cover is the legacy percentage-of-premium
+  // aggregate from REINSURANCE_PROGRAMS, whose attachment is a multiple of
+  // expected loss and whose LIMIT is a percentage of the pool premium — so
+  // netting it would make the premium depend on a structure that depends on the
+  // premium. It also has no closed-form expected-ceded to read; WC and GL have
+  // one only because towerMoments exists for them. Measured residual: Property
+  // cedes 2.2% of gross, about $0.14M/yr, against GL's 43.5%.
+  const estimatedExpectedCededDollars =
+    (towerQuote?.expectedCeded ?? 0) + (estimatedAggregateQuote?.expectedCeded ?? 0);
+  const estimatedExpectedCededPer100 =
+    estimatedExpectedCededDollars / Math.max(estimatedExposure * 10_000, 1);
+  // Floored at zero: a book so small that expected ceded exceeded the whole pure
+  // premium would otherwise produce a negative contribution rate.
+  const estimatedNetPurePremiumPer100 =
+    Math.max(0, newPurePremiumPer100 - estimatedExpectedCededPer100);
+
+  const estimatedRateAtConfidenceLevelPer100 =
+    estimatedNetPurePremiumPer100 * selectedFundingCLF * pricingAdjustment;
+
+  const estimatedPremium =
+    estimatedExposure * estimatedRateAtConfidenceLevelPer100 * 10_000;
+
+  const estimatedReinsuranceCost = towerQuote !== null
+    ? towerQuote.premium + (estimatedAggregateQuote?.premium ?? 0)
     : calculateReinsuranceCost(
         lineDecisions.reinsuranceLevel, estimatedPremium, instance.marketEnvironment.competitivePressure,
       );
@@ -461,16 +505,45 @@ export function processLineYear(
   const writtenExposure = activeExposure;
 
   // Expected loss is based only on payroll and Pure Premium.
+  //
+  // ⚠ STAYS GROSS, and every consumer of it depends on that. It is the aggregate
+  // stop-loss's attachment basis, the reserve basis, and the finding-6 pricing
+  // denominator. The net-funding change moves the PREMIUM basis only — it must
+  // not move the loss quantities.
   const expectedLoss = activeExposure * newPurePremiumPer100 * 10_000;
 
+  // The WC aggregate, priced on the REAL post-movement expectedLoss. Its
+  // expected ceded is netted out of the pool premium below alongside the
+  // occurrence layers'.
+  const aggregateQuote = isWcClaimLine && placedForCost && lineDecisions.aggregateStopLevel >= 0
+    ? quoteAggregate(
+        placedForCost, currentActiveMembers, expectedLoss, lineDecisions.aggregateStopLevel, yearNumber,
+      )
+    : null;
+
+  // NET FUNDING — see the long note at the preliminary rate above for why the
+  // pool premium funds net rather than gross, and for why Property is excluded.
+  const expectedCededDollars =
+    (towerQuote?.expectedCeded ?? 0) + (aggregateQuote?.expectedCeded ?? 0);
+  const expectedCededPer100 = expectedCededDollars / Math.max(activeExposure * 10_000, 1);
+  const netPurePremiumPer100 = Math.max(0, newPurePremiumPer100 - expectedCededPer100);
+
   const rateAtConfidenceLevelPer100 =
-    newPurePremiumPer100 * selectedFundingCLF * pricingAdjustment;
+    netPurePremiumPer100 * selectedFundingCLF * pricingAdjustment;
 
   const poolPremiumRatePer100 = rateAtConfidenceLevelPer100;
 
   const poolPremium =
     activeExposure * rateAtConfidenceLevelPer100 * 10_000;
 
+  // ⚠ ADMIN STAYS ON THE GROSS EXPECTED LOSS, deliberately. The pool adjusts,
+  // reserves and pays a ceded claim in full and only then recovers from the
+  // reinsurer, so administering it costs exactly what administering a retained
+  // claim costs — ceding transfers the LOSS, not the handling. Moving admin to
+  // the net basis would understate the pool's real expense by the cession share:
+  // worth 0.13 per $100 on GL at the default all-layers placement, which on a
+  // $400M book is about $0.5M/yr of expense the pool would stop collecting for
+  // work it still has to do.
   const adminExpense = expectedLoss * ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM;
   const adminRatePer100 = newPurePremiumPer100 * ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM;
   const poolPremiumAndAdminExpense = poolPremium + adminExpense;
@@ -496,8 +569,7 @@ export function processLineYear(
   //
   // Property: unchanged, still a percentage of premium off REINSURANCE_PROGRAMS.
   let reinsuranceCost: number;
-  if (towerOccurrenceCost !== null && placedForCost) {
-    const towerLine = line as TowerLine;
+  if (towerQuote !== null && placedForCost) {
     // COMPUTED FROM THE BOOK AND THE YEAR, not a frozen per-$100 rate times
     // nominal exposure. The old form charged a premium that grew at the wage rate
     // while the cover's value grew with the severity trend, and it applied one
@@ -505,14 +577,10 @@ export function processLineYear(
     //
     // The occurrence component is REUSED from above rather than recomputed: it
     // reads only the pre-movement book and the year, so hoisting it to build the
-    // price signal did not change it. The aggregate still prices here, off the
-    // real post-movement expectedLoss.
-    reinsuranceCost = towerOccurrenceCost;
-    if (towerLine === 'WC' && lineDecisions.aggregateStopLevel >= 0) {
-      reinsuranceCost += quoteAggregate(
-        placedForCost, currentActiveMembers, expectedLoss, lineDecisions.aggregateStopLevel, yearNumber,
-      ).premium;
-    }
+    // price signal did not change it. The aggregate is quoted once, just above,
+    // off the real post-movement expectedLoss, and both its premium and its
+    // expected ceded come from that single quote.
+    reinsuranceCost = towerQuote.premium + (aggregateQuote?.premium ?? 0);
   } else {
     reinsuranceCost = calculateReinsuranceCost(
       lineDecisions.reinsuranceLevel,

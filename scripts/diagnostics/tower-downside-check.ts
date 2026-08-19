@@ -27,7 +27,6 @@ import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
-import { REINSURANCE_TOWER } from '../../src/data/reinsuranceTower';
 import { wageFactor } from '../../src/data/exposureTrend';
 import type { CoverageLine, GameState } from '../../src/types/simulation';
 
@@ -44,7 +43,7 @@ const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
 interface Y { members: number; realExp: number; rate: number; joined: number; left: number; sat: number; }
 interface G { s0: number; end: number; uw: number; inv: number; years: Y[]; }
 
-function run(tower: boolean): G[] {
+function run(placement: boolean[]): G[] {
   const out: G[] = [];
   for (let g = 0; g < GAMES; g++) {
     const id = `TDS${g}`;
@@ -60,7 +59,7 @@ function run(tower: boolean): G[] {
     let uw = 0, inv = 0;
     for (let y = 1; y <= YEARS; y++) {
       const d = defaultDecisionSet(y);
-      d.byLine.GL.layersPlaced = REINSURANCE_TOWER.GL.map(() => tower);
+      d.byLine.GL.layersPlaced = [...placement];
       const p = processYear(gs, d);
       const r = (p.result as never as { byLine: Record<string, Record<string, number>> }).byLine.GL;
       years.push({
@@ -79,9 +78,13 @@ function run(tower: boolean): G[] {
 console.log('=== TOWER DOWNSIDE CHECK — GL only, 50 games x 10 years, all other decisions default ===');
 console.log('ENROLLED BASIS. Real exposure deflated by GL\'s wageFactor. Reported, not gated.\n');
 console.log('--- arm A: NO reinsurance (every layer stripped) ---');
-const armA = run(false);
+const armA = run([false, false, false]);
 console.log('--- arm B: FULL tower (which is the DEFAULT placement) ---');
-const armB = run(true);
+const armB = run([true, true, true]);
+// The single most likely real decision: keep the two upper layers, decline the
+// working layer that is pierced several times a year.
+console.log('--- arm C: decline $4M xs $1M only, keep $5M xs $5M and $15M xs $10M ---');
+const armC = run([false, true, true]);
 
 function report(label: string, games: G[]) {
   const mult = games.map(g => g.end / g.s0);
@@ -108,6 +111,7 @@ function report(label: string, games: G[]) {
 
 const A = report('ARM A — no reinsurance', armA);
 const B = report('ARM B — full tower (the default)', armB);
+const C = report('ARM C — decline $4M xs $1M only', armC);
 
 console.log('\n\n=== DOES THE TOWER NOW HAVE A DOWNSIDE? ===');
 console.log('  Before the price channel: underwriting improved by ~3.2 of S0 with the tower and');
@@ -128,6 +132,20 @@ for (let y = 0; y < YEARS; y++) {
   const ra = q(armA.map(g => g.years[y].rate), 0.5), rb = q(armB.map(g => g.years[y].rate), 0.5);
   console.log(`  Y${String(y + 1).padStart(2)}   ${String(ma).padStart(9)}   ${String(mb).padStart(9)}   ` +
     `${String(mb - ma).padStart(4)}   ${ra.toFixed(2).padStart(6)}   ${rb.toFixed(2).padStart(6)}`);
+}
+
+console.log('\n\n=== THE ACTUAL DECISION: DECLINING $4M xs $1M (arm B -> arm C) ===');
+{
+  const rB = q(armB.map(g => g.years[0].rate), 0.5), rC = q(armC.map(g => g.years[0].rate), 0.5);
+  console.log(`  member rate per $100, Y1 median:  full tower ${rB.toFixed(3)} -> decline ${rC.toFixed(3)}  ` +
+    `= ${(((rC / rB) - 1) * 100).toFixed(1)}%`);
+  console.log(`  games below start:                full tower ${B.below}/${GAMES} -> decline ${C.below}/${GAMES}`);
+  console.log(`  median surplus multiple:          full tower ${q(B.mult, 0.5).toFixed(2)} -> decline ${q(C.mult, 0.5).toFixed(2)}`);
+  console.log(`  p10 surplus multiple:             full tower ${q(B.mult, 0.1).toFixed(2)} -> decline ${q(C.mult, 0.1).toFixed(2)}`);
+  console.log(`  Y10 members median:               full tower ${q(armB.map(g => g.years[YEARS - 1].members), 0.5)} -> ` +
+    `decline ${q(armC.map(g => g.years[YEARS - 1].members), 0.5)}`);
+  console.log('\n  A cheaper price against a wider downside is exactly the shape this decision');
+  console.log('  should have. Two-sided iff BOTH move, and in opposite directions.');
 }
 
 console.log('\nDONE — reported, not gated.');

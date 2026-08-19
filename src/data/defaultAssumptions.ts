@@ -612,15 +612,15 @@ export const BASE_NEW_MEMBERS_PER_YEAR = 1.0;
 //
 // ⚠ THE CONDITION IS ON TOTAL JOINS, NOT ON THE BASE ALONE, and the `adj` term
 // is why. The adjustment ladder in membershipEngine's newMemberAdjustment does
-// NOT sit at zero when every decision is at its default: measured at +0.619
-// members/yr, near-identical on all three lines (WC +0.569, GL +0.652,
-// Property +0.636). Two channels drive it — competitivePressure, drawn in
+// NOT sit at zero when every decision is at its default: measured at +0.611
+// members/yr, near-identical on all three lines (WC +0.542, GL +0.658,
+// Property +0.633). Two channels drive it — competitivePressure, drawn in
 // [0.3, 0.8], contributes (1 - cp) x 0.5, mean +0.225; and satisfaction starts
 // in [6.5, 8.5], so the >= 7.5 branch fires about half the time. The rate-LEVEL
 // term added with the price channel contributes essentially nothing here BY
 // CONSTRUCTION, since RATE_NEUTRAL_LOAD is measured at defaults — the residual
-// level deviation at defaults is -0.05% on WC, +0.19% on GL and -0.00% on
-// Property. Pinning k on the base alone would leave the pool growing at
+// level deviation at defaults is within a few hundredths of a percent on every
+// line. Pinning k on the base alone would leave the pool growing at
 // defaults, which fails the whole point of the fix.
 //
 // Folding it in is not a fudge, it is what makes the adjustments DIFFERENTIAL:
@@ -630,16 +630,16 @@ export const BASE_NEW_MEMBERS_PER_YEAR = 1.0;
 // entire objective. Leaving `adj` out would measure every decision against a
 // silently growing baseline instead.
 //
-// N* = 61 is the pooled median starting book with all three lines active
-// (WC 60, GL 60, Property 63), re-measured after the price channel. Starting
+// N* = 63 is the pooled median starting book with all three lines active
+// (WC 64, GL 62, Property 63), re-measured after the funding basis moved to net. Starting
 // books are drawn as an exposure SHARE (STARTING_EXPOSURE_SHARE, 25-35%), never
 // as a count, so the count is emergent.
 //
 // ONE k STILL SERVES ALL THREE, and this was re-checked rather than assumed.
 // The price channel is the first mechanism here with a genuinely per-line
 // neutral point, so the question was reopened. Per-line k values come out at
-// WC 0.014951, GL 0.014431, Property 0.015234 — a 1.056x spread, TIGHTER than
-// the 1.147x spread in the adjustment alone, because each line's higher
+// WC 0.016546, GL 0.015084, Property 0.015669 — a 1.097x spread, TIGHTER than
+// the 1.213x spread in the adjustment alone, because each line's higher
 // adjustment is offset by its own departure rate and starting book. The pooled
 // k sits inside that range on every line.
 //
@@ -653,8 +653,8 @@ export const BASE_NEW_MEMBERS_PER_YEAR = 1.0;
 // flat from wherever it opens, which is the property that actually matters and
 // is verified directly in scripts/diagnostics/membership-equilibrium-check.ts.
 //
-//     k = (61 x 0.044 - 0.619) / (200 - 61) = 2.065 / 139 = 0.014856
-export const MEMBERSHIP_EQUILIBRIUM_ENROLLMENT = 61;
+//     k = (63 x 0.044 - 0.611) / (200 - 63) = 2.161 / 137 = 0.015774
+export const MEMBERSHIP_EQUILIBRIUM_ENROLLMENT = 63;
 
 // The measured contribution of the adjustment ladder at ALL-DEFAULT decisions,
 // in members/yr. Folded into k so that defaults are the neutral point — see the
@@ -664,9 +664,11 @@ export const MEMBERSHIP_EQUILIBRIUM_ENROLLMENT = 61;
 // ⚠ If any adjustment branch's coefficient changes, THIS NUMBER MUST BE
 // RE-MEASURED. It is a property of the ladder, not a constant of nature, and a
 // stale value here silently re-tilts the equilibrium. It has already had to move
-// once for exactly that reason: reconnecting the price channel added the
-// rate-LEVEL term to this ladder and took it from 0.60 to 0.619.
-export const MEMBERSHIP_DEFAULT_ADJUSTMENT = 0.619;
+// twice for exactly that reason: reconnecting the price channel added the
+// rate-LEVEL term to this ladder (0.60 -> 0.619), and moving the pool premium to
+// a net funding basis moved every line's load and with it the level term
+// (0.619 -> 0.611).
+export const MEMBERSHIP_DEFAULT_ADJUSTMENT = 0.611;
 
 // The REALISED share of the book that leaves per year at all-default decisions.
 //
@@ -677,7 +679,7 @@ export const MEMBERSHIP_DEFAULT_ADJUSTMENT = 0.619;
 // starts in [6.5, 8.5] against a 5.0 reference and the surplus ratio climbs
 // through the 0.6 reference as the pool builds surplus. MAX_WITHDRAWN_PER_YEAR
 // then truncates the top of the noise distribution on top of that. The measured
-// result is 4.4%, not 5.0% — WC 4.44%, GL 4.45%, Property 4.32%, over 40 games
+// result is 4.4%, not 5.0% — WC 4.36%, GL 4.42%, Property 4.41%, over 40 games
 // x 10 years x 3 lines at defaults.
 //
 // Both sides of the equilibrium therefore have to be taken as they actually
@@ -685,7 +687,8 @@ export const MEMBERSHIP_DEFAULT_ADJUSTMENT = 0.619;
 // while the book only sheds 4.4% builds in a permanent upward tilt.
 //
 // ⚠ RE-MEASURE THIS TOO whenever the retention ladder changes. It moved from
-// 0.042 to 0.044 when the price channel was reconnected, and the mechanism is
+// 0.042 to 0.044 when the price channel was reconnected (and held at 0.044
+// through the move to net funding), and the mechanism is
 // worth naming: the rate-change retention penalty is PENALTY-ONLY, so ordinary
 // year-to-year rate noise around the neutral point produces penalties in up
 // years and nothing in down years. That asymmetry is a genuine, permanent
@@ -895,9 +898,9 @@ export const MEMBER_MOVEMENT_WEIGHTS = {
 // changes, or if the admin ratio changes. They are properties of the pricing
 // path, not constants of nature.
 export const RATE_NEUTRAL_CHANGE_PCT: Record<CoverageLine, number> = {
-  WC: -1.39,
-  GL: 1.35,
-  Property: 4.83,
+  WC: -1.53,
+  GL: 1.23,
+  Property: 4.10,
 };
 
 // The load — total member charge rate / pure premium rate — at all-default
@@ -909,8 +912,8 @@ export const RATE_NEUTRAL_CHANGE_PCT: Record<CoverageLine, number> = {
 // tower is what lifts them to these values, and that gap IS the tower's price
 // signal to prospects.
 export const RATE_NEUTRAL_LOAD: Record<CoverageLine, number> = {
-  WC: 1.757,
-  GL: 1.897,
+  WC: 1.472,
+  GL: 1.457,
   Property: 1.525,
 };
 

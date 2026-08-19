@@ -382,7 +382,7 @@ console.log('\n--- 7. THE FEEDBACK LOOP THE RUNTIME PRICE INTRODUCES ---');
   const shrunk = bookFor('GL', 360);   // ~10% smaller
   const placed = [true, true, true];
   const expOf = (bk: Member[]) => bk.reduce((s, m) => s + glP(m), 0);
-  const costOf = (bk: Member[]) => occurrenceProgramCost('GL', placed, bk, 1);
+  const costOf = (bk: Member[]) => occurrenceProgramCost('GL', placed, bk, 1).premium;
   const rateBase = costOf(base) / expOf(base), rateSmall = costOf(shrunk) / expOf(shrunk);
   const sizeDelta = expOf(shrunk) / expOf(base) - 1;
   const rateDelta = rateSmall / rateBase - 1;
