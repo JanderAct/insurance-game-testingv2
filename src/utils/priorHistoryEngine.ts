@@ -17,7 +17,7 @@
 //
 // Opening band (PER-LINE reject-and-redraw, NO clamping): each active line
 // must end its pre-game with opening surplus inside that line's own
-// OPENING_MULTIPLE_BAND — [min, max] × its own Required Reserve Margin
+// OPENING_SURPLUS_TO_PREMIUM_BAND — [min, max] × its own opening POOL PREMIUM
 // (two-sided: too weak AND too strong both redraw). If a line lands outside,
 // ONLY that line re-simulates on a deterministically derived alternate seed
 // (seed + attempt * 997) until it lands in-band — one line's redraw never
@@ -41,7 +41,7 @@ import type {
 } from '../types/simulation';
 import { generateStartingPoolState } from './instanceGenerator';
 import { getPredefinedMarketMembers } from '../data/memberCatalog';
-import { OPENING_MULTIPLE_BAND } from '../data/defaultAssumptions';
+import { OPENING_SURPLUS_TO_PREMIUM_BAND } from '../data/defaultAssumptions';
 import { processYear, aggregateLineResults } from './simulationEngine';
 import { emptyLinePoolState } from './lineHelpers';
 import { defaultDecisionSet } from './decisionDefaults';
@@ -126,19 +126,30 @@ function simulateLineCandidate(
 }
 
 // Per-line reject-and-redraw: re-simulate ONLY this line until its opening
-// surplus lands inside this line's own OPENING_MULTIPLE_BAND (two-sided).
+// surplus lands inside OPENING_SURPLUS_TO_PREMIUM_BAND (two-sided).
+//
+// ⚠ MEASURED AGAINST PREMIUM, NOT AGAINST THE REQUIRED RESERVE MARGIN. The
+// margin is expectedNetUnpaidLoss x (reserveMarginCLF - 1), and testing against
+// it made the opening move whenever the reserve, the reserve-margin CLF or the
+// funding basis moved — three consecutive commits did exactly that, none of them
+// a decision. Premium is the same quantity STARTING_CAPITAL_TO_PREMIUM already
+// sets the seed from, so both sides of the pre-game now reference one stable
+// basis and the reserve margin has left this path entirely. The band stays
+// PER-LINE: a single shared tolerance was measured and rejected because it moved
+// WC +22% and Property -18%, which is a re-tune, not a decoupling. See the
+// band's own comment for the calibration.
 function runLinePreGame(
   instance: GameInstance,
   setup: GameSetupSettings,
   line: CoverageLine
 ): LinePreGame {
-  const band = OPENING_MULTIPLE_BAND[line] ?? { min: 1.35, max: 2.0 };
+  const band = OPENING_SURPLUS_TO_PREMIUM_BAND[line] ?? { min: 0.83, max: 1.22 };
   let best: { c: ReturnType<typeof simulateLineCandidate>; attempt: number; distance: number } | null = null;
 
   for (let attempt = 0; attempt < MAX_HISTORY_ATTEMPTS; attempt++) {
     const c = simulateLineCandidate(instance, setup, line, attempt);
     const last = c.lineResults[c.lineResults.length - 1];
-    const multiple = last.endingSurplus / Math.max(last.reserveRiskMarginNeeded, 1);
+    const multiple = last.endingSurplus / Math.max(last.poolPremium, 1);
     if (multiple >= band.min && multiple <= band.max) return finalizeLine(c, line, attempt);
     // Distance to the band (0 inside): the fallback keeps the closest miss.
     const distance = multiple < band.min ? band.min - multiple : multiple - band.max;

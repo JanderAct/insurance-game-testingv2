@@ -953,32 +953,93 @@ export const EXPOSURE_RANGES: Record<string, { min: number; max: number }> = {
 // Size category probability weights — mostly small entities
 export const SIZE_WEIGHTS = [0.55, 0.30, 0.12, 0.03];
 
-// Per-line opening capital (seed-fix-per-line-opening): each active line's
-// opening surplus = this multiple × that line's own opening premium. Config-
-// independent by construction (depends only on the line's own premium), which
-// replaces the old net-reserve-weighted split of a single shared pot.
-// Tuned (investment-and-opening-tuning) so the 3-year pre-game typically lands
-// each line's Year-1 opening inside its OPENING_MULTIPLE_BAND below; the
-// two-sided pre-game redraw is the guarantee, these are the primary mechanism.
+// PRE-GAME SEED capital: each active line's surplus at the START of the 3-year
+// pre-game = this multiple x that line's own premium. Config-independent by
+// construction (depends only on the line's own premium).
+//
+// ⚠ THIS IS NOT THE YEAR-1 OPENING RATIO, and the distinction matters more than
+// it looks. These are the pre-game's INITIAL conditions at year -2; three
+// simulated years of operation then run on top, and the acceptance band below
+// selects which of those runs is kept. Measured, the year-1 opening lands at
+// 1.068x premium on WC, 1.300x on GL and 1.263x on Property — nowhere near
+// 0.70 / 0.45 / 0.18. Anyone reading these as "WC opens at 0.70x premium" will
+// be wrong by a factor of 1.5.
+//
+// ⚠ THE PER-LINE ORDERING HAS NO SURVIVING RATIONALE, and inventing one would be
+// worse than saying so. The comment here used to justify these by the acceptance
+// test they were tuned against, and that test has been replaced. Checked against
+// the two candidate explanations:
+//
+//   TAIL LENGTH cannot separate WC from GL. The engine's only per-line runoff
+//   parameter is LINE_RESERVE_PAYDOWN_PCT, and WC and GL are IDENTICAL on it
+//   (both 0.35, steady-state reserve 1.71x annual loss). It explains Property
+//   being lower (0.65 paydown, 0.92x) and nothing else.
+//
+//   RISK does not explain it either, and points the wrong way: GL's retained
+//   annual CV is about 0.78 against WC's 0.39, so GL is twice as volatile per
+//   dollar of expected loss while receiving LESS seed capital per dollar of
+//   premium.
+//
+// What they are, honestly: pre-game initial conditions whose influence on the
+// year-1 opening is largely washed out by three years of operation and by the
+// acceptance band. DISPLACED BY: a real per-line capital standard, if one is
+// ever adopted. Until then the band below is what actually sets the opening.
 export const STARTING_CAPITAL_TO_PREMIUM: Record<string, number> = {
   WC: 0.70,
   GL: 0.45,
   Property: 0.18,
 };
 
-// Pre-game acceptance band (per line): the line's Year-1 opening surplus must
-// land within [min, max] × that line's own Required Reserve Margin, or its
-// pre-game redraws on its own derived seed. PER-LINE on purpose — checking at
-// pool level would reintroduce config-dependence. Property's band is higher
-// because Required Reserve Margin measures RESERVE risk, structurally small
-// for a short-tail line (margin ≈ 0.64× premium vs WC's 1.16×); Property's
-// real exposure is catastrophe/underwriting risk that the margin metric
-// doesn't capture, so it must hold a larger multiple of that small margin to
-// carry comparable surplus against its premium.
-export const OPENING_MULTIPLE_BAND: Record<string, { min: number; max: number }> = {
-  WC: { min: 1.35, max: 2.0 },
-  GL: { min: 1.35, max: 2.0 },
-  Property: { min: 2.0, max: 3.0 },
+// Pre-game acceptance band: the line's Year-1 opening surplus must land within
+// [min, max] x that line's own opening PREMIUM, or its pre-game redraws on its
+// own derived seed. PER-LINE on purpose — checking at pool level would
+// reintroduce config-dependence.
+//
+// ⚠ IT USED TO BE MEASURED AGAINST THE REQUIRED RESERVE MARGIN, and that was
+// the defect. The margin is expectedNetUnpaidLoss x (reserveMarginCLF - 1):
+// a stable target (STARTING_CAPITAL_TO_PREMIUM, a multiple of premium) filtered
+// through an unstable acceptance test, and the filter wins. Three consecutive
+// commits moved the opening through that path without any decision causing it:
+//   f328d65  static CLF tables — reserveMarginCLF fell ~1.79 -> 1.36 on GL
+//   fab85e4  net funding — the margin's basis was corrected
+//   962ef60  IBNR removed — the reserve fell 24.8%, the opening fell 30.4%
+// The last made reserves-to-surplus WORSE (0.920 -> 1.089) while the reserve
+// SHRANK, because the opening moved further than the reserve did. Both sides now
+// reference premium, so the margin has left the opening path entirely.
+//
+// ⚠ NOT A TOLERANCE AROUND STARTING_CAPITAL_TO_PREMIUM, which would have been
+// the obvious construction and is wrong: that constant is the pre-game's year -2
+// SEED (0.70 / 0.45 / 0.18), while this band tests the YEAR-1 opening after three
+// years of operation, which measures 1.065 / 1.270 / 1.293. A tolerance around
+// 0.70 would reject essentially every WC pre-game.
+//
+// ⚠ STILL PER-LINE, AND ONE SHARED BAND WAS TRIED AND REJECTED ON MEASUREMENT.
+// The argument for collapsing Property's separate band is sound as far as it
+// goes — its old 2.0-3.0 existed because the reserve margin is structurally
+// small for a short-tail line, and on a premium basis that reasoning does
+// evaporate. But the three lines do NOT currently open at the same multiple of
+// premium, and their ranges barely overlap: WC [0.83, 1.22] against Property
+// [1.13, 1.70]. A single band spanning the union was measured and moved the
+// openings materially — WC's median +22%, Property's -18% — which is a re-tune,
+// and precisely the kind of uncaused movement this change exists to stop.
+//
+// So: one BASIS for all three lines (premium, which is the fix), three
+// TOLERANCES (which is what preserves the distribution). Collapsing to a single
+// number would be a separate decision about a common capital standard, and it
+// should be taken deliberately rather than smuggled in behind a basis change.
+//
+// CALIBRATED TO PRESERVE THE CURRENT DISTRIBUTION, not to re-tune it. Each band
+// is the OLD margin-basis band translated onto premium at that line's median
+// margin/premium ratio AS MEASURED AT THE PARENT (WC 0.612, GL 0.744, Property
+// 0.567 — the after-state ratios differ, which is the point):
+//   WC        [1.35, 2.0] x 0.612 = [0.83, 1.22]
+//   GL        [1.35, 2.0] x 0.744 = [1.00, 1.49]
+//   Property  [2.0,  3.0] x 0.567 = [1.13, 1.70]
+// so the accept/reject decision is the same one, taken against a stable basis.
+export const OPENING_SURPLUS_TO_PREMIUM_BAND: Record<string, { min: number; max: number }> = {
+  WC: { min: 0.83, max: 1.22 },
+  GL: { min: 1.00, max: 1.49 },
+  Property: { min: 1.13, max: 1.70 },
 };
 
 // Starting enrollment per line: each active line independently enrolls members

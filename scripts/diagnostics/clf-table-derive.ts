@@ -58,10 +58,15 @@
 //
 // Installing the table changes the engine it was measured from, via the 90%
 // stop: reserveMarginCLF reads it, the Required Reserve Margin scales with it,
-// and runPriorHistory accepts a pre-game only if the opening surplus lands
+// and runPriorHistory accepted a pre-game only if the opening surplus landed
 // inside OPENING_MULTIPLE_BAND x that margin. Measured, not assumed — the first
 // pass gave a WC crossing of 49.9% and re-deriving with that table installed
 // gave 47.2%.
+//
+// ⚠ THE LINK IS NOW CUT: the pre-game tests the opening against PREMIUM
+// (OPENING_SURPLUS_TO_PREMIUM_BAND), so the 90% stop no longer reaches the
+// opening surplus. Expect ONE pass to converge. Run it twice anyway and check —
+// the cost is one run, and this loop is exactly the kind that comes back.
 //
 // So: derive, install, DERIVE AGAIN, and only ship once two consecutive passes
 // agree. Anything else ships a table calibrated to an engine that no longer

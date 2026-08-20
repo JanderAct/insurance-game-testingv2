@@ -1167,18 +1167,18 @@ export function processLineYear(
   // this product are now net. GL's 90% CLF falls from ~1.79 to 1.3642 and WC's
   // from ~1.54 to 1.3893 as a result.
   //
-  // ⚠ IT MOVES OPENING SURPLUS, because runPriorHistory's reject-and-redraw
-  // accepts a pre-game only if the opening surplus lands inside
-  // OPENING_MULTIPLE_BAND x THIS margin. Median opening surplus falls from
-  // $15.09M to $11.65M on WC and from $21.29M to $11.72M on GL. The enrolled
-  // book is unchanged (61/62 members). Those band multipliers were chosen
-  // against the old gross-based margin and now want re-centring: the pre-game
-  // reject-and-redraw needs a MEDIAN OF 28 ATTEMPTS on GL to land in band (p90
-  // 116, max 158) against WC's median of 4. Nothing is broken — no game exhausts
-  // MAX_HISTORY_ATTEMPTS (500) and none falls back to the closest-miss path — but
-  // a band hit one try in 28 is fragile, and it makes the pre-game roughly 4x
-  // slower on GL. Flagged rather than re-tuned here: moving OPENING_MULTIPLE_BAND
-  // changes every game's starting surplus and belongs in its own commit.
+  // ⚠ IT NO LONGER MOVES OPENING SURPLUS — and that is a deliberate repair, not
+  // an accident of the current numbers. This margin USED to be the pre-game's
+  // acceptance basis: runPriorHistory accepted an opening only inside
+  // OPENING_MULTIPLE_BAND x THIS quantity, so every change to the reserve, to
+  // the reserve-margin CLF, or to the funding basis re-rated every game's
+  // starting surplus. It did, three commits running (f328d65, fab85e4, 962ef60);
+  // the worst of it moved GL's median opening from $21.29M to $11.72M and needed
+  // a MEDIAN OF 28 REDRAWS to land in band. The pre-game now tests against
+  // PREMIUM (OPENING_SURPLUS_TO_PREMIUM_BAND), so this margin has no consumer on
+  // the opening path at all. KEEP IT THAT WAY: if a future change wants to
+  // condition the opening on reserve risk, that is a decision to argue for
+  // explicitly, not a side effect to reintroduce.
   const reserveMarginCLF = hasStaticClf(line)
     ? staticClf(line, 0.90)
     : lookupCLF(0.90);

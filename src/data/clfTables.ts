@@ -155,10 +155,17 @@
 //
 // Installing the table changes the engine it was measured from. The route is
 // the 90% stop: reserveMarginCLF reads it, the Required Reserve Margin scales
-// with it, and runPriorHistory's reject-and-redraw accepts a pre-game only if
-// the opening surplus lands inside OPENING_MULTIPLE_BAND x that margin. So a
-// first-pass table measured under the old grids sits in an engine with
+// with it, and runPriorHistory's reject-and-redraw accepted a pre-game only if
+// the opening surplus landed inside OPENING_MULTIPLE_BAND x that margin. So a
+// first-pass table measured under the old grids sat in an engine with
 // different opening surplus than the one it was derived from.
+//
+// ⚠ THAT ROUTE IS NOW CLOSED, and the iteration record below is kept anyway.
+// The pre-game tests the opening against PREMIUM, not against the margin, so
+// installing a table no longer moves the opening and the self-reference is
+// broken at its only link. A re-derivation from here should converge in ONE
+// pass. Confirm that rather than assume it — the fixed-point discipline below
+// is what caught the problem in the first place, and it costs one extra run.
 //
 // Measured rather than assumed, and iterated until it stopped moving:
 //

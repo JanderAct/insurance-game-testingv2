@@ -1760,7 +1760,8 @@ dominated by the bottom of the distribution.
 `wageFactor` and `wcSeverityTrend` both **floor at year 1** rather than deflating for negative
 yearNumbers. Less symmetric with `wcFrequencyTrend`, which does let the pre-game run hotter — but the
 pre-game is an **initial-conditions generator**, not a wage history, and every dollar constant shaping it
-(`STARTING_FINANCIALS`, `STARTING_CAPITAL_TO_PREMIUM`, `OPENING_MULTIPLE_BAND`) is in year-1 dollars.
+(`STARTING_FINANCIALS`, `STARTING_CAPITAL_TO_PREMIUM`, `OPENING_SURPLUS_TO_PREMIUM_BAND`) is in
+year-1 dollars.
 Letting it deflate re-rated the opening position: measured at 5% lower starting surplus and 3 fewer
 starting members, for no modelling gain. The same mismatch is why `instanceGenerator` pins
 `OPENING_EXPOSURE_YEAR` to 1.

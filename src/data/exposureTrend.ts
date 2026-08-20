@@ -100,8 +100,8 @@ export const WAGE_INFLATION_APPLIES: Record<CoverageLine, boolean> = {
 // run only to produce an opening balance sheet for a pool that has been
 // operating. Every dollar constant that shapes it is expressed in year-1
 // dollars: STARTING_FINANCIALS' premium and surplus ranges,
-// STARTING_CAPITAL_TO_PREMIUM, and the OPENING_MULTIPLE_BAND acceptance test
-// that redraws the whole pre-game when the opening surplus lands outside it.
+// STARTING_CAPITAL_TO_PREMIUM, and the OPENING_SURPLUS_TO_PREMIUM_BAND
+// acceptance test that redraws the pre-game when the opening lands outside it.
 // Deflating exposure ~10% while those stay fixed silently re-rates the opening
 // position — measured at a 5% lower starting surplus and 3 fewer starting
 // members, for no modelling gain.
