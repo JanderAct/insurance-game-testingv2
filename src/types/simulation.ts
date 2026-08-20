@@ -479,6 +479,33 @@ export interface ResultSet {
   ratePer100: number;           // rate per $100 payroll
   purePremiumPer100: number;    // expected loss per $100 payroll
   purePremium: number;          // kept for compat
+  // NET-FUNDING INTERMEDIATES — purePremiumPer100 is GROSS; poolPremium funds
+  // (purePremiumPer100 - expectedCededPer100) x CLF x rateLevel/100. Both were
+  // locals inside processLineYear until now, so nothing outside the engine
+  // could reproduce poolPremium, and the audit page's build-up card displayed
+  // a gross derivation beside a net value it could not reconcile to (38-73%
+  // apart on WC/GL). Added purely so that gap can be closed; see
+  // simulationEngine.ts's fundedNetExpectedLoss and the net-funding note above
+  // it for the fuller story.
+  //
+  // STORED UNROUNDED, unlike purePremiumPer100 above (which is toFixed(4) for
+  // display) — these two exist to satisfy an exact identity
+  // (poolPremium === activeExposure x netPurePremiumPer100 x CLF x
+  // rateLevel/100 x 10_000), and rounding either would break that to display
+  // precision instead of float precision.
+  //
+  // NOT COLLAPSIBLE TO ONE FIELD. netPurePremiumPer100 = Math.max(0,
+  // purePremiumPer100 - expectedCededPer100) — a floor that has never bound in
+  // measurement, but deriving one from the other via that formula would only
+  // reproduce the un-rounded purePremiumPer100 exactly, and the only copy of
+  // that on this type is rounded. Both are stored so the identity holds from
+  // stored fields alone.
+  //
+  // ZERO ON PROPERTY, exactly and by construction: Property is deliberately
+  // not netted (see the net-funding note), so its expectedCededPer100 is the
+  // literal 0 the ternary never overrides, not a measured coincidence.
+  expectedCededPer100: number;
+  netPurePremiumPer100: number;
   writtenExposure: number;      // payroll exposure in $M
 
   // Premium

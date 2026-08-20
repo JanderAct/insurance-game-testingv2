@@ -1342,6 +1342,10 @@ export function processLineYear(
     ratePer100: parseFloat(totalMemberRatePer100.toFixed(4)),
     purePremiumPer100: parseFloat(newPurePremiumPer100.toFixed(4)),
     purePremium: parseFloat(newPurePremiumPer100.toFixed(4)),
+    // Unrounded — see the type's comment for why these two skip the toFixed(4)
+    // every sibling per-$100 field above gets.
+    expectedCededPer100,
+    netPurePremiumPer100,
     writtenExposure: parseFloat(writtenExposure.toFixed(2)),
 
     poolPremium,
@@ -2126,6 +2130,13 @@ export function aggregateLineResults(
     ratePer100: first.ratePer100,
     purePremiumPer100: first.purePremiumPer100,
     purePremium: first.purePremium,
+    // Same one-line placeholder as the per-100 fields above, for the same
+    // reason: a per-100 RATE cannot be summed across lines, and blending it
+    // needs an exposure weighting sum() does not do. Do not read these at pool
+    // scope; each line's own value is exact and is what the identity in
+    // fundedNetExpectedLoss's header is asserted against.
+    expectedCededPer100: first.expectedCededPer100,
+    netPurePremiumPer100: first.netPurePremiumPer100,
     writtenExposure: sum('writtenExposure'),
 
     poolPremium: sum('poolPremium'),

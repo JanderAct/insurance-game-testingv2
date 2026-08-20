@@ -194,6 +194,26 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
       csvValue: r => r.purePremiumPer100,
     },
     {
+      // The term poolPremiumRateAtSelectedClf below could not previously be
+      // reconciled to purePremiumRatePer100 above: the pool premium funds NET
+      // expected loss (see simulationEngine.ts's net-funding note) while pure
+      // premium is GROSS, and the gap between them was two engine locals no
+      // export or audit-page row could reach — an export figure the reader
+      // could not reproduce from anything else on the sheet.
+      key: 'expectedCededPer100',
+      category: 'Rate and Premium',
+      label: 'Expected Ceded per $100 Payroll',
+      value: r => dollars(r.expectedCededPer100),
+      csvValue: r => r.expectedCededPer100,
+    },
+    {
+      key: 'netPurePremiumRatePer100',
+      category: 'Rate and Premium',
+      label: 'Net Pure Premium Rate per $100 Payroll',
+      value: r => dollars(r.netPurePremiumPer100),
+      csvValue: r => r.netPurePremiumPer100,
+    },
+    {
       key: 'poolPremiumRateAtSelectedClf',
       category: 'Rate and Premium',
       label: 'Pool Premium Rate at Selected CLF',
