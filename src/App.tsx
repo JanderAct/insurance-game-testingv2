@@ -428,15 +428,32 @@ export default function App() {
   const fundingConsequence = React.useMemo(() => {
     if (!gameState) return null;
     const lineState = gameState.poolState.lines[decisionLine];
+    const d = currentDecisions.byLine[decisionLine];
     return computeFundingConsequence(
-      lineState.purePremiumPer100,
       decisionLineFundingLevel,
       decisionLineReinsuranceLevel,
       lineState.ratePer100,
       decisionLine,
       decisionLineFundingAtExpected,
+      {
+        yearNumber: gameState.currentYearNumber,
+        // The tower prices off the book itself, so the panel needs the members
+        // and the year, not just an exposure total.
+        members: decisionLineActiveMembers,
+        exposure: decisionLineActiveMembers.reduce(
+          (sum, m) => sum + getMemberExposure(m, decisionLine, gameState.currentYearNumber), 0,
+        ),
+        layersPlaced: d.layersPlaced,
+        aggregateStopLevel: d.aggregateStopLevel,
+        pricingAdjustment: lineState.rateLevel / 100,
+        competitivePressure: gameState.instance.marketEnvironment.competitivePressure,
+        priorPurePremiumPer100: lineState.purePremiumPer100,
+        lossTrend: gameState.instance.lossEnvironment.lossTrend,
+        priorRcEffectiveness: lineState.riskControlEffectiveness,
+        riskControlPct: d.riskControlPct,
+      },
     );
-  }, [gameState, decisionLine, decisionLineFundingLevel, decisionLineReinsuranceLevel, decisionLineFundingAtExpected]);
+  }, [gameState, decisionLine, decisionLineFundingLevel, decisionLineReinsuranceLevel, decisionLineFundingAtExpected, decisionLineActiveMembers, currentDecisions]);
 
   return (
     <div className="min-h-screen bg-gray-50">

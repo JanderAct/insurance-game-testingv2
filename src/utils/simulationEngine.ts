@@ -31,7 +31,6 @@ import {
   aggregateRecovery,
   cedeOccurrences,
   normalizeLayersPlaced,
-  occurrenceProgramCost,
   occurrenceTotals,
   quoteAggregate,
 } from './reinsuranceTower';
@@ -43,6 +42,7 @@ import { computeKLine, deriveNeutralPurePremiumPer100, expectedWcGrossLossForPri
 import { hasStaticClf, staticClf } from '../data/clfTables';
 import { computeKGl, deriveNeutralGlPurePremiumPer100, expectedGlGrossLossForPricing, generateGlClaims, glCappedSeverityTrend } from './glClaimEngine';
 import { generateNarrative } from './narrativeEngine';
+import { quoteLineRates } from './linePricing';
 import { getMemberExposure } from './lineHelpers';
 import { wageFactor } from '../data/exposureTrend';
 import { getPredefinedMarketMembers } from '../data/memberCatalog';
@@ -124,6 +124,60 @@ function fundedNetExpectedLoss(r: { poolPremium: number; selectedFundingCLF: num
 // wander instead of holding. Do not "fix" this.
 const WC_HELD_PURE_PREMIUM_PER_100 = deriveNeutralPurePremiumPer100(getPredefinedMarketMembers());
 const GL_HELD_PURE_PREMIUM_PER_100 = deriveNeutralGlPurePremiumPer100(getPredefinedMarketMembers());
+
+// THIS YEAR'S GROSS PURE PREMIUM PER $100 — exported because the Decisions
+// panel needs the SAME number the engine is about to price with.
+//
+// ⚠ IT IS NOT lineState.purePremiumPer100. That field holds LAST year's value,
+// and the panel used to price off it directly — so on WC and GL, which
+// re-derive from held constants times the year's own trend factors, the panel
+// was a year stale before anything else went wrong with it. Small (~2%/yr on
+// WC) but structural, and it compounds with the funding-basis gap rather than
+// cancelling it.
+//
+// Extracted from processLineYear VERBATIM, operation order included: these are
+// float products feeding every downstream premium, and reassociating them
+// would move engine values.
+export function currentPurePremiumPer100(
+  line: CoverageLine,
+  yearNumber: number,
+  priorPurePremiumPer100: number,
+  lossTrend: number,
+  rcEffectiveness: number,
+): number {
+  return line === 'WC'
+    ? WC_HELD_PURE_PREMIUM_PER_100
+      * wcFrequencyTrend(yearNumber)
+      * wcSeverityTrend(yearNumber)
+      / wageFactor('WC', yearNumber)
+    : line === 'GL'
+    ? GL_HELD_PURE_PREMIUM_PER_100
+      * glCappedSeverityTrend(yearNumber)
+      / wageFactor('GL', yearNumber)
+    // PROPERTY ALONE compounds off its own prior value and its own decisions,
+    // so unlike WC/GL it is not a pure function of the year.
+    : priorPurePremiumPer100 *
+      (1 + lossTrend) *
+      (1 - rcEffectiveness);
+}
+
+// The risk-control effectiveness this year's decision produces. Exported for
+// the same reason: Property's pure premium above depends on it, so the panel
+// cannot reach a matching pure premium without it.
+export function projectedRcEffectiveness(
+  priorRCEffectiveness: number,
+  riskControlPct: number,
+): number {
+  const maxRC = RISK_CONTROL_PARAMS.maxEffectiveness;
+  const rcGain =
+    (riskControlPct / 0.08) *
+    (maxRC / RISK_CONTROL_PARAMS.lagYears);
+  const rcDecay =
+    priorRCEffectiveness *
+    RISK_CONTROL_PARAMS.decayRate *
+    (riskControlPct < 0.01 ? 2 : 1);
+  return Math.max(0, Math.min(maxRC, priorRCEffectiveness + rcGain - rcDecay));
+}
 
 // Line-specific label for a seeded sub-RNG stream. WC keeps its original,
 // unsuffixed label so a WC-only game's random draws (and therefore the Stage
@@ -261,21 +315,8 @@ export function processLineYear(
 
   const lossTrend = instance.lossEnvironment.lossTrend;
   const priorRCEffectiveness = lineState.riskControlEffectiveness;
-  const maxRC = RISK_CONTROL_PARAMS.maxEffectiveness;
 
-  const rcGain =
-    (lineDecisions.riskControlPct / 0.08) *
-    (maxRC / RISK_CONTROL_PARAMS.lagYears);
-
-  const rcDecay =
-    priorRCEffectiveness *
-    RISK_CONTROL_PARAMS.decayRate *
-    (lineDecisions.riskControlPct < 0.01 ? 2 : 1);
-
-  const newRCEffectiveness = Math.max(
-    0,
-    Math.min(maxRC, priorRCEffectiveness + rcGain - rcDecay)
-  );
+  const newRCEffectiveness = projectedRcEffectiveness(priorRCEffectiveness, lineDecisions.riskControlPct);
 
   // WC and GL price off their claim generators' OWN analytic expectations, so
   // premium and losses share one basis by construction — the finding-6
@@ -333,46 +374,9 @@ export function processLineYear(
   // full-roster expectation. All three factors are pure functions of the year and
   // cannot see the roster, so k_line keeps sole responsibility for the
   // roster/risk-quality-mix correction.
-  const newPurePremiumPer100 = line === 'WC'
-    ? WC_HELD_PURE_PREMIUM_PER_100
-      * wcFrequencyTrend(yearNumber)
-      * wcSeverityTrend(yearNumber)
-      / wageFactor('WC', yearNumber)
-    : line === 'GL'
-    // GL CARRIES TWO OF THE THREE, and both must be here for the same reason
-    // WC's three must (finding 37). GL has NO frequency trend — its frequency is
-    // flat by design — so:
-    //
-    //   x glCappedSeverityTrend  ~+5.48%/yr  each claim costs more
-    //   / wageFactor              +3.63%/yr  the rate is per $100 of NOMINAL
-    //                                        payroll, and the denominator grew
-    //
-    // ⚠ THE SEVERITY FACTOR IS glCappedSeverityTrend, NOT glSeverityTrend, AND
-    // THAT IS LOAD-BEARING. GL_SEVERITY_CAP is a FIXED $100M ceiling that does
-    // not inflate, so the capped expected claim grows strictly slower than the
-    // raw trend — 1.6112 rather than 1.6473 by year 10. Pricing on the raw trend
-    // would charge for dollars the capped generator cannot produce: +2.24% by
-    // year 10, +5.82% by year 20. See glCappedSeverityTrend's own header; it is
-    // still a deterministic ROSTER-BLIND function of the year, so it may ride on
-    // top of a held pure premium exactly as the raw trend did.
-    //
-    // Because frequency is flat, PREMIUM growth comes out at the CAPPED severity
-    // trend alone, INDEPENDENT of the wage rate — the cheapest available test
-    // that both factors are present, and asserted in gl-claim-check. If premium
-    // growth moves when only WAGE_INFLATION_PER_YEAR changes, one of these two
-    // is missing.
-    //
-    // Still HELD: GL_HELD_PURE_PREMIUM_PER_100 is derived once at
-    // HELD_PURE_PREMIUM_YEAR (= 1) from the neutral full-roster expectation, so
-    // the trend rides on top here rather than being baked in twice. Both factors
-    // are pure functions of the year and cannot see the roster, so k_GL keeps
-    // sole responsibility for the roster/risk-quality-mix correction.
-    ? GL_HELD_PURE_PREMIUM_PER_100
-      * glCappedSeverityTrend(yearNumber)
-      / wageFactor('GL', yearNumber)
-    : lineState.purePremiumPer100 *
-      (1 + lossTrend) *
-      (1 - newRCEffectiveness);
+  const newPurePremiumPer100 = currentPurePremiumPer100(
+    line, yearNumber, lineState.purePremiumPer100, lossTrend, newRCEffectiveness,
+  );
 
   // Preliminary contribution estimate used only for member movement.
   // Final premium is recalculated after member movement because exposure changes.
@@ -415,84 +419,43 @@ export function processLineYear(
   const isGlClaimLine = line === 'GL';
   const isClaimLine = isWcClaimLine || isGlClaimLine;
 
+  // --- THE PRE-MOVEMENT QUOTE ------------------------------------------------
+  //
+  // EXTRACTED TO utils/linePricing.ts AND SHARED WITH THE DECISIONS PANEL. The
+  // whole rate stack (tower quote, net-funding deduction, admin on gross,
+  // runtime reinsurance price) used to live inline here while the panel that
+  // EXPLAINS the price to the player re-derived it from its own formulas — and
+  // drifted, silently, to a 73%-high pool premium rate on GL. Parity is
+  // structural now: there is one definition and both callers use it.
+  //
+  // The long notes that lived here on why funding is NET, why the deduction
+  // must reflect which layers are placed, why WC's aggregate must be netted
+  // alongside the occurrence layers, and why Property is deliberately excluded,
+  // all moved WITH the code — see quoteLineRates.
+  const estimatedQuote = quoteLineRates({
+    line,
+    yearNumber,
+    members: currentActiveMembers,
+    exposure: estimatedExposure,
+    purePremiumPer100: newPurePremiumPer100,
+    clf: selectedFundingCLF,
+    pricingAdjustment,
+    layersPlaced: lineDecisions.layersPlaced,
+    aggregateStopLevel: lineDecisions.aggregateStopLevel,
+    reinsuranceLevel: lineDecisions.reinsuranceLevel,
+    competitivePressure: instance.marketEnvironment.competitivePressure,
+  });
+
+  // The occurrence quote is REUSED by the post-movement pass below rather than
+  // re-priced: it reads only the pre-movement book and the year, so re-quoting
+  // would be a second version of a figure that cannot legitimately differ.
   const placedForCost = isClaimLine
     ? normalizeLayersPlaced(line as TowerLine, lineDecisions.layersPlaced)
     : null;
-  const towerQuote = isClaimLine && placedForCost
-    ? occurrenceProgramCost(line as TowerLine, placedForCost, currentActiveMembers, yearNumber)
-    : null;
+  const towerQuote = estimatedQuote.towerQuote;
 
-  const estimatedAdminRatePer100 = newPurePremiumPer100 * ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM;
-  // The WC aggregate is the one component that cannot be hoisted exactly — it
-  // prices off expectedLoss, which needs the post-movement exposure. Estimated
-  // here on the pre-movement book, and inert at defaults (aggregateStopLevel -1).
-  //
-  // ⚠ IT CEDES EXPECTED LOSS TOO, and its expected recovery comes from a
-  // different function than the occurrence layers' — quoteAggregate's own
-  // `expectedCeded`. Netting only the occurrence tower would leave the aggregate
-  // double-collected, which is the easiest piece of this to miss.
-  const estimatedAggregateQuote = isWcClaimLine && placedForCost && lineDecisions.aggregateStopLevel >= 0
-    ? quoteAggregate(
-        placedForCost, currentActiveMembers,
-        estimatedExposure * newPurePremiumPer100 * 10_000,
-        lineDecisions.aggregateStopLevel, yearNumber,
-      )
-    : null;
-
-  // --- NET FUNDING BASIS ----------------------------------------------------
-  //
-  // The pool premium funds the loss the pool will actually KEEP, so expected
-  // ceded comes off the contribution before the CLF is applied.
-  //
-  // WHAT THIS FIXES. The premium used to fund GROSS expected loss while the P&L
-  // charged NET ultimate loss, so the ceded portion was collected twice — once
-  // inside the pool premium and again as the reinsurance premium members pay on
-  // top — and the pool banked the difference. Measured at bdc98ec, that was
-  // $11.84M/yr on GL and $4.22M/yr on WC of margin nobody had decided to charge.
-  // It also inverted the reinsurance decision: the more the pool ceded, the more
-  // expected ceded it collected and kept, so buying the maximum tower was always
-  // correct for the pool regardless of what it cost members.
-  //
-  // ⚠ IT REFLECTS WHICH LAYERS ARE ACTUALLY PLACED. `towerQuote.expectedCeded`
-  // sums only the placed layers, so declining a layer leaves that layer's
-  // expected ceded inside the pool premium — correctly, because the pool is then
-  // keeping that loss. This is what finally makes declining a layer a real
-  // two-sided choice: the member charge falls by the layer's PREMIUM but rises
-  // by its EXPECTED CEDED, and the net saving is the risk load alone.
-  //
-  // ⚠ PROPERTY IS DELIBERATELY NOT NETTED, and this is a known residual rather
-  // than an oversight. Property's cover is the legacy percentage-of-premium
-  // aggregate from REINSURANCE_PROGRAMS, whose attachment is a multiple of
-  // expected loss and whose LIMIT is a percentage of the pool premium — so
-  // netting it would make the premium depend on a structure that depends on the
-  // premium. It also has no closed-form expected-ceded to read; WC and GL have
-  // one only because towerMoments exists for them. Measured residual: Property
-  // cedes 2.2% of gross, about $0.14M/yr, against GL's 43.5%.
-  const estimatedExpectedCededDollars =
-    (towerQuote?.expectedCeded ?? 0) + (estimatedAggregateQuote?.expectedCeded ?? 0);
-  const estimatedExpectedCededPer100 =
-    estimatedExpectedCededDollars / Math.max(estimatedExposure * 10_000, 1);
-  // Floored at zero: a book so small that expected ceded exceeded the whole pure
-  // premium would otherwise produce a negative contribution rate.
-  const estimatedNetPurePremiumPer100 =
-    Math.max(0, newPurePremiumPer100 - estimatedExpectedCededPer100);
-
-  const estimatedRateAtConfidenceLevelPer100 =
-    estimatedNetPurePremiumPer100 * selectedFundingCLF * pricingAdjustment;
-
-  const estimatedPremium =
-    estimatedExposure * estimatedRateAtConfidenceLevelPer100 * 10_000;
-
-  const estimatedReinsuranceCost = towerQuote !== null
-    ? towerQuote.premium + (estimatedAggregateQuote?.premium ?? 0)
-    : calculateReinsuranceCost(
-        lineDecisions.reinsuranceLevel, estimatedPremium, instance.marketEnvironment.competitivePressure,
-      );
-
-  const estimatedTotalMemberRatePer100 =
-    estimatedRateAtConfidenceLevelPer100
-    + estimatedAdminRatePer100
-    + estimatedReinsuranceCost / Math.max(estimatedExposure * 10_000, 1);
+  const estimatedPremium = estimatedQuote.poolPremium;
+  const estimatedTotalMemberRatePer100 = estimatedQuote.totalMemberChargeRatePer100;
 
   // vs last year's total member charge rate. NULL when there is no usable
   // prior — see priceSignalFor in membershipEngine for how null is treated.

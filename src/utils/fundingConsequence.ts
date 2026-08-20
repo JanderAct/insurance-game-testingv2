@@ -1,30 +1,41 @@
 // Funding-confidence-level consequence panel — CLF-only pricing.
 //
-// Every figure here is re-derived from the SAME formulas simulationEngine.ts
-// uses to actually price a line, not a parallel definition:
-//   poolPremiumRatePer100         = purePremiumPer100 * CLF        (pricingAdjustment is now always 1)
-//   adminRatePer100                = purePremiumPer100 * ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM
-//   reinsRatePer100                = poolPremiumRatePer100 * reinsCostPct
-//   totalMemberChargeRatePer100    = poolPremiumRatePer100 + adminRatePer100 + reinsRatePer100
-// "The load" (charge / expected loss) is therefore CLF*(1+reinsCostPct) + 0.15,
-// and at the default reinsurance level (2, cost 37.5% of pool premium) that is
-// exactly CLF + 0.15 + 0.375*CLF — the reference formula the panel was speced
-// against. reinsCostPct is read from the ACTUAL selected reinsurance level
-// rather than hardcoded, so the panel stays correct if the player changes it.
+// ⚠ THE PRICE ITSELF IS NOT COMPUTED HERE ANY MORE. Every rate below comes from
+// quoteLineRates in utils/linePricing.ts — the SAME function simulationEngine
+// calls to build its own pre-movement quote. That is a structural guarantee,
+// not a claim: there is one definition and both callers use it.
 //
-// Verified against the reference numbers at reinsuranceLevel 2 (default):
-//   75% -> load 2.0008, combined ratio 82.7%, margin +17.3%
-//   60% -> load 1.5250, combined ratio 100.0% (exact break-even)
-//   50% -> load 1.2871, combined ratio 113.4%, funds 82.7% of expected
-//   30% -> load 0.8595, combined ratio 156.3%, funds 51.6% of expected
-// (all four reproduce exactly using the reference chart's CLF values; see the
-// discrepancy note on FUNDING_CLF_TABLE[0.60] in defaultAssumptions.ts — the
-// live table's 1.003 there yields 99.8%, not exactly 100.0%.)
+// WHY THAT CHANGED. This file used to re-derive the stack from its own
+// formulas, and the header here asserted it matched the engine. It did not, on
+// two counts, and both were invisible because the panel's combined ratio was
+// internally consistent on its own basis and read 100.0% — the same 100.0% the
+// engine reached once ITS combined-ratio basis was fixed. The two agreed on the
+// only summary number anyone would check while the components underneath were:
+//
+//   GL pool premium rate /$100    panel $5.63 (gross x CLF)   engine $3.26 (net)
+//   GL reinsurance rate /$100     panel legacy % of premium   engine runtime tower
+//
+// A third divergence was found while fixing those two and is worth naming
+// separately, because nothing in the brief pointed at it: the panel priced off
+// lineState.purePremiumPer100, which is LAST year's. WC and GL re-derive theirs
+// from held constants times the current year's trends, so the panel was also a
+// year stale (~2%/yr on WC) before any of the above. It now calls
+// currentPurePremiumPer100, the engine's own derivation.
+//
+// WHAT REMAINS DIFFERENT, stated rather than papered over: this is the
+// PRE-MOVEMENT quote. The engine's FINAL premium re-runs the same arithmetic on
+// the POST-movement book, so the two differ by whoever joins or leaves during
+// the year — which the panel cannot know when the decision is being made. The
+// engine's own pre-movement estimate is the referent, and parity against it is
+// exact. See scripts/diagnostics/panel-engine-parity-check.ts, which asserts
+// the components bit-for-bit and MEASURES the post-movement residual instead of
+// pretending it is zero.
 
-import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, REINSURANCE_PROGRAMS, SLIDER_RANGES } from '../data/defaultAssumptions';
-import { lookupCLF } from './simulationEngine';
+import { SLIDER_RANGES } from '../data/defaultAssumptions';
+import { lookupCLF, currentPurePremiumPer100, projectedRcEffectiveness } from './simulationEngine';
 import { hasStaticClf, staticClf, staticClfCrossing } from '../data/clfTables';
-import type { CoverageLine } from '../types/simulation';
+import { quoteLineRates } from './linePricing';
+import type { CoverageLine, Member } from '../types/simulation';
 
 // ⚠ THREADED, NOT GENERIC lookupCLF. This panel used to call lookupCLF
 // unconditionally for every line, while simulationEngine.ts priced WC (and now
@@ -50,12 +61,17 @@ function clfFor(line: CoverageLine, confidenceLevel: number, atExpected: boolean
 // "Expected" marker's true position. Read straight off STATIC_CLF_TABLE by
 // interpolation, so it cannot drift from the CLF the same table charges.
 //
-// ⚠ NO LONGER BOOK-DEPENDENT, and the signature says so. The retired grids
+// ⚠ THE CROSSING IS NOT BOOK-DEPENDENT, and this helper's signature still says
+// so even though computeFundingConsequence's no longer can. The retired grids
 // computed a per-book crossing because they interpolated on the book's own
 // CV/lambda; the static tables are one curve per line, so the crossing is one
-// number per line — WC 47.2%, GL 68.6% as measured. The `members` and
-// `yearNumber` arguments both helpers used to take are gone rather than left
-// unused, so nothing suggests a book-dependence that no longer exists.
+// number per line — WC 43.5%, GL 57.7% as currently measured (GL reads its
+// SUPPLIED curve; its own derived one crosses at 68.6%).
+//
+// computeFundingConsequence DOES take members and yearNumber again, for the
+// tower — which genuinely prices off the book. This helper deliberately does
+// not, so the distinction stays visible: the CLF curve is book-blind, the
+// reinsurance price is not.
 //
 // Property has no table of its own to cross (see clfFor above); its 60% stop
 // already coincides with CLF 1.000 in FUNDING_CLF_TABLE, so this returns 0.60
@@ -75,6 +91,10 @@ export interface FundingConsequence {
   expectedPercentile: number;
   clf: number;
   purePremiumPer100: number;
+  /** GROSS minus what the placed tower is expected to cede — the base the CLF
+   *  is actually applied to. Zero on Property, which is not netted. */
+  expectedCededPer100: number;
+  netPurePremiumPer100: number;
   poolPremiumRatePer100: number;
   adminRatePer100: number;
   reinsRatePer100: number;
@@ -95,43 +115,98 @@ export interface FundingConsequence {
   isAtMax: boolean;
 }
 
-function reinsCostPctFor(reinsuranceLevel: number): number {
-  const prog = REINSURANCE_PROGRAMS[reinsuranceLevel];
-  return prog ? (prog.costPctOfPremiumMin + prog.costPctOfPremiumMax) / 2 : 0;
+// The book-and-year inputs the price genuinely depends on. Grouped so the
+// signature says what it needs rather than accumulating positional arguments.
+//
+// ⚠ members AND yearNumber ARE BACK, and for a different reason than the ones
+// removed at the static-table change. Those were needed only to index the
+// retired CV/lambda CLF grids, which is a dependence the pricing genuinely lost.
+// These two are needed because the TOWER prices off the actual book and the
+// year — occurrenceProgramCost reads both — so a panel that cannot see them
+// cannot quote the reinsurance the engine will charge. Different dependence,
+// genuinely present.
+export interface FundingConsequenceBook {
+  yearNumber: number;
+  members: Member[];
+  exposure: number;
+  layersPlaced: boolean[];
+  aggregateStopLevel: number;
+  /** rateLevel / 100 — permanently 1 today, threaded so it cannot silently
+   *  desync if the rate level moves again. */
+  pricingAdjustment: number;
+  competitivePressure: number;
+  /** Last year's stored pure premium and the loss trend — PROPERTY ONLY, which
+   *  compounds off its own prior value. Ignored for WC/GL, which re-derive. */
+  priorPurePremiumPer100: number;
+  lossTrend: number;
+  priorRcEffectiveness: number;
+  riskControlPct: number;
 }
 
-function ratesAt(purePremiumPer100: number, confidenceLevel: number, reinsuranceLevel: number, line: CoverageLine, atExpected: boolean) {
+function ratesAt(
+  confidenceLevel: number, reinsuranceLevel: number, line: CoverageLine,
+  atExpected: boolean, book: FundingConsequenceBook,
+) {
+  const rcEffectiveness = projectedRcEffectiveness(book.priorRcEffectiveness, book.riskControlPct);
+  const purePremiumPer100 = currentPurePremiumPer100(
+    line, book.yearNumber, book.priorPurePremiumPer100, book.lossTrend, rcEffectiveness,
+  );
   const clf = clfFor(line, confidenceLevel, atExpected);
-  const poolPremiumRatePer100 = purePremiumPer100 * clf;
-  const adminRatePer100 = purePremiumPer100 * ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM;
-  const reinsRatePer100 = poolPremiumRatePer100 * reinsCostPctFor(reinsuranceLevel);
-  const totalMemberChargeRatePer100 = poolPremiumRatePer100 + adminRatePer100 + reinsRatePer100;
-  return { clf, poolPremiumRatePer100, adminRatePer100, reinsRatePer100, totalMemberChargeRatePer100 };
+  const q = quoteLineRates({
+    line,
+    yearNumber: book.yearNumber,
+    members: book.members,
+    exposure: book.exposure,
+    purePremiumPer100,
+    clf,
+    pricingAdjustment: book.pricingAdjustment,
+    layersPlaced: book.layersPlaced,
+    aggregateStopLevel: book.aggregateStopLevel,
+    reinsuranceLevel,
+    competitivePressure: book.competitivePressure,
+  });
+  return {
+    clf,
+    purePremiumPer100: q.purePremiumPer100,
+    netPurePremiumPer100: q.netPurePremiumPer100,
+    expectedCededPer100: q.expectedCededPer100,
+    poolPremiumRatePer100: q.poolPremiumRatePer100,
+    adminRatePer100: q.adminRatePer100,
+    reinsRatePer100: q.reinsRatePer100,
+    totalMemberChargeRatePer100: q.totalMemberChargeRatePer100,
+  };
 }
 
 export function computeFundingConsequence(
-  purePremiumPer100: number,
   confidenceLevel: number,
   reinsuranceLevel: number,
   priorTotalMemberChargeRatePer100: number | null,
   line: CoverageLine,
-  // ⚠ NO members / yearNumber ANY MORE. Both were needed only to index the
-  // retired CV/lambda grids; the static tables in clfTables.ts are one curve per
-  // line and take neither. Dropping them from the signature rather than leaving
-  // them unused keeps the panel from implying a book-dependence the pricing no
-  // longer has.
   atExpected: boolean,
+  book: FundingConsequenceBook,
 ): FundingConsequence {
-  const { clf, poolPremiumRatePer100, adminRatePer100, reinsRatePer100, totalMemberChargeRatePer100 } =
-    ratesAt(purePremiumPer100, confidenceLevel, reinsuranceLevel, line, atExpected);
+  const {
+    clf, purePremiumPer100, netPurePremiumPer100, expectedCededPer100,
+    poolPremiumRatePer100, adminRatePer100, reinsRatePer100, totalMemberChargeRatePer100,
+  } = ratesAt(confidenceLevel, reinsuranceLevel, line, atExpected, book);
 
   // Computed UNCONDITIONALLY (not only while atExpected) — cheap, and useful
   // for the UI to show "Expected (~X%)" even before the player selects it.
   const expectedPercentile = expectedPercentileFor(line);
 
+  // THE LOAD stays on the GROSS pure premium — "what members pay per dollar of
+  // expected loss" is a gross-basis question and is the one the panel label
+  // asks.
   const load = purePremiumPer100 > 0 ? totalMemberChargeRatePer100 / purePremiumPer100 : 0;
-  const expectedLossRatio = load > 0 ? 1 / load : 0;
-  const expectedExpenseRatio = load > 0 ? (adminRatePer100 + reinsRatePer100) / purePremiumPer100 / load : 0;
+
+  // ⚠ THE RATIOS ARE ON THE NET NUMERATOR, matching the engine's
+  // expectedLossRatioMemberBasis exactly. The old form here was 1/load — a
+  // GROSS numerator over the member charge — which is precisely the basis
+  // mismatch the engine carried until it was fixed. Reproducing it here would
+  // have re-imported the defect into the display.
+  const denom = totalMemberChargeRatePer100;
+  const expectedLossRatio = denom > 0 ? netPurePremiumPer100 / denom : 0;
+  const expectedExpenseRatio = denom > 0 ? (adminRatePer100 + reinsRatePer100) / denom : 0;
   const expectedCombinedRatio = expectedLossRatio + expectedExpenseRatio;
 
   const derivedRateChangePct = priorTotalMemberChargeRatePer100 && priorTotalMemberChargeRatePer100 > 0
@@ -148,7 +223,7 @@ export function computeFundingConsequence(
   const isAtMax = nextLevel > max + 1e-9;
   const marginalCostPct = isAtMax
     ? null
-    : (ratesAt(purePremiumPer100, nextLevel, reinsuranceLevel, line, false).poolPremiumRatePer100 / Math.max(poolPremiumRatePer100, 1e-9) - 1) * 100;
+    : (ratesAt(nextLevel, reinsuranceLevel, line, false, book).poolPremiumRatePer100 / Math.max(poolPremiumRatePer100, 1e-9) - 1) * 100;
 
   return {
     // Overridden to the crossing percentile while atExpected, so "Adequate in
@@ -158,6 +233,8 @@ export function computeFundingConsequence(
     expectedPercentile,
     clf,
     purePremiumPer100,
+    expectedCededPer100,
+    netPurePremiumPer100,
     poolPremiumRatePer100,
     adminRatePer100,
     reinsRatePer100,

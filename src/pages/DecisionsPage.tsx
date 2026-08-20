@@ -407,9 +407,25 @@ function FundingLevelControl({ line, d, fundingConsequence, setFundingLevel, set
   );
 }
 
-// CLF-only pricing consequence panel (Part 2). Everything here is computed in
-// src/utils/fundingConsequence.ts from the SAME formulas simulationEngine.ts
-// actually prices with — this renders that object, it does not recompute it.
+// CLF-only pricing consequence panel (Part 2). Everything here comes from
+// src/utils/fundingConsequence.ts, which calls quoteLineRates — literally the
+// same function simulationEngine calls to build its own quote. This renders
+// that object; it does not recompute anything.
+//
+// ⚠ THE CLAIM ABOVE USED TO BE FALSE AND IS NOW ASSERTED. It previously said
+// the panel used "the SAME formulas simulationEngine.ts actually prices with"
+// while the panel funded GROSS and charged a percentage-of-premium
+// reinsurance rate — GL's pool premium rate read $5.63 here against the
+// engine's $3.26. It is kept only because parity is now structural (one shared
+// function) AND checked component by component in
+// scripts/diagnostics/panel-engine-parity-check.ts. If that check is ever
+// deleted, delete this claim with it.
+//
+// ONE RESIDUAL, STATED: these are PRE-MOVEMENT figures. The engine settles the
+// year's premium on the post-movement book, so the final rate differs by
+// whoever joins or leaves — measured at a median 1.0% on WC, 3.2% on GL, 0.0%
+// on Property. That is not closable: the panel is asked the question before the
+// answer exists.
 function FundingConsequencePanel({ c, lastLineResult, line }: { c: FundingConsequence | null; lastLineResult?: LineResultSet; line: CoverageLine }) {
   if (!c) return null;
   const pct1 = (v: number) => `${v.toFixed(1)}%`;
@@ -425,6 +441,16 @@ function FundingConsequencePanel({ c, lastLineResult, line }: { c: FundingConseq
     <div className="bg-gray-50 rounded-lg p-3 border border-gray-200 text-xs space-y-2 -mt-1">
       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
         <DataRow label="CLF Multiplier" value={`×${c.clf.toFixed(3)}`} />
+        {/* The net-funding step, shown rather than hidden inside the pool
+            premium rate: without it the panel's own numbers do not multiply
+            out, which is what made the old gross derivation so hard to spot. */}
+        <DataRow label="Pure Premium Rate / $100 (gross)" value={`$${c.purePremiumPer100.toFixed(2)}`} />
+        {c.expectedCededPer100 > 0 && (
+          <DataRow label="Less Expected Ceded / $100" value={`−$${c.expectedCededPer100.toFixed(2)}`} />
+        )}
+        {c.expectedCededPer100 > 0 && (
+          <DataRow label="Net Pure Premium Rate / $100" value={`$${c.netPurePremiumPer100.toFixed(2)}`} />
+        )}
         <DataRow label="Pool Premium Rate / $100" value={`$${c.poolPremiumRatePer100.toFixed(2)}`} />
         <DataRow label="Total Member Charge Rate / $100" value={`$${c.totalMemberChargeRatePer100.toFixed(2)}`} />
         <DataRow label="The Load (charge ÷ expected loss)" value={`${c.load.toFixed(2)}×`} />
