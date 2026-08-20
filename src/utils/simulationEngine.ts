@@ -1,7 +1,7 @@
 // Core simulation engine for Risk Pool Simulation v1
 // Premium formula: Premium = Exposure($M) × Rate_per_$100_payroll × 10,000
 
-import type { Claim, WcUnreportedClaim, GameState, Occurrence, PoolState, DecisionSet, LinePoolState, LineDecisionSet, ResultSet, LineResultSet, ReserveCohort, Member, MemberLossResult, MembershipHistory, CoverageLine, GameInstance, AssetAllocation } from '../types/simulation';
+import type { Claim, GameState, Occurrence, PoolState, DecisionSet, LinePoolState, LineDecisionSet, ResultSet, LineResultSet, ReserveCohort, Member, MemberLossResult, MembershipHistory, CoverageLine, GameInstance, AssetAllocation } from '../types/simulation';
 import type { LineShockEffects, ShockFiring, ShockRecord } from '../types/shocks';
 import { resolveShocks, ownFreqMultipliers, ownComponentFreqMultipliers, ownSevMultipliers } from './shockResolver';
 import { WHOLE_LINE } from './shockEffects';
@@ -40,7 +40,6 @@ import { simulateMemberMovement } from './membershipEngine';
 import { cloneMembershipHistory, openInterval, closeInterval } from './membershipHistory';
 import { cloneMemberLossHistory, recordMemberLossYear } from './memberLossHistory';
 import { computeKLine, deriveNeutralPurePremiumPer100, expectedWcGrossLossForPricing, generateWcClaims, wcFrequencyTrend, wcSeverityTrend } from './wcClaimEngine';
-import { dollarWeightedPDelayed, ldfToUltimate, wcIbnrBalance } from './wcIbnr';
 import { hasStaticClf, staticClf } from '../data/clfTables';
 import { computeKGl, deriveNeutralGlPurePremiumPer100, expectedGlGrossLossForPricing, generateGlClaims, glCappedSeverityTrend } from './glClaimEngine';
 import { generateNarrative } from './narrativeEngine';
@@ -679,14 +678,6 @@ export function processLineYear(
   const shockAttributableLoss: Record<string, number> = {};
   const shockAttributableClaims: Record<string, number> = {};
   const shockExpectedAdded: Record<string, number> = {};
-  // WC report-lag / IBNR outputs. Left at their empty values on GL and Property,
-  // which draw every claim as reported in its accident year.
-  let nextUnreportedClaims: WcUnreportedClaim[] = [];
-  let unreportedClaimCount = 0;
-  // Gross loss from THIS accident year reported this year, and gross loss from
-  // PRIOR accident years reported this year. They sum to aggregateMemberLoss.
-  let currentAccidentYearGross = 0;
-  let emergedPriorYearLoss = 0;
 
   if (isWcClaimLine) {
     // k_line is recomputed against the CURRENTLY ENROLLED book, after member
@@ -697,21 +688,6 @@ export function processLineYear(
     // tempting to hand the 200-member roster to everything below; doing it here
     // would drive k_line to ~1 permanently and silently disable the correction.
     const kLine = computeKLine(memberResult.activeMembers);
-
-    // THE UNREPORTED INVENTORY. Claims drawn in an earlier accident year whose
-    // reportYear is now. Split rather than filtered-twice so the carry-forward
-    // and the emergence are visibly complementary.
-    //
-    // ⚠ THE INVENTORY IS FULL-MARKET (all 200 members); the pool's own figures
-    // must use the ENROLLED slice. Splitting on reportYear first and enrolment
-    // second keeps a prospect's claim in the inventory when it emerges while it
-    // is still a prospect, rather than dropping it on the floor.
-    const inventory = lineState.unreportedClaims ?? [];
-    const emergingAll = inventory.filter(u => u.reportYear <= yearNumber);
-    const stillUnreported = inventory.filter(u => u.reportYear > yearNumber);
-    const enrolledIds = new Set(memberResult.activeMembers.map(m => m.id));
-    const emergingEnrolled = emergingAll.filter(u => enrolledIds.has(u.memberId));
-    const emergingProspect = emergingAll.filter(u => !enrolledIds.has(u.memberId));
 
     const generated = generateWcClaims({
       members: memberResult.activeMembers,
@@ -735,7 +711,6 @@ export function processLineYear(
       // frequency without touching the pricing expectation, so it genuinely
       // moves the loss ratio instead of cancelling out.
       riskControlEffectiveness: newRCEffectiveness,
-      emerging: emergingEnrolled,
       injections: ctx.shock?.injections,
     });
     // PROSPECTS: the rest of the 200-member marketplace, generated at kLine = 1
@@ -753,7 +728,6 @@ export function processLineYear(
         // year is not a pool membership benefit. Pool-specific claim injections
         // do NOT — those are events landing on the pool's own book.
         componentFreqMultipliers: ctx.shock?.componentFreqMultipliers,
-        emerging: emergingProspect,
       })
       : undefined;
     generatedClaims = generated.claims;
@@ -767,19 +741,6 @@ export function processLineYear(
       ...(prospectGenerated?.memberLossResults ?? []),
     ];
     kLineApplied = kLine;
-
-    // CARRY THE INVENTORY FORWARD: what did not emerge, plus what was drawn this
-    // year and deferred, across BOTH calls so prospects keep their own pipeline.
-    nextUnreportedClaims = [
-      ...stillUnreported,
-      ...generated.newlyDelayed,
-      ...(prospectGenerated?.newlyDelayed ?? []),
-    ];
-    // ENROLLED ONLY — this is a pool figure. See the field comment on
-    // LinePoolState.unreportedClaims.
-    unreportedClaimCount = nextUnreportedClaims.filter(u => enrolledIds.has(u.memberId)).length;
-    currentAccidentYearGross = generated.currentAccidentYearGross;
-    emergedPriorYearLoss = generated.emergedGross;
 
     // WC's shock flag: a claim from the heavy mixture component large enough to
     // matter. Replaces the retired "a catastrophic-tier claim occurred" test,
@@ -947,14 +908,10 @@ export function processLineYear(
   let aggregatePremium = 0;
   let aggregateAttachment = 0;
   let attachment: number;
-  // Hoisted so the IBNR provision below can net against the SAME placement the
-  // cession used. Empty on Property, which has no tower.
-  let placedLayers: boolean[] = [];
 
   if (isClaimLine && (isWcClaimLine || isGlClaimLine)) {
     const towerLine = line as TowerLine;
     const placed = normalizeLayersPlaced(towerLine, lineDecisions.layersPlaced);
-    placedLayers = placed;
     const totals = occurrenceTotals(generatedClaims ?? [], generatedOccurrences ?? []);
     const cession = cedeOccurrences(towerLine, totals, placed);
     cededByLayer = cession.cededByLayer;
@@ -1037,83 +994,50 @@ export function processLineYear(
 
   const allCohorts = [...updatedCohorts, currentYearCohort];
 
-  // --- IBNR (WC only) --------------------------------------------------------
+  // ⚠ THE IBNR PROVISION THAT STOOD HERE IS GONE, WITH WC'S REPORT LAG.
   //
-  // THE CHAIN-LADDER PROVISION: for each open accident year,
-  // `net reported to date x (LDF(age) - 1)`.
+  // WHY, so the intent survives the deletion. WC was the only line with a report
+  // lag: GL had zero references to one and Property a single comment. That made
+  // WC's grossUltimateLoss a CALENDAR-year reported figure while GL's and
+  // Property's were ACCIDENT-year — one field meaning two different things
+  // depending on the line, which is what surfaced this.
   //
-  // WHY CHAIN-LADDER RATHER THAN "EXPECTED UNREPORTED DOLLARS" (which is
-  // algebraically identical IN EXPECTATION): it conditions on what ACTUALLY
-  // reported, so a year that reports heavy books a heavier IBNR. The reserve
-  // becomes responsive to experience instead of a fixed fraction of an assumed
-  // ultimate — which is what a real reserve does, and is the shape that
-  // accommodates IBNER later without rework. See src/utils/wcIbnr.ts.
+  // ⚠ THIS IS A REPLACEMENT, NOT AN ABANDONMENT. IBNR is retired in favour of
+  // IBNER: claims reported immediately but booked at an initial estimate below
+  // ultimate, converging over several years. That is the better mechanic on four
+  // counts, and each is a reason this removal loses nothing:
+  //   it applies to ALL THREE LINES, not to WC alone
+  //   it needs no deferral architecture — no inventory, no carry-forward, no
+  //     per-claim reportYear, none of the machinery just deleted
+  //   it makes reserve development a REAL quantity rather than a random wobble
+  //   and it is already open item 9: claims are drawn at ultimate and never
+  //     develop, so the reserve cannot currently be wrong in an interesting way
   //
-  // NET, and computable HERE rather than after the tower re-derivation: the
-  // netting depends only on the layer STRUCTURE (attachments and limits), which
-  // this change does not touch, not on the tower's measured expectedCededPer100
-  // constants, which it does invalidate.
+  // What went with it: the per-component p_delayed draw and the lognormal lag,
+  // the unreported-claim inventory and its carry-forward, wcIbnr.ts and its
+  // chain-ladder, emergedGross / newlyDelayed / delayedGross / delayedCount, and
+  // ibnrReserve / ibnrAccrual. currentAccidentYearGross collapsed into
+  // grossUltimateLoss because with no deferral they are the same number.
   //
-  // GL AND PROPERTY HAVE NO REPORT LAG, so every claim reports in its accident
-  // year and their IBNR is 0 by construction, not by omission.
-  let ibnrReserve = 0;
-  let ibnrAccrual = 0;
-  let nextAccidentYearReported = lineState.wcAccidentYearReported ?? [];
-  if (isWcClaimLine) {
-    // The share of THIS year's net loss that will report late, on the book and
-    // the reinsurance placement as they actually are this year. Stored with the
-    // accident year rather than recomputed later, because both change.
-    const pDelayedNet = dollarWeightedPDelayed(memberResult.activeMembers, placedLayers, yearNumber);
-    // Net-down this accident year's own reported gross by the year's realized
-    // cession ratio. Using the realized ratio rather than re-deriving the
-    // waterfall keeps ONE definition of what was ceded.
-    const cessionRatio = aggregateMemberLoss > 0 ? netUltimateLoss / aggregateMemberLoss : 1;
-    const currentNetReported = currentAccidentYearGross * cessionRatio;
-    const emergedNetByYear = new Map<number, number>();
-    for (const c of generatedClaims ?? []) {
-      if (c.accidentYear >= yearNumber) continue;
-      emergedNetByYear.set(c.accidentYear, (emergedNetByYear.get(c.accidentYear) ?? 0) + c.grossUltimate * cessionRatio);
-    }
-
-    const merged = lineState.wcAccidentYearReported
-      ? lineState.wcAccidentYearReported.map(e => ({
-        ...e,
-        netReported: e.netReported + (emergedNetByYear.get(e.yearNumber) ?? 0),
-      }))
-      : [];
-    // An accident year that has emerged but was never opened (an old save, or a
-    // backdated shock injection reaching further back than the ledger goes) is
-    // opened now at this year's pattern rather than dropped.
-    for (const [ay, amount] of emergedNetByYear) {
-      if (!merged.some(e => e.yearNumber === ay)) merged.push({ yearNumber: ay, netReported: amount, pDelayedNet });
-    }
-    merged.push({ yearNumber, netReported: currentNetReported, pDelayedNet });
-    nextAccidentYearReported = merged;
-
-    ibnrReserve = wcIbnrBalance(nextAccidentYearReported, yearNumber);
-    // ⚠ THE ACCRUAL IS THIS YEAR'S ADDITION; ibnrReserve IS THE BALANCE. They
-    // differ by the mean report lag (~3.5 years) and swapping them is a 3.5x
-    // reserve error in either direction, silent both ways. The relationship is
-    // Little's Law and is asserted, not hoped for — see littlesLawRatio.
-    ibnrAccrual = currentNetReported * (ldfToUltimate(0, pDelayedNet) - 1);
-  }
+  // ⚠ priorYearDevelopment IS NOW PURE WOBBLE, and it was mostly wobble before.
+  // It reads processReserveDevelopment's developmentFactor, 1 + rng.range(-0.05,
+  // 0.08) per cohort — it never read emergence. The REAL prior-year quantity was
+  // emergedPriorYearLoss (median $1.54M/yr, non-zero in 100% of line-years), and
+  // that is what this removal takes away. So reserve development is now a random
+  // walk with nothing behind it until IBNER lands, which is precisely the gap
+  // IBNER is meant to fill — recorded here rather than left to be rediscovered.
 
   // --- Accounting Reserves ---
   // These are expected unpaid losses (net of reinsurance) from all accident
   // years. They are the booked balance sheet reserves and are NOT CLF-loaded.
   //
-  // IBNR SITS ALONGSIDE THE COHORTS, NOT INSIDE THEM. The cohort rollforward
-  // pays down CASE reserves on a per-line percentage; IBNR is a different
-  // quantity with a different runoff (the reporting pattern), and folding it
-  // into netUnpaid would put it on the wrong paydown curve.
-  const endingNetReserve = allCohorts.reduce((s, c) => s + c.netUnpaid, 0) + ibnrReserve;
+  // Case cohorts only, now that IBNR is gone. Every line's reserve is the same
+  // quantity again.
+  const endingNetReserve = allCohorts.reduce((s, c) => s + c.netUnpaid, 0);
 
   const expectedNetUnpaidLoss = endingNetReserve;
 
-  const beginningNetReserve = lineState.reserveCohorts.reduce(
-    (s, c) => s + c.netUnpaid,
-    0
-  ) + wcIbnrBalance(lineState.wcAccidentYearReported ?? [], yearNumber - 1);
+  const beginningNetReserve = lineState.reserveCohorts.reduce((s, c) => s + c.netUnpaid, 0);
 
   // --- Income Statement ---
   // Use reserve-rollforward incurred loss so the income statement and balance sheet tie.
@@ -1411,10 +1335,6 @@ export function processLineYear(
 
     beginningNetReserve,
     currentYearNetReserve,
-    ibnrReserve,
-    ibnrAccrual,
-    emergedPriorYearLoss,
-    unreportedClaimCount,
     netPaidLosses: netPaidLossesThisYear,
     endingNetReserve,
 
@@ -1513,11 +1433,6 @@ export function processLineYear(
     riskControlEffectiveness: newRCEffectiveness,
 
     reserveCohorts: allCohorts,
-    // WC's report-lag state, carried to next year. Empty on GL and Property.
-    // FULL-MARKET inventory (see the field comment); ENROLLED, NET reported
-    // ledger.
-    unreportedClaims: nextUnreportedClaims,
-    wcAccidentYearReported: nextAccidentYearReported,
     members: memberResult.activeMembers,
 
     netUnpaidReserve: endingNetReserve,
@@ -2198,10 +2113,6 @@ export function aggregateLineResults(
     // Pooled elementwise like every other reserve figure. Non-WC lines
     // contribute 0, so the pool total IS WC's — correct, since only WC has a
     // report lag.
-    ibnrReserve: sum('ibnrReserve'),
-    ibnrAccrual: sum('ibnrAccrual'),
-    emergedPriorYearLoss: sum('emergedPriorYearLoss'),
-    unreportedClaimCount: sum('unreportedClaimCount'),
     netPaidLosses: sum('netPaidLosses'),
     endingNetReserve: sum('endingNetReserve'),
 

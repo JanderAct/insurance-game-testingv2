@@ -50,23 +50,23 @@ export type ShockEffect =
   // $9.0M is the heavy component's 99.95th percentile, not its mean. An
   // instructor-triggered event wants a REPRODUCIBLE amount, not a tail draw.
   //
-  // `accidentYearOffset` BACKDATES the claim (negative = prior years). This is
-  // the "conditions that were not compensable now are" mechanism — a presumption
-  // expansion or an abuse revival statute ADDS claims dated to prior accident
-  // years. It is NOT the same as revising the existing unreported inventory,
-  // which makes known-but-unreported claims cost more; do not conflate them.
-  // Relative, not absolute, because the event can be scheduled in any year.
+  // ⚠ `accidentYearOffset` IS GONE, with WC's report lag. It BACKDATED a claim
+  // so a presumption expansion could add claims dated to prior accident years,
+  // which only meant anything while a deferral mechanism existed to recognise
+  // them later. With every claim reported in its own accident year, a backdated
+  // claim still lands in THIS year's loss — the offset changed a label and
+  // nothing else once the chain-ladder that read it was removed. #10 now files
+  // its three claims on enactment for the same money in the same year.
   //
   // `firstYearOnly` exists because HORIZON IS PER-EVENT, NOT PER-EFFECT. #10 is
-  // future-horizon so its frequency multiplier persists forward — but its
-  // backdated injection is a one-off at enactment, and without this flag the
-  // resolver would re-inject the same reach-back every single year.
+  // future-horizon so its frequency multiplier persists forward — but enactment
+  // is a one-off, and without this flag the resolver would re-inject the same
+  // three claims every single year.
   | {
       kind: 'injectClaim';
       line: CoverageLine;
       count: number;
       amount: number;
-      accidentYearOffset?: number;
       firstYearOnly?: boolean;
     }
   // IMPLEMENTED for GL sub-coverages. Multiplies a realized frequency for one
@@ -233,7 +233,7 @@ export interface LineShockEffects {
   // shockId is carried so an injected claim's cost maps back to the event that
   // caused it. Frequency multipliers carry no such tag because their cost is
   // not exactly attributable in the first place — see ShockRecord.
-  injections?: { count: number; amount: number; accidentYearOffset?: number; shockId: string }[];
+  injections?: { count: number; amount: number; shockId: string }[];
 }
 
 export interface ShockResolution {

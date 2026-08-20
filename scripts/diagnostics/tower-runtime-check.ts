@@ -162,10 +162,10 @@ console.log('\n--- 3. ANALYTIC vs MONTE CARLO (the algebra vs the generator) ---
           members: book, yearNumber: 1, calendarYear: 2026,
           instanceSeed: 4242 + y * 7919, kLine: k, riskControlEffectiveness: 0,
         });
-        // Delayed claims included: the treaty sees a claim whenever it is
-        // reported, and for the annual SIZE distribution a deferred claim is the
-        // same size. Excluding them understates the upper layers badly.
-        totals = [...g.claims.map(c => c.grossUltimate), ...g.newlyDelayed.map(u => u.amount)];
+        // Every claim from the accident year is in g.claims now — WC's report
+        // lag is gone, so there is no deferred set to add back. The union that
+        // stood here existed only so the treaty saw deferred claims too.
+        totals = g.claims.map(c => c.grossUltimate);
       } else {
         const gp = deriveSubRng(9090 + y * 7919, 1, 'tower_check_gpool')
           .gamma(WC_LOSS_MODEL.poolYearFactor.shape, WC_LOSS_MODEL.poolYearFactor.scale);

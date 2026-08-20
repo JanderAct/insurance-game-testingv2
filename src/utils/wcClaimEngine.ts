@@ -48,10 +48,9 @@ import type {
   MemberLossResult,
   Occurrence,
   Region,
-  WcUnreportedClaim,
 } from '../types/simulation';
-import { deriveSubRng, type SeededRandom } from './random';
-import { lognormalParams, memoizeByYear } from './claimMath';
+import { deriveSubRng } from './random';
+import { memoizeByYear } from './claimMath';
 import {
   WC_LOSS_MODEL,
   WC_RATING_GROUPS,
@@ -157,8 +156,7 @@ export const wcSeverityTrend = memoizeByYear(
 
 // A component's log-location shifted to a given year. exp(mu + ln(s)) = s x
 // exp(mu), so a location shift in log space IS a multiplicative scale — the same
-// trick wcIbnr.retainedComponentMean uses for regionMult, and it keeps sigma
-// (and therefore CV, and therefore the CLF grid's interpolation axis) untouched.
+// trick regionMult uses, and it keeps sigma untouched.
 export function trendedMu(mu: number, yearNumber: number): number {
   return mu + Math.log(wcSeverityTrend(yearNumber));
 }
@@ -215,16 +213,6 @@ export function expectedClaimSeverity(
   let total = 0;
   for (let i = 0; i < mix.length; i++) total += weights[i] * componentMean(mix[i].component, yearNumber);
   return total * regionMult;
-}
-
-// --- report lag --------------------------------------------------------------
-
-// lag = round(1 + lognormal(mean, cv)), in whole years, always >= 1.
-// Drawn ONLY for claims that came up delayed, so an undelayed claim consumes no
-// lag randomness at all.
-function drawReportLag(rng: SeededRandom, params = M): number {
-  const { mu, sigma } = lognormalParams(params.reportLag.meanYears, params.reportLag.cv);
-  return Math.max(1, Math.round(1 + rng.lognormal(mu, sigma)));
 }
 
 // --- exported: analytic expectation ------------------------------------------
@@ -343,46 +331,34 @@ export interface WcGenerationInputs {
   instanceSeed: number;
   kLine: number;
   riskControlEffectiveness: number; // DRAW ONLY — see invariant 2
-  // Claims from the unreported inventory whose reportYear is THIS year. Passed
-  // in rather than looked up so the generator stays pure, and materialised HERE
-  // rather than by the caller so claim construction lives in exactly one place.
-  //
-  // ⚠ THE CALLER MUST HAVE FILTERED THESE. This function does not check
-  // reportYear; it emits every entry it is given.
-  emerging?: WcUnreportedClaim[];
   // Claims a shock event injects this year, each with an EXPLICIT AMOUNT.
-  injections?: { count: number; amount: number; accidentYearOffset?: number }[];
+  //
+  // ⚠ NO accidentYearOffset ANY MORE. Backdating existed so a retroactive shock
+  // could add claims to prior accident years and have them surface through the
+  // report-lag inventory. With claims reported in the year they occur there is
+  // no channel for that, and a claim labelled to a prior year would still hit
+  // this year's P&L — the label would be decoration. See shock #10, retargeted.
+  injections?: { count: number; amount: number }[];
   // Current-horizon shock multipliers on a COMPONENT'S ARRIVAL RATE. Keys are
   // component names ('large', ...) or '*' for every component. DRAW ONLY.
   componentFreqMultipliers?: Record<string, number>;
 }
 
 export interface WcGenerationResult {
-  // Claims REPORTED this calendar year: those from this accident year that were
-  // not delayed, plus those emerging from prior accident years. Their
-  // `accidentYear` fields therefore are NOT all equal to yearNumber — that is
-  // the dual-booking convention, not a bug.
+  // Every claim from THIS accident year. Every `accidentYear` equals yearNumber.
+  //
+  // ⚠ THIS IS NOW AN ACCIDENT-YEAR FIGURE ON ALL THREE LINES. It used to be
+  // WC's CALENDAR-year reported loss — this accident year's non-delayed claims
+  // plus prior years' emergence — while GL's and Property's were accident-year.
+  // One field meaning two things by line is what surfaced the report lag in the
+  // first place. currentAccidentYearGross is gone because it is now identical to
+  // this, and keeping both would reintroduce the ambiguity under a second name.
   claims: Claim[];
   occurrences: Occurrence[];
-  // Sum of `claims` above — the CALENDAR-year reported loss, which is what the
-  // income statement recognises.
   grossUltimateLoss: number;
-  // The slice of grossUltimateLoss belonging to THIS accident year. This is the
-  // figure the chain-ladder provision applies its LDF to.
-  currentAccidentYearGross: number;
-  // The slice belonging to PRIOR accident years — recognised now, attributed
-  // back. Feeds prior-year development.
-  emergedGross: number;
-  // Drawn this year but NOT reported this year. The caller adds these to the
-  // inventory; they are not in `claims`.
-  newlyDelayed: WcUnreportedClaim[];
   memberLossResults: MemberLossResult[];
   claimCountsByGroup: Record<string, number>;
   claimCountsByComponent: Record<string, number>;
-  // Count of claims drawn this accident year that were deferred, and their
-  // dollars — reported by the diagnostic, not used in accounting.
-  delayedCount: number;
-  delayedGross: number;
   // One entry per requested injection, in the same order.
   injectionResults: { count: number; gross: number }[];
 }
@@ -398,16 +374,11 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
   const claims: Claim[] = [];
   const occurrences: Occurrence[] = [];
   const memberLossResults: MemberLossResult[] = [];
-  const newlyDelayed: WcUnreportedClaim[] = [];
   const claimCountsByGroup: Record<string, number> = {};
   const claimCountsByComponent: Record<string, number> = {};
   for (const g of WC_RATING_GROUPS) claimCountsByGroup[g] = 0;
   for (const c of Object.keys(WC_SEVERITY_COMPONENTS)) claimCountsByComponent[c] = 0;
 
-  let currentAccidentYearGross = 0;
-  let emergedGross = 0;
-  let delayedCount = 0;
-  let delayedGross = 0;
 
   // Emit one claim + its occurrence. WC emits exactly ONE claim per occurrence,
   // which is what makes the per-occurrence tower's layer arithmetic exact at
@@ -467,7 +438,6 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
     // asserted in scripts/diagnostics/enrolment-independence-check.ts.
     const freqRng = deriveSubRng(instanceSeed, yearNumber, `wc_freq:${member.id}`);
     const sevRng = deriveSubRng(instanceSeed, yearNumber, `wc_sev:${member.id}`);
-    const lagRng = deriveSubRng(instanceSeed, yearNumber, `wc_lag:${member.id}`);
 
     const payroll = member.exposureByLine.WC ?? 0;
     const rq = member.riskQuality;
@@ -475,7 +445,6 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
     const g = params.ratingGroups[group];
     const regionMult = regionMultiplier(member.region);
     const before = claims.length;
-    let memberDelayed = 0;
 
     if (payroll > 0) {
       // Per member-year noise, mean 1. NO POOL FACTOR — it was removed from WC
@@ -511,39 +480,12 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
           // Severity: a single amount, no legs, no trend, no vintage.
           // TRENDED AT THE ACCIDENT YEAR, and fixed there forever.
           //
-          // ⚠ THE REPORT LAG MUST NOT SEE THIS. The amount is trended once, HERE,
-          // and then frozen onto the claim (and onto WcUnreportedClaim.amount for
-          // a delayed one). A claim emerging in a later year carries its
-          // accident-year level unchanged. Trending over the lag is what makes
-          // E[(1+r)^lag] over an unbounded lognormal DIVERGENT — the reason the
-          // retired presumption process had to truncate at 40 years, and the
-          // reason this model's lag was built trend-free. Asserted in
-          // wc-severity-rebuild-check.
+          // The trend-free-lag warning that stood here is retired with the lag
+          // itself: there is no longer a gap between accident and report year for
+          // a trend to be applied over, so E[(1+r)^lag] cannot arise.
           const amount = sevRng.lognormal(trendedMu(spec.mu, yearNumber), spec.sigma) * regionMult;
-          // Report lag: drawn AFTER severity and INDEPENDENT of it. The only
-          // coupling between the two is that p_delayed differs by component,
-          // which is what makes the inventory dollar-weighted.
-          const delayed = lagRng.next() < spec.pDelayed;
           const id = `wc-${yearNumber}-${member.id}-${componentKey}-${n}`;
-          if (delayed) {
-            const reportYear = yearNumber + drawReportLag(lagRng, params);
-            newlyDelayed.push({
-              id,
-              memberId: member.id,
-              region: member.region,
-              ratingGroup: group,
-              component: componentKey,
-              accidentYear: yearNumber,
-              reportYear,
-              amount,
-            });
-            delayedCount += 1;
-            delayedGross += amount;
-            memberDelayed += amount;
-          } else {
-            emit(id, member.id, member.region, group, componentKey, amount, yearNumber, yearNumber);
-            currentAccidentYearGross += amount;
-          }
+          emit(id, member.id, member.region, group, componentKey, amount, yearNumber, yearNumber);
         }
       }
     }
@@ -559,30 +501,11 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
       // x mixture, not a single per-member CV.
       coefficientOfVariation: 0,
       standardDeviation: 0,
-      // REPORTED-BASIS, matching grossUltimateLoss: what this member's claims
-      // cost the pool in THIS calendar year. Claims deferred to a later year are
-      // deliberately excluded — they are not yet known, and an underwriting
-      // screen reading loss history must see what a real one would see.
-      // Emerging prior-year claims are added below, after they are emitted.
+      // ACCIDENT-YEAR BASIS, matching grossUltimateLoss. With the report lag
+      // gone every claim this member incurred this year is already in here, so
+      // there is nothing deferred to exclude and nothing emerging to add later.
       simulatedLoss: reportedThisYear,
     });
-    void memberDelayed;
-  }
-
-  // --- claims emerging from the unreported inventory --------------------------
-  //
-  // Drawn in an earlier accident year, reported now. They keep their ORIGINAL
-  // id, member, region, group, component and amount — the record is replayed,
-  // not re-drawn, which is what makes a retroactive shock able to act on the
-  // inventory without history silently restating itself.
-  const byMember = new Map(memberLossResults.map(r => [r.memberId, r]));
-  for (const u of inputs.emerging ?? []) {
-    emit(u.id, u.memberId, u.region, u.ratingGroup, u.component, u.amount, u.accidentYear, yearNumber);
-    emergedGross += u.amount;
-    claimCountsByGroup[u.ratingGroup] = (claimCountsByGroup[u.ratingGroup] ?? 0) + 1;
-    claimCountsByComponent[u.component] = (claimCountsByComponent[u.component] ?? 0) + 1;
-    const r = byMember.get(u.memberId);
-    if (r) r.simulatedLoss += u.amount;
   }
 
   // --- shock injections ---------------------------------------------------------
@@ -632,17 +555,11 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
         let u = injRng.next() * totalWeight;
         for (const t of targets) { u -= t.weight; if (u <= 0) { pick = t; break; } }
 
-        // A BACKDATED accidentYear is how a RETROACTIVE event adds claims that
-        // were not compensable when they happened. It is a different mechanism
-        // from revising the existing inventory (which makes known-but-unreported
-        // claims cost more) and the two must not be conflated: this one adds
-        // claims, that one reprices them.
-        const accidentYear = yearNumber + (injection.accidentYearOffset ?? 0);
+        // Always THIS accident year. Backdating is gone with the report lag —
+        // see the note on WcGenerationInputs.injections.
         injSeq += 1;
         const id = `wc-inject-${yearNumber}-${injSeq}`;
-        emit(id, pick.member.id, pick.member.region, pick.group, 'injected', injection.amount, accidentYear, yearNumber);
-        if (accidentYear === yearNumber) currentAccidentYearGross += injection.amount;
-        else emergedGross += injection.amount;
+        emit(id, pick.member.id, pick.member.region, pick.group, 'injected', injection.amount, yearNumber, yearNumber);
         claimCountsByGroup[pick.group] += 1;
         injectedByMember.set(pick.member.id, (injectedByMember.get(pick.member.id) ?? 0) + injection.amount);
         count += 1;
@@ -662,14 +579,9 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
     claims,
     occurrences,
     grossUltimateLoss,
-    currentAccidentYearGross,
-    emergedGross,
-    newlyDelayed,
     memberLossResults,
     claimCountsByGroup,
     claimCountsByComponent,
-    delayedCount,
-    delayedGross,
     injectionResults,
   };
 }

@@ -109,9 +109,10 @@ export function lognormalPartialMoment(mean: number, cv: number, k: number, boun
 // already stated as (mu, sigma) rather than (mean, cv): WC's and GL's mixture
 // components both are. Closed form, no quadrature:
 //   E[X ^ L] = exp(mu + s^2/2) x Phi((ln L - mu - s^2)/s) + L x (1 - Phi((ln L - mu)/s))
-// Shared by both lines' reinsurance netting (wcIbnr.ts) and tower re-derivation
-// diagnostics — moved here from wcIbnr.ts so a GL consumer isn't importing a
-// WC-named module for shared math.
+// Shared by the tower re-derivation diagnostics and both lines' band moments.
+// It lives here rather than in a line-specific module so a GL consumer is not
+// importing WC-named math — originally moved out of the since-deleted wcIbnr.ts
+// for exactly that reason.
 export function limitedExpectedValue(mu: number, sigma: number, limit: number): number {
   if (!(limit > 0)) return 0;
   if (!Number.isFinite(limit)) return Math.exp(mu + (sigma * sigma) / 2);

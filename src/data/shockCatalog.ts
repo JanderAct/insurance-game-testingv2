@@ -95,13 +95,25 @@ export const SHOCK_CATALOG: Record<string, ShockDefinition> = {
   //
   // ⚠ RETROACTIVE MAGNITUDE IS A JUDGMENT CALL — the spec requires the mechanism
   // but sets no number, and the retired event had no retroactive half at all.
-  // Sized to mirror the forward rate over a three-year reach-back: 3 claims, one
-  // dated to each of the three prior accident years, at $900,000 each. That is
-  // $2.70M against an enrolled annual WC loss near $9.70M, i.e. ~9.3% per year
-  // reached back — the same rate as the forward effect. $900,000 is the heavy
-  // component's ~98.3rd percentile, which is the right neighbourhood for a
+  // Sized to mirror the forward rate over a three-year reach-back: 3 claims at
+  // $900,000 each, $2.70M against an enrolled annual WC loss near $9.70M, i.e.
+  // ~9.3% per year reached back — the same rate as the forward effect. $900,000
+  // is the heavy component's ~98.3rd percentile, the right neighbourhood for a
   // serious occupational-disease claim and well below #15's $9.0M mega-claim.
   // DISPLACED BY: any real reach-back window from comparable legislation.
+  //
+  // ⚠ THE THREE CLAIMS ARE NO LONGER BACKDATED, and the magnitude is unchanged.
+  // They carried accidentYearOffset -1/-2/-3 so they would be attributed to
+  // prior accident years; with WC's report lag removed there is no mechanism by
+  // which a prior-year claim becomes known now — it would have reported in its
+  // own accident year. The claims were never inert (emit added them to this
+  // year's loss regardless of their label), so what the offset actually bought
+  // was an attribution that fed the chain-ladder, and that consumer is gone.
+  // Keeping it would have left a field that changes a label and nothing else.
+  //
+  // The narrative survives intact: legislation makes previously non-compensable
+  // conditions compensable, and the claims are FILED ON ENACTMENT. Three claims,
+  // $2.70M, in the year the event fires — the same money at the same time.
   //
   // `firstYearOnly` on all three: the event is future-horizon so the frequency
   // multiplier persists, but enactment happens once. Without the flag the same
@@ -114,13 +126,11 @@ export const SHOCK_CATALOG: Record<string, ShockDefinition> = {
     band: 'high',
     description:
       'Legislation permanently expands the presumption that police and fire occupational disease is '
-      + 'work-related, raising the rate of severe claims from this year forward and reopening three '
-      + 'prior accident years for conditions that were not previously compensable.',
+      + 'work-related, raising the rate of severe claims from this year forward. On enactment, three '
+      + 'claims are filed at once for conditions that were not previously compensable.',
     effects: [
       { kind: 'componentFreqMultiplier', line: 'WC', component: 'large', factor: 1.096 },
-      { kind: 'injectClaim', line: 'WC', count: 1, amount: 900_000, accidentYearOffset: -1, firstYearOnly: true },
-      { kind: 'injectClaim', line: 'WC', count: 1, amount: 900_000, accidentYearOffset: -2, firstYearOnly: true },
-      { kind: 'injectClaim', line: 'WC', count: 1, amount: 900_000, accidentYearOffset: -3, firstYearOnly: true },
+      { kind: 'injectClaim', line: 'WC', count: 3, amount: 900_000, firstYearOnly: true },
     ],
   },
 
@@ -347,11 +357,6 @@ for (const def of Object.values(SHOCK_CATALOG)) {
       }
       if (!(effect.count > 0)) {
         throw new Error(`shockCatalog ${def.id}: injectClaim needs a positive count, got ${effect.count}`);
-      }
-      if (effect.accidentYearOffset !== undefined && effect.accidentYearOffset > 0) {
-        throw new Error(
-          `shockCatalog ${def.id}: injectClaim accidentYearOffset must be <= 0 (it BACKDATES a claim); got ${effect.accidentYearOffset}`,
-        );
       }
     }
     // A component multiplier must name a component the model actually has, or

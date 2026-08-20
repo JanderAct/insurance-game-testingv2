@@ -145,20 +145,23 @@ export default function App() {
               if (typeof ld.aggregateStopLevel !== 'number') ld.aggregateStopLevel = -1;
             }
           }
-          // WC SEVERITY REBUILD: three additive fields, defaulted rather than
-          // bumping the save key — same precedent as membershipHistory and
-          // memberLossHistory, and orphaning every save over additive fields
-          // would be a worse trade.
+          // WC SEVERITY REBUILD: wcRatingGroup re-stamped onto every member from
+          // the canonical catalog. It is roster data, not game state, so
+          // rebuilding it is exact rather than a guess — and wcClaimEngine THROWS
+          // on a member without one. Defaulted rather than bumping the save key,
+          // same precedent as membershipHistory and memberLossHistory.
           //
-          //   wcRatingGroup   re-stamped onto every member from the canonical
-          //                   catalog. It is roster data, not game state, so
-          //                   rebuilding it is exact rather than a guess — and
-          //                   wcClaimEngine THROWS on a member without one.
-          //   unreportedClaims / wcAccidentYearReported
-          //                   default to empty. An old save therefore cold-starts
-          //                   with no IBNR inventory and understates IBNR for
-          //                   about four years while it refills. That is visible
-          //                   and self-correcting; discarding the save is not.
+          // ⚠ THE unreportedClaims / wcAccidentYearReported BACKFILL THAT STOOD
+          // HERE IS GONE, and old saves are fine WITHOUT a migration. Both fields
+          // were removed with WC's report lag. A save written before this commit
+          // still carries them, and they are simply ignored: nothing reads them,
+          // TypeScript does not police excess properties on a parsed JSON object,
+          // and they cost a few KB of localStorage until the next save overwrites
+          // them. Deleting them on load would be busywork with a failure mode
+          // (mutating a save the user might open in an older build) and no
+          // benefit. The one thing that would break a save is a field the engine
+          // now REQUIRES and the save lacks; this change removes fields, so there
+          // is none.
           {
             const groupByName = new Map(
               getPredefinedMarketMembers().map(m => [m.name, m.wcRatingGroup]),
@@ -170,8 +173,6 @@ export default function App() {
             const lines = (gs.poolState?.lines ?? {}) as Record<string, LinePoolState | undefined>;
             for (const ls of Object.values(lines)) {
               (ls?.members ?? []).forEach(repair);
-              if (ls && !Array.isArray(ls.unreportedClaims)) ls.unreportedClaims = [];
-              if (ls && !Array.isArray(ls.wcAccidentYearReported)) ls.wcAccidentYearReported = [];
             }
             (im ?? []).forEach(repair);
           }

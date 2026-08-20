@@ -167,7 +167,9 @@ if (worstDeviation > 0.15) {
         members, yearNumber: YEAR, calendarYear: 2026,
         instanceSeed: 424242 + i * 7919, kLine: d.kLine, riskControlEffectiveness: 0,
       });
-      draws.push(g.grossUltimateLoss + g.delayedGross);
+      // g.grossUltimateLoss is the whole accident year now — WC's report lag is
+      // gone, so there is no delayedGross to add back.
+      draws.push(g.grossUltimateLoss);
     }
     const sorted = sortNum(draws);
     const ratios: Record<number, number> = {};

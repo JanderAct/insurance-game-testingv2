@@ -317,19 +317,13 @@ console.log('\n--- 6. #15 Catastrophic WC Mega-Claim — measured at both bases 
   console.log(`    member losses reconcile to the line total: ${note(Math.abs(s.memberLossResults.reduce((t, m) => t + m.simulatedLoss, 0) - s.grossUltimateLoss) < 1e-6, 'injected claims are missing from memberLossResults')}`);
   console.log(`    a zero/absent amount throws: ${note(throws(() => run(pool, [{ count: 1, amount: 0 }])), 'an injection without a positive amount is silently accepted')}`);
 
-  // BACKDATING — the retroactive mechanism #10 needs. A claim dated to a prior
-  // accident year is RECOGNISED now and ATTRIBUTED back; that is dual booking,
-  // and it must show up as emerged prior-year loss rather than current-year.
-  const back = generateWcClaims({
-    members: pool, yearNumber: 3, calendarYear: 2028, instanceSeed: 24601,
-    kLine: computeKLine(pool), riskControlEffectiveness: 0,
-    injections: [{ count: 1, amount: 900_000, accidentYearOffset: -2 }],
-  });
-  const bc = back.claims[back.claims.length - 1];
-  console.log(`  backdated injection: accidentYear ${bc.accidentYear}, reportedYear ${bc.reportedYear}  ` +
-    `${note(bc.accidentYear === 1 && bc.reportedYear === 3, 'a backdated injection did not split accident and report year')}`);
-  console.log(`    counted as EMERGED prior-year loss, not current-accident-year: ` +
-    `${note(Math.abs(back.emergedGross - 900_000) < 1e-6, `backdated injection landed in the wrong bucket (emerged ${back.emergedGross})`)}`);
+  // ⚠ THE BACKDATING CHECK THAT STOOD HERE IS GONE. It asserted that an
+  // injection with accidentYearOffset split accident year from report year and
+  // landed in emerged prior-year loss. Both the offset and that bucket were
+  // removed with WC's report lag: with no deferral, a claim dated to a prior
+  // year would still hit this year's loss, so the offset changed a label and
+  // nothing else. #10 now files its three claims on enactment — same money,
+  // same year — and section 7 below still covers the event.
 }
 
 console.log('\n--- 7. #10 WC Presumption Expansion — componentFreqMultiplier and forward persistence ---');

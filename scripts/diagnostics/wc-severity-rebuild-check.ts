@@ -44,16 +44,9 @@ import {
   regionMultiplier,
   tiltedWeights,
 } from '../../src/utils/wcClaimEngine';
-import {
-  MEAN_REPORT_LAG_YEARS,
-  dollarWeightedPDelayed,
-  ldfToUltimate,
-  reportLagCdf,
-  wcIbnrBalance,
-} from '../../src/utils/wcIbnr';
 import { limitedExpectedValue, normalCdf } from '../../src/utils/claimMath';
 import { SeededRandom } from '../../src/utils/random';
-import type { Member, WcUnreportedClaim, WcAccidentYearReportedEntry } from '../../src/types/simulation';
+import type { Member } from '../../src/types/simulation';
 
 const M = WC_LOSS_MODEL;
 const problems: string[] = [];
@@ -293,48 +286,11 @@ console.log('\n--- 4. RISK QUALITY — two channels, and k_line sees both ---');
 }
 
 // ---------------------------------------------------------------------------
-console.log('\n--- 5. REPORT LAG — the pattern and its LDFs ---');
+// ⚠ SECTION 5 (REPORT LAG — the pattern and its LDFs) IS GONE with the lag. It
+// checked E[lag], the reporting CDF at 4 and 5 years, the loss-development
+// factors implied by it, and the net dollar-weighted p_delayed. None of those
+// quantities exists any more.
 // ---------------------------------------------------------------------------
-{
-  console.log(`  E[lag] (rounded lag, tail-sum) = ${MEAN_REPORT_LAG_YEARS.toFixed(4)} years`);
-  const within4 = reportLagCdf(4), within5 = reportLagCdf(5);
-  console.log(`  share of DELAYED claims reporting within 4 years: ${pct(within4)}   within 5: ${pct(within5)}`);
-  console.log(`    ⚠ THE SPEC SAYS 78% / 88% HERE AND THAT IS INCONSISTENT WITH ITS OWN §9 TABLES.`);
-  console.log(`      The LDF table and the convergence table below both reproduce EXACTLY off F(4)=${within4.toFixed(4)},`);
-  console.log(`      so 81.6% is the value the stated parameters actually imply. Gated on the LDF table,`);
-  console.log(`      which is checkable two ways, rather than on the 78%.`);
-
-  // The implied LDF table — a checkable OUTPUT, and what makes the lag testable
-  // against a real reporting triangle.
-  const pPool = dollarWeightedPDelayed(roster, [], 1);
-  console.log(`  pool dollar-weighted p_delayed, GROSS, FULL MARKET: ${pct(pPool)} (spec 17.1%)  ` +
-    `${note(Math.abs(pPool - 0.171) < 0.005, `dollar-weighted p_delayed ${pct(pPool)} vs 17.1%`)}`);
-  const ldfTargets: Record<number, number> = { 0: 1.2063, 1: 1.1442, 2: 1.0751, 3: 1.0471, 5: 1.0238, 10: 1.0079 };
-  console.log('  age   reported    LDF     spec');
-  for (const age of [0, 1, 2, 3, 5, 10]) {
-    const ldf = ldfToUltimate(age, pPool);
-    const t = ldfTargets[age];
-    console.log(`  ${String(age).padStart(3)}   ${pct(1 / ldf).padStart(8)}  ${ldf.toFixed(4)}  ${t.toFixed(4)}  ` +
-      `${note(Math.abs(ldf - t) < 0.002, `LDF at age ${age} is ${ldf.toFixed(4)}, spec ${t}`)}`);
-  }
-
-  // CONVERGENCE IS STRUCTURAL — reproduced so nobody gates on 0.599.
-  console.log('  IBNR / annual loss by game year (structural ceiling, NOT a target):');
-  for (const N of [1, 3, 5, 10, 40]) {
-    let acc = 0;
-    for (let t = 0; t < N; t++) acc += 1 - reportLagCdf(t);
-    console.log(`    year ${String(N).padStart(2)}: ${(pPool * acc).toFixed(3)}`);
-  }
-  console.log(`    A 5-year run reaches ~0.443 against the 0.599 limit. GATING ON 0.599 WOULD FAIL CORRECT CODE.`);
-
-  // NET vs GROSS. Delayed dollars sit in the heavy component, which is exactly
-  // what the tower cedes, so the two patterns are materially different.
-  const allPlaced = [true, true, true, false];
-  const pNet = dollarWeightedPDelayed(roster, allPlaced, 1);
-  console.log(`  p_delayed NET of the purchasable tower: ${pct(pNet)} vs GROSS ${pct(pPool)}  ` +
-    `${note(pNet < pPool, 'netting did not reduce the delayed dollar share — the heavy component is what the tower cedes')}`);
-  console.log(`    LDF(0) net ${ldfToUltimate(0, pNet).toFixed(4)} vs gross ${ldfToUltimate(0, pPool).toFixed(4)} — reserves are NET, so the net one is booked.`);
-}
 
 // ---------------------------------------------------------------------------
 console.log('\n--- 6. THE DRAW — counts asserted, dollars reported with CI ---');
@@ -352,10 +308,11 @@ const YEARS = 300;
   // yearNumber HELD AT 1 and the SEED varied: WC carries a -1.5%/yr frequency
   // trend, so looping the year would average over a decline instead of sampling
   // one year repeatedly.
-  const counts = runs.map(r => r.claims.length + r.newlyDelayed.length);
-  const drawn = runs.map(r => r.grossUltimateLoss + r.delayedGross);
-  const delayedCounts = runs.map(r => r.delayedCount);
-  const delayedDollars = runs.map(r => r.delayedGross);
+  // r.claims IS the whole accident year now. The unions that stood here added
+  // back the deferred set, which no longer exists — with the report lag gone
+  // every claim drawn for the year is reported in it.
+  const counts = runs.map(r => r.claims.length);
+  const drawn = runs.map(r => r.grossUltimateLoss);
 
   // ⚠ THE COMPARATOR MUST CARRY THE DRAW'S OWN CONDITIONS. The 1,825.6 headline
   // is the NEUTRAL-RQ, k_line = 1 figure; the draw applies each member's own
@@ -372,15 +329,9 @@ const YEARS = 300;
     `${note(Math.abs(mean(counts) / analyticCount - 1) < 0.01, `drawn claim count ${mean(counts).toFixed(1)} vs analytic ${analyticCount.toFixed(1)}`)}`);
   console.log(`    (the 1,825.6 headline is the NEUTRAL-RQ, k_line=1 figure — a different quantity)`);
 
-  // COUNT-BASED, SO GATEABLE. Finding 26's line.
-  const delayedShareCount = mean(delayedCounts) / mean(counts);
-  console.log(`  delayed share BY COUNT: ${pct(delayedShareCount)} (target 8.4%)  ` +
-    `${note(Math.abs(delayedShareCount - 0.084) < 0.005, `delayed share by count ${pct(delayedShareCount)} vs 8.4%`)}`);
-
-  // DOLLAR-WEIGHTED — REPORTED, NOT GATED.
-  const delayedShareDollar = mean(delayedDollars) / mean(drawn);
-  const [dLo, dHi] = bootstrapCi(runs.map(r => r.delayedGross / Math.max(r.grossUltimateLoss + r.delayedGross, 1)));
-  console.log(`  delayed share BY DOLLARS: ${pct(delayedShareDollar)}, 99% CI [${pct(dLo)}, ${pct(dHi)}] (analytic 17.1%) — REPORTED`);
+  // The delayed-share checks (8.4% by count, 17.1% by dollars) are gone with
+  // the report lag. Their whole subject was how the deferred set was tilted
+  // toward `large`; there is no deferred set.
 
   // THE GATEABLE DOLLAR FIGURE IS THE CAPPED ONE. Finding 26 permits gating
   // counts, rates, quantiles and CAPPED means — and forbids gating a
@@ -400,8 +351,7 @@ const YEARS = 300;
     });
   }
   const drawnCapped = mean(runs.map(r =>
-    [...r.claims.map(c => c.grossUltimate), ...r.newlyDelayed.map(u => u.amount)]
-      .reduce((s, x) => s + Math.min(x, 1e6), 0)));
+    r.claims.reduce((s, c) => s + Math.min(c.grossUltimate, 1e6), 0)));
   console.log(`  $1M-CAPPED annual loss — GATED: drawn ${fmt$(drawnCapped)} vs analytic ${fmt$(analyticCapped)} ` +
     `(${((drawnCapped / analyticCapped - 1) * 100).toFixed(2)}%)  ` +
     `${note(Math.abs(drawnCapped / analyticCapped - 1) < 0.02, `capped drawn loss ${fmt$(drawnCapped)} vs analytic ${fmt$(analyticCapped)}`)}`);
@@ -418,7 +368,7 @@ const YEARS = 300;
   console.log(`      the assertion; the capped figure above is what the draw is held to.`);
 
   // Realized claim-size distribution, reported.
-  const all = runs.flatMap(r => [...r.claims.map(c => c.grossUltimate), ...r.newlyDelayed.map(u => u.amount)]);
+  const all = runs.flatMap(r => r.claims.map(c => c.grossUltimate));
   all.sort((a, b) => a - b);
   const q = (p: number) => all[Math.min(all.length - 1, Math.floor(p * all.length))];
   const sampleMean = mean(all);
@@ -432,123 +382,23 @@ const YEARS = 300;
 }
 
 // ---------------------------------------------------------------------------
-console.log('\n--- 7. IBNR — Little\'s Law, not a fixed percentage ---');
-{
-  // Drives the generator with a real inventory, which is what the engine does.
-  //
-  // ⚠ AVERAGED ACROSS INDEPENDENT PATHS, AND THAT IS NOT A CONVENIENCE. Little's
-  // Law holds IN EXPECTATION: E[balance] = E[accrual] x E[lag]. A single realized
-  // path does not obey it year by year, because the chain-ladder balance is
-  // driven by what actually REPORTED, and on a book with a blended CV above 11 a
-  // year in which one large claim reports produces a large balance estimate
-  // whether or not the unreported inventory moved. Gating one path's maximum
-  // fails on entirely correct code — measured at 1.74 here before the paths were
-  // averaged. The per-path spread is REPORTED below so the volatility stays
-  // visible rather than hidden by the averaging.
-  const enrolled = roster.filter((_, i) => i % 5 === 0); // ~40 members, an enrolled-scale stand-in
-  const k = computeKLine(enrolled);
-  const N = 40;
-  const PATHS = 40;
-  const pDelayedNet = dollarWeightedPDelayed(enrolled, [], 1);
-  const balByYear: number[][] = Array.from({ length: N }, () => []);
-  const accByYear: number[][] = Array.from({ length: N }, () => []);
-  const lossByYear: number[][] = Array.from({ length: N }, () => []);
-  const invByYear: number[][] = Array.from({ length: N }, () => []);
-
-  for (let path = 0; path < PATHS; path++) {
-    let inventory: WcUnreportedClaim[] = [];
-    const ledger: WcAccidentYearReportedEntry[] = [];
-    for (let y = 1; y <= N; y++) {
-      const emerging = inventory.filter(u => u.reportYear <= y);
-      inventory = inventory.filter(u => u.reportYear > y);
-      const g = generateWcClaims({
-        members: enrolled, yearNumber: 1, calendarYear: 2025 + y,
-        instanceSeed: 31337 + path * 104729 + y * 7919, kLine: k, riskControlEffectiveness: 0,
-        emerging,
-      });
-      // The generator dates newly delayed claims to its own yearNumber, which is
-      // pinned at 1 here so the frequency trend does not confound the pattern.
-      // Re-stamp them onto the real game year, preserving the DRAWN lag.
-      inventory = [...inventory, ...g.newlyDelayed.map(u => ({
-        ...u, accidentYear: y, reportYear: y + (u.reportYear - u.accidentYear),
-      }))];
-      for (const e of ledger) {
-        e.netReported += emerging.filter(u => u.accidentYear === e.yearNumber).reduce((t, u) => t + u.amount, 0);
-      }
-      ledger.push({ yearNumber: y, netReported: g.currentAccidentYearGross, pDelayedNet });
-      balByYear[y - 1].push(wcIbnrBalance(ledger, y));
-      accByYear[y - 1].push(g.currentAccidentYearGross * (ldfToUltimate(0, pDelayedNet) - 1));
-      lossByYear[y - 1].push(g.grossUltimateLoss + g.delayedGross);
-      invByYear[y - 1].push(inventory.length);
-    }
-  }
-
-  // Expected-path ratio: mean balance over (mean accrual to date x mean lag).
-  const ratioAt = (y: number) => {
-    const meanAccrualToDate = mean(accByYear.slice(0, y).map(a => mean(a)));
-    return mean(balByYear[y - 1]) / (meanAccrualToDate * MEAN_REPORT_LAG_YEARS);
-  };
-  console.log(`  ${PATHS} independent ${N}-year paths, enrolled-scale book ` +
-    `($${enrolled.reduce((t, m) => t + (m.exposureByLine.WC ?? 0), 0).toFixed(0)}M payroll, ${enrolled.length} members).`);
-  console.log('  year   E[IBNR balance]   E[accrual]   E[bal]/(E[acc] x meanLag)   IBNR/annual loss   inventory');
-  for (const y of [1, 2, 3, 5, 10, 20, 40]) {
-    console.log(`  ${String(y).padStart(4)}   ${fmt$(mean(balByYear[y - 1])).padStart(15)}   ${fmt$(mean(accByYear[y - 1])).padStart(10)}   ` +
-      `${ratioAt(y).toFixed(3).padStart(25)}   ${(mean(balByYear[y - 1]) / mean(lossByYear[y - 1])).toFixed(3).padStart(16)}   ${mean(invByYear[y - 1]).toFixed(0).padStart(9)}`);
-  }
-
-  // THE GATE, on the expectation. Approaches 1 FROM BELOW and must not exceed it.
-  const ratios = Array.from({ length: N - 1 }, (_, i) => ratioAt(i + 2));
-  const maxRatio = Math.max(...ratios);
-  console.log(`  max E-ratio from year 2 on: ${maxRatio.toFixed(3)} — must not exceed 1  ` +
-    `${note(maxRatio <= 1.05, `Little's Law ratio reached ${maxRatio.toFixed(3)} in expectation — the balance exceeds arrival rate x time in system`)}`);
-  const lateRatio = mean(ratios.slice(24));
-  console.log(`  mean E-ratio over years 26-40: ${lateRatio.toFixed(3)} — should approach 1  ` +
-    `${note(lateRatio > 0.85, `Little's Law ratio only reaches ${lateRatio.toFixed(3)} by year 40 — the balance is not converging`)}`);
-  console.log(`    ⚠ UNDER THE BALANCE-AS-ACCRUAL FAILURE THIS READS ~${MEAN_REPORT_LAG_YEARS.toFixed(1)} FROM TURN ONE. That is why it is the`);
-  console.log(`      gate and the 0.599 LEVEL is not: the level is 26% short at year 5 on correct code.`);
-
-  // Per-path spread at year 40 — REPORTED, so the averaging above does not hide
-  // how volatile a single game's reserve actually is.
-  const y40 = [...balByYear[N - 1]].sort((a, b) => a - b);
-  console.log(`  single-path IBNR balance at year 40: p10 ${fmt$(y40[Math.floor(0.1 * PATHS)])}, ` +
-    `median ${fmt$(y40[Math.floor(0.5 * PATHS)])}, p90 ${fmt$(y40[Math.floor(0.9 * PATHS)])} — REPORTED`);
-
-  // STEADY STATE, not monotonic growth.
-  const inv20 = mean(invByYear[19]), inv40 = mean(invByYear[39]);
-  console.log(`  E[inventory] year 20 ${inv20.toFixed(0)} -> year 40 ${inv40.toFixed(0)} (a growing stock would roughly double)  ` +
-    `${note(inv40 < inv20 * 1.15, `the unreported inventory grew ${(inv40 / inv20).toFixed(2)}x between years 20 and 40 rather than holding steady`)}`);
-  console.log(`  ENROLLED-SCALE figures; they scale with exposure. THE RATIO DOES NOT.`);
-}
+// ⚠ SECTION 7 (IBNR — Little's Law) IS GONE, with WC's report lag and IBNR.
+// It asserted E[balance] = E[accrual] x E[mean lag] across independent paths.
+// There is no balance, no accrual and no lag left to relate, so the check has
+// no subject — retiring it is the point, not a regression in coverage. A
+// harness left testing a removed path is a trap this project has hit before.
+// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 console.log('\n--- 8. WAGE INFLATION: the trend-free lag, and what fixed attachments do ---');
 // ---------------------------------------------------------------------------
 {
-  // ⚠ THE REPORT LAG MUST STAY TREND-FREE. Severity is trended ONCE, at the
-  // accident-year draw, and then frozen. If a delayed claim were re-trended when
-  // it emerges, E[(1+r)^lag] over an unbounded lognormal lag would be DIVERGENT —
-  // the reason the retired presumption process had to truncate at 40 years, and
-  // the reason this lag was built trend-free. It holds by CONSTRUCTION (the
-  // amount is stored on WcUnreportedClaim), so this asserts the construction
-  // rather than trusting it.
-  const k = computeKLine(roster);
-  const y1 = generateWcClaims({
-    members: roster, yearNumber: 1, calendarYear: 2026,
-    instanceSeed: 5150, kLine: k, riskControlEffectiveness: 0,
-  });
-  const delayed = y1.newlyDelayed;
-  const later = generateWcClaims({
-    members: roster, yearNumber: 6, calendarYear: 2031,
-    instanceSeed: 909, kLine: k, riskControlEffectiveness: 0,
-    emerging: delayed,
-  });
-  const byId = new Map(later.claims.map(c => [c.id, c.grossUltimate]));
-  const worst = delayed.reduce((w, u) => Math.max(w, Math.abs((byId.get(u.id) ?? 0) - u.amount)), 0);
-  console.log(`  ${delayed.length} year-1 claims emerged in year 6; worst amount change $${worst.toExponential(2)}  ` +
-    `${note(worst < 1e-9, `a delayed claim was re-trended on emergence (worst $${worst}) — E[(1+r)^lag] is divergent and the lag must stay trend-free`)}`);
-  const sevRatio = Math.pow(1 + WC_SEVERITY_TREND_PER_YEAR, 5);
-  console.log(`    (had it been re-trended over 5 years it would have moved ${((sevRatio - 1) * 100).toFixed(1)}%, so this is a real test)`);
-
+  // The trend-free-lag assertion that opened this section is gone with the lag.
+  // It checked that a claim deferred to a later year kept its accident-year
+  // amount; with every claim reported in its own accident year there is no
+  // deferral for a trend to be applied over, so the divergence it guarded
+  // against (E[(1+r)^lag] over an unbounded lognormal) cannot arise.
+  //
   // SEVERITY AND PAYROLL TREND TOGETHER, so the rate barely moves. Asserted
   // analytically because it is the whole design.
   const rateTrend = (1 + M.frequencyTrendPerYear) * (1 + WC_SEVERITY_TREND_PER_YEAR) / (1 + WAGE_INFLATION_PER_YEAR);
@@ -592,11 +442,6 @@ console.log('\n--- 8. WAGE INFLATION: the trend-free lag, and what fixed attachm
   console.log(`    ⚠ NEAR-CANCELLATION, NOT AN IDENTITY: severity inflation pushes each layer UP while the`);
   console.log(`      per-$100 denominator inflates and counts fall. Re-measure if the wage rate, the severity`);
   console.log(`      trend, the frequency trend or any attachment moves.`);
-
-  // The same question for the IBNR netting, which uses the same fixed bounds.
-  const allPlaced = REINSURANCE_TOWER.WC.map(() => true);
-  console.log(`  wcIbnr net p_delayed (fixed layer bounds): year 1 ${pct(dollarWeightedPDelayed(roster, allPlaced, 1))}  ` +
-    `year ${HORIZON} ${pct(dollarWeightedPDelayed(roster, allPlaced, HORIZON))}`);
 }
 
 console.log(`\n${problems.length === 0 ? 'ALL WC SEVERITY REBUILD CHECKS PASS.' : `${problems.length} PROBLEMS:\n  ${problems.join('\n  ')}`}`);

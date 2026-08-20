@@ -38,12 +38,8 @@ function describe(effect: ShockEffect): string {
   switch (effect.kind) {
     case 'forceEvent':
       return `force ${effect.peril} in ${effect.region} at intensity ${effect.intensity}${effect.span ? ' (spanning)' : ''}`;
-    case 'injectClaim': {
-      const when = effect.accidentYearOffset
-        ? ` backdated ${Math.abs(effect.accidentYearOffset)}yr`
-        : '';
-      return `inject ${effect.count} ${effect.line} claim${effect.count === 1 ? '' : 's'} at $${(effect.amount / 1e6).toFixed(2)}M${when}`;
-    }
+    case 'injectClaim':
+      return `inject ${effect.count} ${effect.line} claim${effect.count === 1 ? '' : 's'} at $${(effect.amount / 1e6).toFixed(2)}M`;
     case 'freqMultiplier':
       return `${effect.line}${effect.sub ? ` ${effect.sub}` : ''} frequency x${effect.factor}`;
     case 'componentFreqMultiplier':
@@ -168,7 +164,6 @@ export function resolveShocks(instance: GameInstance, yearNumber: number): Shock
           bucket.injections.push({
             count: effect.count,
             amount: effect.amount,
-            accidentYearOffset: effect.accidentYearOffset,
             shockId: def.id,
           });
           break;

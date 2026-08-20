@@ -13,7 +13,7 @@ import { wageFactor } from '../data/exposureTrend';
 //
 //   REAL (raw           `member.exposureByLine.WC` read directly, no factor.
 //    exposureByLine)    CLAIM FREQUENCY, and only claim frequency.
-//                       wcClaimEngine, wcIbnr, wcLossDistribution read it raw.
+//                       wcClaimEngine reads it raw.
 //
 // WHY FREQUENCY MUST NOT SEE THE FACTOR: the roster is frozen, so payroll growth
 // here is PURE WAGE INFLATION — same members, same workers, same injuries.

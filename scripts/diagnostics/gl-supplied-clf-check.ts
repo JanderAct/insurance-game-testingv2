@@ -16,7 +16,8 @@
 //   3. Every confidence level the UI can request falls INSIDE the supplied
 //      curve's 25-95 range, so no reachable slider position is answered by a
 //      clamp.
-//   4. WC's table is untouched and still crosses at 47.2%.
+//   4. WC's table still crosses where its own derivation puts it (43.5%),
+//      i.e. the GL swap did not reach it.
 //
 // WHAT IS MEASURED AND REPORTED (not gated — it is a property of a placeholder,
 // and gating on it would just encode the placeholder):
@@ -58,8 +59,15 @@ check(wc.source === 'derived', 'WC table is still tagged `derived`');
   check(Math.abs(c - 0.577) < 0.0005, 'supplied curve crosses 1.000 at 57.7%', `${(c * 100).toFixed(2)}%`);
   check(Math.abs(crossingOf(GL_DERIVED) - 0.686) < 0.002,
     'GL_DERIVED is retained beside it and still crosses at 68.6%', `${(crossingOf(GL_DERIVED) * 100).toFixed(2)}%`);
-  check(Math.abs(crossingOf(wc) - 0.472) < 0.002,
-    'WC untouched, still crosses at 47.2%', `${(crossingOf(wc) * 100).toFixed(2)}%`);
+  // GUARDS AGAINST THE GL SWAP LEAKING INTO WC, not against WC ever changing.
+  // WC's own crossing legitimately moved 47.2% -> 43.5% when its report lag and
+  // IBNR were removed and its table re-derived; this constant tracks WC's
+  // current derived value and must be updated whenever WC is deliberately
+  // re-derived. It failed exactly once, on that re-derivation, which is the
+  // check working rather than the check being wrong.
+  check(Math.abs(crossingOf(wc) - 0.435) < 0.002,
+    'WC still crosses where its own derivation puts it (43.5%) — the GL swap did not reach it',
+    `${(crossingOf(wc) * 100).toFixed(2)}%`);
 }
 
 console.log('\n--- 2. "EXPECTED" IS STILL EXACTLY 1.000 ---');

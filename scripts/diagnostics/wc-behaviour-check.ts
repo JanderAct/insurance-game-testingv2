@@ -26,7 +26,6 @@ import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { REINSURANCE_TOWER } from '../../src/data/reinsuranceTower';
-import { MEAN_REPORT_LAG_YEARS } from '../../src/utils/wcIbnr';
 import type { CoverageLine, GameState, LineResultSet } from '../../src/types/simulation';
 
 const GAMES = 50;
@@ -150,24 +149,15 @@ console.log('\n--- Q3. IS THE PRICE STILL FLAT? (the defect this run exists to c
 }
 
 // --- Q4 ---------------------------------------------------------------------
-console.log('\n--- Q4. IBNR AND THE REPORT LAG ---');
-{
-  const finalRatio = games.map(g => {
-    const r = g.years[YEARS - 1];
-    return r.ibnrReserve / Math.max(r.grossUltimateLoss, 1);
-  });
-  console.log(`  IBNR / annual loss at Y${YEARS}: median ${q(finalRatio, 0.5).toFixed(3)}, mean ${mean(finalRatio).toFixed(3)}   prior run 0.529 (prediction 0.52)`);
-  // Little's Law across games, on the expectation — see wcIbnr for why a single
-  // path's ratio is too noisy to read.
-  for (const y of [2, 5, 10]) {
-    const bal = mean(games.map(g => g.years[y - 1].ibnrReserve));
-    const acc = mean(games.flatMap(g => g.years.slice(0, y).map(r => r.ibnrAccrual)));
-    console.log(`    Y${String(y).padStart(2)} Little's Law E[bal]/(E[acc] x meanLag ${MEAN_REPORT_LAG_YEARS.toFixed(2)}): ${(bal / (acc * MEAN_REPORT_LAG_YEARS)).toFixed(3)}`);
-  }
-  const unrep = mean(games.map(g => g.years[YEARS - 1].unreportedClaimCount));
-  const emerged = mean(games.flatMap(g => g.years.map(r => r.emergedPriorYearLoss)));
-  console.log(`  unreported inventory at Y${YEARS}: ${unrep.toFixed(0)} claims (enrolled)   mean emerged prior-year loss/yr ${fmt$(emerged)}`);
-}
+// ⚠ Q4 (IBNR AND THE REPORT LAG) IS GONE, with the mechanic it measured. It
+// reported IBNR/annual loss at Y10, Little's Law across games, and the
+// unreported inventory count. None of those quantities exists any more.
+//
+// FOR THE RECORD, since this harness is where the figure came from: its last
+// run read IBNR/annual loss 0.529 at Y10. That was measured with NO
+// REINSURANCE (layersPlaced all false above) and IBNR is a NET reserve, so it
+// is not comparable to the 0.409 measured at all-defaults with the full tower
+// placed. Both were correct; they described different books.
 
 // --- Q5 ---------------------------------------------------------------------
 console.log('\n--- Q5. LOSS SHAPE AND THE TAIL ---');

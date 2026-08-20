@@ -92,6 +92,31 @@
 // engine's loss or pricing path invalidates it.
 //
 // ============================================================================
+// ⚠ WC'S TABLE WAS RE-DERIVED WHEN THE REPORT LAG AND IBNR WERE REMOVED, and
+// the move went the OPPOSITE way to what was expected. The prediction was that
+// removing IBNR would close the 4.6pp incurred-vs-ultimate gap and lift WC's
+// crossing from 47.2% toward 51.9%. Measured, it FELL to 44.0% incurred / 47.0%
+// ultimate, and the gap narrowed only to 3.0pp rather than closing.
+//
+// TWO EFFECTS, OPPOSITE SIGNS, and the larger one was not in the prediction:
+//   the IBNR BUILD used to inflate netIncurredLoss, so removing it lowers the
+//     ratio and lifts the crossing — worth the ~1.6pp of gap that did close
+//   the REPORT LAG used to DEFER ~17% of dollars out of each year's reported
+//     loss. In a book growing ~2.1%/yr nominal, deferral out exceeds emergence
+//     in, so reported loss ran systematically BELOW the accident-year loss the
+//     premium was funding. Removing the lag removes that suppression, raising
+//     the ratio and lowering the crossing. Mean ratio moved 1.0476 -> 1.0624,
+//     +1.5% of premium, against ~1.2% predicted by 17% x (1 - 1.021^-3.5).
+// The second dominates, so the crossing fell 3.2pp.
+//
+// ⚠ IT MOVED AWAY FROM THE ~55% REAL-POOL BENCHMARK, NOT TOWARD IT. That was
+// hoped for as a side effect of the removal and did not happen.
+//
+// The residual 3.0pp incurred-vs-ultimate gap is CASE-reserve rollforward — the
+// paydown schedule and developmentFactor — which this change did not touch. So
+// the gap was never purely IBNR.
+//
+// ============================================================================
 // THE MEASURED CROSSING of the DERIVED curves — where the ratio reaches 1.000,
 // i.e. what "Expected" (CLF exactly 1.000) delivers against each line's own
 // distribution:
@@ -138,8 +163,19 @@
 // Measured rather than assumed, and iterated until it stopped moving:
 //
 //   pass 1 (derived under the retired grids)   WC 49.9%   GL 68.8%
-//   pass 2 (derived with pass 1 installed)     WC 47.2%   GL 68.6%   <- SHIPPED
+//   pass 2 (derived with pass 1 installed)     WC 47.2%   GL 68.6%
 //   pass 3 (derived with pass 2 installed)     WC 47.2%   GL 68.6%   converged
+//
+// AND AGAIN when the report lag and IBNR came out, which moved WC's whole
+// distribution and so required the same iteration from scratch:
+//   pass 1 (under the pre-removal table)       WC 44.0%
+//   pass 2 (with pass 1 installed)             WC 43.5%   <- SHIPPED
+//   pass 3 (with pass 2 installed)             WC 43.5%   converged
+// Pass 3 reproduces pass 2 to three decimals at every stop (p50 1.0384 vs
+// 1.0385, p90 1.3709 vs 1.3714).
+// GL's derived curve re-measured at 68.7% across that change, unmoved — WC's
+// report lag never touched it, which is the same thing the GL-solo leak check
+// says byte-for-byte.
 //
 // Pass 3 reproduces pass 2 to three decimals at every stop (WC p50 1.0184 vs
 // 1.0187, p90 1.3893 vs 1.3887; GL identical at 0.5397 and 5.6018), so the
@@ -175,8 +211,8 @@ const WC_DERIVED: ClfTable = {
   source: 'derived',
   stops: [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 97.5, 99],
   clf: [
-    0.7106, 0.7644, 0.8098, 0.8481, 0.8855, 0.9198, 0.9523, 0.9846, 1.0184, 1.0514,
-    1.0854, 1.1226, 1.1610, 1.2036, 1.2519, 1.3108, 1.3893, 1.5082, 1.6130, 1.7790,
+    0.7661, 0.8134, 0.8539, 0.8877, 0.9211, 0.9521, 0.9800, 1.0083, 1.0384, 1.0674,
+    1.0974, 1.1289, 1.1650, 1.2056, 1.2496, 1.3014, 1.3709, 1.4783, 1.5750, 1.7154,
   ],
 };
 

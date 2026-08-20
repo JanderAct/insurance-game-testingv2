@@ -1,4 +1,4 @@
-import type { WcComponentKey, WcRatingGroup } from '../data/defaultAssumptions';
+import type { WcRatingGroup } from '../data/defaultAssumptions';
 // TYPE-ONLY, so the cycle with defaultAssumptions.ts (which imports Region from
 // here) is erased at compile time and never exists at runtime.
 
@@ -428,24 +428,6 @@ export interface ReinsuranceStructure {
 //      draw is precisely what gives a retroactive shock its force.
 //
 // Fields are exactly what re-emitting the claim needs, and no more.
-export interface WcUnreportedClaim {
-  id: string;
-  memberId: string;
-  region: Region;
-  ratingGroup: WcRatingGroup;
-  component: WcComponentKey;
-  accidentYear: number;   // when it happened — attribution
-  reportYear: number;     // when it becomes known — recognition
-  amount: number;         // fixed at draw; no trend over the lag (see wcClaimEngine invariant 4)
-}
-
-// One accident year's reported-to-date and reporting pattern. See LinePoolState.
-export interface WcAccidentYearReportedEntry {
-  yearNumber: number;
-  netReported: number;
-  pDelayedNet: number;
-}
-
 export interface ReserveCohort {
   yearNumber: number;
   calendarYear: number;
@@ -548,14 +530,9 @@ export interface ResultSet {
   // from seed x member x year on demand. Optional for exactly that reason:
   // any consumer must handle its absence.
   //
-  // ⚠ ONE THING IS PERSISTED, AND THE EXCEPTION HAS A REASON. WC's unreported
-  // claim inventory (LinePoolState.unreportedClaims) DOES go to localStorage.
-  // The rule above is about an UNBOUNDED FLOW — the claim log grows with every
-  // year played and reaches ~7MB by year 10. The inventory is a BOUNDED STOCK:
-  // it reaches steady state at ~530 records (~80KB) because delayed claims clear
-  // faster than they arrive. And unlike this array it CANNOT be regenerated,
-  // because a retroactive shock changes the parameters a replay would use. See
-  // WcUnreportedClaim for the full argument.
+  // The one persisted exception that used to be noted here — WC's unreported
+  // claim inventory — is gone with the report lag. Nothing per-claim is
+  // persisted now, so the rule above has no exception.
   claims?: Claim[];
   occurrences?: Occurrence[];
   claimCountsByClass?: Record<string, number>;  // WC
@@ -602,22 +579,10 @@ export interface ResultSet {
   // Reserve development (NET basis — reserves are net of reinsurance)
   priorYearDevelopment: number; // positive = favorable, negative = adverse
   beginningNetReserve: number;
-  currentYearNetReserve: number; // case reserve for this accident year, net (excludes IBNR below)
-  // --- IBNR (WC only; 0 on GL and Property, which have no report lag) -------
-  // The chain-ladder provision: sum over open accident years of
-  // `net reported to date x (LDF(age) - 1)`. See src/utils/wcIbnr.ts.
-  //
-  // ⚠ ibnrReserve is the BALANCE (what sits on the sheet); ibnrAccrual is this
-  // year's ADDITION. They differ by the mean report lag (~3.5 years) and
-  // confusing them is a 3.5x reserve error in either direction — both silent.
-  ibnrReserve: number;
-  ibnrAccrual: number;
-  // Claims reported this calendar year that belong to a PRIOR accident year —
-  // recognised now, attributed back. Dual booking: no locked year's reported
-  // figures change.
-  emergedPriorYearLoss: number;
-  // Count of claims sitting unreported at year end, ENROLLED members only.
-  unreportedClaimCount: number;
+  currentYearNetReserve: number; // case reserve for this accident year, net
+  // ibnrReserve / ibnrAccrual / emergedPriorYearLoss / unreportedClaimCount are
+  // gone with WC's report lag — see the note in simulationEngine where the
+  // provision used to be computed, and the IBNER replacement it records.
   netPaidLosses: number;
   endingNetReserve: number;
 
@@ -758,30 +723,6 @@ export interface LinePoolState {
   reserveCohorts: ReserveCohort[];
   // WC ONLY, empty on GL and Property. Claims drawn but not yet reported.
   //
-  // ⚠ FULL-MARKET: keyed across ALL 200 CANONICAL MEMBERS, not just enrolled.
-  // Claims are generated marketplace-wide so prospects carry a readable loss
-  // history, and their delayed claims belong to it.
-  //
-  // WHO MAY SUM THIS. Pool accounting — reserves, IBNR, anything on the balance
-  // sheet — must filter to ENROLLED members first, exactly as memberLossResults
-  // is the enrolled list and marketMemberLossResults is the full one. Summing it
-  // whole into a pool figure is the full-market/enrolled error this project has
-  // hit more than any other.
-  //
-  // Optional so saves predating the WC severity rebuild still parse; App.tsx
-  // defaults it to [] on load rather than bumping the save key. An old save
-  // cold-starts with no inventory and understates IBNR for ~4 years while it
-  // fills — a better trade than orphaning every save.
-  unreportedClaims?: WcUnreportedClaim[];
-  // WC ONLY. Net reported-to-date per accident year, plus the NET dollar-weighted
-  // delayed share measured in that year — the two inputs the chain-ladder IBNR
-  // provision needs. `pDelayedNet` is stored per accident year rather than
-  // recomputed because both the book's mix and its reinsurance placement change,
-  // and the reporting pattern that applies to a given accident year is that
-  // year's. See src/utils/wcIbnr.ts.
-  //
-  // ENROLLED AND NET, unlike unreportedClaims above — it is a reserve input.
-  wcAccidentYearReported?: WcAccidentYearReportedEntry[];
   members: Member[];
   netUnpaidReserve: number;    // unpaid loss reserve, net of reinsurance
   surplus: number;

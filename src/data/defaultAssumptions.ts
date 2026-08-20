@@ -159,16 +159,13 @@ export const WC_HIGH_SAFETY_CITIES: ReadonlySet<string> = new Set([
 export interface WcSeverityComponent {
   mu: number;
   sigma: number;
-  // Probability this component's claim is reported LATE (see reportLag below).
-  // Tilted 3.6x on `large` on purpose — see the reportLag comment.
-  pDelayed: number;
 }
 
 export const WC_SEVERITY_COMPONENTS = {
   // FITTED (EM on the pool's claim severities). Median $308, mean $489, CV 1.23.
-  small: { mu: 5.731549, sigma: 0.960883, pDelayed: 0.05 },
+  small: { mu: 5.731549, sigma: 0.960883 },
   // FITTED (EM). Median $1,753, mean $2,974, CV 1.37.
-  medium: { mu: 7.469014, sigma: 1.028369, pDelayed: 0.05 },
+  medium: { mu: 7.469014, sigma: 1.028369 },
   // ⚠⚠ ASSERTED, NOT FITTED. Median $13,064, mean $96,529, CV 7.32.
   //
   // The EM fit produced mu 10.653133, sigma 1.243817 (median $42,325, mean
@@ -200,11 +197,11 @@ export const WC_SEVERITY_COMPONENTS = {
   // THE TAIL HAS NO CEILING. The 1-in-250-year claim is $71.2M. If $50M is a
   // hard maximum rather than a high observation, that needs an explicit cap —
   // recorded as an open item, deliberately not imposed here.
-  large: { mu: 9.4776, sigma: 2.00, pDelayed: 0.18 },
+  large: { mu: 9.4776, sigma: 2.00 },
   // ASSERTED. Schools' second component. Median $5,363, mean $27,100, CV 3.51.
   // Schools has TWO components by design — a school district does not generate
   // the catastrophic-injury tail that a public-works or safety group does.
-  schoolsMedium: { mu: 8.5873, sigma: 1.80, pDelayed: 0.05 },
+  schoolsMedium: { mu: 8.5873, sigma: 1.80 },
 } as const satisfies Record<string, WcSeverityComponent>;
 
 export type WcComponentKey = keyof typeof WC_SEVERITY_COMPONENTS;
@@ -338,42 +335,14 @@ export const WC_LOSS_MODEL = {
   // they are 5.1% of it.
   rqSeverityBeta: 0.06,
 
-  // --- Report lag ---------------------------------------------------------
-  //
-  // Every claim draws a lag AFTER its severity. The draws are INDEPENDENT — the
-  // only coupling is that p_delayed differs by component (above), which is what
-  // makes the unreported inventory dollar-weighted rather than a random sample.
-  //
-  //   lag = round(1 + lognormal(mean 2.5, CV 2.0))     [years, >= 1]
-  //
-  // Shape: median 2 years, 10% beyond 7, 1% beyond 22, a thin tail to ~57.
-  // That matches the real structure — a large mass reporting at once, a chunk
-  // at one year (December injuries, and minor injuries that later worsened),
-  // and a thin tail of genuine occupational disease.
-  //
-  // THE 15%-ISH OVERALL DELAYED RATE IS DOING TWO JOBS DELIBERATELY: genuine
-  // late reporting, and the CALENDAR-BOUNDARY EFFECT — a December injury
-  // reported in January has a one-month real lag but crosses the accident year.
-  // In an annual model those are indistinguishable.
-  //
-  // WHY `large` IS TILTED 3.6x (0.18 against 0.05). It carries ~94% of the loss,
-  // so tilting it makes the IBNR inventory dollar-weighted toward large claims:
-  // 8.4% of claims by count but 17.1% by dollars, pool-wide. That recovers the
-  // correlation the retired presumption process had (0.82% of claims, 16% of
-  // dollars) and it is what gives a retroactive shock real force — without the
-  // tilt the inventory would be a random sample of ordinary claims. Schools has
-  // no `large` component, so its count and dollar shares are equal at 5.0%,
-  // which is right: a school district's late claims are not occupational
-  // disease.
-  //
-  // NO TRUNCATION IS NEEDED, unlike the retired presumption lag, because
-  // severity does not trend over the lag. See convention 2 in the header.
-  //
-  // ALL FOUR LAG PARAMETERS ARE ASSERTED. DISPLACED BY: report-date-minus-
-  // accident-date from the same claim file the severity fit came from — which
-  // would also make the implied loss-development factors a measured output
-  // instead of a derived one.
-  reportLag: { meanYears: 2.5, cv: 2.0 },
+  // ⚠ reportLag IS GONE, WITH THE WHOLE REPORT-LAG MECHANIC. WC was the only
+  // line that had one, which made its grossUltimateLoss calendar-year while
+  // GL's and Property's were accident-year. Retired in favour of IBNER — claims
+  // reported immediately, booked below ultimate, converging over several years —
+  // which applies to all three lines and needs no deferral architecture. The
+  // per-component pDelayed fields above went with it. See the note in
+  // simulationEngine where the IBNR provision used to be computed.
+
 
   // Region severity multiplier. Mean-neutral by construction, so region shifts
   // the DISTRIBUTION of severity across members without moving the book's
