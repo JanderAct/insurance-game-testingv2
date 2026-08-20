@@ -65,6 +65,43 @@ export function lookupCLF(level: number): number {
   return FUNDING_CLF_TABLE[best];
 }
 
+// THE LOSS PROVISION THE POOL PREMIUM ACTUALLY FUNDS — the numerator every
+// expected-loss ratio must use, and the reason it is a function rather than an
+// inlined expression at each of its two call sites (line scope and pool
+// aggregation).
+//
+// ⚠ WHY NOT expectedLoss. Since the net-funding change, poolPremium funds
+// (gross expected - expected ceded) x CLF x rateLevel/100, while expectedLoss
+// stays GROSS on purpose. Pairing gross expectedLoss with a denominator built
+// on the net-funded poolPremium counts the ceded loss TWICE — once in the loss
+// numerator and again as reinsuranceCost in the expense ratio — which is what
+// pushed the Expected Combined Ratio to 130.0% on GL and 118.9% on WC while
+// the pool was funding exactly its expected cost.
+//
+// ⚠ WHY DIVIDING BY THE CLF IS THE RIGHT INVERSION, and not merely convenient.
+// poolPremium = exposure x netPurePremiumPer100 x CLF x pricingAdjustment x
+// 10_000, so this returns net expected loss AT THE PRICED RATE LEVEL. That
+// matters: the identity below has to close for any pricingAdjustment, not just
+// the 1.0 it currently sits at, and re-deriving the net loss from the pure
+// premium instead would drop the rate-level factor and reopen the gap the
+// moment rateLevel moves off 100.
+//
+// THE IDENTITY THIS EXISTS TO PRESERVE. poolPremium + adminExpense +
+// reinsuranceCost is identically totalMemberCharge, so at CLF 1.000 this
+// numerator IS poolPremium and the Expected Combined Ratio is EXACTLY 1.0000 —
+// not approximately. Above CLF 1.000 the shortfall below 1.0000 is the funding
+// margin, which is the whole point of a confidence level. Asserted to float
+// precision in scripts/diagnostics/ratio-basis-check.ts; if it stops closing
+// exactly, this function or its callers are wrong.
+//
+// PROPERTY IS UNCHANGED BY CONSTRUCTION, which is what makes this a diagnosis
+// rather than a guess: Property is deliberately not netted, so its
+// netPurePremiumPer100 IS its gross pure premium and this returns exactly the
+// expectedLoss it already used. Property-solo must stay byte-identical.
+function fundedNetExpectedLoss(r: { poolPremium: number; selectedFundingCLF: number }): number {
+  return r.poolPremium / Math.max(r.selectedFundingCLF, 1e-9);
+}
+
 // The claim lines' pure premiums: derived ONCE, at module load, from each
 // claim generator's analytic expectation over the FULL canonical roster at
 // neutral risk quality, then held for every line-year of every game. This is
@@ -1228,28 +1265,50 @@ export function processLineYear(
   // the single most repeated error in this project:
   //
   //   PRICING BASIS      poolPremiumAndAdminExpense  = poolPremium + admin
-  //                      -> the finding-6 reconciliation basis. Gross ultimate
-  //                         over this is what the WC/GL 6b harness checks
-  //                         assert against 66.8%. DO NOT CHANGE IT.
+  //                      -> the finding-6 reconciliation basis.
   //   MEMBER-CHARGE BASIS totalMemberCharge          = the above + reinsurance
   //                      -> what members actually pay, and the only basis on
   //                         which a loss ratio and an expense ratio may be
   //                         ADDED, since a combined ratio is meaningless unless
   //                         both terms share a denominator.
-  const expectedLossRatio = expectedLoss / Math.max(poolPremiumAndAdminExpense, 1);
-  const expectedLossRatioMemberBasis = expectedLoss / Math.max(totalMemberCharge, 1);
+  //
+  // ⚠ AND A DENOMINATOR IS ONLY HALF OF A BASIS. Both denominators now contain
+  // the NET-funded poolPremium, so a GROSS numerator over either of them is
+  // mixed even though it names its denominator correctly. That is the defect
+  // this block carried from the net-funding change until it was measured: the
+  // rule "state your denominator" was followed and was not enough. Both
+  // expected-loss ratios below therefore take fundedNetExpectedLoss (see its
+  // header for the identity and the inversion), not expectedLoss.
+  //
+  // ⚠ THE 66.8% TARGET IS OBSOLETE AND IS NOT WHAT THESE MEASURE. It was
+  // gross / (gross x 1.346 + 0.15 x gross) — a GROSS-funded pool at the old
+  // 75%-confidence default. Funding is net now and the default CLF is exactly
+  // 1.000, so neither input survives. The two cutover harnesses still compare
+  // their OWN gross numerator against it (gl-cutover-check.ts:156,
+  // wc-cutover-check.ts) and read 139.21% on GL; those asserts sit behind a
+  // non-default `6b` argv flag, so they never fire. Reported, deliberately NOT
+  // silently re-pointed here: re-deriving a reconciliation target is its own
+  // decision, and quietly moving the constant to match the code would destroy
+  // the only record that the old one ever meant something.
+  const expectedLossRatio =
+    fundedNetExpectedLoss({ poolPremium, selectedFundingCLF }) / Math.max(poolPremiumAndAdminExpense, 1);
+  const expectedLossRatioMemberBasis =
+    fundedNetExpectedLoss({ poolPremium, selectedFundingCLF }) / Math.max(totalMemberCharge, 1);
   // Computed from the LIVE expense values, not as 1 - lossRatio. The old form
   // was a residual reverse-engineered to force the combined ratio to 1.000,
   // which is why the display insisted the pool broke even while surplus
   // tripled over five years.
   const expectedExpenseRatio =
     (adminExpense + reinsuranceCost) / Math.max(totalMemberCharge, 1);
-  // Both terms on the member-charge basis, so this is a real combined ratio.
-  // It is NOT 1.000 except by coincidence: at CLF 1.0 the pool charges exactly
-  // its expected cost and the ratio lands at 100%, while at the default CLF
-  // 1.346 it is ~82.7% — 17.3 points of intended underwriting margin, which is
-  // what a 75%-confidence funding level is FOR. The margin is correct
-  // behaviour; the old 1.000 display was what hid it.
+  // Both terms on the member-charge basis AND both numerators on the net basis,
+  // so this is a real combined ratio.
+  //
+  // AT CLF 1.000 IT IS EXACTLY 1.0000 — a closed identity, not a coincidence and
+  // not an approximation, because poolPremium + adminExpense + reinsuranceCost
+  // is identically totalMemberCharge. Above CLF 1.000 the shortfall below
+  // 1.0000 IS the funding margin, which is what a confidence level above
+  // expected is for. A reading above 1.0000 at CLF 1.000 means a numerator has
+  // drifted off the net basis again.
   const expectedCombinedRatio = expectedLossRatioMemberBasis + expectedExpenseRatio;
 
   const actualLossRatio = netIncurredLoss / Math.max(totalMemberCharge, 1);
@@ -2008,9 +2067,18 @@ export function aggregateLineResults(
   const reserveRiskMarginNeededSum = sum('reserveRiskMarginNeeded');
   const excessAvailableSurplusSum = sum('excessAvailableSurplus');
 
-  // Same two-denominator discipline as the line level (see the block there).
-  const expectedLossRatio = expectedLossSum / Math.max(poolPremiumAndAdminExpenseSum, 1);
-  const expectedLossRatioMemberBasis = expectedLossSum / Math.max(totalMemberChargeSum, 1);
+  // Same two-denominator AND same net-numerator discipline as the line level
+  // (see the block there, and fundedNetExpectedLoss's header).
+  //
+  // ⚠ SUMMED PER LINE, NOT DIVIDED ONCE. Each line carries its own CLF, so
+  // poolPremiumSum / someCLF is not the pool's funded net loss for any choice
+  // of someCLF once two lines price at different confidence levels. Reducing
+  // over the line results is the only inversion that stays correct in a mixed
+  // book — and at pool scope `first.selectedFundingCLF` is a placeholder, which
+  // is exactly the trap this avoids.
+  const fundedNetExpectedLossSum = results.reduce((a, r) => a + fundedNetExpectedLoss(r), 0);
+  const expectedLossRatio = fundedNetExpectedLossSum / Math.max(poolPremiumAndAdminExpenseSum, 1);
+  const expectedLossRatioMemberBasis = fundedNetExpectedLossSum / Math.max(totalMemberChargeSum, 1);
   const expectedExpenseRatio =
     (adminExpenseSum + reinsuranceCostSum) / Math.max(totalMemberChargeSum, 1);
   const expectedCombinedRatio = expectedLossRatioMemberBasis + expectedExpenseRatio;

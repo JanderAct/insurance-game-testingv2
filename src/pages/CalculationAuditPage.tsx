@@ -1652,30 +1652,64 @@ export function buildSupportingRows(
   const basisGuardDiff = Math.abs(
     (result.expectedLossRatioMemberBasis + result.expectedExpenseRatio) - result.expectedCombinedRatio,
   );
-  const basisGuardStatus: CheckStatus = basisGuardDiff < 1e-12 ? 'pass' : 'fail';
-  const basisGuardNote = basisGuardStatus === 'pass'
-    ? 'Basis check: loss + expense = combined exactly, all three over total member charge.'
-    : `Basis check FAILED by ${basisGuardDiff.toExponential(2)} — a term is on the wrong denominator.`;
+  // ⚠ AND THE HALF THE GUARD ABOVE WAS MISSING: A DENOMINATOR IS NOT A BASIS.
+  // The check above passed throughout the period the combined ratio read 130.0%
+  // on GL, because it only ever asked whether the three terms shared a
+  // DENOMINATOR — which they did. What it never asked was whether the
+  // NUMERATORS did. After the net-funding change the loss numerator was gross
+  // while the denominator contained the net-funded pool premium, and nothing on
+  // this page could see it.
+  //
+  // The identity: poolPremium + adminExpense + reinsuranceCost is identically
+  // totalMemberCharge, so at CLF 1.000 the combined ratio must be EXACTLY
+  // 1.0000. Checked only at CLF 1.000, because that is the only point where the
+  // identity is closed — above it the shortfall is the funding margin and below
+  // it the excess is the funding shortfall, both correct.
+  // The numerator both expected-loss ratios are built from, mirroring
+  // simulationEngine's fundedNetExpectedLoss so the rows show what is computed.
+  const fundedNetLoss = result.poolPremium / Math.max(result.selectedFundingCLF, 1e-9);
+  const numeratorGuardApplies = result.selectedFundingCLF === 1.0;
+  const numeratorGuardDiff = Math.abs(result.expectedCombinedRatio - 1);
+  const numeratorGuardFails = numeratorGuardApplies && numeratorGuardDiff >= 1e-12;
+
+  const basisGuardStatus: CheckStatus =
+    basisGuardDiff < 1e-12 && !numeratorGuardFails ? 'pass' : 'fail';
+  const basisGuardNote = basisGuardDiff >= 1e-12
+    ? `Basis check FAILED by ${basisGuardDiff.toExponential(2)} — a term is on the wrong denominator.`
+    : numeratorGuardFails
+      ? `Basis check FAILED: CLF is 1.000, so this must be exactly 100% — it is off by ` +
+        `${numeratorGuardDiff.toExponential(2)}. A NUMERATOR is on the wrong basis (gross against ` +
+        `the net-funded premium), which the denominator half of this guard cannot see.`
+      : numeratorGuardApplies
+        ? 'Basis check: loss + expense = combined exactly, all three over total member charge; and at ' +
+          'CLF 1.000 the combined ratio is exactly 100%, so both numerators are on the net basis too.'
+        : 'Basis check: loss + expense = combined exactly, all three over total member charge. The ' +
+          'numerator identity is only closed at CLF 1.000; here the gap from 100% is the funding margin.';
 
   const ratioRows: AuditRow[] = [
     {
       metric: 'Expected Loss Ratio (pricing basis)',
       value: formatPct(result.expectedLossRatio),
       numericValue: result.expectedLossRatio,
-      formula: { kind: 'ratio', numerator: curTerm(result.expectedLoss, 'expected pool loss'), denominator: curTerm(result.poolPremium + result.adminExpense, 'pool premium + admin expense') },
+      formula: { kind: 'ratio', numerator: curTerm(fundedNetLoss, 'net expected loss the premium funds'), denominator: curTerm(result.poolPremium + result.adminExpense, 'pool premium + admin expense') },
       subFormula: {
         label: 'pool premium + admin expense',
         value: result.poolPremium + result.adminExpense,
         spec: { kind: 'sum', terms: [curTerm(result.poolPremium, 'pool premium'), curTerm(result.adminExpense, 'admin expense')] },
       },
-      explain: 'PRICING basis — the denominator EXCLUDES reinsurance cost. This is the finding-6 reconciliation figure that the WC and GL generator checks assert against 66.8%. It is not a component of the combined ratio: adding it to an expense ratio measured over total member charge would mix denominators.',
+      explain: 'PRICING basis — the denominator EXCLUDES reinsurance cost. The numerator is the NET loss the pool premium funds (pool premium / CLF), not gross expected loss: since the funding-basis change the denominator contains a net-funded premium, and a gross numerator over it double-counts the ceded loss. The 66.8% target the cutover harnesses carry predates both net funding and the CLF 1.000 default and no longer describes this figure.',
     },
     {
       metric: 'Expected Loss Ratio (member charge basis)',
       value: formatPct(result.expectedLossRatioMemberBasis),
       numericValue: result.expectedLossRatioMemberBasis,
-      formula: { kind: 'ratio', numerator: curTerm(result.expectedLoss, 'expected pool loss'), denominator: curTerm(result.totalMemberCharge, 'total member charge') },
-      explain: 'MEMBER-CHARGE basis — the denominator INCLUDES reinsurance cost. This is the loss-ratio component of the combined ratio below.',
+      formula: { kind: 'ratio', numerator: curTerm(fundedNetLoss, 'net expected loss the premium funds'), denominator: curTerm(result.totalMemberCharge, 'total member charge') },
+      subFormula: {
+        label: 'net expected loss the premium funds',
+        value: fundedNetLoss,
+        spec: { kind: 'ratio', numerator: curTerm(result.poolPremium, 'pool premium'), denominator: { value: result.selectedFundingCLF, format: 'plain', label: 'selected CLF' } },
+      },
+      explain: 'MEMBER-CHARGE basis — the denominator INCLUDES reinsurance cost. This is the loss-ratio component of the combined ratio below. Gross expected loss is NOT the numerator: it would double-count the ceded portion, once here and once as reinsurance cost in the expense ratio.',
     },
     {
       metric: 'Expected Expense Ratio (member charge basis)',

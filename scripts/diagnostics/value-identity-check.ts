@@ -312,6 +312,55 @@ if (changed.length === 0) {
     const ex = keys[0];
     console.log(`    ${f.padEnd(34)} ${String(keys.length).padStart(4)} instances   e.g. ${base[ex]} -> ${out[ex]}`);
   }
+
+  // ==========================================================================
+  // BROKEN IDENTITIES — reported SEPARATELY from ordinary movement, because
+  // they are not the same kind of event and reading them as the same kind is
+  // how a real defect shipped.
+  //
+  // ⚠ THIS RULE EXISTS BECAUSE THE GATE ALREADY CAUGHT THE BUG AND NOBODY
+  // NOTICED. At the net-funding chain this script logged
+  //   expectedCombinedRatio   111 instances   e.g. 1 -> 1.1734760163189506
+  // in the middle of a list of 78 legitimately-moving fields, and it was read
+  // as intended movement like everything around it. It was not: that field sat
+  // at EXACTLY 1 on every line and every year because
+  // poolPremium + admin + reinsurance is identically totalMemberCharge. A
+  // field pinned to exactly 1.000 or exactly 0.000 across EVERY instance is a
+  // CLOSED IDENTITY, not a value that happens to be round, and its departure
+  // is a defect by construction rather than a change to be explained.
+  //
+  // The test is deliberately conservative — it fires only when the baseline
+  // was exactly 1 or exactly 0 at EVERY instance of that field name, so a
+  // quantity that is merely usually-zero (dividends, assessments, shock loss)
+  // does not trip it. A field that legitimately leaves an identity will still
+  // be listed here; the point is that it must be argued for explicitly rather
+  // than disappearing into the ordinary list.
+  // ==========================================================================
+  const allByField = new Map<string, string[]>();
+  for (const k of baseKeys) {
+    const f = k.split('|').pop()!;
+    if (!allByField.has(f)) allByField.set(f, []);
+    allByField.get(f)!.push(k);
+  }
+  const broken: { field: string; was: number; moved: number; of: number }[] = [];
+  for (const [f, keys] of byField) {
+    const every = allByField.get(f) ?? [];
+    const wasAllOne = every.length > 0 && every.every(k => base[k] === 1);
+    const wasAllZero = every.length > 0 && every.every(k => base[k] === 0);
+    if (wasAllOne || wasAllZero) {
+      broken.push({ field: f, was: wasAllOne ? 1 : 0, moved: keys.length, of: every.length });
+    }
+  }
+  if (broken.length > 0) {
+    console.log(`\n  ⚠ BROKEN IDENTITIES — ${broken.length} field(s) left a value that was EXACTLY`);
+    console.log(`  constant across every instance in the baseline. Treat each as a defect until`);
+    console.log(`  argued otherwise; do NOT recapture past one without deciding it is intended.`);
+    for (const b of broken) {
+      const ex = byField.get(b.field)![0];
+      console.log(`    ${b.field.padEnd(34)} was exactly ${b.was} on all ${b.of} instances; ` +
+        `${b.moved} moved, e.g. -> ${out[ex]}`);
+    }
+  }
 }
 
 if (changed.length === 0) {
