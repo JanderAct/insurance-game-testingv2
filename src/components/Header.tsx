@@ -15,7 +15,7 @@ export default function Header({ gameState, startingFinancials, onNewGame, onAdv
   const lastResult = gameState?.lockedResults?.[gameState.lockedResults.length - 1];
 
   const surplus = lastResult?.endingSurplus ?? startingFinancials?.surplus ?? 0;
-  const poolLossRatio = lastResult ? lastResult.poolLosses / Math.max(lastResult.poolPremium, 1) : undefined;
+  const poolLossRatio = lastResult?.actualLossRatio;
   const marketShare = lastResult?.marketShare ?? startingFinancials?.marketShare ?? 0;
   const poolName = gameState?.setup?.poolName ?? 'Risk Pool';
   const instanceId = gameState?.instance?.instanceId ?? '—';
