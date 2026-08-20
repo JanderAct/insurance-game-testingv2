@@ -212,7 +212,7 @@ for (const { lines, name } of CONFIGS) {
         const cp = inst.marketEnvironment.competitivePressure;
         const checks = computeAuditChecks(poolResult, scope, inst.seed);
 
-        const sup = buildSupportingRows(result, isPoolView, cp);
+        const sup = buildSupportingRows(poolResult, scope, cp);
         auditRows('Exposure and Membership', sup.exposureRows, ctx);
         auditRows('Funding Rate Build-Up', sup.rateRows, ctx);
         auditRows('Losses and Reinsurance', sup.lossRows, ctx);

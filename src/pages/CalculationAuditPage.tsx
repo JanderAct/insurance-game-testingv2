@@ -374,7 +374,7 @@ export default function CalculationAuditPage({ lockedResults, priorHistory, inst
   // buildRevExpRows / buildNetPositionRows pattern below) so a regression
   // script can evaluate every formula without rendering the page.
   const { exposureRows, rateRows, lossRows, reserveRows, ratioRows, capitalRows } =
-    buildSupportingRows(result, isPoolView, competitivePressure);
+    buildSupportingRows(poolResult, lineView, competitivePressure);
 
   // The two statement-mirroring cards, built from exported pure functions so a
   // regression script can assert their correspondence to the statements.
@@ -1310,11 +1310,30 @@ function formatSliderNumber(range: { min: number; max: number; step: number; def
 // two statement-mirroring cards below.
 // ============================================================================
 
+// ⚠ TAKES THE POOL RESULT AND THE SCOPE, matching buildRevExpRows,
+// buildNetPositionRows and buildCashInvestmentRows. It used to take the
+// already-scoped LineResultSet, which was fine until a pool row turned out to
+// need its constituent LINES: the reserve risk margin is a sum of per-line
+// products, each line applying its own 90% CLF, and no single factor
+// reproduces it. Scoping at the boundary had thrown that away.
 export function buildSupportingRows(
-  result: LineResultSet,
-  isPoolView: boolean,
+  poolResult: ResultSet,
+  lineView: LineView,
   competitivePressure: number,
 ): { exposureRows: AuditRow[]; rateRows: AuditRow[]; lossRows: AuditRow[]; reserveRows: AuditRow[]; ratioRows: AuditRow[]; capitalRows: AuditRow[] } {
+  const isPoolView = lineView === 'pool';
+  const result: LineResultSet = isPoolView ? poolResult : poolResult.byLine[lineView];
+  // The per-line pieces of the pool's reserve risk margin, in a stable order.
+  // Mirrors simulationEngine's reserveMarginCLF dispatch: the line's own static
+  // table where it has one, FUNDING_CLF_TABLE otherwise.
+  const MARGIN_ORDER: CoverageLine[] = ['WC', 'GL', 'Property'];
+  const perLine = isPoolView
+    ? MARGIN_ORDER.filter(l => poolResult.byLine[l]).map(l => ({
+        line: l,
+        expectedNetUnpaidLoss: poolResult.byLine[l].expectedNetUnpaidLoss,
+        marginFactor: (hasStaticClf(l) ? staticClf(l, 0.90) : lookupCLF(0.90)) - 1,
+      }))
+    : undefined;
   const payrollUnits = Math.max(result.activeExposure * 10_000, 1);
   const rateAtConfidenceLevel = result.poolPremium / payrollUnits;
   // result.ratePer100 is a real per-line stored rate, but at pool scope it is
@@ -1538,14 +1557,36 @@ export function buildSupportingRows(
         : {
             kind: 'product',
             factors: [
-              { value: result.purePremiumPer100, format: 'plain', label: 'pure premium rate' },
+              { value: result.netPurePremiumPer100, format: 'plain', label: 'net pure premium rate' },
               factorTerm(result.selectedFundingCLF, `CLF at ${(result.selectedFundingConfidenceLevel * 100).toFixed(0)}%`),
               factorTerm(result.rateLevel / 100, `rate level ${result.rateLevel}`),
             ],
           },
+      // ⚠ THE NETTING STEP IS SHOWN, NOT FOLDED IN. This row used to multiply
+      // the GROSS pure premium rate by the CLF against a NET-funded value, so
+      // the operands came out 1.86x the figure beside them — and because the
+      // gross rate is a plausible-looking number in its own right, that
+      // survived eight commits unnoticed. Naming the deduction is what makes
+      // the discrepancy visible if the basis ever moves again.
+      //
+      // The FACTOR is the stored netPurePremiumPer100 rather than the
+      // subtraction below, because purePremiumPer100 is stored rounded to 4dp
+      // while both net fields are stored raw — so the subtraction is accurate
+      // to ~5e-5 and the stored field reconciles exactly.
+      subFormula: isPoolView ? undefined : {
+        label: 'net pure premium rate',
+        value: result.netPurePremiumPer100,
+        spec: {
+          kind: 'sum',
+          terms: [
+            { value: result.purePremiumPer100, format: 'plain', label: 'gross pure premium rate' },
+            { value: -result.expectedCededPer100, format: 'plain', label: 'less expected ceded to reinsurers' },
+          ],
+        },
+      },
       explain: isPoolView
-        ? 'The line-level build-up (pure premium rate × CLF × rate level) is not shown at pool scope: purePremiumPer100 and rateLevel are aggregated as one line\'s value kept as a placeholder, not a real pool figure. Select a line tab to see the build-up.'
-        : undefined,
+        ? 'The line-level build-up (net pure premium rate × CLF × rate level) is not shown at pool scope: purePremiumPer100, netPurePremiumPer100 and rateLevel are all aggregated as one line\'s value kept as a placeholder, not a real pool figure. Select a line tab to see the build-up.'
+        : 'The pool premium funds the loss the pool KEEPS, so expected ceded comes off before the CLF is applied. Property is not netted — its legacy percentage-of-premium cover has no closed-form expected ceded — so its net and gross rates are equal.',
     },
     {
       metric: 'Gross Premium & Admin Expense Rate per $100',
@@ -1927,19 +1968,40 @@ export function buildSupportingRows(
       metric: 'Reserve Risk Margin Needed',
       value: formatCurrency(result.reserveRiskMarginNeeded),
       numericValue: result.reserveRiskMarginNeeded,
-      formula: {
-        kind: 'product',
-        factors: [
-          curTerm(result.expectedNetUnpaidLoss, 'expected net unpaid loss'),
-          factorTerm(fundingMarginCLF - 1, 'required margin factor'),
-        ],
-      },
-      subFormula: {
+      // ⚠ AT POOL SCOPE THIS IS A SUM, NOT A PRODUCT, and showing the product
+      // was a regression this page's own diagnostic caught in its first run.
+      // The pool figure is summed across lines, each applying its OWN 90% CLF
+      // (WC 1.3709, GL 1.5020, Property 1.9510), so a single factor cannot
+      // reproduce it. The CHECK was correctly made n/a when that was found; the
+      // FORMULA was left showing expectedNetUnpaidLoss x 0.951 and read $20.47M
+      // against a stated $7.99M. A wrong derivation beside a neutralised check
+      // is worse than no derivation — nothing was left to contradict it.
+      formula: isPoolView && perLine && perLine.length > 0
+        ? {
+            kind: 'sum',
+            terms: perLine.map(p => ({
+              product: [
+                curTerm(p.expectedNetUnpaidLoss, 'expected net unpaid loss'),
+                factorTerm(p.marginFactor, 'margin factor'),
+              ],
+              label: p.line,
+            })),
+          }
+        : {
+            kind: 'product',
+            factors: [
+              curTerm(result.expectedNetUnpaidLoss, 'expected net unpaid loss'),
+              factorTerm(fundingMarginCLF - 1, 'required margin factor'),
+            ],
+          },
+      subFormula: isPoolView ? undefined : {
         label: 'required margin factor',
         value: fundingMarginCLF - 1,
         spec: { kind: 'sum', terms: [factorTerm(fundingMarginCLF, fundingMarginCLFLabel), factorTerm(-1, '1.0')] },
       },
-      explain: `${fundingMarginCLFLabel} is a fixed 90%-confidence reserve-margin factor, independent of the player's own selected funding confidence level above. It is the LINE'S OWN curve: WC and GL read their static tables (1.3709 and 1.5020), Property reads FUNDING_CLF_TABLE (1.9510).`,
+      explain: isPoolView
+        ? 'Summed across the active lines, each applying its own 90%-confidence margin factor — WC and GL read their static tables (1.3709 and 1.5020), Property reads FUNDING_CLF_TABLE (1.9510). No single blended factor reproduces the total, which is why the check above is n/a at pool scope; select a line tab to check one line against its own curve.'
+        : `${fundingMarginCLFLabel} is a fixed 90%-confidence reserve-margin factor, independent of the player's own selected funding confidence level above. It is the LINE'S OWN curve: WC and GL read their static tables (1.3709 and 1.5020), Property reads FUNDING_CLF_TABLE (1.9510).`,
     },
     {
       metric: 'Reserve Risk Margin Check Difference',
@@ -2067,17 +2129,47 @@ export function buildRevExpRows(
       metric: 'Contributions for retained risk',
       value: formatCurrency(result.poolPremium),
       numericValue: result.poolPremium,
+      // ⚠ NET, AND THE DEDUCTION IS ON SCREEN. This showed gross expectedLoss x
+      // CLF against the net-funded poolPremium — operands 1.86x the value beside
+      // them, on the headline revenue line of the statement card. The earlier
+      // audit called it unfixable here because the netting terms were engine
+      // locals; they are stored on the result now, so it is fixable and fixed.
+      //
+      // Built through exposure rather than from stored expectedLoss because
+      // there is no stored NET expected loss: activeExposure x 10,000 x the net
+      // rate IS the engine's own construction. activeExposure is stored at 2dp,
+      // so it is a nested product — that keeps its rounding visible to the
+      // formula checker's tolerance instead of hiding it inside a lump sum.
       formula: scoped(
         () => ({
           kind: 'product',
           factors: [
-            cur(result.expectedLoss, 'expected loss'),
+            {
+              product: [
+                { value: result.activeExposure, format: 'exposure', label: 'exposure' },
+                { value: 10_000, format: 'plain', label: 'payroll units per $M' },
+                { value: result.netPurePremiumPer100, format: 'plain', label: 'net pure premium rate' },
+              ],
+              label: 'net expected loss',
+            },
             { value: result.selectedFundingCLF, format: 'factor', label: `CLF at ${(result.selectedFundingConfidenceLevel * 100).toFixed(0)}%` },
             { value: result.rateLevel / 100, format: 'factor', label: `rate level ${result.rateLevel}` },
           ],
         }),
         x => x.poolPremium
       ),
+      subFormula: isPoolView ? undefined : {
+        label: 'net pure premium rate',
+        value: result.netPurePremiumPer100,
+        spec: {
+          kind: 'sum',
+          terms: [
+            { value: result.purePremiumPer100, format: 'plain', label: 'gross pure premium rate' },
+            { value: -result.expectedCededPer100, format: 'plain', label: 'less expected ceded to reinsurers' },
+          ],
+        },
+      },
+      explain: 'Funds the loss the pool KEEPS: expected ceded comes off before the CLF, so the ceded portion is not collected twice (once here and again as the reinsurance premium below). Property is not netted — its legacy cover has no closed-form expected ceded — so its net and gross rates are equal.',
       indent: 1,
     },
     {
