@@ -175,6 +175,43 @@
 // funding-default change does. PR-SOLO STAYED BYTE-IDENTICAL ON ALL THREE —
 // Property runs the legacy REINSURANCE_PROGRAMS path and was not reached. That
 // is the leak check for this recapture, and it held.
+//
+// v13 retired here (moved to v14) by EIGHT COMMITS: 875cb75 (memoize five
+// pure-function-of-year trends — a caching change, confirmed inert by hash),
+// fdc747c (scale member joins with the remaining marketplace), bdc98ec
+// (reconnect the price channel to membership), fab85e4 (fund the pool premium
+// net of expected ceded), f328d65 (replace the CLF grids with static
+// backtested tables), 3d3fbcc (install a supplied static CLF table for GL),
+// 962ef60 (remove WC's report lag and IBNR), and a3d7760 (decouple the
+// opening position from the reserve margin, testing against premium instead).
+//
+// PR-SOLO CHECKED PER COMMIT, NOT JUST AT THE ENDPOINTS, because membership
+// and pricing are shared machinery this time rather than a WC/GL-only
+// mechanism — the v13 assumption that Property is untouched until the last
+// commit does NOT hold here. Re-running this guard at every intermediate
+// commit: 875cb75 leaves PR-solo byte-identical (the memoization touches only
+// WC's and GL's own claim engines); fdc747c and bdc98ec each move PR-solo on
+// all three seeds, exactly as their own commit messages claim ("no line is an
+// untouched control... PR-solo will NOT hold"); fab85e4, f328d65, 3d3fbcc and
+// 962ef60 leave PR-solo byte-identical again (net funding explicitly does not
+// touch Property's legacy aggregate; the CLF table swaps are WC/GL-only; the
+// IBNR removal is WC-only); a3d7760 moves PR-solo on 2 of 3 seeds — the third
+// (6KA6WGLJ) happened to accept the same pre-game attempt under both the old
+// margin-basis and the new premium-basis band, so its history is genuinely
+// unchanged, not a leak that got lucky. Property therefore moves at TWO points
+// in this chain, not one: the membership/pricing commits and the opening-band
+// commit, each for a documented shared-machinery reason.
+//
+// SHAPE, NOT JUST VALUES: 962ef60 deletes wcIbnr.ts and its four fields
+// (ibnrReserve, ibnrAccrual, emergedPriorYearLoss, unreportedClaimCount) —
+// see the matching note in value-identity-check.ts. Invisible to THIS guard on
+// every config, including WC-solo: none of the four was ever in RESULT_METRICS
+// (checked against 962ef60^'s resultMetrics.ts — zero matches), so they never
+// reached the exported workbook this script hashes. value-identity-check sees
+// them because it reads the raw LineResultSet object directly, where all three
+// lines carried them (0 on GL/Property, "which have no report lag" per the old
+// type comment) — that is why it reports exactly 150 instances per field, the
+// same count as any other fully-populated field, not a WC-only 30 or 60.
 import * as XLSX from 'xlsx';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -189,7 +226,7 @@ import { RESULT_METRICS } from '../../src/utils/resultMetrics';
 import type { GameState, CoverageLine, ResultSet } from '../../src/types/simulation';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v13.json');
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v14.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

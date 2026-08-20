@@ -203,7 +203,39 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // PR-solo staying at 0/3,210 (0 new fields) IS the leak check this recapture
 // needed: Property runs the legacy REINSURANCE_PROGRAMS path, untouched by
 // f5ece4d, and this proves it was not reached.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v13.json');
+//
+// v14: EIGHT COMMITS — see solo-export-guard.ts's matching v13->v14 note for
+// the full per-commit attribution; this note covers only what differs at the
+// field-value level.
+//
+// 16,140 -> 15,540 fields, 0 added, 600 removed: ibnrReserve, ibnrAccrual,
+// emergedPriorYearLoss, unreportedClaimCount, all from 962ef60 (WC's report
+// lag and IBNR removed). 150 instances each (matching any other fully-
+// populated field), NOT a WC-only 30 or 60 — these were LineResultSet fields
+// present at 0 on every line ("WC only; 0 on GL and Property, which have no
+// report lag", per the old type comment), so they populated every line's own
+// scope AND the pool scope, on every config. None of the four was ever in
+// RESULT_METRICS (checked against 962ef60^'s resultMetrics.ts — zero
+// matches), which is why solo-export-guard's hash of the actual exported
+// workbook never saw them and could not have caught this removal on its own;
+// this scan's added/removed count is what does.
+//
+// 10,590 of the 16,140 baseline fields changed, across 78 field names. By
+// config (numerator excludes the 4 removed fields; denominator is the v13
+// baseline count for that config): WC-solo 2,113/3,225, GL-solo 2,133/3,240,
+// PR-solo 2,068/3,210, tri 4,276/6,465.
+//
+// PR-solo MOVING IS NOT A LEAK — the opposite of the v13 pattern, and
+// expected: fdc747c and bdc98ec are membership/pricing machinery shared by
+// all three lines (each commit's own message says so, and the mechanism null
+// test is the isolation used in place of a line control), and a3d7760's
+// opening band applies per line to all three. The other five commits in this
+// range (875cb75, fab85e4, f328d65, 3d3fbcc, 962ef60) are confirmed WC/GL-only
+// by solo-export-guard's per-commit PR-solo hash check; this scan cannot
+// separate their contribution from fdc747c/bdc98ec/a3d7760's inside one
+// cumulative diff, which is why the hash guard's per-commit run is the
+// isolation tool here, not this one.
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v14.json');
 
 function seedOf(id: string) {
   let h = 5381;

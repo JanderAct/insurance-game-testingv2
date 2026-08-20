@@ -1,4 +1,4 @@
-# Baseline Lineage — v4 through v13
+# Baseline Lineage — v4 through v14
 
 A genealogy of the multi-line baselines: what each version represents, what change caused the jump
 to it, which numbers moved and why. Covers the multi-line-meaningful baselines (v4–v11). Earlier
@@ -248,6 +248,60 @@ this recapture, and it held).
 
 ---
 
+## v14 — eight commits: membership/pricing rework, net funding, static CLF tables, IBNR removed, opening decoupled
+**Trigger:** no single mechanism. Eight commits landed between v13 and this recapture, spanning three
+mostly-independent threads: membership/pricing (shared across all three lines), the funding basis and CLF
+grids (WC/GL only), and the pre-game opening band (all three lines again, on a different axis).
+
+**The eight, in order, and who they touch:**
+- `875cb75` memoize five pure-function-of-year trends — caching only, confirmed inert (PR-solo
+  byte-identical; WC/GL-solo unaffected in effect, only in call count).
+- `fdc747c` scale member joins with the remaining marketplace (`expectedNewMembers = k x (roster -
+  enrolled)`, replacing a flat constant with exactly one equilibrium for every line regardless of book
+  size) — shared machinery, **all three lines move**.
+- `bdc98ec` reconnect the price channel to membership (rate CHANGE -> retention/satisfaction, rate LEVEL
+  -> new business) — shared machinery, **all three lines move**.
+- `fab85e4` fund the pool premium net of expected ceded, fixing a double-collection of the ceded portion —
+  WC/GL only (Property's legacy aggregate has no closed-form expected ceded and is explicitly not netted).
+- `f328d65` replace the CLF grids with one static table per line, backtested on the engine itself rather
+  than a separate model of it — WC/GL only.
+- `3d3fbcc` install a supplied real-pool CLF table for GL in place of its own derived one — GL only.
+- `962ef60` remove WC's report lag and IBNR, replacing calendar-year reported loss with accident-year —
+  WC only.
+- `a3d7760` decouple the pre-game opening band from the Required Reserve Margin, testing the accepted
+  opening against premium instead — **all three lines move**, on a different axis than fdc747c/bdc98ec
+  (the acceptance test, not the join/retention ladders).
+
+**PR-solo checked per commit, not just at the endpoints** — the v13 pattern (Property untouched until
+one clearly-marked commit) does NOT hold here, and assuming it would have been wrong. Re-running
+`solo-export-guard.ts` at every intermediate commit: `fdc747c` and `bdc98ec` each move PR-solo on all
+three seeds (both commits' own messages call this out — "no line is an untouched control... PR-solo will
+NOT hold"); `875cb75`, `fab85e4`, `f328d65`, `3d3fbcc` and `962ef60` leave PR-solo byte-identical; `a3d7760`
+moves PR-solo on 2 of 3 seeds — the third (`6KA6WGLJ`) happened to accept the same pre-game attempt under
+both the old margin-basis and the new premium-basis band, so its history is genuinely unchanged rather
+than a leak that got lucky. **Property moves at two points in this chain** (the membership/pricing pair,
+and the opening-band commit), each for a documented shared-machinery reason — confirmed by measurement,
+not assumed from any single commit's message.
+
+**Shape moved for the first time since v8/v9:** `962ef60` deletes `ibnrReserve`, `ibnrAccrual`,
+`emergedPriorYearLoss` and `unreportedClaimCount` — 16,140 -> 15,540 fields, 0 added, 600 removed (150
+instances per field, matching any other fully-populated field, because these were `LineResultSet` fields
+present at 0 on GL/Property rather than WC-only). None of the four was ever in `RESULT_METRICS`, so
+`solo-export-guard`'s hash of the actual exported workbook never saw them — the export-shape guard reads
+WC-only-affected here even though the underlying object's shape changed on every line, and the
+value-identity scan is what actually caught the removal.
+
+**Value movement:** 10,590 of the 16,140 baseline fields changed across 78 field names. By config:
+WC-solo 2,113/3,225, GL-solo 2,133/3,240, PR-solo 2,068/3,210, tri 4,276/6,465. Both gates read fully
+green against the new v14 baselines immediately after capture.
+
+**Isolation used throughout:** every commit in this range used a mechanism null test rather than a line
+control, since the shared-machinery commits leave no untouched line — force the new code path to
+reproduce the old numeric behaviour and confirm byte-identity against the parent. All eight commits
+document a passing null test at their own site.
+
+---
+
 ## Quick "why did the numbers change" reference
 | Jump | Cause | WC-only affected? |
 |---|---|---|
@@ -261,6 +315,7 @@ this recapture, and it held).
 | v10 → v11 | Self-funded discount removed | Premium +1%; **9/72 seed-lines re-rolled, incl. MAMC6EA4 GL** |
 | v11 → v12 | Six GL engine commits (fitted-mixture rebuild, $100M cap, own CLF grid) + Expected funding option | Yes — both lines' default moved |
 | v12 → v13 | Reinsurance tower priced at runtime (both lines); WC aggregate lambda basis fixed | Yes — pricing-basis only, no loss-model change |
+| v13 → v14 | Eight commits: membership/pricing rework (all lines), net funding + static CLF tables (WC/GL), GL supplied table, WC IBNR removed, opening band decoupled to premium (all lines) | No — Property moves twice, at the membership/pricing pair and at the opening-band commit |
 
 ## Still pending (would drive a future v11)
 - **⚠️ Systematic underpricing (finding 6)** — actual loss ratio ~46% against a 66.8% expected
