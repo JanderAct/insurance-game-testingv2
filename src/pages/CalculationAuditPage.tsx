@@ -80,13 +80,13 @@ type CheckStatus = 'pass' | 'variance' | 'fail' | 'na';
 
 type TermFormat = 'currency' | 'pct' | 'factor' | 'exposure' | 'plain';
 
-type FormulaTerm =
+export type FormulaTerm =
   | { value: number; format: TermFormat; label?: string }
   // A nested product, so an expression like "a − pressure × spread" stays
   // verifiable rather than being flattened into prose.
   | { product: FormulaTerm[]; label?: string; negate?: boolean };
 
-type FormulaSpec =
+export type FormulaSpec =
   | { kind: 'product'; factors: FormulaTerm[] }
   | { kind: 'sum'; terms: FormulaTerm[] }
   // A division — most of the Ratios card and Market Share. Rendered as
@@ -252,7 +252,7 @@ function reinsRateSubFormula(ownRate: ReturnType<typeof computeReinsRate>, compe
   };
 }
 
-interface AuditRow {
+export interface AuditRow {
   metric: string;
   value: string;
   // A structured spec on the statement cards; plain prose on the supporting

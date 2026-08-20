@@ -12,6 +12,13 @@
     // No diagnostic script uses a DOM-only API (document, window, etc.) —
     // that would still be a real bug if one ever did.
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // JSX is here for the same reason DOM is: a file scripts PULL IN, not the
+    // scripts themselves. audit-formula-check.ts imports the exported pure row
+    // builders and evaluateFormula from pages/CalculationAuditPage.tsx — that
+    // page exports them precisely so a regression script can check every
+    // displayed formula without rendering anything. Resolving a .tsx at all
+    // requires this; no script renders or returns JSX.
+    "jsx": "react-jsx",
     "module": "ESNext",
     "types": ["node"],
     "skipLibCheck": true,
