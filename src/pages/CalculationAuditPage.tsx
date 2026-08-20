@@ -688,6 +688,21 @@ export interface AuditCheckSet {
   sweepTransfer: number;
   investmentsFloorBound: boolean;
   liquidityFloorBound: boolean;
+  // EACH LINE'S OWN SWEEP, in scope order — length 1 at line scope. The sweep
+  // runs per line inside the engine and the branch taken can DIFFER between
+  // lines, so a pool row cannot be written as one branch's arithmetic. Exposed
+  // so the Cash & Investments rows can show the per-line sum at pool scope and
+  // the branch that actually fired at line scope.
+  perLineSweep: {
+    line: CoverageLine | 'pool';
+    cash: number;
+    investments: number;
+    preSweepCash: number;
+    investmentsBeforeSweep: number;
+    operatingCashTarget: number;
+    liquidityFloorBound: boolean;
+    investmentsFloorBound: boolean;
+  }[];
 }
 
 function mkCheck(
@@ -893,14 +908,25 @@ export function computeAuditChecks(
     (a, b) => ({
       cash: a.cash + b.cash,
       investments: a.investments + b.investments,
+      preSweepCash: a.preSweepCash + b.preSweepCash,
       operatingCashTarget: a.operatingCashTarget + b.operatingCashTarget,
       investmentsBeforeSweep: a.investmentsBeforeSweep + b.investmentsBeforeSweep,
       sweepTransfer: a.sweepTransfer + b.sweepTransfer,
       liquidityFloorBound: a.liquidityFloorBound || b.liquidityFloorBound,
       investmentsFloorBound: a.investmentsFloorBound || b.investmentsFloorBound,
     }),
-    { cash: 0, investments: 0, operatingCashTarget: 0, investmentsBeforeSweep: 0, sweepTransfer: 0, liquidityFloorBound: false, investmentsFloorBound: false }
+    { cash: 0, investments: 0, preSweepCash: 0, operatingCashTarget: 0, investmentsBeforeSweep: 0, sweepTransfer: 0, liquidityFloorBound: false, investmentsFloorBound: false }
   );
+  const perLineSweep = (isPoolView ? lineKeys : [lineView as CoverageLine]).map((l, i) => ({
+    line: isPoolView ? l : (lineView as CoverageLine),
+    cash: sweepParts[i].cash,
+    investments: sweepParts[i].investments,
+    preSweepCash: sweepParts[i].preSweepCash,
+    investmentsBeforeSweep: sweepParts[i].investmentsBeforeSweep,
+    operatingCashTarget: sweepParts[i].operatingCashTarget,
+    liquidityFloorBound: sweepParts[i].liquidityFloorBound,
+    investmentsFloorBound: sweepParts[i].investmentsFloorBound,
+  }));
 
   const endingCashSweep: AuditCheck = sweep.liquidityFloorBound
     ? {
@@ -1014,6 +1040,7 @@ export function computeAuditChecks(
     sweepTransfer: sweep.sweepTransfer,
     investmentsFloorBound: sweep.investmentsFloorBound,
     liquidityFloorBound: sweep.liquidityFloorBound,
+    perLineSweep,
   };
 }
 
@@ -2617,67 +2644,199 @@ export function buildCashInvestmentRows(
     result.surplusFromIncome - (result.beginingSurplus + result.netIncome);
   const tieOutDifferenceDifference =
     result.surplusTieOutDifference - (result.endingSurplus - result.surplusFromIncome);
+
+  const cur = (value: number, label?: string): FormulaTerm => ({ value, format: 'currency', label });
+
+  // ⚠ HOW A FORMULA IS SHAPED DETERMINES WHAT THE CHECKER CAN SEE ABOUT ITS OWN
+  // PRECISION, and that is not obvious enough to leave unsaid.
+  //
+  // audit-formula-check bounds each row by propagating the DISPLAY/STORAGE
+  // quantum of its operands. A term written as one currency figure declares a
+  // quantum of $1 whatever it was built from — so collapsing `exposure x rate`
+  // into a single lump sum tells the checker the value is good to a dollar when
+  // the exposure behind it is stored at 2dp and is really good to ~$150. The
+  // bound then comes out far too tight and a CORRECT row fails.
+  //
+  // So: wherever a rounded operand is involved, write the NESTED product and
+  // let the rounding propagate. That is why the sweep rows below decompose to
+  // their real operands instead of quoting the reconstructed subtotal. See
+  // 6d3b359, where folding exposure into a lump sum forced exactly this
+  // problem on "Contributions for retained risk".
+  //
+  // The cash rows here are sums of unrounded stored dollars, so they carry no
+  // hidden rounding — but they are written out in full for the same reason: a
+  // subtotal quoted as one term is a derivation the checker cannot inspect.
+
+  // Each line's own sweep, so a pool row can be the sum of the lines rather
+  // than one branch's arithmetic applied to aggregates. The branch taken can
+  // differ per line, and at pool scope frequently does.
+  const sweeps = checks.perLineSweep;
+
+  // ENDING CASH, BY THE BRANCH THAT ACTUALLY FIRED — never a path not taken.
+  //   normal:      cash is pinned to the operating-cash target, whether the
+  //                sweep moved money out (surplus) or in (shortfall covered)
+  //   floor bound: investments ran out first, so cash lands short at
+  //                preSweepCash + whatever investments there were
+  const endingCashTermFor = (p: typeof sweeps[number]): FormulaTerm =>
+    p.liquidityFloorBound
+      ? { product: [cur(p.preSweepCash + p.investmentsBeforeSweep)], label: `${p.line} (liquidity floor bound)` }
+      : { product: [cur(p.operatingCashTarget)], label: `${p.line} (swept to target)` };
+
   return [
 
     {
       metric: 'Beginning Cash',
       value: formatCurrency(result.beginningCash),
-      formula: 'Operating cash carried into the year.',
+      // ATOMIC, AND SAYING SO IS THE POINT. An opening balance is carried in,
+      // not computed here, so there is no derivation to show. Left as prose
+      // deliberately — an empty formula column would read as an oversight.
+      formula: { kind: 'text', text: 'Operating cash carried into the year — an opening balance, not a calculation. It is the prior year\'s ending cash.' },
     },
     {
       metric: 'Beginning Investments',
       value: formatCurrency(result.beginningInvestments),
-      formula: 'Investment portfolio carried into the year.',
+      formula: { kind: 'text', text: 'Investment portfolio carried into the year — an opening balance, not a calculation. It is the prior year\'s ending investments.' },
     },
     {
       metric: 'Investment Income',
       value: formatCurrency(result.investmentIncome),
-      formula: 'Applied to the portfolio before the sweep. Can be negative in a down market.',
+      numericValue: result.investmentIncome,
+      // Holds at pool scope too: investmentReturnRate is aggregated as
+      // sum(income)/sum(assets), a genuine weighted blend, NOT one line's rate
+      // kept as a placeholder the way ratePer100 is.
+      formula: {
+        kind: 'product',
+        factors: [
+          cur(result.investedAssets, 'invested assets'),
+          { value: result.investmentReturnRate, format: 'pct', label: 'investment return rate' },
+        ],
+      },
+      explain: 'Applied to the portfolio before the sweep. Can be negative in a down market.',
     },
     {
       metric: 'Investments Before Sweep',
       value: formatCurrency(checks.investmentsBeforeSweep),
-      formula: 'Beginning investments plus investment income, floored at zero (a loss cannot drive the portfolio negative).',
+      numericValue: checks.investmentsBeforeSweep,
+      // Per line, because the zero floor binds per line: one line flooring does
+      // not make the pool total the floored sum of the others.
+      formula: {
+        kind: 'sum',
+        terms: sweeps.map(p => ({ product: [cur(p.investmentsBeforeSweep)], label: p.line })),
+      },
+      subFormula: sweeps.length === 1 ? {
+        label: 'beginning investments + investment income',
+        value: sweeps[0].investmentsBeforeSweep,
+        spec: {
+          kind: 'sum',
+          terms: [cur(result.beginningInvestments, 'beginning investments'), cur(result.investmentIncome, 'investment income')],
+        },
+      } : undefined,
+      explain: sweeps.some(p => p.investmentsFloorBound)
+        ? 'FLOORED AT ZERO on at least one line: an investment loss cannot drive the portfolio negative, so the sum above is not simply beginning investments plus income.'
+        : 'Beginning investments plus investment income, floored at zero (a loss cannot drive the portfolio negative). The floor is not binding this year.',
     },
     {
       metric: 'Operating Cash Target',
       value: formatCurrency(checks.operatingCashTarget),
-      formula: `Gross premium & admin expense × ${formatPct(OPERATING_CASH_PCT_OF_PREMIUM)}${isPoolView ? ', summed across lines (the sweep runs per line)' : ''}. Cash is swept toward this level each year end.`,
+      numericValue: checks.operatingCashTarget,
+      // A single product survives pool scope here because the percentage is a
+      // constant: sum over lines of (charge_i x pct) IS (sum charge_i) x pct.
+      formula: {
+        kind: 'product',
+        factors: [
+          cur(result.totalMemberCharge, 'gross premium & admin expense'),
+          { value: OPERATING_CASH_PCT_OF_PREMIUM, format: 'pct', label: 'operating cash target rate' },
+        ],
+      },
+      explain: `Cash is swept toward this level each year end.${isPoolView ? ' Summed across lines — the sweep runs per line — which equals the pool charge times the rate, since the rate is a constant.' : ''}`,
     },
     {
       metric: 'Sweep Transfer',
       value: formatCurrency(checks.sweepTransfer),
-      formula: 'Net movement into the portfolio from the sweep: positive when cash above target was swept in, negative when investments were drawn down to cover a cash shortfall.',
+      numericValue: checks.sweepTransfer,
+      // Definitional, and additive across lines, so one form serves both scopes.
+      formula: {
+        kind: 'sum',
+        terms: [
+          cur(checks.endingInvestmentsSweep.derived, 'investments after sweep'),
+          cur(-checks.investmentsBeforeSweep, 'less investments before sweep'),
+        ],
+      },
+      explain: 'Net movement into the portfolio from the sweep: positive when cash above target was swept in, negative when investments were drawn down to cover a cash shortfall.',
     },
     {
       metric: 'Ending Cash / Operating Cash Sweep',
       value: formatCurrency(result.endingCash),
-      formula: 'Reconstructs the sweep: the year\'s flows accumulate to a pre-sweep cash total, then cash is either capped at the operating-cash target with the surplus swept into investments, or topped up from investments to reach it. Flags a known variance if investments run out first — a genuine liquidity shortfall rather than a modelling gap.',
+      numericValue: result.endingCash,
+      formula: { kind: 'sum', terms: sweeps.map(endingCashTermFor) },
+      subFormula: sweeps.length === 1 && !sweeps[0].liquidityFloorBound ? {
+        label: 'pre-sweep cash',
+        value: sweeps[0].preSweepCash,
+        spec: {
+          kind: 'sum',
+          terms: [
+            cur(result.beginningCash, 'beginning cash'),
+            cur(result.totalMemberCharge, 'member charge'),
+            cur(result.assessments, 'assessments'),
+            cur(-result.netPaidLosses, 'net paid losses'),
+            cur(-result.operatingExpense, 'operating expense'),
+            cur(-result.riskControlInvestment, 'risk control'),
+            cur(-result.reinsuranceCost, 'reinsurance cost'),
+            cur(-result.dividends, 'dividends'),
+          ],
+        },
+      } : undefined,
+      explain: sweeps.some(p => p.liquidityFloorBound)
+        ? 'LIQUIDITY FLOOR BOUND on at least one line: investments ran out before the operating-cash target was reached, so that line ends at pre-sweep cash plus whatever investments existed. A real balance-sheet event, not a reconciliation gap.'
+        : 'Every line reached its operating-cash target, so ending cash IS the target — the sweep moved the difference either into investments (surplus) or out of them (shortfall). The sub-formula shows the pre-sweep flows the target was measured against.',
       note: checks.endingCashSweep.note,
       status: checks.endingCashSweep.status,
     },
     {
       metric: 'Ending Investments / Sweep',
       value: formatCurrency(result.endingInvestments),
-      formula: 'Investments before sweep plus the sweep transfer. The mirror image of the cash reconstruction above — the sweep conserves total assets, moving money between the two accounts.',
+      numericValue: result.endingInvestments,
+      formula: {
+        kind: 'sum',
+        terms: [
+          cur(checks.investmentsBeforeSweep, 'investments before sweep'),
+          cur(checks.sweepTransfer, 'sweep transfer'),
+        ],
+      },
+      explain: 'The mirror image of the cash reconstruction above — the sweep conserves total assets, moving money between the two accounts.',
       note: checks.endingInvestmentsSweep.note,
       status: checks.endingInvestmentsSweep.status,
     },
     {
       metric: 'Unearned Premium',
       value: formatCurrency(result.unearnedPremium),
-      formula: 'Held at zero: written premium is treated as collected and earned in the year it is written, with no separate timing layer.',
+      // Held at a constant, so there is no arithmetic — stated rather than
+      // dressed up as a calculation against zero.
+      formula: { kind: 'text', text: 'Held at zero, not calculated: written premium is treated as collected and earned in the year it is written, with no separate timing layer.' },
     },
     {
       metric: 'Surplus from Income',
       value: formatCurrency(result.surplusFromIncome),
-      formula: 'Beginning surplus plus net income — the stored rollforward figure.',
+      numericValue: result.surplusFromIncome,
+      // ⚠ THIS ROW AND THE NEXT ARE THE SURPLUS ROLLFORWARD TIE-OUT — the
+      // reconciliation between the balance sheet and the income statement, and
+      // until now the one nobody had verified anywhere. A rollforward that does
+      // not close is the clearest signal of an accounting error there is.
+      formula: {
+        kind: 'sum',
+        terms: [cur(result.beginingSurplus, 'beginning surplus'), cur(result.netIncome, 'net income')],
+      },
       ...legacyCheck(surplusFromIncomeDifference),
     },
     {
       metric: 'Tie-Out Difference',
       value: formatCurrency(result.surplusTieOutDifference),
-      formula: 'Ending surplus less surplus from income. Zero when the balance sheet and income statement agree.',
+      numericValue: result.surplusTieOutDifference,
+      formula: {
+        kind: 'sum',
+        terms: [cur(result.endingSurplus, 'ending surplus'), cur(-result.surplusFromIncome, 'less surplus from income')],
+      },
+      explain: 'Zero when the balance sheet and income statement agree.',
       ...legacyCheck(tieOutDifferenceDifference),
     },
   ];
