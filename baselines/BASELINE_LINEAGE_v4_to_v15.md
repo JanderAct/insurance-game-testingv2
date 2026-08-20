@@ -1,4 +1,4 @@
-# Baseline Lineage — v4 through v14
+# Baseline Lineage — v4 through v15
 
 A genealogy of the multi-line baselines: what each version represents, what change caused the jump
 to it, which numbers moved and why. Covers the multi-line-meaningful baselines (v4–v11). Earlier
@@ -302,6 +302,60 @@ document a passing null test at their own site.
 
 ---
 
+## v15 — eight commits: the expected-combined-ratio basis fix, then seven display/diagnostic commits
+**Trigger:** one engine defect and its aftermath. `fab85e4` (in the v14 range) moved the pool premium onto
+net funding and left every loss numerator gross; the resulting basis mismatch was found, fixed, and then
+the display layer that had drifted alongside it was brought back into line and put under a check.
+
+**The eight, in order, and what each moved:**
+- `6f47db7` fix the Pool Loss Ratio display (five sites showed `poolLosses / poolPremium`, a capped
+  numerator over a narrow denominator) — **nothing moved, on either gate.**
+- `d80aa9e` put the expected loss ratios back on the net basis — **the only value movement in the entire
+  range.** 315 fields across exactly 3 names: `expectedLossRatio`, `expectedLossRatioMemberBasis`,
+  `expectedCombinedRatio`. WC, GL and tri move; **PR-solo byte-identical**, because Property is
+  deliberately not netted and was already correct. That asymmetry was the diagnosis, not a coincidence.
+- `4a8c601` store `expectedCededPer100` and `netPurePremiumPer100` on `LineResultSet` — **shape only:
+  +300 fields, 0 values moved.** All four hashes move because the two new columns enter the export.
+- `684ae9f` fix five audit-page and export display defects (pool row taking GL's tower, ungated
+  `computeReinsRate`, `FUNDING_CLF_TABLE[0.90]` at three sites, `poolLosses` in the pool-sum card, the
+  duplicate premium label) — **all four hashes move, 0 values and 0 fields.** The hash moved on LABELS
+  and column set alone, which is exactly the display-vs-value split the two gates exist to separate.
+- `a668d11` put the Decisions panel on the engine's own pricing path — nothing moved.
+- `acf0f29` wire `evaluateFormula` into a standing diagnostic — nothing moved.
+- `6d3b359` fix the three formula defects it found — nothing moved.
+- `ac4bf9e` give Cash & Investments its formula specs — nothing moved.
+
+**Shape movement:** 15,540 → 15,840 fields (+300, 0 removed), all at `4a8c601`, all two field names.
+
+**Value movement:** 315 fields at `d80aa9e` and nowhere else. Measured per commit in a worktree rather
+than inferred from the endpoint — the endpoint alone cannot distinguish "one commit moved values" from
+"three moved values and two cancelled".
+
+**⚠ THE BROKEN-IDENTITIES RULE NEARLY DISARMED ITSELF HERE, and the measurement is what caught it.**
+`d80aa9e` both fixed a closed identity (`expectedCombinedRatio` must be exactly 1.0000 at CLF 1.000,
+because `poolPremium + admin + reinsurance` is identically `totalMemberCharge`) and added the reporting
+rule that flags a field leaving such an identity. The rule required the baseline value to be **bit-exactly**
+1 at every instance. At this capture 6 of 150 instances sit at 1 ± 2e-16 — ordering noise from summing
+per-line terms at pool scope — so a bit-exact test would have refused to arm on the very field it was
+written for, silently, from this baseline onward. The rule now uses a 1e-12 bound for the "exactly 1"
+case and keeps exact for "exactly 0": a value that should be 1 is a dimensionless ratio, so a scale-free
+epsilon is meaningful; a value that should be 0 carries units, so no scale-free epsilon exists and exact
+is the only defensible test. Verified: the loosened rule fires nothing spurious on this recapture, and it
+DOES arm on the new baseline (worst departure 2.22e-16).
+
+**Correctness of the fix, confirmed at the capture:** all 150 `expectedCombinedRatio` instances are within
+2.22e-16 of exactly 1.
+
+**Isolation:** the line control worked for once — `d80aa9e` is a genuine WC/GL-move-Property-holds commit,
+and Property holding is the strongest evidence the diagnosis was right rather than a plausible guess. The
+seven other commits are display-only and were each verified gate-identical to their own parent at commit
+time, then re-verified here per commit.
+
+**Retired at this recapture:** `SOLO_EXPORT_GUARD_v13.json` and `VALUE_IDENTITY_v13.json`, now that v14 is
+the immediate predecessor. The v11 workbook set is untouched — separate lineage, no v13/v14/v15 equivalent.
+
+---
+
 ## Quick "why did the numbers change" reference
 | Jump | Cause | WC-only affected? |
 |---|---|---|
@@ -316,6 +370,7 @@ document a passing null test at their own site.
 | v11 → v12 | Six GL engine commits (fitted-mixture rebuild, $100M cap, own CLF grid) + Expected funding option | Yes — both lines' default moved |
 | v12 → v13 | Reinsurance tower priced at runtime (both lines); WC aggregate lambda basis fixed | Yes — pricing-basis only, no loss-model change |
 | v13 → v14 | Eight commits: membership/pricing rework (all lines), net funding + static CLF tables (WC/GL), GL supplied table, WC IBNR removed, opening band decoupled to premium (all lines) | No — Property moves twice, at the membership/pricing pair and at the opening-band commit |
+| v14 → v15 | Expected-combined-ratio basis fix (`d80aa9e`) plus seven display/diagnostic commits | **Yes — WC and GL only.** Property was already correct, being deliberately un-netted, and is byte-identical |
 
 ## Still pending (would drive a future v11)
 - **⚠️ Systematic underpricing (finding 6)** — actual loss ratio ~46% against a 66.8% expected
@@ -358,6 +413,6 @@ git log --all --diff-filter=D -- 'baselines/*'     # find the removing commit
 
 **This document is why the removal was safe** — it records what each retired
 version represented and what moved between them, which is the part worth
-keeping. What remains in `baselines/` is the current gate pair (v12), its
-immediate predecessor (v11, the one to reach for if a v12 capture ever needs
-checking), and the v10/v11 workbook sets.
+keeping. What remains in `baselines/` is the current gate pair (v15), its
+immediate predecessor (v14, the one to reach for if a v15 capture ever needs
+checking), and the v11 workbook set.

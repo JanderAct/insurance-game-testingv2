@@ -235,7 +235,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // separate their contribution from fdc747c/bdc98ec/a3d7760's inside one
 // cumulative diff, which is why the hash guard's per-commit run is the
 // isolation tool here, not this one.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v14.json');
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v15.json');
 
 function seedOf(id: string) {
   let h = 5381;
@@ -342,10 +342,24 @@ if (changed.length === 0) {
     if (!allByField.has(f)) allByField.set(f, []);
     allByField.get(f)!.push(k);
   }
+  //
+  // ⚠ "EXACTLY 1" MEANS TO FLOAT PRECISION, NOT BIT-EXACTLY, and that
+  // distinction was nearly fatal to this rule. A closed identity evaluated by
+  // SUMMING per-line terms picks up ordering noise: at the v15 measurement 6 of
+  // 150 expectedCombinedRatio instances sat at 1 +/- 2e-16 rather than exactly
+  // 1. A bit-exact test would therefore have refused to arm on the very field
+  // this rule was written for, silently, from the first recapture onward.
+  //
+  // THE ASYMMETRY IS DELIBERATE. A value that should be 1 is a RATIO —
+  // dimensionless — so 1e-12 is a meaningful scale-free bound. A value that
+  // should be 0 has UNITS, so no scale-free epsilon exists for it; exact is the
+  // only defensible test there and it errs toward firing, which is the right
+  // direction for a guard.
+  const IDENTITY_EPS = 1e-12;
   const broken: { field: string; was: number; moved: number; of: number }[] = [];
   for (const [f, keys] of byField) {
     const every = allByField.get(f) ?? [];
-    const wasAllOne = every.length > 0 && every.every(k => base[k] === 1);
+    const wasAllOne = every.length > 0 && every.every(k => Math.abs(base[k] - 1) <= IDENTITY_EPS);
     const wasAllZero = every.length > 0 && every.every(k => base[k] === 0);
     if (wasAllOne || wasAllZero) {
       broken.push({ field: f, was: wasAllOne ? 1 : 0, moved: keys.length, of: every.length });
