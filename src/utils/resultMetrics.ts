@@ -7,9 +7,9 @@ import type { SpreadsheetMetric } from './resultsExport';
 import { formatCurrency, formatPct } from './formatters';
 import { REINSURANCE_PROGRAMS } from '../data/defaultAssumptions';
 import { placementCode, placementSummary, resultUsesTower } from './reinsuranceDisplay';
-import type { CoverageLine } from '../types/simulation';
+import type { CoverageLine, LineDecisionSet, ResultSet } from '../types/simulation';
 
-// Which tower line a result row belongs to.
+// Which tower line a result row belongs to — WC or GL ONLY, never a guess.
 //
 // ⚠ THIS USED TO INFER IT FROM THE LAYER COUNT (`>= 4 ? 'WC' : 'GL'`), on the
 // grounds that "WC's tower has 4 layers, GL's has 3". THE MERGE OF WC's TOP TWO
@@ -17,11 +17,33 @@ import type { CoverageLine } from '../types/simulation';
 // 'GL' — and it would still have compiled, still have rendered, and produced a
 // placement summary naming GL's layers on a WC result.
 //
-// A count is not an identity. The row carries its line now (ResultSet.line), so
-// read that. Falls back to GL only for the pool row, which has no single line and
-// never reaches here anyway — resultUsesTower gates the call.
-const towerLineOf = (r: { line?: CoverageLine }): CoverageLine =>
-  r.line === 'WC' ? 'WC' : 'GL';
+// ⚠ IT THEN FELL BACK TO 'GL' FOR ANY ROW WITHOUT AN EXPLICIT LINE, ON THE
+// CLAIMED GROUND THAT THE POOL ROW "NEVER REACHES HERE — resultUsesTower GATES
+// THE CALL." That was never true and was never tested: the pooled ResultSet
+// carries no `line` (it aggregates every active line) and sums cededByLayer
+// ELEMENTWISE, so resultUsesTower reads true whenever ANY tower line is
+// active — which, with DEFAULT_LAYERS_PLACED, is every default game. A
+// WC-solo pool row hit this fallback and printed GL's top band, $15M xs $10M,
+// on a pool whose real top band is WC's $40M xs $10M. Returns undefined now
+// rather than guess; poolReinsuranceLevelDetail below is what the pool row
+// actually reads.
+const towerLineOf = (r: { line?: CoverageLine }): CoverageLine | undefined =>
+  r.line === 'WC' || r.line === 'GL' ? r.line : undefined;
+
+// THE POOL ROW HAS NO SINGLE LINE, so instead of picking one it reports every
+// active tower line by name. Reads r.byLine, which is present and accurate on
+// every pool-scope row (populated in simulationEngine's pool aggregation from
+// the SAME per-line results this file reports elsewhere) even though the type
+// this function is declared against (LineResultSet) does not carry it.
+function poolReinsuranceLevelDetail(
+  r: { line?: CoverageLine },
+  render: (line: CoverageLine, decisions: Pick<LineDecisionSet, 'layersPlaced' | 'aggregateStopLevel' | 'reinsuranceLevel'>) => string,
+): string {
+  const byLine = (r as unknown as ResultSet).byLine;
+  const active = (['WC', 'GL'] as const).filter(l => byLine?.[l]);
+  if (active.length === 0) return 'n/a';
+  return active.map(l => `${l}: ${render(l, byLine[l].decisions)}`).join(' | ');
+}
 
 const dollars = (value: number) => `$${value.toFixed(2)}`;
 const roundDollars = (value: number) => Math.round(value);
@@ -106,8 +128,16 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
       key: 'reinsuranceLevel',
       category: 'Decisions',
       label: 'Reinsurance Level',
-      value: r => resultUsesTower(r) ? placementSummary(towerLineOf(r), r.decisions) : `${r.decisions.reinsuranceLevel} - ${REINSURANCE_PROGRAMS[r.decisions.reinsuranceLevel]?.label ?? ''}`,
-      csvValue: r => resultUsesTower(r) ? placementCode(towerLineOf(r), r.decisions) : r.decisions.reinsuranceLevel,
+      value: r => {
+        if (!resultUsesTower(r)) return `${r.decisions.reinsuranceLevel} - ${REINSURANCE_PROGRAMS[r.decisions.reinsuranceLevel]?.label ?? ''}`;
+        const line = towerLineOf(r);
+        return line ? placementSummary(line, r.decisions) : poolReinsuranceLevelDetail(r, placementSummary);
+      },
+      csvValue: r => {
+        if (!resultUsesTower(r)) return r.decisions.reinsuranceLevel;
+        const line = towerLineOf(r);
+        return line ? placementCode(line, r.decisions) : poolReinsuranceLevelDetail(r, placementCode);
+      },
     },
     {
       key: 'assetAllocation',
@@ -286,9 +316,22 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
       csvValue: r => roundDollars(r.expectedLoss),
     },
     {
+      // ⚠ WAS ALSO LABELLED "Pool Premium at Selected CLF" — the same string as
+      // the poolPremium row in Rate and Premium, on the same sheet, holding a
+      // different number. It IS gross expectedLoss x CLF, which stopped being
+      // the pool premium when funding moved to the net basis: it now runs 39%
+      // above the real poolPremium on WC and 77% on GL.
+      //
+      // RENAMED, NOT RETIRED, though retiring was the alternative and it has no
+      // engine consumer (grep: computed at simulationEngine.ts:1175, stored,
+      // pool-summed, read only here and by the audit page). The defect reported
+      // is the label collision, and renaming closes it completely; deleting a
+      // stored engine field is a different and larger change — it drops one of
+      // the audit page's integrity checks with it — and belongs in its own
+      // commit if the column is genuinely unwanted.
       key: 'clfAdjustedExpectedLoss',
       category: 'Losses',
-      label: 'Pool Premium at Selected CLF',
+      label: 'CLF-Adjusted Gross Expected Loss',
       value: r => formatCurrency(r.clfAdjustedExpectedLoss),
       csvValue: r => roundDollars(r.clfAdjustedExpectedLoss),
     },

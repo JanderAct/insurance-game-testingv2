@@ -1,6 +1,6 @@
 import { RefreshCw, ChevronRight, AlertCircle } from 'lucide-react';
 import type { GameState } from '../types/simulation';
-import { formatCurrency, formatPct } from '../utils/formatters';
+import { formatCurrency, formatPct, colorForRatioOnDark } from '../utils/formatters';
 import { RippleMark } from '../assets/RippleLogo';
 
 interface HeaderProps {
@@ -61,10 +61,7 @@ export default function Header({ gameState, startingFinancials, onNewGame, onAdv
                 <Chip
                   label="Pool Loss Ratio"
                   value={formatPct(poolLossRatio)}
-                  valueClass={
-                    poolLossRatio < 0.90 ? 'text-emerald-400' :
-                    poolLossRatio < 1.10 ? 'text-amber-400' : 'text-red-400'
-                  }
+                  valueClass={colorForRatioOnDark(poolLossRatio)}
                 />
               )}
               <Chip

@@ -13,6 +13,7 @@ import { normalizeLayersPlaced, quoteAggregate } from '../utils/reinsuranceTower
 import { allLayerRiskMoments } from '../utils/towerMoments';
 import { lineDisplayName } from '../utils/lineDisplay';
 import { lookupCLF } from '../utils/simulationEngine';
+import { hasStaticClf, staticClf } from '../data/clfTables';
 import type { FundingConsequence } from '../utils/fundingConsequence';
 
 export interface LineLoanInfo {
@@ -178,7 +179,7 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
             set={set}
             disabled={disabled}
           />
-          <FundingConsequencePanel c={fundingConsequence} lastLineResult={lastLineResult} />
+          <FundingConsequencePanel c={fundingConsequence} lastLineResult={lastLineResult} line={selectedLine} />
           <SliderInput label="Dividend / Assessment" value={dividendAssessmentValue} min={SLIDER_RANGES.dividendAssessment.min} max={dividendAssessmentMax} step={SLIDER_RANGES.dividendAssessment.step} onChange={setDividendAssessment} formatValue={dividendAssessmentDisplay} leftLabel="Assessment" rightLabel="Dividend" valueColor={dividendAssessmentValue > 0 ? 'text-emerald-600' : dividendAssessmentValue < 0 ? 'text-red-600' : 'text-gray-500'} disabled={disabled} helpText="One combined control: positive returns value to members as a dividend; negative calls additional funds beyond premium as an assessment. Exactly one may apply in a given year — this is structural, not a suggestion. Assessments are never counted toward the loss ratio of the members being billed." />
           {selectedLoanInfo.dividendBlocked && (
             <p className="text-xs text-red-600 -mt-3">Dividend blocked: this line carried a negative surplus in from last year.</p>
@@ -409,11 +410,16 @@ function FundingLevelControl({ line, d, fundingConsequence, setFundingLevel, set
 // CLF-only pricing consequence panel (Part 2). Everything here is computed in
 // src/utils/fundingConsequence.ts from the SAME formulas simulationEngine.ts
 // actually prices with — this renders that object, it does not recompute it.
-function FundingConsequencePanel({ c, lastLineResult }: { c: FundingConsequence | null; lastLineResult?: LineResultSet }) {
+function FundingConsequencePanel({ c, lastLineResult, line }: { c: FundingConsequence | null; lastLineResult?: LineResultSet; line: CoverageLine }) {
   if (!c) return null;
   const pct1 = (v: number) => `${v.toFixed(1)}%`;
   const signed = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
-  const reserveMarginCLF = lookupCLF(0.90);
+  // PER LINE, mirroring simulationEngine's reserveMarginCLF dispatch. An
+  // unconditional lookupCLF(0.90) here read 1.951 — Property's table — on every
+  // line, against WC's actual 1.3709 and GL's 1.5020, i.e. the same
+  // wrong-curve-on-the-display defect clfFor above this file was written to fix,
+  // surviving in the one readout that did not go through it.
+  const reserveMarginCLF = hasStaticClf(line) ? staticClf(line, 0.90) : lookupCLF(0.90);
 
   return (
     <div className="bg-gray-50 rounded-lg p-3 border border-gray-200 text-xs space-y-2 -mt-1">

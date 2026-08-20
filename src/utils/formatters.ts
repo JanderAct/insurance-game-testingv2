@@ -51,11 +51,26 @@ export function formatRatio(value: number): string {
   return value.toFixed(3);
 }
 
+// ONE set of loss-ratio bands, two palettes. The header sits on a dark slate
+// bar and needs -400 shades for contrast while the pages use -600 on white, so
+// the two cannot share a class string — but they MUST share the cutoffs. The
+// header previously inlined its own three-band scale (<0.90 / <1.10) against
+// this four-band one, so a 0.95 loss ratio rendered amber in the header and
+// sky on the dashboard, on the same screen, for the same number.
+function ratioBand(ratio: number): 0 | 1 | 2 | 3 {
+  if (ratio < 0.90) return 0;
+  if (ratio < 1.00) return 1;
+  if (ratio < 1.10) return 2;
+  return 3;
+}
+
 export function colorForRatio(ratio: number): string {
-  if (ratio < 0.90) return 'text-emerald-600';
-  if (ratio < 1.00) return 'text-sky-600';
-  if (ratio < 1.10) return 'text-amber-600';
-  return 'text-red-600';
+  return ['text-emerald-600', 'text-sky-600', 'text-amber-600', 'text-red-600'][ratioBand(ratio)];
+}
+
+// Same bands as colorForRatio, lightened for the dark header bar.
+export function colorForRatioOnDark(ratio: number): string {
+  return ['text-emerald-400', 'text-sky-400', 'text-amber-400', 'text-red-400'][ratioBand(ratio)];
 }
 
 export function colorForSurplus(surplus: number): string {

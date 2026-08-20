@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
-import { resultUsesTower } from '../utils/reinsuranceDisplay';
+import { resultUsesTower, usesTower } from '../utils/reinsuranceDisplay';
+import { hasStaticClf, staticClf } from '../data/clfTables';
+import { lookupCLF } from '../utils/simulationEngine';
 import {
   Calculator,
   ClipboardList,
@@ -198,15 +200,42 @@ function factorTerm(value: number, label?: string): FormulaTerm {
 // PROPERTY'S PRODUCT ONLY. WC and GL price per layer off measured expected ceded
 // loss, not as a percentage of premium, so there is no "rate" to compute for
 // them — callers must check resultUsesTower first.
+//
+// ⚠ `prog` IS null FOR TOWER LINES, AND THAT IS THE POINT. This function
+// previously returned the Property programme object regardless, so the
+// docstring above was advice a caller could ignore silently — and both callers
+// did. They rendered `$9.96M x 0.0% (Moderate rate)` next to a stored
+// reinsurance cost of $8.368M on WC and $15.683M on GL: a seven-figure value
+// beside a derivation evaluating to zero, labelled with a quota-share programme
+// on a line that has no quota share. Returning null makes the same mistake a
+// TYPE ERROR instead of a rendering artefact, so this class of defect cannot
+// recur by omission.
 function computeReinsRate(x: LineResultSet, competitivePressure: number) {
+  if (resultUsesTower(x)) return { pct: 0, prog: null, spread: 0 };
   const prog = REINSURANCE_PROGRAMS[x.decisions.reinsuranceLevel];
-  if (resultUsesTower(x) || x.decisions.reinsuranceLevel === 0) return { pct: 0, prog, spread: 0 };
+  if (x.decisions.reinsuranceLevel === 0) return { pct: 0, prog, spread: 0 };
   const spread = prog.costPctOfPremiumMax - prog.costPctOfPremiumMin;
   return { pct: prog.costPctOfPremiumMax - competitivePressure * spread, prog, spread };
 }
 
-// Sub-formula spec for the rate itself — shared by both rows above.
+// How a tower line's reinsurance cost is actually built — the honest
+// replacement for the percentage-of-premium product, which does not describe it.
+function towerReinsCostFormula(x: LineResultSet): FormulaSpec {
+  const layersPaid = (x.cededByLayer ?? []).length;
+  const agg = (x.aggregatePremium ?? 0) > 0;
+  return {
+    kind: 'echo',
+    value: x.reinsuranceCost,
+    text: `Per-occurrence tower: sum of ${layersPaid} placed layer premium(s)` +
+      `${agg ? ' + aggregate stop-loss premium' : ''}, each priced off measured expected ceded loss — ` +
+      'NOT a percentage of pool premium.',
+  };
+}
+
+// Sub-formula spec for the rate itself — shared by both rows above. Returns
+// undefined for tower lines, which have no such rate to decompose.
 function reinsRateSubFormula(ownRate: ReturnType<typeof computeReinsRate>, competitivePressure: number) {
+  if (!ownRate.prog) return undefined;
   return {
     label: `${ownRate.prog.label} rate`,
     value: ownRate.pct,
@@ -365,6 +394,24 @@ export default function CalculationAuditPage({ lockedResults, priorHistory, inst
           note: check.note,
           status: check.status,
         })),
+        // The omission is STATED, not silent — an absent row reads as "nothing
+        // to say here", which is the opposite of the truth.
+        ...(checks.poolSumOmitsTowerLossSplit
+          ? [{
+              metric: 'Pool Losses / Excess Losses / Quota Share Losses',
+              value: 'not shown',
+              formula: { kind: 'echo' as const, value: 0, text: 'omitted at pool scope while a tower line is active' },
+              note:
+                'These three split GROSS loss at the reinsurance attachment. For WC and GL that attachment ' +
+                'is the tower\'s first layer at $1M PER OCCURRENCE, compared against an ANNUAL aggregate loss — ' +
+                'so Pool Losses pins at exactly $1M every year, Excess Losses is just the remainder, and ' +
+                '"Quota Share Losses" is not a quota share but all retained loss above $1M. Summing them ' +
+                'across lines would also add a per-occurrence retention to Property\'s annual aggregate ' +
+                'attachment. They remain correct and are still shown on the Pool History tab, where ' +
+                'Pool Losses sits beside Excess Losses as the split it was built for.',
+              status: 'na' as const,
+            }]
+          : []),
         ...(checks.reserveCurrentNoncurrent
           ? [{
               metric: 'Reserve Current + Noncurrent (reserve-weighted)',
@@ -623,6 +670,9 @@ export interface AuditCheckSet {
   endingInvestmentsSweep: AuditCheck;
   // Pool-only: one entry per summable metric, plus the reserve-weighted split.
   poolSum: { metric: string; check: AuditCheck }[];
+  // True when the three attachment-split loss rows were dropped from the pool
+  // card because a tower line is active — see TOWER_MEANINGLESS_POOL_SUM_KEYS.
+  poolSumOmitsTowerLossSplit: boolean;
   reserveCurrentNoncurrent: AuditCheck | null;
   // Derived display values the cards also need.
   totalOperatingRevenuesValue: number;
@@ -652,6 +702,32 @@ function mkCheck(
   });
   return { derived, statement, diff, note, status, buildUp: opts.buildUp };
 }
+
+// ⚠ MEANINGLESS ON WC AND GL, AND THE CHECK CANNOT TELL YOU SO. For a tower
+// line `attachment` is REINSURANCE_TOWER[line][0].attachment — $1M PER
+// OCCURRENCE — while grossUltimateLoss is an ANNUAL AGGREGATE, so
+// poolLosses = min(annual gross, $1M) pins at exactly $1M in 100% of WC and GL
+// line-years (measured, 30 games x 8 years). excessLosses is then just
+// "annual gross minus $1M", and quotaShareLosses is not a quota share at all —
+// it is every retained dollar above the first $1M including the gaps between
+// layers and the band above the tower (it is not retainedAboveTower either:
+// mean gap $9.5M on WC, $10.9M on GL).
+//
+// The pool card reconciles them PERFECTLY, because both sides compute the same
+// wrong thing — a constant column with a green check, which is worse than an
+// absent one. They are DROPPED rather than branched-per-line because the pool
+// card's job is a cross-line SUM, and adding a WC per-occurrence retention to
+// Property's 125%-of-expected-loss annual aggregate attachment is not a
+// quantity even in principle.
+//
+// KEPT when Property is the only active line, where all three are genuinely
+// what they say (a real annual aggregate against a real aggregate attachment),
+// and the absence is stated on the card rather than left silent.
+// NOT REMOVED FROM THE ENGINE: HistoryPage uses poolLosses correctly, beside
+// excessLosses, which is the split it was built for.
+const TOWER_MEANINGLESS_POOL_SUM_KEYS = new Set<keyof LineResultSet>([
+  'poolLosses', 'excessLosses', 'quotaShareLosses',
+]);
 
 // Every metric where the pool figure must equal the sum of its active lines.
 const POOL_SUM_METRICS: { key: keyof LineResultSet; label: string }[] = [
@@ -874,8 +950,11 @@ export function computeAuditChecks(
   }
 
   // --- Pool = sum of active lines (pool scope only) ---
+  const anyTowerLine = lineKeys.some(l => usesTower(l));
   const poolSum = isPoolView
-    ? POOL_SUM_METRICS.map(({ key, label }) => {
+    ? POOL_SUM_METRICS
+      .filter(({ key }) => !(anyTowerLine && TOWER_MEANINGLESS_POOL_SUM_KEYS.has(key)))
+      .map(({ key, label }) => {
         const sumOfLines = lineKeys.reduce(
           (s, l) => s + Number(poolResult.byLine[l][key]),
           0
@@ -920,6 +999,7 @@ export function computeAuditChecks(
     endingCashSweep,
     endingInvestmentsSweep,
     poolSum,
+    poolSumOmitsTowerLossSplit: isPoolView && anyTowerLine,
     reserveCurrentNoncurrent,
     totalOperatingRevenuesValue,
     totalOperatingExpensesValue,
@@ -1282,11 +1362,45 @@ export function buildSupportingRows(
   const indicatedNetReserveDifference =
     result.indicatedNetReserveAtConfidenceLevel - indicatedNetReserveCheck;
 
+  // ⚠ PER LINE, mirroring simulationEngine's reserveMarginCLF dispatch exactly.
+  // This read FUNDING_CLF_TABLE[0.90] = 1.951 for every line, against WC's
+  // actual 1.3709 and GL's 1.5020, so the recalculation came out 1.9x high on
+  // GL and 2.6x high on WC — and this row is the PAGE'S OWN INTEGRITY CHECK,
+  // so it failed 100% of the time on two of three lines (worst gap $35.83M)
+  // and the header counted each failure in its "N differences found" tally.
+  // The page was telling the user the engine was wrong, every year, using a
+  // curve the engine stopped reading when the static tables landed.
+  const reserveMarginCLFForLine = result.line && hasStaticClf(result.line)
+    ? staticClf(result.line, 0.90)
+    : lookupCLF(0.90);
+
+  // WHERE THE SELECTED CLF ACTUALLY CAME FROM. Under fundingAtExpected — the
+  // DEFAULT on WC and GL — no table is consulted at all and the multiplier is
+  // the literal 1.0, so naming any table here would send a reader to a curve
+  // that was not read.
+  const clfProvenanceText = result.line && hasStaticClf(result.line)
+    ? (result.decisions.fundingAtExpected
+        ? 'Expected funding — the table is bypassed entirely and the multiplier is exactly 1.000'
+        : `STATIC_CLF_TABLE.${result.line}[${formatPct(result.selectedFundingConfidenceLevel, 0)}] — see clfTables.ts`)
+    : `FUNDING_CLF_TABLE[${formatPct(result.selectedFundingConfidenceLevel, 0)}] — see Default Assumptions`;
+
   const reserveRiskMarginCheck =
-    result.expectedNetUnpaidLoss * (FUNDING_CLF_TABLE[0.90] - 1);
+    result.expectedNetUnpaidLoss * (reserveMarginCLFForLine - 1);
 
   const reserveRiskMarginDifference =
     result.reserveRiskMarginNeeded - reserveRiskMarginCheck;
+
+  // At pool scope reserveRiskMarginNeeded is SUMMED across lines, each with its
+  // OWN 90% CLF, so no single factor reproduces it — the same placeholder
+  // problem the rate checks above document. Checked per line only.
+  const marginCheck = (diff: number) =>
+    isPoolView
+      ? naNote(
+          'the reserve risk margin is summed across lines, each with its own 90% CLF ' +
+          '(WC 1.3709, GL 1.5020, Property 1.9510) — no single factor reproduces the sum. ' +
+          'Select a line tab to check it.'
+        )
+      : legacyCheck(diff);
 
   const netIncurredLossCheck =
     result.netPaidLosses +
@@ -1413,7 +1527,7 @@ export function buildSupportingRows(
       metric: 'Selected CLF',
       value: result.selectedFundingCLF.toFixed(3),
       numericValue: result.selectedFundingCLF,
-      formula: { kind: 'echo', value: result.selectedFundingCLF, text: `FUNDING_CLF_TABLE[${formatPct(result.selectedFundingConfidenceLevel, 0)}] — see Default Assumptions` },
+      formula: { kind: 'echo', value: result.selectedFundingCLF, text: clfProvenanceText },
     },
     {
       metric: `Pool Premium Rate at ${(result.selectedFundingConfidenceLevel * 100).toFixed(0)}% CLF`,
@@ -1501,13 +1615,17 @@ export function buildSupportingRows(
       ...rateCheck(expectedLossDifference),
     },
     {
-      metric: `Pool Premium at ${(result.selectedFundingConfidenceLevel * 100).toFixed(0)}% CLF`,
+      // NOT the pool premium — see the matching note in resultMetrics.ts. This
+      // is gross expected loss scaled by the CLF, which the net-funding change
+      // left 39% above the real poolPremium on WC and 77% on GL.
+      metric: 'CLF-Adjusted Gross Expected Loss',
       value: formatCurrency(result.clfAdjustedExpectedLoss),
       numericValue: result.clfAdjustedExpectedLoss,
-      formula: { kind: 'product', factors: [curTerm(result.expectedLoss), factorTerm(result.selectedFundingCLF)] },
+      formula: { kind: 'product', factors: [curTerm(result.expectedLoss, 'GROSS expected loss'), factorTerm(result.selectedFundingCLF)] },
+      explain: 'Gross expected loss at the selected CLF. This is NOT the pool premium: the premium funds NET expected loss (see Pool Premium Rate above), so on WC and GL this figure sits well above it.',
     },
     {
-      metric: `Pool Premium at ${(result.selectedFundingConfidenceLevel * 100).toFixed(0)}% CLF Check Difference`,
+      metric: 'CLF-Adjusted Gross Expected Loss Check Difference',
       value: formatCurrency(clfAdjustedExpectedLossDifference),
       numericValue: clfAdjustedExpectedLossDifference,
       formula: { kind: 'sum', terms: [curTerm(result.clfAdjustedExpectedLoss, 'stored'), curTerm(-clfAdjustedExpectedLossCheck, 'recalculated')] },
@@ -1548,7 +1666,9 @@ export function buildSupportingRows(
       metric: 'Reinsurance Cost',
       value: formatCurrency(result.reinsuranceCost),
       numericValue: result.reinsuranceCost,
-      formula: { kind: 'product', factors: [curTerm(result.poolPremium), { value: computeReinsRate(result, competitivePressure).pct, format: 'pct', label: `${computeReinsRate(result, competitivePressure).prog.label} rate` }] },
+      formula: resultUsesTower(result)
+        ? towerReinsCostFormula(result)
+        : { kind: 'product', factors: [curTerm(result.poolPremium), { value: computeReinsRate(result, competitivePressure).pct, format: 'pct', label: `${computeReinsRate(result, competitivePressure).prog?.label ?? ''} rate` }] },
       subFormula: reinsRateSubFormula(computeReinsRate(result, competitivePressure), competitivePressure),
       explain: 'Same figure and rate as "Premiums for transferred risk" on the Statement of Revenues, Expenses & Changes in Net Position.',
     },
@@ -1728,7 +1848,7 @@ export function buildSupportingRows(
       value: formatPct(result.expectedCombinedRatio),
       numericValue: result.expectedCombinedRatio,
       formula: { kind: 'sum', terms: [pctTerm(result.expectedLossRatioMemberBasis, 'expected loss ratio (member charge)'), pctTerm(result.expectedExpenseRatio, 'expected expense ratio (member charge)')] },
-      explain: 'Both terms share the total-member-charge denominator, so the sum is meaningful. It is NOT 100% except at funding confidence CLF 1.0: at the default CLF the pool charges a deliberate risk margin, and the shortfall below 100% IS that margin. The former 100% reading was an artifact of adding a pricing-basis loss ratio to a residual expense ratio.',
+      explain: 'Both terms share the total-member-charge denominator AND the net numerator basis, so the sum is meaningful. At CLF 1.000 — the default on WC and GL — it is EXACTLY 100%, because pool premium + admin + reinsurance is identically the total member charge. Above CLF 1.000 the shortfall below 100% is the deliberate funding margin, which is what a confidence level above expected buys.',
       note: basisGuardNote,
       status: basisGuardStatus,
     },
@@ -1778,7 +1898,10 @@ export function buildSupportingRows(
     },
   ];
 
-  const fundingMarginCLF = FUNDING_CLF_TABLE[0.90];
+  const fundingMarginCLF = reserveMarginCLFForLine;
+  const fundingMarginCLFLabel = result.line && hasStaticClf(result.line)
+    ? `STATIC_CLF_TABLE.${result.line}[90%]`
+    : 'FUNDING_CLF_TABLE[90%]';
 
   const capitalRows: AuditRow[] = [
     {
@@ -1814,16 +1937,16 @@ export function buildSupportingRows(
       subFormula: {
         label: 'required margin factor',
         value: fundingMarginCLF - 1,
-        spec: { kind: 'sum', terms: [factorTerm(fundingMarginCLF, 'FUNDING_CLF_TABLE[90%]'), factorTerm(-1, '1.0')] },
+        spec: { kind: 'sum', terms: [factorTerm(fundingMarginCLF, fundingMarginCLFLabel), factorTerm(-1, '1.0')] },
       },
-      explain: 'FUNDING_CLF_TABLE[90%] is a fixed pool-funding-confidence factor from Default Assumptions, independent of the player\'s own selected funding confidence level above.',
+      explain: `${fundingMarginCLFLabel} is a fixed 90%-confidence reserve-margin factor, independent of the player's own selected funding confidence level above. It is the LINE'S OWN curve: WC and GL read their static tables (1.3709 and 1.5020), Property reads FUNDING_CLF_TABLE (1.9510).`,
     },
     {
       metric: 'Reserve Risk Margin Check Difference',
       value: formatCurrency(reserveRiskMarginDifference),
       numericValue: reserveRiskMarginDifference,
       formula: { kind: 'sum', terms: [curTerm(result.reserveRiskMarginNeeded, 'stored'), curTerm(-reserveRiskMarginCheck, 'recalculated')] },
-      ...legacyCheck(reserveRiskMarginDifference),
+      ...marginCheck(reserveRiskMarginDifference),
     },
     {
       metric: 'Surplus',
@@ -1928,10 +2051,12 @@ export function buildRevExpRows(
       value: formatCurrency(result.reinsuranceCost),
       numericValue: result.reinsuranceCost,
       formula: scoped(
-        () => ({
-          kind: 'product',
-          factors: [cur(result.poolPremium), { value: ownRate.pct, format: 'pct', label: `${ownRate.prog.label} rate` }],
-        }),
+        () => ownRate.prog === null
+          ? towerReinsCostFormula(result)
+          : {
+            kind: 'product',
+            factors: [cur(result.poolPremium), { value: ownRate.pct, format: 'pct', label: `${ownRate.prog.label} rate` }],
+          },
         x => x.reinsuranceCost
       ),
       subFormula: isPoolView ? undefined : reinsRateSubFormula(ownRate, competitivePressure),
