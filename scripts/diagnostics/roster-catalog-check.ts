@@ -61,7 +61,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Deliberately duplicated from the generator rather than imported: if the
 // generator is ever pointed at a different CSV, this check must NOT follow it
 // silently — a roster swap should surface here as a mismatch, not be absorbed.
-const CSV_PATH = path.join(__dirname, '../../src/data/roster_canonical_v5.csv');
+const CSV_PATH = path.join(__dirname, '../../src/data/roster_canonical_v6.csv');
 
 let failures = 0;
 function check(ok: boolean, label: string, detail = '') {

@@ -1,4 +1,4 @@
-// One-time generator: src/data/roster_canonical_v5.csv -> src/data/memberCatalog.ts
+// One-time generator: src/data/roster_canonical_v6.csv -> src/data/memberCatalog.ts
 //
 // ============================================================================
 // SAFE TO RUN AGAIN — REPAIRED, AND HERE IS WHAT WAS WRONG.
@@ -51,7 +51,11 @@
 //   TIV jitter tightened to sigma 0.25; and TWO NEW STORED COLUMNS, Locations
 //   (integer site count) and Primary Asset Share, which together give
 //   Property a per-member location schedule.
-// - v5 roster_canonical_v5.csv — CURRENT. TIV ONLY, x1.188512 uniformly on
+// - v6 roster_canonical_v6.csv — CURRENT. TIV ONLY, x3.484302 uniformly on
+//   every member ($17,000.0M -> $59,233.0M, 13.08x payroll -> 45.6x). Sized so
+//   the ENROLLED book — about 29% of the marketplace at the membership
+//   equilibrium — is worth roughly $17B rather than the marketplace being.
+// - v5 roster_canonical_v5.csv — TIV ONLY, x1.188512 uniformly on
 //   every member ($14,303.6M -> $17,000.0M, 11.00x payroll -> 13.08x). UNIFORM,
 //   unlike v4's per-type rescale, so within-type AND cross-type spread and rank
 //   are both preserved exactly. Payroll, RQ, Region, Locations and Primary
@@ -95,7 +99,7 @@ import { fileURLToPath } from 'url';
 import type { MemberType, Region, SizeCategory } from '../../src/types/simulation';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CSV_PATH = path.join(__dirname, '../../src/data/roster_canonical_v5.csv');
+const CSV_PATH = path.join(__dirname, '../../src/data/roster_canonical_v6.csv');
 // Overridable so a harness can regenerate to a scratch path and diff, without
 // clobbering the live catalog. roster-catalog-check.ts uses it — that check is
 // the reason "is the generator still in step?" has an answer at all.
@@ -175,9 +179,9 @@ for (const [type, target] of [['County', 0.30], ['City', 0.20]] as const) {
   }
 }
 
-// v5: TIV totals $17,000.0M (x1.188512 uniformly on v4's $14,303.6M), a
-// blended 13.08x payroll. A DESIGN CHOICE, not a calibration — see
-// memberCatalog.ts's header.
+// v6: TIV totals $59,233.0M (x3.484302 uniformly on v5's $17,000.0M), a blended
+// 45.6x payroll. A DESIGN CHOICE, not a calibration — see memberCatalog.ts's
+// header for why a marketplace this property-heavy is deliberate.
 //
 // ⚠ THIS ASSERTION EARNED ITS KEEP. It was still pinned to v4's $14,303.5M
 // after the v5 CSV landed, and it THREW rather than silently emitting a
@@ -185,8 +189,8 @@ for (const [type, target] of [['County', 0.30], ['City', 0.20]] as const) {
 // that will happily write any roster it is handed is not a generator, it is a
 // transcription.
 const tivSum = rows.reduce((s, r) => s + r.tiv, 0);
-if (Math.abs(tivSum - 17000.0) > 1) {
-  throw new Error(`TIV sum $${tivSum.toFixed(1)}M deviates from the expected $17,000.0M`);
+if (Math.abs(tivSum - 59233.0) > 1) {
+  throw new Error(`TIV sum $${tivSum.toFixed(1)}M deviates from the expected $59,233.0M`);
 }
 const largestTivShare = Math.max(...rows.map(r => r.tiv)) / tivSum;
 if (largestTivShare > 0.05) {
@@ -199,13 +203,13 @@ if (locationsSum !== 1866) {
 }
 
 // Zone TIV drives the cat/weather footprint engines, so it is asserted here
-// rather than rediscovered later. v5 values: North 5988.9 / Central 5753.1 /
-// South 5257.9 (v4 was 5039.0 / 4840.6 / 4423.9; v3 was 2513.9 / 2400.2 /
-// 2079.2).
+// rather than rediscovered later. v6 values: North 20867.2 / Central 20045.7 /
+// South 18320.1 (v5 was 5988.9 / 5753.1 / 5257.9; v4 was 5039.0 / 4840.6 /
+// 4423.9; v3 was 2513.9 / 2400.2 / 2079.2).
 //
-// ⚠ v5's SCALE IS UNIFORM, so unlike v4 the zone MIX is unchanged — every zone
-// moved by the same x1.188512 and the shares are identical to v4's. That is
-// worth stating because v4's per-type rescale did shift the mix, and the two
+// ⚠ v5 AND v6 ARE BOTH UNIFORM SCALES, so the zone MIX is unchanged from v4 —
+// every zone moved by the same factor and the shares are identical. That is
+// worth stating because v4's per-type rescale DID shift the mix, and the two
 // look the same from the totals alone.
 //
 // THE PINNED CAT/WEATHER MU VALUES ARE STILL VALID: AAL scales linearly with
@@ -215,7 +219,7 @@ if (locationsSum !== 1866) {
 // unbuilt and these constants are what it would use.)
 const zoneTiv: Record<string, number> = { North: 0, Central: 0, South: 0 };
 rows.forEach(r => { zoneTiv[r.region] += r.tiv; });
-for (const [zone, expected] of [['North', 5988.9], ['Central', 5753.1], ['South', 5257.9]] as const) {
+for (const [zone, expected] of [['North', 20867.2], ['Central', 20045.7], ['South', 18320.1]] as const) {
   if (Math.abs(zoneTiv[zone] - expected) > 1) {
     throw new Error(`Zone ${zone} TIV $${zoneTiv[zone].toFixed(1)}M != expected $${expected}M`);
   }
@@ -280,28 +284,32 @@ const out = `// Canonical 200-member marketplace — GENERATED FILE, do not edit
 // 20% by design) and drives both WC and GL exposure — public-entity pools have
 // one payroll base, not a separate commercial-style GL revenue base.
 //
-// EVERYTHING PROPERTY NEEDS IS AUTHORED, NOT DERIVED. TIV totals $17,000.0M (a
-// blended 13.08x payroll) and carries no scale factor.
+// EVERYTHING PROPERTY NEEDS IS AUTHORED, NOT DERIVED. TIV totals $59,233.0M (a
+// blended 45.6x payroll) and carries no scale factor.
 //
-// ⚠ 13.08x IS A DESIGN CHOICE, NOT A CALIBRATION, and it must not be read as
-// one. The real pool this model is built from runs about 4.6x. The model pool
-// is deliberately MORE PROPERTY-HEAVY than the book Property's severity was
-// fitted from, so that Property is a line whose reinsurance decision can
-// matter rather than a rounding error next to WC and GL.
+// ⚠ 45.6x IS A DESIGN CHOICE, NOT A CALIBRATION, and at ten times the real
+// pool's 4.6x it must not be read as one. The marketplace is deliberately far
+// more property-heavy per dollar of payroll than any real public-entity pool.
 //
-// Measured, which is what the choice was made against: at v4's $14,303.6M
-// Property was 8.1% of gross pool loss with 9.0 enrolled claims a year and an
-// annual CV of 1.710; at $17,000.0M it is 10.4% with 11.1 claims and a CV of
-// 1.419, against WC 0.526 and GL 0.784. Property remains the most volatile
-// line — more claims damp it, they do not tame it.
+// THE REASON IS THE ENROLMENT FRACTION, not a view about property values. The
+// membership equilibrium is k x (200 - E) = 0.044 x E, which solves to about 53
+// members — roughly a quarter of the roster, BY CONSTRUCTION. The pool therefore
+// only ever holds ~29% of the marketplace, so an ENROLLED Property book worth
+// modelling requires a MARKETPLACE several times larger than the book itself.
+// Sizing the marketplace is the only lever available: starting Property higher
+// would collapse back to the equilibrium (joins fall to 0.8/yr against 6.6
+// departures at 150 enrolled), and a per-line k would fight fdc747c rather than
+// use it.
 //
-// NOTHING ABOUT THE FIT MOVED. Frequency is per $1M of TIV and severity is
-// independent of the member, so scaling TIV scales expected loss exactly and
-// leaves the severity distribution, the pure premium per $100 and every fitted
-// parameter untouched.
+// FREQUENCY AND SEVERITY COME FROM REAL DATA; THE TIV BASE IS CHOSEN. Those are
+// different kinds of number and keeping them distinct is the point: scaling TIV
+// scales expected loss exactly and leaves the severity distribution, the pure
+// premium per $100 and every fitted parameter untouched.
 //
-// v5 scaled TIV x1.188512 UNIFORMLY on every member from v4's $14,303.6M, so
-// within-type and cross-type spread and rank are both preserved exactly.
+// v6 scaled TIV x3.484302 UNIFORMLY from v5's $17,000.0M; v5 scaled x1.188512
+// from v4's $14,303.6M. Both uniform, so within-type AND cross-type spread and
+// rank are preserved exactly and the zone mix is unchanged from v4.
+//
 // v4 rescaled TIV per
 // member TYPE (School x3.6, Water x2.7778, Fire x2.1429, County/Recreation x2,
 // Transit x1.8333, City x1.8, Special x1.6364, Park x1.5556) off v3's
