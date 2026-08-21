@@ -1,4 +1,30 @@
-// One-time generator: src/data/roster_canonical_v4.csv -> src/data/memberCatalog.ts
+// One-time generator: src/data/roster_canonical_v5.csv -> src/data/memberCatalog.ts
+//
+// ============================================================================
+// ⚠⚠ DO NOT RUN THIS. IT IS STALE AND RUNNING IT BREAKS THE GAME. ⚠⚠
+//
+// src/data/memberCatalog.ts has been edited by hand since this script last
+// produced it, despite that file's own "do not edit" header. Regenerating from
+// this script DELETES:
+//
+//   - `wcRatingGroup` on every member, and the wcRatingGroupFor() helper that
+//     assigns it. wcClaimEngine.ts:75 READS IT AND THROWS IF IT IS MISSING, so
+//     a regenerated catalog does not merely lose an attribute — WC stops
+//     running. It is the one member attribute that is STORED rather than
+//     derived from Type, precisely because no rule over Type can separate the
+//     eight cities that run their own police and fire from the other 24.
+//   - the note recording that MARKET_TOTAL_LOCATIONS was retired.
+//
+// FOUND BY RUNNING IT AS A NULL TEST during the v5 TIV rescale — the
+// regeneration was expected to be byte-identical and was not. The rescale was
+// therefore applied by editing the catalog directly and writing the v5 CSV
+// alongside it; both were then verified to agree per member.
+//
+// BEFORE THIS SCRIPT IS EVER RUN AGAIN it must be taught to emit
+// wcRatingGroup, and the regeneration must be shown byte-identical to the
+// committed catalog on an UNCHANGED CSV first. That check is the only thing
+// that makes this script safe, and it is cheap.
+// ============================================================================
 //
 // The canonical roster (200 members, $1,300M payroll) is the permanent, fixed
 // marketplace — it never grows or shrinks. This script converts the CSV into a
@@ -18,7 +44,12 @@
 //   TIV jitter tightened to sigma 0.25; and TWO NEW STORED COLUMNS, Locations
 //   (integer site count) and Primary Asset Share, which together give
 //   Property a per-member location schedule.
-// - v4 roster_canonical_v4.csv — CURRENT. TIV ONLY, rescaled per type by a
+// - v5 roster_canonical_v5.csv — CURRENT. TIV ONLY, x1.188512 uniformly on
+//   every member ($14,303.6M -> $17,000.0M, 11.00x payroll -> 13.08x). UNIFORM,
+//   unlike v4's per-type rescale, so within-type AND cross-type spread and rank
+//   are both preserved exactly. Payroll, RQ, Region, Locations and Primary
+//   Asset Share are byte-identical to v4.
+// - v4 roster_canonical_v4.csv — TIV ONLY, rescaled per type by a
 //   fixed factor (TIV_new = TIV_old x scale_factor) to fix a plausibility
 //   failure: v3's ratios held far too little insured value per type (a county
 //   at 6.0x held $102M for a courthouse, jail, sheriff facilities, a health
@@ -57,7 +88,7 @@ import { fileURLToPath } from 'url';
 import type { MemberType, Region, SizeCategory } from '../../src/types/simulation';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CSV_PATH = path.join(__dirname, '../../src/data/roster_canonical_v4.csv');
+const CSV_PATH = path.join(__dirname, '../../src/data/roster_canonical_v5.csv');
 const OUT_PATH = path.join(__dirname, '../../src/data/memberCatalog.ts');
 
 const VALID_TYPES: ReadonlySet<string> = new Set([
