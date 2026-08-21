@@ -24,7 +24,7 @@ function mergeShockRecords(lineResults: LineResultSet[]): ShockRecord[] | undefi
   return merged.size > 0 ? [...merged.values()] : undefined;
 }
 import { SeededRandom, deriveSubRng } from './random';
-import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, MEMBER_LOSS_VOLATILITY, RISK_CONTROL_PARAMS, LINE_RESERVE_PAYDOWN_PCT, OPERATING_CASH_PCT_OF_PREMIUM, WC_LOSS_MODEL } from '../data/defaultAssumptions';
+import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, PROPERTY_HELD_PURE_PREMIUM_PER_100, FUNDING_CLF_TABLE, MEMBER_LOSS_VOLATILITY, RISK_CONTROL_PARAMS, LINE_RESERVE_PAYDOWN_PCT, OPERATING_CASH_PCT_OF_PREMIUM, WC_LOSS_MODEL } from '../data/defaultAssumptions';
 import { getReinsuranceStructure, calculateReinsuranceCost, calculateReinsuranceRecovery } from './reinsuranceEngine';
 import { REINSURANCE_TOWER, type TowerLine } from '../data/reinsuranceTower';
 import {
@@ -41,6 +41,7 @@ import { cloneMemberLossHistory, recordMemberLossYear } from './memberLossHistor
 import { computeKLine, deriveNeutralPurePremiumPer100, expectedWcGrossLossForPricing, generateWcClaims, wcFrequencyTrend, wcSeverityTrend } from './wcClaimEngine';
 import { hasStaticClf, staticClf } from '../data/clfTables';
 import { computeKGl, deriveNeutralGlPurePremiumPer100, expectedGlGrossLossForPricing, generateGlClaims, glCappedSeverityTrend } from './glClaimEngine';
+import { computeKPr, generatePropertyClaims } from './propertyClaimEngine';
 import { generateNarrative } from './narrativeEngine';
 import { quoteLineRates } from './linePricing';
 import { getMemberExposure } from './lineHelpers';
@@ -123,6 +124,14 @@ function fundedNetExpectedLoss(r: { poolPremium: number; selectedFundingCLF: num
 // risks left, which changes who leaves next year, and the loss ratio would
 // wander instead of holding. Do not "fix" this.
 const WC_HELD_PURE_PREMIUM_PER_100 = deriveNeutralPurePremiumPer100(getPredefinedMarketMembers());
+
+// ⚠ HELD AS A LITERAL, NOT DERIVED AT MODULE LOAD LIKE WC's AND GL's, and the
+// asymmetry is deliberate. Two thirds of the difference is that this figure has
+// two parts with different provenance — a derived non-cat component and an
+// ASSERTED cat load no generator produces — so deriving it here would silently
+// drop the asserted half. See PROPERTY_HELD_PURE_PREMIUM_PER_100's own comment.
+// property-fit-check.ts asserts the derived half against the generator's
+// analytic expectation, which is the check that would otherwise be missing.
 const GL_HELD_PURE_PREMIUM_PER_100 = deriveNeutralGlPurePremiumPer100(getPredefinedMarketMembers());
 
 // THIS YEAR'S GROSS PURE PREMIUM PER $100 — exported because the Decisions
@@ -138,12 +147,16 @@ const GL_HELD_PURE_PREMIUM_PER_100 = deriveNeutralGlPurePremiumPer100(getPredefi
 // Extracted from processLineYear VERBATIM, operation order included: these are
 // float products feeding every downstream premium, and reassociating them
 // would move engine values.
+// ⚠ THE PRIOR VALUE, THE LOSS TREND AND RISK-CONTROL EFFECTIVENESS ARE GONE
+// FROM THE SIGNATURE, not left unused. They existed only for Property's
+// compounding random walk; with Property held, every line's pure premium is a
+// pure function of the line and the year. Dropping the parameters rather than
+// ignoring them is what stops a future reader believing the pure premium can
+// still be moved by a decision — it cannot, and risk control now acts on the
+// DRAW ONLY, in all three generators (finding 17).
 export function currentPurePremiumPer100(
   line: CoverageLine,
   yearNumber: number,
-  priorPurePremiumPer100: number,
-  lossTrend: number,
-  rcEffectiveness: number,
 ): number {
   return line === 'WC'
     ? WC_HELD_PURE_PREMIUM_PER_100
@@ -154,11 +167,16 @@ export function currentPurePremiumPer100(
     ? GL_HELD_PURE_PREMIUM_PER_100
       * glCappedSeverityTrend(yearNumber)
       / wageFactor('GL', yearNumber)
-    // PROPERTY ALONE compounds off its own prior value and its own decisions,
-    // so unlike WC/GL it is not a pure function of the year.
-    : priorPurePremiumPer100 *
-      (1 + lossTrend) *
-      (1 - rcEffectiveness);
+    // ⚠ PROPERTY IS NOW HELD LIKE THE OTHER TWO. It used to be the ONLY line
+    // whose pure premium was a compounding random walk — prior x (1 + lossTrend)
+    // x (1 - rcEffectiveness), seeded from STARTING_FINANCIALS' ratePer100 and
+    // drifting thereafter — so two games with identical decisions priced
+    // Property differently for no modelled reason, and no roster fit could ever
+    // anchor it. It is a pure function of the year now, which is to say a
+    // constant: the fit found no frequency trend, and severity trend is already
+    // inside the payout-pattern convention the generator applies. Adding a
+    // factor here would double-count it, which is the finding-37 trap.
+    : PROPERTY_HELD_PURE_PREMIUM_PER_100;
 }
 
 // The risk-control effectiveness this year's decision produces. Exported for
@@ -313,7 +331,6 @@ export function processLineYear(
   const newRateLevel = lineState.rateLevel;
   const pricingAdjustment = newRateLevel / 100;
 
-  const lossTrend = instance.lossEnvironment.lossTrend;
   const priorRCEffectiveness = lineState.riskControlEffectiveness;
 
   const newRCEffectiveness = projectedRcEffectiveness(priorRCEffectiveness, lineDecisions.riskControlPct);
@@ -374,9 +391,7 @@ export function processLineYear(
   // full-roster expectation. All three factors are pure functions of the year and
   // cannot see the roster, so k_line keeps sole responsibility for the
   // roster/risk-quality-mix correction.
-  const newPurePremiumPer100 = currentPurePremiumPer100(
-    line, yearNumber, lineState.purePremiumPer100, lossTrend, newRCEffectiveness,
-  );
+  const newPurePremiumPer100 = currentPurePremiumPer100(line, yearNumber);
 
   // Preliminary contribution estimate used only for member movement.
   // Final premium is recalculated after member movement because exposure changes.
@@ -417,7 +432,26 @@ export function processLineYear(
   // and it is reused below rather than recomputed.
   const isWcClaimLine = line === 'WC';
   const isGlClaimLine = line === 'GL';
-  const isClaimLine = isWcClaimLine || isGlClaimLine;
+  const isPropertyClaimLine = line === 'Property';
+  // ⚠ TWO DIFFERENT QUESTIONS, AND THEY STOPPED HAVING THE SAME ANSWER WHEN
+  // PROPERTY GOT ITS GENERATOR. `isClaimLine` used to mean both "draws
+  // individual claims" and "runs the per-occurrence tower", which was safe only
+  // while exactly the same two lines did both.
+  //
+  //   isClaimLine  — draws individual Claim/Occurrence objects. All three now.
+  //   usesTower    — prices and cedes through the per-occurrence tower. WC and
+  //                  GL only; Property is still on the legacy aggregate quota
+  //                  share from REINSURANCE_PROGRAMS until it gets a tower.
+  //
+  // Collapsing these back together would silently put Property through a tower
+  // that does not exist for it, or strand it on the aggregate loss path it no
+  // longer uses. Every site below picks one deliberately.
+  //
+  // linePricing.quoteLineRates keeps its OWN tower-only test and correctly
+  // still excludes Property, so the panel and the engine agree without a
+  // second definition here.
+  const isClaimLine = isWcClaimLine || isGlClaimLine || isPropertyClaimLine;
+  const usesTower = isWcClaimLine || isGlClaimLine;
 
   // --- THE PRE-MOVEMENT QUOTE ------------------------------------------------
   //
@@ -449,7 +483,7 @@ export function processLineYear(
   // The occurrence quote is REUSED by the post-movement pass below rather than
   // re-priced: it reads only the pre-movement book and the year, so re-quoting
   // would be a second version of a figure that cannot legitimately differ.
-  const placedForCost = isClaimLine
+  const placedForCost = usesTower
     ? normalizeLayersPlaced(line as TowerLine, lineDecisions.layersPlaced)
     : null;
   const towerQuote = estimatedQuote.towerQuote;
@@ -617,7 +651,14 @@ export function processLineYear(
   // CONSEQUENCE, DELIBERATE: gPool was the model's ONLY cross-line correlation,
   // so WC is now independent of GL and Property. A bad WC year carries no
   // information about the others.
-  const commonLossFactor = isWcClaimLine
+  // ⚠ PROPERTY NOW JOINS WC AT 1, LEAVING GL THE ONLY CONSUMER OF gPool. Its
+  // generator draws its own frequency noise and carries its own tail;
+  // multiplying that by a shared annual factor would double-count volatility
+  // the fitted mixture already contains. The consequence is that gPool — the
+  // model's only cross-line correlation — now links nothing, GL being its sole
+  // reader. A REDUCTION IN CROSS-LINE CORRELATION, deliberate, and one to argue
+  // for explicitly if a shared factor is ever wanted back.
+  const commonLossFactor = isWcClaimLine || isPropertyClaimLine
     ? 1
     : isClaimLine
     ? ctx.gPool
@@ -852,6 +893,36 @@ export function processLineYear(
         shockExpectedAdded[firing.shockId] = shocked - baseline;
       }
     }
+  } else if (isPropertyClaimLine) {
+    // PROPERTY, CUT OVER. Same discipline as WC and GL: the pure premium is
+    // HELD and k_Pr is the per-year roster/risk-quality-mix correction against
+    // the ENROLLED book — not the full roster, which is the trap both other
+    // lines carry a warning about.
+    const kPr = computeKPr(memberResult.activeMembers);
+    const generated = generatePropertyClaims({
+      members: memberResult.activeMembers,
+      yearNumber,
+      calendarYear,
+      instanceSeed: instance.seed,
+      kPr,
+      // Risk control acts on the DRAW ONLY (finding 17), as in WC and GL.
+      riskControlEffectiveness: newRCEffectiveness,
+    });
+    generatedClaims = generated.claims;
+    generatedOccurrences = generated.occurrences;
+    memberLossResults = generated.memberLossResults;
+    aggregateMemberLoss = generated.grossUltimateLoss;
+    kLineApplied = kPr;
+    glClaimCount = generated.claimCount;
+    // ⚠ NO SHOCK CHANNEL. Property's shock used to arrive as an aggregate
+    // add-on keyed off commonLossFactor, which went with the Gamma path; its
+    // replacement is the cat shock events, which are still gated off. So
+    // shockOccurred stays false and the ASSERTED 0.0247 cat load in the held
+    // pure premium is collected and never incurred — a structural 20.4%
+    // over-collection recorded at PROPERTY_HELD_PURE_PREMIUM_PER_100. The fix
+    // is the cat band, not a smaller load, and it is NOT silently netted out
+    // here.
+    shockOccurred = false;
   } else {
     shockOccurred = commonLossFactor > catastropheThreshold;
     memberLossResults = memberResult.activeMembers.map(member => {
@@ -909,7 +980,7 @@ export function processLineYear(
   let aggregateAttachment = 0;
   let attachment: number;
 
-  if (isClaimLine && (isWcClaimLine || isGlClaimLine)) {
+  if (usesTower) {
     const towerLine = line as TowerLine;
     const placed = normalizeLayersPlaced(towerLine, lineDecisions.layersPlaced);
     const totals = occurrenceTotals(generatedClaims ?? [], generatedOccurrences ?? []);

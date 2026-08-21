@@ -325,4 +325,13 @@ export const MARKET_TOTAL_EXPOSURE: Record<CoverageLine, number> = {
 };
 
 // Pool-wide location count (1,866) — the Property attritional frequency base.
-export const MARKET_TOTAL_LOCATIONS = PREDEFINED_MARKET_MEMBERS.reduce((s, m) => s + (m.locations ?? 0), 0);
+// MARKET_TOTAL_LOCATIONS RETIRED with Property's rebuild — it had no consumer
+// even before that, and the per-location frequency basis it existed to serve is
+// gone.
+//
+// ⚠ `locations` AND `primaryAssetShare` ARE KEPT ON EVERY MEMBER AND NOTHING
+// READS THEM. That is deliberate. They are AUTHORED roster facts, not derived
+// values, and deleting authored source data to chase an unused-symbol warning
+// would destroy something a future per-location treaty would have to invent
+// again from nothing. They are recorded here as unread so the next reader does
+// not spend time looking for the consumer.

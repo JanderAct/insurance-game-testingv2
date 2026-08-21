@@ -188,21 +188,6 @@ export interface Claim {
   // per tier; the mixture model books one amount with no payout schedule, so
   // WC claims leave this absent. GL and Property are unaffected.
   paymentPattern?: number[];
-  // --- GL claim-level fields ---
-  // NONE LEFT. The GL sub-coverage rebuild deleted the indemnity/ALAE split
-  // (ALAE is now inside the fitted mixture amount), legalBasis and the
-  // statutory cap it gated, litigationStage, and settlementYear (no more
-  // trend-to-settlement conversion — GL books the mixture draw as-is). See
-  // GL_LOSS_MODEL in defaultAssumptions.ts for the full reasoning.
-  // --- Property claim-level fields (design doc property_noncat NC1) ---
-  // Property severity is EMERGED FROM THE BOOK rather than drawn as a dollar
-  // amount: severity = damageRatio x the hit location's TIV, which is what
-  // bounds every claim at insured value. Both components are recorded so that
-  // cap is externally checkable — a harness can assert
-  // grossUltimate <= locationTiv without re-deriving the location schedule,
-  // and damageRatio can be tested against its Beta directly.
-  damageRatio?: number;
-  locationTiv?: number;
 }
 
 // Seeded, read-only operating history shown before Year 1 begins.

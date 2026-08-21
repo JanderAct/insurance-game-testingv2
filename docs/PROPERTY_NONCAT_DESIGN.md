@@ -1,8 +1,15 @@
+> ⚠ **SUPERSEDED BY THE FITTED PROPERTY MODEL.** The attritional band's per-location
+> frequency and damageRatio x locationTiv severity, and the whole non-cat WEATHER band,
+> were retired when Property was cut over to a fit of the pool's own nine years of claims
+> (frequency per $1M of TIV, four-component lognormal severity capped at $75M). This
+> document is kept for the derivations and the reasoning, NOT as a description of the
+> live model. See PROPERTY_LOSS_MODEL in src/data/defaultAssumptions.ts.
+
 # Ripple — Non-Cat Property Distribution (v3 canonical)
 
 ## Attritional (All-Risk) band · Non-Cat Weather band · Per-Risk reinsurance
 
-Companion to `property_cat_engine_design.md` and `wc_gl_distribution_design.md`. Canonical pool: **roster_canonical_v3.csv** — 200 members, $1,300M payroll, **$6,993M total TIV (5.38× blended)**, **1,866 stored locations**, three named regions (North/Central/South).
+Companion to `property_cat_engine_design.md` and `wc_gl_distribution_design.md`. Canonical pool: ⚠ **THIS DOCUMENT WAS WRITTEN AGAINST roster_canonical_v3.csv ($6,993M TIV, 5.38x blended). THE LIVE ROSTER IS v4 AT $14,303.6M (11.00x)** — every absolute dollar figure below is a v3 figure and must be rescaled by 2.045 before use. 200 members, $1,300M payroll, **1,866 stored locations**, three named regions (North/Central/South).
 
 **This is the consolidated v3 spec.** It supersedes the original non-cat doc, the v2/v3 addenda, and the cat/weather resolution for the non-cat bands. Mechanisms are unchanged; figures are current against v3. TIV and locations are **stored roster columns**, not derived — the `TIV_TYPE_MULTIPLIER`/`PROPERTY_TIV_SCALE` model is deleted.
 

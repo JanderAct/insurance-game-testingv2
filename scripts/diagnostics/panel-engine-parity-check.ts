@@ -34,7 +34,7 @@ import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { computeFundingConsequence } from '../../src/utils/fundingConsequence';
 import { getMemberExposure } from '../../src/utils/lineHelpers';
 import { quoteLineRates } from '../../src/utils/linePricing';
-import { currentPurePremiumPer100, projectedRcEffectiveness, lookupCLF } from '../../src/utils/simulationEngine';
+import { currentPurePremiumPer100, lookupCLF } from '../../src/utils/simulationEngine';
 import { hasStaticClf, staticClf } from '../../src/data/clfTables';
 import { REINSURANCE_PROGRAMS, ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM } from '../../src/data/defaultAssumptions';
 import type { CoverageLine, GameState, LineResultSet } from '../../src/types/simulation';
@@ -104,8 +104,10 @@ console.log('  Panel vs engine, per component, at every level the slider can rea
           );
 
           // The engine's own quote, same shared function, same inputs.
-          const rcEff = projectedRcEffectiveness(lineState.riskControlEffectiveness, dec.riskControlPct);
-          const pp = currentPurePremiumPer100(line, y, lineState.purePremiumPer100, inst.lossEnvironment.lossTrend, rcEff);
+          // currentPurePremiumPer100 lost its prior/lossTrend/rcEffectiveness
+          // parameters when Property's pure premium was held: every line is a
+          // pure function of line and year now.
+          const pp = currentPurePremiumPer100(line, y);
           const clf = hasStaticClf(line) ? staticClf(line, level) : lookupCLF(level);
           const eng = quoteLineRates({
             line, yearNumber: y, members, exposure, purePremiumPer100: pp, clf,

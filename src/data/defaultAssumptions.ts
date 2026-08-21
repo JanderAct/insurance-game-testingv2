@@ -1183,215 +1183,131 @@ export const LINE_RESERVE_PAYDOWN_PCT: Record<string, number> = {
 };
 
 // ===========================================================================
-// PROPERTY loss model — ATTRITIONAL band only (design doc property_noncat
-// section NC1). The cat and weather bands are recorded separately below and
-// are INERT; only this block has a generator behind it.
+// PROPERTY loss model — FITTED, and it replaces a design that was never fitted.
 //
-// Property has three bands with different generative structures:
-//   attritional — independent claims, routine loss plus the occasional large
-//                 single-risk loss; owns the per-risk XoL layer      $16.8M
-//   weather     — event -> zone -> footprint -> correlated claims     $4.5M
-//   cat         — rare, severe, same event structure                  $7.5M
-// Expected property loss is ~$28.8M in total, so ATTRITIONAL ALONE IS 58%.
-// That is why Property is not cut over to its generator on the attritional
-// band alone: a pure premium derived from 58% of eventual loss would price
-// Property at 58% of its cost, and the loss ratio would break the moment
-// weather and cat landed. Cutover happens once all three bands exist.
+// ⚠ WHAT WAS WRONG, IN BOTH DIRECTIONS AT ONCE. The retired design drew ~112
+// claims a year at a $190,179 mean off a per-LOCATION frequency and a
+// damage-ratio-times-location-TIV severity. Nine years of the pool's own
+// property claims say 15.5 claims a year at $435,254. Eleven times too many
+// claims at 44% of the size — so the AAL landed within a factor of three BY
+// ACCIDENT, because only the product was ever anchored. That is the same
+// defect WC's frequency had (finding 37): a product can be right while both
+// factors are wrong, and only fitting the factors separately catches it.
+//
+// FIT PROVENANCE — 1,822 claims over nine MATURE policy years, 2015-16 to
+// 2023-24.
+//   NON-VEHICLE ONLY. VCL is auto physical damage: 51% of claims but 5.5% of
+//     dollars, and its severity CV of 1.57 against 15.2 for the rest shows it
+//     is a different population, not a thin tail of the same one.
+//   THE 2025-01-07 WILDFIRE IS EXCLUDED — six claims, $557.5M. It belongs to
+//     the cat shock events, and leaving it in would have let one event set the
+//     shape of the whole body.
+//   Amounts trended to 2024 at 4%/yr. The SHAPE is insensitive to that choice:
+//     the fitted mean moves 22% across a 2.4-10% range, which is small next to
+//     the tail parameter it would otherwise be confounded with.
+//   ⚠ 40% OF AMOUNTS ARE ROUND-NUMBER CASE RESERVES, so the body carries spikes
+//     at $25k/$50k/$100k and the fit is mildly TIGHTER than settled claims
+//     would be. Read the body as slightly optimistic; the tail is unaffected.
 export const PROPERTY_LOSS_MODEL = {
-  // Frequency is per STORED LOCATION, not per member and not off TIV. Location
-  // count is a physical fact about a member; 1,866 locations x 0.06 = ~112
-  // claims/yr pool-wide.
-  baseFrequencyPerLocation: 0.06,
+  // Per $1M of TIV, not per location and not per member. The location basis
+  // went with the damage-ratio severity it existed to serve.
+  //
+  // FROM THE RECENT FIVE YEARS, NOT ALL NINE. The early years run ~30% lower,
+  // which is the signature of TIV restated to current membership rather than a
+  // real frequency trend. Both readings argue for the recent figure: if TIV was
+  // restated, the early years understate frequency against a too-large
+  // denominator; if it is genuine escalation, the recent level is where the
+  // book now sits.
+  frequencyPer1mTiv: 0.00221,
 
-  // FLAT by design (NC1.1). Attritional property frequency carries no trend —
-  // climate drift belongs to the weather band and, ultimately, a shock layer.
+  // FLAT. There is no frequency trend in the fit, and inventing one from nine
+  // years of a book whose TIV basis moved would be reading noise.
   frequencyTrendPerYear: 0,
 
-  // Poisson, NOT negative binomial. Correlated lumpy variance is deliberately
-  // quarantined into the weather and cat bands, which leaves attritional close
-  // to genuinely independent. Do not "improve" this to NegBin — the band's job
-  // is to be the stable one.
+  // Four-component lognormal mixture on the claim amount. AIC 6714 and BIC
+  // 6775 BOTH select k=4 — no conflict between them, unlike GL, where the two
+  // criteria disagreed and the choice had to be argued.
   //
-  // eps is the per-member-year frequency noise: Gamma(k, 1/k) with SD 1/sqrt(k).
-  // k = 44.4 gives SD 0.15 — MUCH tighter than WC's k=16 (SD 0.25) or GL's k=8
-  // (SD 0.354), because this band is genuinely stable.
-  memberFrequencyNoise: { shape: 44.4, scale: 1 / 44.4 },
+  // Component means: $11,414 / $29,664 / $85,725 / $913,762. The top component
+  // carries 45% of the weight at sigma 1.7417 and is what makes this line's
+  // annual result a question of whether a large claim happened.
+  severityMixture: [
+    { weight: 0.1562, mu: 9.2566, sigma: 0.4147 },
+    { weight: 0.0714, mu: 10.2933, sigma: 0.0937 },
+    { weight: 0.3210, mu: 11.1586, sigma: 0.6330 },
+    { weight: 0.4514, mu: 12.2086, sigma: 1.7417 },
+  ],
 
-  // Damage ratio, mean-concentration parameterization: a = mu*nu,
-  // b = (1-mu)*nu. mu 0.04 / nu 2 -> Beta(0.08, 1.92): J-shaped, median ~1%,
-  // mean 4%, thin tail toward total loss. Severity is damageRatio x the HIT
-  // LOCATION's TIV, so it is capped at insured value by construction.
+  // ⚠ THE CAP IS NOT OPTIONAL, and the evidence is better than GL's was.
+  // Uncapped, the top component puts half of E[X^2] above $86.5M against a
+  // SAMPLE MAXIMUM of $51.9M, and the severity CV reads 6.22 against the
+  // sample's 4.46. Capped here it is 4.78 — still above the sample, correctly,
+  // since a nine-year sample does not contain its own worst case.
   //
-  // NOTE a < 1: the density is unbounded at zero. Verify anything derived from
-  // this distribution by closed form or Monte Carlo, never by fixed-grid
-  // quadrature (see SeededRandom.beta and expectedOverLognormal).
-  damageRatio: { mean: 0.04, concentration: 2 },
+  // Measured by property-fit-check.ts from these parameters rather than taken
+  // on trust: the cap removes 1.9% of the mean and binds once in 6,610 claims,
+  // which at the enrolled book is about once per 700 years. It disciplines the
+  // second moment, which is its job; it is not a loss limit.
+  severityCap: 75_000_000,
 
-  // RQ channels, total beta 0.12 -> ~3.3x worst-to-best.
-  //   frequency: housekeeping, electrical, inspections
-  //   severity:  sprinklers, suppression — scales the Beta MEAN only, nu fixed,
-  //              so RQ acts on the DAMAGE RATIO and never on the dollar amount.
-  //              That is what preserves the insured-value cap.
+  // RQ channels, unchanged in structure from the retired design and
+  // re-pointed at the mixture: frequency scales the Poisson mean, severity
+  // scales the mixture's LOCATION parameter (mu + log(factor)), which moves the
+  // whole distribution multiplicatively and leaves its shape alone.
   rqFrequencyBeta: 0.08,
   rqSeverityBeta: 0.04,
 
-  // Short-tailed: reported the year it happens, paid out over three.
+  // Short-tailed: reported in the accident year, paid over three.
   reportLagYears: 0,
   payoutPattern: [0.70, 0.25, 0.05],
 
-  // Construction cost inflation, applied through the standard accident-year
-  // -> settlement convention (patternTrendFactor over the payout vector), the
-  // same machinery WC's non-catastrophic tiers use. No second trending
-  // convention.
+  // Construction cost inflation, through the shared accident-year ->
+  // settlement convention. Not a second trending convention.
   severityTrendPerYear: 0.04,
 
-  // Per-risk XoL retention. The figures below are v4 (roster v4 doubled TIV
-  // while this $2M threshold stayed fixed in dollars, so the v3 figures this
-  // comment used to cite — 1.77/1.78/1.78/1.77 breaches/yr, largest location
-  // $93.5M — are stale by roughly 2x and have been replaced).
-  //
-  // Measured at v4 by property-claim-check.ts, BOTH BASES, because the treaty
-  // responds to the POOL's claims, not the market's, and every per-risk figure
-  // in this project's history that was quoted full-market alone has read
-  // roughly 3.7x too high:
-  //   full-market breaches/yr   ~3.92, ~3.6% of attritional claims
-  //   enrolled-pool breaches/yr ~1.05 — the treaty-facing basis
-  // The retention itself has NOT been revisited at v4 and may want to be: a
-  // fixed $2M threshold against a roster whose TIV doubled is a materially
-  // looser retention in real terms than it was at v3.
-  //
-  // The treaty is alive ONLY through within-member concentration: at a flat
-  // ~$7.67M average location (v4, $14,303.6M / 1,866 locations) almost no
-  // damage ratio breaches $2M, but Primary Asset Share concentrates each
-  // member's TIV into one dominant site (largest single location $187.0M, v4).
-  // Flatten Primary Asset Share and the treaty dies.
+  // Per-occurrence frequency noise, Gamma(k, 1/k). Kept at the retired
+  // design's k=44.4 (SD 0.15) because nothing in the fit speaks to
+  // year-on-year frequency dispersion — nine years cannot separate it from
+  // severity noise. INHERITED, NOT FITTED, and it should be revisited if the
+  // claim counts ever support it.
+  memberFrequencyNoise: { shape: 44.4, scale: 1 / 44.4 },
+
+  // ⚠ INHERITED AND NOW UNANCHORED. $2M was set at roster v3, when TIV was
+  // $6,993.3M; v4's $14,303.6M already made it 2.05x looser in real terms and
+  // its own comment said so. It survives here UNCHANGED and for a different
+  // reason than it was set: severity no longer scales with TIV at all, so the
+  // TIV-proportional argument that would have re-derived it ($4.09M) is void.
+  // Against the fitted mixture, $2M is exceeded by 4.21% of claims — about 0.4
+  // breaches a year on the enrolled book. Re-derive it when Property gets its
+  // per-occurrence tower, which is the commit that will actually use it.
   perRiskRetention: 2_000_000,
 };
 
-// ===========================================================================
-// PROPERTY CAT and WEATHER parameters — INERT.
+// The held pure premium, per $100 of TIV.
 //
-// NOTHING READS THESE. They are recorded now so the weather and cat bands have
-// their calibration ready, and so the numbers live in the repo rather than in
-// a chat attachment. Full derivation: docs/PROPERTY_CAT_ENGINE_DESIGN.md and
-// docs/PROPERTY_NONCAT_DESIGN.md.
+// ⚠ IT HAS TWO PARTS WITH DIFFERENT PROVENANCE AND THEY MUST NOT BE READ AS
+// ONE NUMBER. Anyone seeing 0.1209 should not have to reverse-engineer that a
+// fifth of it is a judgment call.
 //
-// ⚠ EVERY mu BELOW WAS SOLVED NUMERICALLY AGAINST A TARGET AAL. Intensity
-// enters the event TWICE — once through the footprint
-// (hit_rate = min(base_footprint x intensity, cap)) and once through the damage
-// ratio (event_mean_dr = mu x intensity) — so expected loss per event scales
-// with E[I^2] = 1 + CV^2, not E[I]^2 = 1, and a naive mu/(1+CV^2) correction
-// does NOT land, because the footprint cap interacts with the intensity draw
-// (quake especially: cap 0.95 binds often at CV 1.1).
+//   0.0962  DERIVED. frequencyPer1mTiv x the capped mixture mean ($435,256),
+//           i.e. the generator's own analytic expectation over the 1,822
+//           fitted claims. Reproduced from the parameters by
+//           property-fit-check.ts, which asserts it.
+//   0.0247  ASSERTED. One observed event in ten years — $550M on $111.1B of
+//           TIV, 0.495% — priced at a 1-in-20 return period. A SINGLE
+//           OBSERVATION AT A CHOSEN RETURN PERIOD is not a fit and is not
+//           presented as one.
+//   0.1209  total.
 //
-// AN EXACT CLOSED FORM DOES EXIST, though — the cap does not defeat one, it just
-// means SPLITTING the expectation at the cap instead of taking it whole. See
-// claimMath.lognormalPartialMoment and finding 22's refinement note.
-// expectedWeatherGrossLoss is built on it.
-//
-// DO NOT RE-SOLVE mu ON THE STRENGTH OF THAT. The existing values verify well
-// inside tolerance (weather sits +0.33% from its target, which is mu's own
-// rounding to three significant figures), so a re-solve would move a pinned
-// constant for no behavioural gain. The closed form is recorded so the option is
-// available, not so it gets exercised.
-//
-// RE-SOLVE mu IF lambda, base_footprint, cap OR CV MOVES — and if the roster
-// moves in a way that is not a pure scale change. Unlike the WC and GL pure
-// premiums, these do NOT recompute themselves. Weather is the ONE exemption from
-// the roster clause: its AAL is exactly linear in TIV (see targetAal below), so
-// roster v4 rescaled its target without re-solving. Cat has no such exemption —
-// it draws its zone by hazard weight, v4 rescaled the zones by DIFFERENT factors
-// (2.0045 / 2.0168 / 2.1277), and the cat targets below are still v3 figures.
-//
-// Target AALs: flood $2.90M / wildfire $2.71M / earthquake $1.87M
-// = $7.47M cat total AT v3 TIV, plus weather $9.20M at v4 TIV (see
-// PROPERTY_WEATHER_MODEL.targetAal, which has been rescaled; the cat targets
-// have NOT been, and are still v3 figures).
-export const PROPERTY_CAT_MODEL = {
-  flood:      { lambda: 0.70,  baseFootprint: 0.15, cap: 0.60, intensityCv: 0.7, betaMean: 0.00818, betaConcentration: 1.5, targetAal: 2_900_000 },
-  wildfire:   { lambda: 0.80,  baseFootprint: 0.20, cap: 0.70, intensityCv: 0.5, betaMean: 0.00582, betaConcentration: 2.5, targetAal: 2_710_000 },
-  earthquake: { lambda: 0.045, baseFootprint: 0.40, cap: 0.95, intensityCv: 1.1, betaMean: 0.02532, betaConcentration: 1.5, targetAal: 1_870_000 },
-
-  // Events draw a region by hazard weight. This is the ONLY thing that
-  // differentiates the three regions — zone TIV is near-even (2513.9 / 2400.2 /
-  // 2079.2), so uniform weights would make geography decorative.
-  hazardWeights: {
-    flood:      { North: 0.30, Central: 0.25, South: 0.45 },  // South = coastal/riverine
-    wildfire:   { North: 0.45, Central: 0.35, South: 0.20 },  // North = WUI / dry interface
-    earthquake: { North: 0.25, Central: 0.45, South: 0.30 },  // Central = fault proximity
-  } as Record<'flood' | 'wildfire' | 'earthquake', Record<Region, number>>,
-
-  // Earthquake ALONE can span two ADJACENT regions under one occurrence id;
-  // flood and wildfire are always single-region. North<->Central and
-  // Central<->South are adjacent; NORTH AND SOUTH NEVER CO-OCCUR.
-  //
-  // A quake drawing Central engages one neighbour (50/50) with this
-  // probability, giving 0.45 x 0.35 = 0.1575 extra zone-equivalents. The quake
-  // AAL only reconciles WITH this: 0.045 x 0.40 x $2,331M x 2.532% is ~$1.05M
-  // single-zone, and reaching $1.87M requires the span. A naive re-derivation
-  // that omits it will look wrong — the span is load-bearing.
-  earthquakeSpan: { probability: 0.35, adjacency: { North: ['Central'], Central: ['North', 'South'], South: ['Central'] } },
-
-  // Two-layer structure. The occurrence limit is LIVE, not decorative.
-  occurrenceAttachment: 5_000_000,
-  // ⚠ $1B BINDS AT v3 TIV — do NOT assert it never fires. A two-region quake
-  // exposes up to ~$4,662M (2x the average zone; the worst actual pair,
-  // North+Central, is $4,914M), simulated span-quakes reach ~$2,224M, and
-  // ~0.175% exceed $1B. Above the limit THE POOL RE-RETAINS THE EXCESS — a
-  // genuine tail exposure and a real reason the aggregate matters.
-  occurrenceLimit: 1_000_000_000,
-  aggregateStopMultiple: 1.75,   // x expected annual retained; finite by default
-};
-
-export const PROPERTY_WEATHER_MODEL = {
-  // PER-ZONE Poisson: each of the three zones draws its own count at 2.5, for
-  // 7.5 events/yr pool-wide. This is the ruled reading of NC2.1, which also
-  // contained a contradictory "draw a zone by weather hazard weight" line —
-  // two different mechanisms, and per-zone is the one that reproduces both
-  // 7.5 events/yr and the $4.5M target. That line is deleted, not implemented.
-  lambdaPerZone: 2.5,
-  baseFootprint: 0.10,
-  cap: 0.50,
-  intensityCv: 0.6,
-  betaMean: 0.00189,        // numeric solve — see the warning above, and mu IS UNCHANGED below
-  betaConcentration: 4.0,   // lighter tail than cat
-
-  // TARGET AAL AT ROSTER v4 — rescaled from the v3 figure of $4.50M.
-  //
-  // mu IS UNCHANGED AND WAS NOT RE-SOLVED, which is the one case where the
-  // "re-solve mu if the roster moves" warning above does not bite. Weather AAL
-  // is EXACTLY LINEAR IN ZONE TIV: locations are hit by independent per-location
-  // Bernoulli draws at hit_rate, so expected affected TIV is hit_rate x zone TIV
-  // whatever the size mix, and expected loss per event is
-  // hit_rate(I) x mu x I x zoneTIV. Nothing in that expression depends on the
-  // TIV level, so AAL = C x mu x TIV: double the TIV and the target doubles at
-  // the same mu. (Cat is NOT in this position — it draws its zone by hazard
-  // weight, so its AAL depends on a hazard-weighted TIV mix, and roster v4
-  // rescaled the three zones by different factors: 2.0045 / 2.0168 / 2.1277.
-  // Cat's targets above are still v3 and its mu WILL need re-solving.)
-  //
-  // The rescale: 4.50M x 14,303.6 / 6,993.3 = 4.50M x 2.045325 = $9.204M.
-  //
-  // ⚠ THIS IS $9.204M, NOT the $9.26M quoted in the plan this work was approved
-  // against. That figure does not reconcile against the linear identity above
-  // (it would require a v3 TIV of $6,951M rather than the actual $6,993.3M).
-  // The derived value is used here because it is the one the identity yields.
-  // Difference 0.6%, far inside any verification gate, but an anchor mu is
-  // solved against should be exactly derivable.
-  targetAal: 9_204_000,
-
-  // ⚠ WEATHER HAS NO REGIONAL HAZARD DIFFERENTIATION. Every zone draws the
-  // same expected event count, so loss varies by zone ONLY through TIV
-  // (v4: North $5,039.0M / Central $4,840.6M / South $4,423.9M, summing to the
-  // book's $14,303.5M; these were $2,513.9M / $2,400.2M / $2,079.2M at v3). No
-  // weather hazard table exists in either design doc. If differentiation is
-  // wanted later it needs its OWN table — do NOT borrow flood's, which encodes
-  // coastal/riverine exposure rather than storm frequency.
-  regionalHazardDifferentiation: null,
-
-  // RQ: frequency LOCKED (hazard is nature's, not the member's); RQ affects the
-  // damage ratio only. Development 80/20 over two years.
-  rqFrequencyBeta: 0,
-  rqSeverityBeta: 0.04,
-  payoutPattern: [0.80, 0.20],
-};
+// ⚠ AND THE CAT COMPONENT IS CURRENTLY COLLECTED BUT NEVER INCURRED. The
+// intent is that shock events REALISE this load rather than add to it, the
+// same structure as GL's social-inflation baseline with event #19 on top. But
+// Property's cat shock is inert — shockCatalog's earthquake event is gated on
+// a Property cat band and an occurrence-basis tower, neither of which exists —
+// and the aggregate shock add-on that used to reach Property went with the
+// Gamma path. So Property prices 0.0247 and cannot incur it: a STRUCTURAL
+// 20.4% over-collection of pure premium, with certainty rather than in
+// expectation. Recorded here rather than quietly netted out, because the fix
+// is the cat band, not a smaller load.
+export const PROPERTY_HELD_PURE_PREMIUM_PER_100 = 0.1209;
+export const PROPERTY_PURE_PREMIUM_SPLIT = { nonCatDerived: 0.0962, catAsserted: 0.0247 };

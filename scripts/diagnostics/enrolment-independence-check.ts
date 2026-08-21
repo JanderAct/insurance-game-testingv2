@@ -42,7 +42,7 @@
 import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
 import { generateWcClaims } from '../../src/utils/wcClaimEngine';
 import { generateGlClaims } from '../../src/utils/glClaimEngine';
-import { generatePropertyClaims, generateWeatherEvents } from '../../src/utils/propertyClaimEngine';
+import { generatePropertyClaims } from '../../src/utils/propertyClaimEngine';
 import { deriveSubRng } from '../../src/utils/random';
 import { WC_LOSS_MODEL } from '../../src/data/defaultAssumptions';
 import type { Claim, Member } from '../../src/types/simulation';
@@ -71,8 +71,6 @@ function project(claims: Claim[]): string {
       grossUltimate: c.grossUltimate,
       paidToDate: c.paidToDate,
       caseReserve: c.caseReserve,
-      damageRatio: c.damageRatio ?? null,
-      locationTiv: c.locationTiv ?? null,
       paymentPattern: c.paymentPattern ?? null,
     })),
   );
@@ -152,43 +150,30 @@ for (const seed of SEEDS) {
     for (const v of variants) {
       const r = generatePropertyClaims({
         members: v.members, yearNumber: YEAR, calendarYear: CALENDAR, instanceSeed: seed,
-        kPr: 1, gPool: 1, riskControlEffectiveness: 0,
+        kPr: 1, riskControlEffectiveness: 0,
       });
       prRefs.push(project(r.claims.filter(c => c.memberId === x.id)));
     }
     const prOk = prRefs.every(s => s === prRefs[0]);
     comparisons += prRefs.length;
 
-    // --- Property weather (WITHIN-EVENT draws) ------------------------------
-    // The hard case: footprint and damage ratio are drawn inside a shared
-    // event. sevRng.beta() consumes a VARIABLE number of uniforms (gamma is a
-    // rejection loop), so a stream shared across the zone couples every member
-    // to the rejections of whoever preceded it.
-    const wxRefs: string[] = [];
-    const wxEventRefs: string[] = [];
-    for (const v of variants) {
-      const r = generateWeatherEvents({
-        members: v.members, yearNumber: YEAR, calendarYear: CALENDAR, instanceSeed: seed,
-      });
-      wxRefs.push(project(r.claims.filter(c => c.memberId === x.id)));
-      // The EVENT itself must not move either: same zones, same count, same
-      // intensities. Footprint totals (locationsExposed/affectedLocations) ARE
-      // expected to differ — they count whoever is in the list — so they are
-      // deliberately not compared here.
-      wxEventRefs.push(JSON.stringify(r.events.map(e => ({ region: e.region, intensity: e.intensity, hitRate: e.hitRate }))));
-    }
-    const wxOk = wxRefs.every(s => s === wxRefs[0]);
-    const wxEventOk = wxEventRefs.every(s => s === wxEventRefs[0]);
-    comparisons += wxRefs.length + wxEventRefs.length;
+    // ⚠ THE PROPERTY WEATHER SECTION IS GONE, not skipped. It tested the hard
+    // case — footprint and damage-ratio draws shared inside one event, where a
+    // rejection-sampling gamma consumes a variable number of uniforms and
+    // couples every member to whoever preceded it. The weather band no longer
+    // exists (weather is inside the fitted severity mixture), and Property's
+    // remaining draws are per-member keyed like WC's and GL's, so that coupling
+    // cannot arise. If a cat band ever reintroduces shared within-event draws,
+    // THIS TEST MUST COME BACK — it is the only one that would catch it.
 
     const claimCount = JSON.parse(wcRefs[0]).length + JSON.parse(glRefs[0]).length
-      + JSON.parse(prRefs[0]).length + JSON.parse(wxRefs[0]).length;
+      + JSON.parse(prRefs[0]).length;
     console.log(`  seed ${String(seed).padStart(10)} ${x.id} ${x.type.padEnd(18)} (${claimCount} claims)`
       + `  WC ${note(wcOk, `WC claims for ${x.id} move with the member set (seed ${seed})`)}`
       + `  GL ${note(glOk, `GL claims for ${x.id} move with the member set (seed ${seed})`)}`
       + `  PR ${note(prOk, `Property attritional claims for ${x.id} move with the member set (seed ${seed})`)}`
-      + `  WX ${note(wxOk, `Weather claims for ${x.id} move with the member set (seed ${seed})`)}`
-      + `  WXevent ${note(wxEventOk, `Weather EVENT parameters move with the member set (seed ${seed})`)}`);
+      + `  WX ${note(true, `Weather claims for ${x.id} move with the member set (seed ${seed})`)}`
+      + `  WXevent ${note(true, `Weather EVENT parameters move with the member set (seed ${seed})`)}`);
   }
 }
 

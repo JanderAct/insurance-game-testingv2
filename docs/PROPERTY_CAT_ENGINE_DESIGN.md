@@ -1,8 +1,13 @@
+> ⚠ **STILL UNBUILT, AND NOW LOAD-BEARING.** No cat band exists. Property's held pure
+> premium carries an ASSERTED cat load of 0.0247 per $100 (20.4% of its price) that no
+> generator produces and no shock event currently realises, so Property collects it every
+> year and cannot incur it. This document is the design that would close that gap.
+
 # Ripple — Property Catastrophe Engine (v3 canonical)
 
 ## Flood · Wildfire · Earthquake — three engines, two-layer reinsurance
 
-Companion to `property_noncat_design.md`. Canonical pool: **roster_canonical_v3.csv** — 200 members, $1,300M payroll, **$6,993M total TIV**, **1,866 stored locations**, three named regions (North/Central/South) with per-peril hazard weights.
+Companion to `property_noncat_design.md`. Canonical pool: ⚠ **THIS DOCUMENT WAS WRITTEN AGAINST roster_canonical_v3.csv ($6,993M TIV). THE LIVE ROSTER IS v4 AT $14,303.6M** — every absolute dollar figure below is a v3 figure and must be rescaled by 2.045 before use. 200 members, $1,300M payroll, **1,866 stored locations**, three named regions (North/Central/South) with per-peril hazard weights.
 
 **This is the consolidated v3 spec.** Supersedes the original cat doc and the cat/weather resolution. Mechanisms unchanged; all figures current against v3. TIV/locations are stored roster columns (the `TIV_TYPE_MULTIPLIER`/`PROPERTY_TIV_SCALE` model is deleted).
 

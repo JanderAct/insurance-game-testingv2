@@ -63,10 +63,6 @@ function roundOrBlank(v: number | undefined): number | string {
   return typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : '';
 }
 
-function numOrBlank(v: number | undefined, digits = 4): number | string {
-  return typeof v === 'number' && Number.isFinite(v) ? Number(v.toFixed(digits)) : '';
-}
-
 // Every claim and its enrolled-membership flag, for one line across every
 // locked year — the unit both the claim sheets and the occurrence totals are
 // built from.
@@ -186,7 +182,11 @@ function buildGlSheetRows(rows: LineClaimRow[]): Row[] {
 function buildPropertySheetRows(rows: LineClaimRow[]): Row[] {
   const header = [
     ...SHARED_HEADER, 'Band',
-    'Status', 'Gross Incurred', 'Gross Paid', 'Damage Ratio', 'Location TIV',
+    // Damage Ratio and Location TIV are GONE with Property's rebuild. They were
+    // components of the retired damageRatio x locationTiv severity and were
+    // populated on no other line; the fitted mixture draws an amount directly,
+    // so there is nothing for either column to hold.
+    'Status', 'Gross Incurred', 'Gross Paid',
     'Reported Year', 'Enrolled',
   ];
   const body = sortClaimRows(rows).map(({ claim, member, enrolled }) => [
@@ -194,7 +194,6 @@ function buildPropertySheetRows(rows: LineClaimRow[]): Row[] {
     claim.accidentYear, claim.calendarYear,
     claim.tier,
     claim.status, roundOrBlank(claim.grossUltimate), roundOrBlank(claim.paidToDate),
-    numOrBlank(claim.damageRatio), roundOrBlank(claim.locationTiv),
     claim.reportedYear, enrolled ? 'Yes' : 'No',
   ]);
   // Property's note leads with why the sheet is (currently) empty, since an

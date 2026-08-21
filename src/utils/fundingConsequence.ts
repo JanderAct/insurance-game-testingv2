@@ -32,7 +32,7 @@
 // pretending it is zero.
 
 import { SLIDER_RANGES } from '../data/defaultAssumptions';
-import { lookupCLF, currentPurePremiumPer100, projectedRcEffectiveness } from './simulationEngine';
+import { lookupCLF, currentPurePremiumPer100 } from './simulationEngine';
 import { hasStaticClf, staticClf, staticClfCrossing } from '../data/clfTables';
 import { quoteLineRates } from './linePricing';
 import type { CoverageLine, Member } from '../types/simulation';
@@ -147,10 +147,13 @@ function ratesAt(
   confidenceLevel: number, reinsuranceLevel: number, line: CoverageLine,
   atExpected: boolean, book: FundingConsequenceBook,
 ) {
-  const rcEffectiveness = projectedRcEffectiveness(book.priorRcEffectiveness, book.riskControlPct);
-  const purePremiumPer100 = currentPurePremiumPer100(
-    line, book.yearNumber, book.priorPurePremiumPer100, book.lossTrend, rcEffectiveness,
-  );
+  // ⚠ NO priorPurePremiumPer100 / lossTrend / rcEffectiveness ANY MORE. They
+  // existed only for Property's compounding random walk, which the Property
+  // rebuild replaced with a held constant. Every line's pure premium is now a
+  // pure function of the line and the year, so the panel cannot diverge from
+  // the engine by carrying a stale prior — one fewer way for the parity this
+  // file asserts to break.
+  const purePremiumPer100 = currentPurePremiumPer100(line, book.yearNumber);
   const clf = clfFor(line, confidenceLevel, atExpected);
   const q = quoteLineRates({
     line,
