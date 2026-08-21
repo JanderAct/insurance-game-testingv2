@@ -172,11 +172,15 @@ export function computeKPr(members: Member[]): number {
 
 // Pure premium per $100 of TIV, NON-CAT ONLY.
 //
-// ⚠ THIS IS THE 0.0962 HALF, NOT THE PRICE. The held pure premium adds an
-// ASSERTED cat load of 0.0247 that no generator produces — see
-// PROPERTY_HELD_PURE_PREMIUM_PER_100. Pricing off this function alone would
-// under-collect by that load; pricing off the held constant collects a load
-// that is currently never incurred. Both facts are recorded there.
+// ⚠ THIS IS NOW THE WHOLE PRICE, and it did not use to be. The held pure
+// premium carried an ASSERTED cat load of 0.0247 on top of this figure; that
+// load was removed because no generator produces it and Property's cat shock
+// is gated off, so it was collected with certainty and incurred never. This
+// function and PROPERTY_HELD_PURE_PREMIUM_PER_100 now agree exactly, which is
+// asserted rather than assumed — see property-claim-check.ts.
+//
+// If a cat band arrives, the load and the losses return TOGETHER. See the
+// constant's own comment for the derivation to reinstate.
 export function deriveNeutralPropertyPurePremiumPer100(fullRoster: Member[]): number {
   const expected = expectedPropertyGrossLoss(fullRoster, { riskQualityOverride: NEUTRAL_RQ, kPr: 1 });
   const tivUnits = fullRoster.reduce((s, m) => s + (m.exposureByLine.Property ?? 0), 0) * 10_000;

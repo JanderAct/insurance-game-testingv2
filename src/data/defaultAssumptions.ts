@@ -1283,31 +1283,43 @@ export const PROPERTY_LOSS_MODEL = {
   perRiskRetention: 2_000_000,
 };
 
-// The held pure premium, per $100 of TIV.
+// The held pure premium, per $100 of TIV. DERIVED, and now derived ONLY.
 //
-// ⚠ IT HAS TWO PARTS WITH DIFFERENT PROVENANCE AND THEY MUST NOT BE READ AS
-// ONE NUMBER. Anyone seeing 0.1209 should not have to reverse-engineer that a
-// fifth of it is a judgment call.
+// = frequencyPer1mTiv x the capped mixture mean ($435,256), i.e. the
+// generator's own analytic expectation over the 1,822 fitted claims. Asserted
+// against the generator by property-fit-check.ts and property-claim-check.ts,
+// so the price and the draw cannot drift apart.
 //
-//   0.0962  DERIVED. frequencyPer1mTiv x the capped mixture mean ($435,256),
-//           i.e. the generator's own analytic expectation over the 1,822
-//           fitted claims. Reproduced from the parameters by
-//           property-fit-check.ts, which asserts it.
-//   0.0247  ASSERTED. One observed event in ten years — $550M on $111.1B of
-//           TIV, 0.495% — priced at a 1-in-20 return period. A SINGLE
-//           OBSERVATION AT A CHOSEN RETURN PERIOD is not a fit and is not
-//           presented as one.
-//   0.1209  total.
+// ⚠ AN ASSERTED CAT LOAD OF 0.0247 WAS REMOVED FROM THIS CONSTANT, taking it
+// from 0.1209 to 0.0962. Recorded in full so it can be restored correctly
+// rather than re-derived from memory:
 //
-// ⚠ AND THE CAT COMPONENT IS CURRENTLY COLLECTED BUT NEVER INCURRED. The
-// intent is that shock events REALISE this load rather than add to it, the
-// same structure as GL's social-inflation baseline with event #19 on top. But
-// Property's cat shock is inert — shockCatalog's earthquake event is gated on
-// a Property cat band and an occurrence-basis tower, neither of which exists —
-// and the aggregate shock add-on that used to reach Property went with the
-// Gamma path. So Property prices 0.0247 and cannot incur it: a STRUCTURAL
-// 20.4% over-collection of pure premium, with certainty rather than in
-// expectation. Recorded here rather than quietly netted out, because the fix
-// is the cat band, not a smaller load.
-export const PROPERTY_HELD_PURE_PREMIUM_PER_100 = 0.1209;
-export const PROPERTY_PURE_PREMIUM_SPLIT = { nonCatDerived: 0.0962, catAsserted: 0.0247 };
+//   WHAT IT WAS. One observed event in ten years — $550M of loss on $111.1B of
+//   TIV, 0.495% — priced at a 1-in-20 return period. A SINGLE OBSERVATION AT A
+//   CHOSEN RETURN PERIOD, never a fit, and tagged ASSERTED throughout.
+//
+//   WHY IT CAME OUT. The intent was that shock events REALISE the load rather
+//   than add to it, the same structure as GL's social-inflation baseline with
+//   event #19 on top. But Property's cat shock is gated off and the aggregate
+//   shock add-on that used to reach Property left with the Gamma path, so
+//   Property collected the load every year and COULD NOT INCUR IT — a 20.4%
+//   over-collection with CERTAINTY, not in expectation.
+//
+//   AND IT WOULD HAVE POISONED THE CLF TABLE. That table is derived by
+//   backtest against what the engine actually draws. With the load in, it
+//   would have measured a Property collecting 0.1209 and losing 0.0962 —
+//   reading ~80% of premium every year with no variance contributed by the
+//   load at all. Every stop would sit in the wrong place, and because the
+//   table is iterated to a fixed point it would have converged onto that
+//   wrong answer confidently.
+//
+//   ⚠ IT RETURNS WITH THE CAT BAND, IN THE SAME COMMIT AS THE CAT BAND, so the
+//   price and the losses can never disagree again. Adding the load back on its
+//   own would recreate exactly the defect that removed it.
+export const PROPERTY_HELD_PURE_PREMIUM_PER_100 = 0.0962;
+
+// The retired load, kept as data rather than prose so the restoring commit has
+// a value to reinstate and property-claim-check has something to assert the
+// held constant is NOT carrying. `catAssertedRetired` is deliberately NOT summed
+// into the held constant anywhere.
+export const PROPERTY_PURE_PREMIUM_SPLIT = { nonCatDerived: 0.0962, catAssertedRetired: 0.0247 };

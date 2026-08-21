@@ -60,13 +60,18 @@ console.log('\n--- 2. THE HELD PURE PREMIUM RECONCILES FROM ITS PARTS ---');
 {
   const derived = deriveNeutralPropertyPurePremiumPer100(roster);
   check(Math.abs(derived - PROPERTY_PURE_PREMIUM_SPLIT.nonCatDerived) < 0.0005,
-    'generator analytic == the DERIVED half (0.0962)', derived.toFixed(4));
-  const total = derived + PROPERTY_PURE_PREMIUM_SPLIT.catAsserted;
-  check(Math.abs(total - PROPERTY_HELD_PURE_PREMIUM_PER_100) < 0.0005,
-    'derived + ASSERTED cat load == the held constant (0.1209)', total.toFixed(4));
-  console.log(`\n  ⚠ ${(PROPERTY_PURE_PREMIUM_SPLIT.catAsserted / PROPERTY_HELD_PURE_PREMIUM_PER_100 * 100).toFixed(1)}% OF THE PRICE IS THE ASSERTED CAT LOAD, and no generator produces it.`);
-  console.log('  Property collects it every year and cannot incur it while the cat shock stays');
-  console.log('  gated. Measured, not editorial — see PROPERTY_HELD_PURE_PREMIUM_PER_100.');
+    'generator analytic == the derived non-cat figure (0.0962)', derived.toFixed(4));
+  // THE INVARIANT THAT REPLACED THE OLD SPLIT: price and draw are now the same
+  // number, so there is nothing in the premium the generator does not produce.
+  check(Math.abs(derived - PROPERTY_HELD_PURE_PREMIUM_PER_100) < 0.0005,
+    'the HELD constant IS the generator analytic — no unearned load in the price',
+    `${PROPERTY_HELD_PURE_PREMIUM_PER_100} vs ${derived.toFixed(4)}`);
+  check(Math.abs(PROPERTY_HELD_PURE_PREMIUM_PER_100 - (derived + PROPERTY_PURE_PREMIUM_SPLIT.catAssertedRetired)) > 0.001,
+    'the RETIRED cat load is NOT summed into the held constant',
+    `held ${PROPERTY_HELD_PURE_PREMIUM_PER_100}, retired load ${PROPERTY_PURE_PREMIUM_SPLIT.catAssertedRetired}`);
+  console.log(`\n  The 0.0247 cat load is RETIRED, not applied: Property cannot incur a catastrophe`);
+  console.log('  while the cat shock is gated, so pricing one was a certain over-collection. It');
+  console.log('  returns WITH the cat band, in the same commit, or the two disagree again.');
 }
 
 console.log('\n--- 3. EXPECTED LOSS IS EXACTLY PROPORTIONAL TO TIV ---');

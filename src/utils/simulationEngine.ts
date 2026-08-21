@@ -914,14 +914,17 @@ export function processLineYear(
     aggregateMemberLoss = generated.grossUltimateLoss;
     kLineApplied = kPr;
     glClaimCount = generated.claimCount;
-    // ⚠ NO SHOCK CHANNEL. Property's shock used to arrive as an aggregate
-    // add-on keyed off commonLossFactor, which went with the Gamma path; its
-    // replacement is the cat shock events, which are still gated off. So
-    // shockOccurred stays false and the ASSERTED 0.0247 cat load in the held
-    // pure premium is collected and never incurred — a structural 20.4%
-    // over-collection recorded at PROPERTY_HELD_PURE_PREMIUM_PER_100. The fix
-    // is the cat band, not a smaller load, and it is NOT silently netted out
-    // here.
+    // ⚠ NO SHOCK CHANNEL, AND NO CAT LOAD EITHER — the two facts belong
+    // together. Property's shock used to arrive as an aggregate add-on keyed
+    // off commonLossFactor, which went with the Gamma path; its replacement is
+    // the cat shock events, still gated off. The held pure premium therefore no
+    // longer carries the ASSERTED 0.0247 cat load: a line that cannot incur a
+    // peril must not be priced for it, and the load is now recorded as retired
+    // at PROPERTY_HELD_PURE_PREMIUM_PER_100 rather than collected.
+    //
+    // WHEN THE CAT BAND LANDS, THE LOAD AND THE LOSSES GO BACK IN THE SAME
+    // COMMIT. Restoring either alone recreates the defect: the load alone is a
+    // certain over-collection, the losses alone a certain under-collection.
     shockOccurred = false;
   } else {
     shockOccurred = commonLossFactor > catastropheThreshold;

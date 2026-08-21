@@ -1,7 +1,13 @@
-> ⚠ **STILL UNBUILT, AND NOW LOAD-BEARING.** No cat band exists. Property's held pure
-> premium carries an ASSERTED cat load of 0.0247 per $100 (20.4% of its price) that no
-> generator produces and no shock event currently realises, so Property collects it every
-> year and cannot incur it. This document is the design that would close that gap.
+> ⚠ **STILL UNBUILT. THE CAT LOAD HAS BEEN PULLED FROM THE PRICE.** No cat band exists,
+> so Property no longer prices for one: the ASSERTED 0.0247 per $100 came out of
+> `PROPERTY_HELD_PURE_PREMIUM_PER_100` (0.1209 -> 0.0962) because it was collected with
+> certainty and incurred never, and because it would have poisoned the CLF backtest.
+>
+> **WHEN THIS DESIGN IS BUILT, THE LOAD GOES BACK IN THE SAME COMMIT AS THE LOSSES.**
+> Restoring either alone recreates a defect — the load alone is a certain
+> over-collection, the losses alone a certain under-collection. The derivation to
+> reinstate (one event in ten years, $550M on $111.1B = 0.495% of TIV, priced at 1-in-20)
+> is recorded at the constant.
 
 # Ripple — Property Catastrophe Engine (v3 canonical)
 
