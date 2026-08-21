@@ -230,6 +230,8 @@ function derive(line: CoverageLine) {
 console.log(`=== STATIC CLF TABLE DERIVATION — ${GAMES} games x ${YEARS} years per line, all defaults ===`);
 console.log('Each line run SOLO, so inter-line loans cannot couple the two derivations.');
 console.log(`Stops: ${STOPS.join(', ')}\n`);
-derive('WC');
-derive('GL');
+// LINES env override so one line can be re-derived on its own — the
+// convergence pass after installing a table only needs the line that moved.
+const ONLY = (process.env.LINES ?? 'WC,GL,Property').split(',').map(x => x.trim()) as CoverageLine[];
+for (const l of ONLY) derive(l);
 console.log('\nDONE — derivation only. Nothing written; copy the literals by hand.');

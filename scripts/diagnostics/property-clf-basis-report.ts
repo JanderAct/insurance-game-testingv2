@@ -1,13 +1,23 @@
-// PROPERTY'S CLF BASIS ERROR — sizing what its own derived table would correct.
+// PROPERTY'S CLF CURVE — is the labelled confidence level the one delivered?
 //
 // Run: npx tsx scripts/diagnostics/property-clf-basis-report.ts
 //      GAMES=3000 npx tsx scripts/diagnostics/property-clf-basis-report.ts
 //
-// REPORTS. Changes nothing, gates nothing. Property's own CLF table is the
-// next commit; this measures what that commit is for.
+// REPORTS. Changes nothing, gates nothing.
+//
+// Written to SIZE the basis error while Property was still on the generic
+// FUNDING_CLF_TABLE; it now VALIDATES the derived table that replaced it, and
+// reads both curves side by side so the correction stays legible.
+//
+// ⚠ OUT-OF-SAMPLE BY CONSTRUCTION, WHICH IS WHY IT IS WORTH RUNNING AT ALL. A
+// derived table is the percentiles of this exact statistic, so measuring it on
+// the derivation's own sample would be a tautology. This draws a DIFFERENT
+// population (its own seeds and game count from clf-table-derive's), so a small
+// residual is genuine agreement and a large one means the table has gone stale
+// against the engine.
 //
 // ============================================================================
-// THE DEFECT, STATED PRECISELY.
+// THE DEFECT, AS IT STOOD, STATED PRECISELY.
 //
 // FUNDING_CLF_TABLE maps a confidence LEVEL to a multiplier on expected loss:
 // at level p, funding = CLF(p) x expected loss is asserted to cover the year's
@@ -15,8 +25,8 @@
 // GROSS annual loss distribution.
 //
 // Since dbd9138 Property's pool premium funds NET expected loss — gross less
-// what the occurrence layer is expected to cede. So a gross-basis multiplier is
-// being applied to a net base, and the confidence level it actually delivers is
+// what the occurrence layer is expected to cede. So a gross-basis multiplier was
+// being applied to a net base, and the confidence level actually delivered was
 // not the one on the label. This is the same defect fab85e4 flagged (and did
 // not fix) for WC and GL, where it measured ~5.5pp: the 60% stop delivered
 // 54.3% on GL and 54.7% on WC.
@@ -40,6 +50,7 @@ import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { FUNDING_CLF_TABLE } from '../../src/data/defaultAssumptions';
+import { STATIC_CLF_TABLE, hasStaticClf, crossingOf } from '../../src/data/clfTables';
 import type { CoverageLine, GameState, ResultSet } from '../../src/types/simulation';
 
 const GAMES = Number(process.env.GAMES ?? 1200);
@@ -87,31 +98,53 @@ console.log(`${GAMES} solo games x ${YEARS} years = ${n.toLocaleString()} line-y
 console.log(`  netIncurredLoss / poolPremium:  median ${quantile(0.5).toFixed(4)}   mean ${(ratios.reduce((a, b) => a + b, 0) / n).toFixed(4)}`);
 console.log(`  p10 ${quantile(0.1).toFixed(3)}   p25 ${quantile(0.25).toFixed(3)}   p75 ${quantile(0.75).toFixed(3)}   p90 ${quantile(0.9).toFixed(3)}   p99 ${quantile(0.99).toFixed(3)}\n`);
 
-console.log('  labelled   table CLF   DELIVERS   error (pp)   implied CLF for the label   dollar error');
+// ⚠ NOW MEASURES THE LIVE CURVE, WHICHEVER IT IS. This read FUNDING_CLF_TABLE
+// unconditionally, which was right while that was the curve Property priced
+// against. Property has its own derived table now, so reading the generic one
+// would report a corrected defect as though it were still live — the exact
+// class of stale-diagnostic failure clf-table-derive's own header warns about
+// ("a green check reporting numbers the game does not use is worse than a
+// deleted one"). Both curves are printed so the correction stays visible.
+const live = hasStaticClf(LINE) ? STATIC_CLF_TABLE[LINE] : null;
+const liveClfAt = (stop: number) => {
+  if (!live) return FUNDING_CLF_TABLE[stop];
+  const { stops: ss, clf: cc } = live;
+  const t = stop * 100, last = ss.length - 1;
+  if (t <= ss[0]) return cc[0];
+  if (t >= ss[last]) return cc[last];
+  for (let i = 0; i < last; i++) if (t >= ss[i] && t <= ss[i + 1]) {
+    const w = ss[i + 1] === ss[i] ? 0 : (t - ss[i]) / (ss[i + 1] - ss[i]);
+    return cc[i] + w * (cc[i + 1] - cc[i]);
+  }
+  return cc[last];
+};
+console.log(`  LIVE CURVE: ${live ? `${LINE}'s own DERIVED table, crossing ${(crossingOf(live) * 100).toFixed(1)}%` : 'the generic FUNDING_CLF_TABLE (no derived table)'}`);
+console.log('  (the generic table is shown alongside, as the basis this replaced)\n');
+console.log('  labelled   LIVE CLF   DELIVERS   error (pp)   implied CLF   generic CLF   generic delivers');
 const stops = Object.keys(FUNDING_CLF_TABLE).map(Number).sort((a, b) => a - b);
 let worstPP = 0, defaultPP = 0;
 for (const stop of stops) {
-  const clf = FUNDING_CLF_TABLE[stop];
+  const clf = liveClfAt(stop);
+  const generic = FUNDING_CLF_TABLE[stop];
   const delivered = coverage(clf);
   const errPP = (delivered - stop) * 100;
   const implied = quantile(stop);
-  const dollarErr = (clf / implied - 1) * 100;
   if (Math.abs(errPP) > Math.abs(worstPP)) worstPP = errPP;
   if (Math.abs(stop - 0.60) < 1e-9) defaultPP = errPP;
-  console.log(`   ${(stop * 100).toFixed(0).padStart(4)}%     ${clf.toFixed(3).padStart(7)}    ${(delivered * 100).toFixed(1).padStart(6)}%   ${(errPP >= 0 ? '+' : '')}${errPP.toFixed(1).padStart(6)}       ${implied.toFixed(3).padStart(9)}              ${(dollarErr >= 0 ? '+' : '')}${dollarErr.toFixed(1)}%`);
+  console.log(`   ${(stop * 100).toFixed(0).padStart(4)}%    ${clf.toFixed(4).padStart(8)}    ${(delivered * 100).toFixed(1).padStart(6)}%   ${(errPP >= 0 ? '+' : '')}${errPP.toFixed(1).padStart(6)}     ${implied.toFixed(4).padStart(9)}     ${generic.toFixed(3).padStart(7)}        ${(coverage(generic) * 100).toFixed(1).padStart(6)}%`);
 }
 
 console.log('\n  --- what this means ---');
-console.log(`  AT THE DEFAULT 60% STOP: the table says 1.000 and delivers ${(coverage(1.0) * 100).toFixed(1)}%,`);
-console.log(`  an error of ${defaultPP >= 0 ? '+' : ''}${defaultPP.toFixed(1)}pp. The DOLLARS are exactly right there regardless —`);
-console.log('  1.000x is the identity on any basis — so this is a mislabelling, not an');
-console.log('  overcharge or an undercharge. It is what the funding-consequence panel and');
-console.log('  the Decisions slider tell the player they are buying.');
-console.log(`\n  WORST STOP: ${worstPP >= 0 ? '+' : ''}${worstPP.toFixed(1)}pp.`);
-console.log('  fab85e4 measured the same defect at ~5.5pp on WC and GL (their 60% stop');
-console.log('  delivering 54.3% and 54.7%) before their tables were re-derived on the');
-console.log('  retained distribution. Property has no derived table at all, so it carries');
-console.log('  BOTH that basis error AND whatever gap there is between the real pool\'s');
-console.log('  reference chart and this model\'s Property book — the two are not separable');
-console.log('  from this measurement alone, and a derived table corrects them together.');
+console.log(`  WORST |error| on the LIVE curve: ${Math.abs(worstPP).toFixed(1)}pp (at the 60% stop: ${defaultPP >= 0 ? '+' : ''}${defaultPP.toFixed(1)}pp).`);
+console.log('  A derived table should read near zero at every stop BY CONSTRUCTION — it is');
+console.log('  the percentiles of this very statistic — so a large residual here means the');
+console.log('  table has gone stale against the engine, not that the basis is wrong.');
+console.log('');
+console.log('  THE GENERIC COLUMN IS THE DEFECT THIS REPLACED, kept as the record: a');
+console.log('  gross-basis real-pool chart applied to a net-funded line. Its 60% stop');
+console.log(`  delivers ${(coverage(FUNDING_CLF_TABLE[0.60]) * 100).toFixed(1)}% against the 60% it claims — fab85e4 measured the same`);
+console.log('  defect at ~5.5pp on WC and GL (54.3% and 54.7%) before their own tables');
+console.log('  were derived. Property carried both that basis error and the gap between');
+console.log('  the reference chart and this model\'s Property book; the derived table');
+console.log('  corrects them together.');
 console.log('\nDONE — reported, not gated.');

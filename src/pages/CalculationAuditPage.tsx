@@ -1443,7 +1443,7 @@ export function buildSupportingRows(
     isPoolView
       ? naNote(
           'the reserve risk margin is summed across lines, each with its own 90% CLF ' +
-          '(WC 1.3709, GL 1.5020, Property 1.9510) — no single factor reproduces the sum. ' +
+          '(WC 1.3709, GL 1.5020, Property 1.5923) — no single factor reproduces the sum. ' +
           'Select a line tab to check it.'
         )
       : legacyCheck(diff);
@@ -1998,7 +1998,7 @@ export function buildSupportingRows(
       // ⚠ AT POOL SCOPE THIS IS A SUM, NOT A PRODUCT, and showing the product
       // was a regression this page's own diagnostic caught in its first run.
       // The pool figure is summed across lines, each applying its OWN 90% CLF
-      // (WC 1.3709, GL 1.5020, Property 1.9510), so a single factor cannot
+      // (WC 1.3709, GL 1.5020, Property 1.5923), so a single factor cannot
       // reproduce it. The CHECK was correctly made n/a when that was found; the
       // FORMULA was left showing expectedNetUnpaidLoss x 0.951 and read $20.47M
       // against a stated $7.99M. A wrong derivation beside a neutralised check
@@ -2027,8 +2027,8 @@ export function buildSupportingRows(
         spec: { kind: 'sum', terms: [factorTerm(fundingMarginCLF, fundingMarginCLFLabel), factorTerm(-1, '1.0')] },
       },
       explain: isPoolView
-        ? 'Summed across the active lines, each applying its own 90%-confidence margin factor — WC and GL read their static tables (1.3709 and 1.5020), Property reads FUNDING_CLF_TABLE (1.9510). No single blended factor reproduces the total, which is why the check above is n/a at pool scope; select a line tab to check one line against its own curve.'
-        : `${fundingMarginCLFLabel} is a fixed 90%-confidence reserve-margin factor, independent of the player's own selected funding confidence level above. It is the LINE'S OWN curve: WC and GL read their static tables (1.3709 and 1.5020), Property reads FUNDING_CLF_TABLE (1.9510).`,
+        ? 'Summed across the active lines, each applying its own 90%-confidence margin factor from its own static table (WC 1.3709, GL 1.5020, Property 1.5923). No single blended factor reproduces the total, which is why the check above is n/a at pool scope; select a line tab to check one line against its own curve.'
+        : `${fundingMarginCLFLabel} is a fixed 90%-confidence reserve-margin factor, independent of the player's own selected funding confidence level above. It is the LINE'S OWN curve, read from that line's static table: WC 1.3709, GL 1.5020, Property 1.5923.`,
     },
     {
       metric: 'Reserve Risk Margin Check Difference',

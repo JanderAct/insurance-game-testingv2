@@ -50,29 +50,21 @@ interface DecisionsPageProps {
 // 50%. 0.45 'Minimal' continues the existing descending scale; 0.40/0.35/0.30
 // are named to read as unmistakably underfunded, since that is the point of
 // making them selectable at all (see the consequence panel below).
-// 0.60 is labeled 'Expected' HERE, for PROPERTY ONLY — it is BOTH Property's
-// default and the exact break-even/expected-loss funding point in
-// FUNDING_CLF_TABLE (CLF 1.000 there), so 'Below Average' made the intended
-// setting read as a compromise rather than as the anchor it is. This map is
-// no longer used by WC or GL: their own derived grids' break-even is NOT at
-// 60% and moves with the book (see FUNDING_LEVEL_LABELS_LINE below and the
-// fundingAtExpected field), so keeping the "0.60 = Expected" label there would
-// mislabel the stop exactly the way the derived grids were built to prevent.
-const FUNDING_LEVEL_LABELS: Record<number, string> = {
-  0.95: 'Maximum', 0.90: 'Very High', 0.85: 'High', 0.80: 'Above Average', 0.75: 'Balanced', 0.70: 'Moderate', 0.65: 'Moderate-Low', 0.60: 'Expected', 0.55: 'Low', 0.50: 'Very Low',
-  0.45: 'Minimal', 0.40: 'Deficient', 0.35: 'Severely Deficient', 0.30: 'Critical',
-};
-
-// WC and GL: the SAME descending gradation, minus the 60%='Expected' special
-// case above — 'Expected' now names a book-dependent concept surfaced
-// separately (fundingAtExpected), not a fixed rung at 60%. 0.60 reads as an
-// ordinary point in the ladder here, same as 0.65 or 0.55.
+// ⚠ THE 0.60 = 'Expected' MAP IS GONE, AND PROPERTY WAS ITS LAST CONSUMER.
+// It labelled 60% as the anchor because that was where FUNDING_CLF_TABLE's
+// CLF hit exactly 1.000 — true only for a line reading the generic table.
+// Property has its own derived table now (crossing 54.0%), so every line
+// surfaces 'Expected' as the book's real break-even via fundingAtExpected
+// rather than as a fixed rung, and one ladder serves all three.
+//
+// ALL THREE LINES: a plain descending gradation, with 0.60 an ordinary point
+// in it, same as 0.65 or 0.55.
 const FUNDING_LEVEL_LABELS_LINE: Record<number, string> = {
   0.95: 'Maximum', 0.90: 'Very High', 0.85: 'High', 0.80: 'Above Average', 0.75: 'Balanced', 0.70: 'Moderate', 0.65: 'Moderate-Low', 0.60: 'Below Average', 0.55: 'Low', 0.50: 'Very Low',
   0.45: 'Minimal', 0.40: 'Deficient', 0.35: 'Severely Deficient', 0.30: 'Critical',
 };
 
-function getFundingLabel(v: number, labels: Record<number, string> = FUNDING_LEVEL_LABELS): string {
+function getFundingLabel(v: number, labels: Record<number, string> = FUNDING_LEVEL_LABELS_LINE): string {
   const rounded = Math.round(v * 20) / 20;
   return labels[rounded] ?? v.toFixed(2);
 }
@@ -171,12 +163,10 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
               is now the sole pricing lever; the consequence panel below
               replaces the information the deleted lever used to carry. */}
           <FundingLevelControl
-            line={selectedLine}
             d={d}
             fundingConsequence={fundingConsequence}
             setFundingLevel={setFundingLevel}
             setFundingAtExpected={setFundingAtExpected}
-            set={set}
             disabled={disabled}
           />
           <FundingConsequencePanel c={fundingConsequence} lastLineResult={lastLineResult} line={selectedLine} />
@@ -347,32 +337,24 @@ function outstandingLoanSlider(
 // update — the natural, and only, way to leave Expected mode. A separate
 // button re-selects Expected directly, since a dragged slider can never land
 // back on an arbitrary fractional percentage on its own.
-function FundingLevelControl({ line, d, fundingConsequence, setFundingLevel, setFundingAtExpected, set, disabled }: {
-  line: CoverageLine;
+// `line` and `set` are gone from the signature with Property's branch: the
+// remaining path is line-agnostic and never writes fundingConfidenceLevel
+// directly (setFundingLevel does, and clears fundingAtExpected with it).
+function FundingLevelControl({ d, fundingConsequence, setFundingLevel, setFundingAtExpected, disabled }: {
   d: LineDecisionSet;
   fundingConsequence: FundingConsequence | null;
   setFundingLevel: (v: number) => void;
   setFundingAtExpected: () => void;
-  set: (key: keyof LineDecisionSet, val: number) => void;
   disabled: boolean;
 }) {
-  if (line === 'Property') {
-    return (
-      <SliderInput
-        label="Funding Confidence Level"
-        value={d.fundingConfidenceLevel}
-        min={SLIDER_RANGES.fundingConfidenceLevel.min} max={SLIDER_RANGES.fundingConfidenceLevel.max} step={SLIDER_RANGES.fundingConfidenceLevel.step}
-        onChange={v => set('fundingConfidenceLevel', v)}
-        formatValue={v => `${getFundingLabel(v)} (${(v * 100).toFixed(0)}%)`}
-        leftLabel="Underfunded" rightLabel="Higher Confidence"
-        valueColor={d.fundingConfidenceLevel < 0.60 ? 'text-red-600' : 'text-gray-700'}
-        disabled={disabled}
-        helpText="Sets the funding confidence level, applied as a multiplier (CLF) on expected losses to set pool premium. 60% is expected — pool premium equals expected losses. Below it the pool funds less than expected losses by design."
-      />
-    );
-  }
-
-  // WC/GL: break-even is not a fixed percent — it moves with the enrolled
+  // ⚠ PROPERTY'S SEPARATE CONTROL IS GONE. It rendered the original slider with
+  // a fixed "60% is expected" label, correct only while Property read the
+  // generic FUNDING_CLF_TABLE whose 0.60 entry is literally 1.000. It has its
+  // own derived table now, crossing at 54.0%, so a hardcoded 60% would mislabel
+  // the stop by 6 points — exactly the error the derived tables exist to
+  // prevent, and the reason WC and GL never had such a label.
+  //
+  // ALL THREE LINES: break-even is not a fixed percent — it moves with the enrolled
   // book's own CV (WC) or expected claim count (GL). expectedPercentile is
   // cross-checked against the same grid computeWcClf/computeGlClf use (see
   // wcClfCrossingPercentile/glClfCrossingPercentile), never derived separately.

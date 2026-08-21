@@ -195,7 +195,7 @@
 
 import type { CoverageLine } from '../types/simulation';
 
-export type StaticClfLine = 'WC' | 'GL';
+export type StaticClfLine = 'WC' | 'GL' | 'Property';
 
 // A line's curve. `stops` and `clf` are index-aligned and ascending.
 //
@@ -303,14 +303,69 @@ export const GL_DERIVED: ClfTable = {
   ],
 };
 
+// ============================================================================
+// PROPERTY — DERIVED from this engine, on the NET basis.
+//
+// 20,000 line-years from 2,000 solo games at all defaults, via
+// scripts/diagnostics/clf-table-derive.ts (LINES=Property GAMES=2000). Same
+// statistic, same block bootstrap over whole games, same script that produced
+// WC's. 95% CI half-widths run 0.007 at the working stops to 0.034 at the 99th.
+//
+// ⚠ A GROSS-BASIS TABLE FOR PROPERTY WAS OFFERED AND REJECTED, and the reason
+// is the whole point of deriving this one. That candidate curve (crossing
+// 65.5%, median 0.7774, CV 0.809) was checked against four candidate bases on
+// this engine and reproduces `grossUltimateLoss / grossExpectedLoss` to within
+// 2.0% at every stop — matching its mean (1.0053 v 1.0009), CV (0.805 v 0.809),
+// median (0.7808 v 0.7774) and skew (1.287 v 1.288). It is a GROSS curve.
+// Property funds NET, so installing it would have re-created the very basis
+// error a derived table exists to remove, just with different numbers than
+// FUNDING_CLF_TABLE's. The net distribution is far tighter — CV 0.434 against
+// 0.809 — because the occurrence layer removes the top of every large claim,
+// and that is exactly the difference a net-basis table has to capture.
+//
+// CROSSING 54.0% (95% CI 53.4-54.8), stationary across the ten years (52-55%).
+// So "Expected" on Property is a ~54% stop, not the 60% the generic
+// FUNDING_CLF_TABLE labelled it — the -5.7pp mislabelling measured in
+// scripts/diagnostics/property-clf-basis-report.ts, now corrected at source.
+//
+// CONVERGENCE: the second pass, with this table installed, is BYTE-IDENTICAL to
+// the first at every stop, CI and crossing. That is the outcome the derive-twice
+// note above PREDICTS rather than a lucky result — a3d7760 moved the pre-game
+// band onto premium, cutting the 90%-stop-to-opening-surplus loop, and at all
+// defaults fundingAtExpected pins the CLF to 1.000 so the derivation never
+// consults the table it is deriving. Property is the first line derived entirely
+// after that link was cut, which is why it converges in one pass where WC moved
+// 49.9% -> 47.2%.
+//
+// VALIDATED OUT OF SAMPLE, which the derivation alone cannot do: a derived table
+// is by construction the percentiles of its own sample. property-clf-basis-report
+// draws a different population and finds every labelled stop within 0.9pp of
+// what it delivers, +0.1pp at the default.
+const PROPERTY_DERIVED: ClfTable = {
+  source: 'derived',
+  stops: [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 97.5, 99],
+  clf: [
+    0.4808, 0.5551, 0.6224, 0.6820, 0.7387, 0.7903, 0.8463, 0.8994, 0.9542, 1.0108,
+    1.0688, 1.1339, 1.1998, 1.2754, 1.3594, 1.4608, 1.5923, 1.8043, 2.0037, 2.2466,
+  ],
+};
+
 // WHAT THE ENGINE ACTUALLY READS.
 export const STATIC_CLF_TABLE: Record<StaticClfLine, ClfTable> = {
   WC: WC_DERIVED,
   GL: GL_SUPPLIED,
+  Property: PROPERTY_DERIVED,
 };
 
+// ⚠ ALL THREE LINES NOW HAVE A TABLE, so this is true universally and
+// FUNDING_CLF_TABLE has no line left reading it for PRICING. It is still read
+// for the catastrophe threshold (simulationEngine's
+// catastropheThresholdConfidence lookup), which is a different use and not a
+// per-line funding curve — so the generic table is not dead, just no longer a
+// pricing fallback. Kept as a real predicate for the same reason
+// hasTractableCeded is.
 export const hasStaticClf = (line: CoverageLine): line is StaticClfLine =>
-  line === 'WC' || line === 'GL';
+  line === 'WC' || line === 'GL' || line === 'Property';
 
 // CLF at a requested confidence level (0-1), linearly interpolated between the
 // LINE'S OWN stops and clamped to that line's range.

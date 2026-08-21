@@ -10,11 +10,13 @@ import type { CoverageLine, DecisionSet, LineDecisionSet } from '../types/simula
 export function defaultLineDecisionSet(line: CoverageLine): LineDecisionSet {
   return {
     fundingConfidenceLevel: SLIDER_RANGES.fundingConfidenceLevel.default,
-    // Default TRUE for every line, including Property (where it is inert —
-    // Property ignores the flag and always reads FUNDING_CLF_TABLE). Both WC
-    // and GL default to "fund exactly at expected loss", the same CONCEPT on
-    // both, rather than WC at 60% and GL at 65% (two numbers that meant two
-    // different, both wrong, things before their own derived grids existed).
+    // Default TRUE for every line, and no longer inert on any of them: all
+    // three now default to "fund exactly at expected loss", the same CONCEPT on
+    // each, rather than a per-line percentage stop (WC at 60%, GL at 65% — two
+    // numbers that meant two different, both wrong, things before their own
+    // derived tables existed). Property was the last line for which this flag
+    // did nothing; its derived table crosses at 54.0%, not 60%, so it now
+    // carries the same meaning here as on WC and GL.
     fundingAtExpected: true,
     dividendPct: SLIDER_RANGES.dividendPct.default,
     assessmentPct: SLIDER_RANGES.assessmentPct.default,

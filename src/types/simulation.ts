@@ -301,12 +301,15 @@ export interface LineDecisionSet {
   // ~75.2%. It cannot be represented as a fixed number in
   // fundingConfidenceLevel: that field would go stale the moment the book's
   // composition shifted, silently drifting off CLF 1.000 while still reading
-  // as "the chosen value". WC and GL ONLY: true means the engine bypasses the
-  // grid stop-lookup entirely and uses CLF = 1.000 exactly, at every book
+  // as "the chosen value". ALL THREE LINES: true means the engine bypasses the
+  // table stop-lookup entirely and uses CLF = 1.000 exactly, at every book
   // size, every year — not an interpolated value that happens to land close.
-  // Property IGNORES this field — it still reads FUNDING_CLF_TABLE, whose
-  // 60% entry already is exactly 1.000, so Property's "Expected" and its 60%
-  // stop already coincide and nothing new is needed there.
+  //
+  // ⚠ PROPERTY USED TO IGNORE THIS FIELD and no longer does. It read the
+  // generic FUNDING_CLF_TABLE, whose 60% entry is exactly 1.000, so its
+  // "Expected" and its 60% stop coincided and the flag was inert. Its own
+  // derived table crosses at 54.0%, so the two no longer coincide and the flag
+  // is what keeps "Expected" meaning break-even rather than a 60% stop.
   // fundingConfidenceLevel is NOT read for pricing while this is true (it is
   // only the fallback the slider lands on if the player later drags away from
   // Expected to a specific percentile stop).

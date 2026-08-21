@@ -73,9 +73,12 @@ function clfFor(line: CoverageLine, confidenceLevel: number, atExpected: boolean
 // not, so the distinction stays visible: the CLF curve is book-blind, the
 // reinsurance price is not.
 //
-// Property has no table of its own to cross (see clfFor above); its 60% stop
-// already coincides with CLF 1.000 in FUNDING_CLF_TABLE, so this returns 0.60
-// there rather than a meaningless "crossing".
+// ⚠ EVERY LINE HAS A TABLE NOW, so the 0.60 fallback is unreachable. It used to
+// be Property's branch: with no table of its own, its 60% stop coincided with
+// CLF 1.000 in FUNDING_CLF_TABLE, so returning 0.60 was the honest answer.
+// Property's derived table crosses at 54.0%, and hasStaticClf now covers it, so
+// the real crossing is returned for all three. The fallback is kept rather than
+// removed because a future fourth line would land on it before it had a table.
 function expectedPercentileFor(line: CoverageLine): number {
   if (hasStaticClf(line)) return staticClfCrossing(line);
   return 0.60;
