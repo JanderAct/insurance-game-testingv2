@@ -15,24 +15,45 @@
 // was `wcRatingGroup`, which wcClaimEngine.ts reads and THROWS on — so
 // regenerating would not have degraded WC, it would have stopped it.
 //
-// So this check answers the question neither the generator nor the two export
-// gates can: DO THE CSV AND THE CATALOG STILL AGREE, member by member, on
-// every field the CSV actually carries?
+// TWO QUESTIONS, AND SECTION 0 IS THE STRONGER ONE.
+//
+//   0. Does the live catalog equal WHAT THE GENERATOR PRODUCES TODAY?
+//   1-4. Does the live catalog agree with the CSV on every AUTHORED field?
+//
+// ⚠ SECTION 1 CANNOT SUBSTITUTE FOR SECTION 0, and assuming it could was a real
+// mistake in this file's first version. The generator does not merely copy the
+// CSV — it applies DERIVED rules (risk-quality clamping, size bucketing,
+// satisfaction, wcRatingGroup). Change one of those and the CSV still agrees
+// with the catalog perfectly, because neither side moved; only the rule did.
+//
+// Demonstrated rather than argued: moving the size-bucket boundary from rank
+// < 30 to rank < 31 reclassifies a member Medium -> Large, the generator emits
+// the change, and sections 1-4 PASS. Section 0 catches it, because a
+// byte-for-byte comparison against regenerated output has no blind spot by
+// construction.
+//
+// Section 1 still earns its place: it is the finer-grained answer. Section 0
+// says "these files differ"; sections 1-4 say WHICH member and WHICH field, and
+// they hold even if the generator itself is wrong, since the CSV is the
+// authored source and the generator is not.
 // ============================================================================
 //
-// ⚠ IT CHECKS THE CSV's FIELDS, NOT THE CATALOG's. The catalog carries derived
-// attributes the CSV has no column for — size bucket, satisfaction,
-// wcRatingGroup — and those are the generator's job, not the roster's. Adding
-// them here would be asserting the generator against itself. What this owns is
-// the boundary: every AUTHORED value must survive the crossing unchanged.
+// ⚠ SECTIONS 1-4 CHECK THE CSV's FIELDS, NOT THE CATALOG's. The catalog carries
+// derived attributes the CSV has no column for — size bucket, satisfaction,
+// wcRatingGroup — and comparing those against the CSV is impossible; comparing
+// them against the generator is section 0's job. So sections 1-4 own the
+// boundary (every AUTHORED value survives the crossing unchanged) and check the
+// derived attributes for PRESENCE only, because absence is what a stale
+// generator causes.
 //
-// The complementary check is regeneration byte-identity, which the generator's
-// own header documents as a precondition for running it. The two together are
-// what make the catalog trustworthy: this one catches hand-drift in the DATA,
-// that one catches hand-drift in the STRUCTURE.
+// Together: section 0 catches drift in the DERIVATION and in the STRUCTURE,
+// sections 1-4 catch drift in the DATA and localise any failure to a member and
+// a field.
 
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
+import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { getPredefinedMarketMembers, CANONICAL_ROSTER } from '../../src/data/memberCatalog';
 
@@ -76,8 +97,58 @@ for (const line of raw.slice(1)) {
   });
 }
 
+// --- 0. THE LIVE CATALOG vs WHAT THE GENERATOR PRODUCES NOW ------------------
+//
+// THE CHECK THAT HAS NO BLIND SPOT. Everything below compares the catalog to
+// the CSV, which by construction cannot see a change in a DERIVED rule. This
+// regenerates to a scratch path and compares bytes.
+//
+// It is also the precondition the generator's own header states before anyone
+// runs it for real: regenerate against an unchanged CSV, confirm no diff. That
+// instruction was previously a request; this makes it a gate.
+console.log('--- 0. LIVE CATALOG === GENERATOR OUTPUT (byte-for-byte) ---');
+{
+  const gen = path.join(__dirname, '../tools/generate-member-catalog.ts');
+  const live = path.join(__dirname, '../../src/data/memberCatalog.ts');
+  const scratch = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rostercheck-')), 'memberCatalog.ts');
+  let ran = true;
+  try {
+    // CATALOG_OUT redirects the write, so the live file is never at risk even
+    // if this check is run on a dirty tree.
+    execFileSync('npx', ['tsx', gen], { env: { ...process.env, CATALOG_OUT: scratch }, stdio: 'pipe' });
+  } catch (e) {
+    ran = false;
+    // A THROW IS A RESULT, NOT AN ERROR TO SWALLOW. The generator asserts its
+    // roster totals, so it refuses to emit for the wrong CSV — which is how a
+    // whole wrong-roster catalog was avoided once already.
+    const msg = (e as { stderr?: Buffer; message?: string }).stderr?.toString() ?? (e as Error).message;
+    check(false, 'the generator runs at all', msg.split('\n').find(l => l.includes('Error')) ?? 'see stderr');
+  }
+  if (ran) {
+    const a = fs.readFileSync(live, 'utf8');
+    const b = fs.readFileSync(scratch, 'utf8');
+    if (a === b) {
+      check(true, 'regenerating reproduces the live catalog exactly', `${a.length.toLocaleString()} bytes`);
+    } else {
+      const al = a.split('\n'), bl = b.split('\n');
+      const diffs: string[] = [];
+      for (let i = 0; i < Math.max(al.length, bl.length) && diffs.length < 6; i++) {
+        if (al[i] !== bl[i]) diffs.push(`line ${i + 1}:\n        live: ${(al[i] ?? '(absent)').slice(0, 110)}\n        gen:  ${(bl[i] ?? '(absent)').slice(0, 110)}`);
+      }
+      check(false, 'regenerating reproduces the live catalog exactly',
+        `${al.length} vs ${bl.length} lines`);
+      for (const d of diffs) console.log(`        ${d}`);
+      console.log('\n        ⚠ THE CATALOG AND ITS GENERATOR HAVE DIVERGED. Do NOT run the');
+      console.log('        generator to "fix" this until you know which side is right — it');
+      console.log('        overwrites without warning, and it has silently dropped a field');
+      console.log('        that wcClaimEngine throws on before.');
+    }
+    fs.rmSync(path.dirname(scratch), { recursive: true, force: true });
+  }
+}
+
 // --- 1. THE ROSTER LITERAL, WHICH IS WHAT THE GENERATOR WRITES ---------------
-console.log('--- 1. CANONICAL_ROSTER vs CSV, field by field ---');
+console.log('\n--- 1. CANONICAL_ROSTER vs CSV, field by field ---');
 check(CANONICAL_ROSTER.length === csv.size,
   'same member count', `${CANONICAL_ROSTER.length} catalog vs ${csv.size} CSV`);
 {

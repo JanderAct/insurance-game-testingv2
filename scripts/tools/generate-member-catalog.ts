@@ -96,7 +96,10 @@ import type { MemberType, Region, SizeCategory } from '../../src/types/simulatio
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CSV_PATH = path.join(__dirname, '../../src/data/roster_canonical_v5.csv');
-const OUT_PATH = path.join(__dirname, '../../src/data/memberCatalog.ts');
+// Overridable so a harness can regenerate to a scratch path and diff, without
+// clobbering the live catalog. roster-catalog-check.ts uses it — that check is
+// the reason "is the generator still in step?" has an answer at all.
+const OUT_PATH = process.env.CATALOG_OUT ?? path.join(__dirname, '../../src/data/memberCatalog.ts');
 
 const VALID_TYPES: ReadonlySet<string> = new Set([
   'City', 'County', 'Fire District', 'Water District', 'Transit Authority',
