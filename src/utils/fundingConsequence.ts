@@ -92,7 +92,8 @@ export interface FundingConsequence {
   clf: number;
   purePremiumPer100: number;
   /** GROSS minus what the placed tower is expected to cede — the base the CLF
-   *  is actually applied to. Zero on Property, which is not netted. */
+   *  is actually applied to. Nonzero on all three lines as of Property's own
+   *  occurrence layer; zero only where the player declines everything. */
   expectedCededPer100: number;
   netPurePremiumPer100: number;
   poolPremiumRatePer100: number;

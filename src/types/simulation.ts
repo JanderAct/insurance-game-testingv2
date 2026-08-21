@@ -489,9 +489,12 @@ export interface ResultSet {
   // that on this type is rounded. Both are stored so the identity holds from
   // stored fields alone.
   //
-  // ZERO ON PROPERTY, exactly and by construction: Property is deliberately
-  // not netted (see the net-funding note), so its expectedCededPer100 is the
-  // literal 0 the ternary never overrides, not a measured coincidence.
+  // ⚠ NONZERO ON EVERY LINE NOW. This said "ZERO ON PROPERTY, exactly and by
+  // construction" until Property got its own occurrence layer and aggregate;
+  // netting follows from `usesTower`, so widening that widened this with it.
+  // Property's expectedCededPer100 is a measured quantity like WC's and GL's
+  // (~25% of gross pure premium at the default placement) and only reaches 0
+  // if the player declines the layer AND the aggregate.
   expectedCededPer100: number;
   netPurePremiumPer100: number;
   writtenExposure: number;      // payroll exposure in $M

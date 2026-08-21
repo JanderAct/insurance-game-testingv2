@@ -1613,7 +1613,7 @@ export function buildSupportingRows(
       },
       explain: isPoolView
         ? 'The line-level build-up (net pure premium rate × CLF × rate level) is not shown at pool scope: purePremiumPer100, netPurePremiumPer100 and rateLevel are all aggregated as one line\'s value kept as a placeholder, not a real pool figure. Select a line tab to see the build-up.'
-        : 'The pool premium funds the loss the pool KEEPS, so expected ceded comes off before the CLF is applied. Property is not netted — its legacy percentage-of-premium cover has no closed-form expected ceded — so its net and gross rates are equal.',
+        : 'The pool premium funds the loss the pool KEEPS, so expected ceded comes off before the CLF is applied. All three lines net now — Property joined when it got its own occurrence layer and aggregate, replacing the legacy percentage-of-premium cover that had no closed-form expected ceded to deduct.',
     },
     {
       metric: 'Gross Premium & Admin Expense Rate per $100',
@@ -2196,7 +2196,7 @@ export function buildRevExpRows(
           ],
         },
       },
-      explain: 'Funds the loss the pool KEEPS: expected ceded comes off before the CLF, so the ceded portion is not collected twice (once here and again as the reinsurance premium below). Property is not netted — its legacy cover has no closed-form expected ceded — so its net and gross rates are equal.',
+      explain: 'Funds the loss the pool KEEPS: expected ceded comes off before the CLF, so the ceded portion is not collected twice (once here and again as the reinsurance premium below). All three lines net now — Property joined when it got its own occurrence layer and aggregate, replacing the legacy cover that had no closed-form expected ceded to deduct.',
       indent: 1,
     },
     {

@@ -77,17 +77,37 @@ import type { Member } from '../types/simulation';
 
 const PM = PROPERTY_LOSS_MODEL;
 
-// Discretization bin width. Fine enough that rounding the final attachment to
-// the nearest whole $1M (see the caller) is not sensitive to it: at $50k bins,
-// 20 bins per $1M.
-const BIN = 50_000;
+// Discretization bin width.
+//
+// ⚠ THIS USED TO BE A CONVERGENCE PARAMETER AND IS NO LONGER ONE. The original
+// discretisation was a naive CDF difference — bucket j held
+// F(j*BIN) - F((j-1)*BIN) and that mass was placed at j*BIN, i.e. every claim
+// was rounded UP to the next lattice point. The bias is ~BIN/2 per claim,
+// which at $50k bins inflated the per-claim retained severity mean by 8.1%
+// (measured: true E[min(X,$5M)] = $328,026 against a discretised $354,658).
+// With ~33 claims a year that compounded into the annual mean, the rescale
+// below then divided it out, and the correction landed on the SHAPE — where
+// it was invisible in the mean but showed up as an ~18% understatement of
+// E[ceded] at the higher attachment, which is exactly where the aggregate's
+// value is thinnest and hardest to check.
+//
+// The fix is GERBER'S MEAN-PRESERVING (local moment matching) discretisation
+// below, which is exact in the mean at ANY bin width — verified to float
+// precision from $200k down to $2k bins. BIN is therefore now a
+// speed/resolution choice for the CEDED integral alone, not an accuracy knob:
+// the first moment is exact by construction and only the layer integral's
+// bucket resolution depends on it. $25k gives 40 buckets per $1M against
+// attachments rounded to whole $1M, and quotes in a few milliseconds, which
+// the Decisions panel needs since it re-quotes live on every render.
+const BIN = 25_000;
 // Retained loss up to $200M/yr covers every playable scenario with wide margin
 // (even fully declining the layer, ~37 claims/yr capped individually at the
 // $75M severity cap does not realistically sum anywhere near this).
 const MAX_BINS = Math.round(200_000_000 / BIN);
 
-// Neutral-RQ mixture CDF, F(x) = P(raw severity <= x). Used only to build the
-// discretized RETAINED severity below, never to draw anything.
+// Neutral-RQ mixture CDF, F(x) = P(raw severity <= x). Retained only for the
+// harness, which uses it to reconstruct the retired naive discretisation and
+// demonstrate the bias this module no longer carries.
 function neutralSeverityCdf(x: number): number {
   if (!(x > 0)) return 0;
   const lnX = Math.log(x);
@@ -98,45 +118,82 @@ function neutralSeverityCdf(x: number): number {
   return f;
 }
 
-// Discretized pmf of min(raw severity, threshold), in BIN-sized buckets,
-// buckets[j] = P(retained in bucket j+1), j = 0..J-1, J = threshold/BIN.
-// The top bucket absorbs BOTH "raw severity landed just under threshold" and
-// "raw severity capped at threshold" — the two are indistinguishable at BIN
-// resolution and both retain (approximately) `threshold`, which is exactly
-// what makes this a valid discretization of an atom at `threshold`.
+// LIMITED EXPECTED VALUE, E[min(X, t)], for the neutral-RQ mixture, in closed
+// form. This is the quantity mean-preserving discretisation is built from, and
+// having it in closed form is what makes that discretisation exact rather than
+// merely finer:
+//   E[min(X,t)] = sum_c w_c ( exp(mu+s^2/2) Phi((ln t - mu - s^2)/s)
+//                             + t (1 - Phi((ln t - mu)/s)) )
+function limitedExpectedValue(t: number): number {
+  if (!(t > 0)) return 0;
+  const lnT = Math.log(t);
+  let total = 0;
+  for (const c of PM.severityMixture) {
+    const below = Math.exp(c.mu + (c.sigma * c.sigma) / 2) * normalCdf((lnT - c.mu - c.sigma * c.sigma) / c.sigma);
+    const atOrAbove = t * (1 - normalCdf((lnT - c.mu) / c.sigma));
+    total += c.weight * (below + atOrAbove);
+  }
+  return total;
+}
+
+// GERBER'S MEAN-PRESERVING DISCRETISATION of min(raw severity, threshold).
+//
+//   f_0 = 1 - E[X ^ h] / h
+//   f_j = (2 E[X ^ jh] - E[X ^ (j-1)h] - E[X ^ (j+1)h]) / h,   j >= 1
+//
+// where h = BIN and E[X ^ t] is the limited expected value above. The
+// construction spreads each interval's mass across its two bounding lattice
+// points in exactly the proportion that preserves the first moment, so
+// E[discretised] == E[min(X, threshold)] identically — no rounding direction
+// and no residual bias at any bin width.
+//
+// Returns index 0..J, INCLUDING f_0 (the mass at zero, which this method
+// necessarily creates and the naive one did not). The Panjer recursion below
+// carries the f_0 correction terms that make that valid.
+//
+// The top lattice point absorbs the remaining probability: raw severity at or
+// above `threshold` retains exactly `threshold`, which IS that lattice point,
+// so this is the exact atom the retention creates rather than an approximation.
 function discretizedRetainedSeverity(threshold: number): Float64Array {
   const J = Math.round(threshold / BIN);
-  const out = new Float64Array(J);
-  let prevCdf = 0;
+  const f = new Float64Array(J + 1);
+  const L = (k: number) => limitedExpectedValue(Math.min(k * BIN, threshold));
+  f[0] = 1 - L(1) / BIN;
   for (let j = 1; j < J; j++) {
-    const cdf = neutralSeverityCdf(j * BIN);
-    out[j - 1] = cdf - prevCdf;
-    prevCdf = cdf;
+    f[j] = (2 * L(j) - L(j - 1) - L(j + 1)) / BIN;
   }
-  out[J - 1] = 1 - prevCdf;
-  return out;
+  let accumulated = 0;
+  for (let j = 0; j < J; j++) accumulated += f[j];
+  f[J] = Math.max(0, 1 - accumulated);
+  return f;
 }
 
 // Panjer recursion for a Negative Binomial frequency (r, beta), mean = r*beta,
 // variance = r*beta*(1+beta). a = beta/(1+beta), b = (r-1)*beta/(1+beta).
-// severityPmf[j] = P(one occurrence's retained severity is in bucket j+1);
-// severityPmf has no j=0 (zero-severity) term, since every occurrence here has
-// positive retained severity, which is what keeps the recursion's g_0 = p_0
-// term exact (the general Panjer formula's f_0 correction is for a possible
-// mass at zero, absent here).
+//
+// severityPmf is indexed from 0 and CARRIES A MASS AT ZERO (f_0 > 0), which
+// mean-preserving discretisation necessarily produces. Both f_0 corrections
+// are therefore required and neither is optional:
+//   g_0 = P_N(f_0) = (1 + beta(1 - f_0))^(-r)   — the NegBin pgf at f_0,
+//         not (1+beta)^(-r), which is P_N(0) and only correct when f_0 == 0
+//   each g_s is divided by (1 - a f_0)
+// Dropping either silently reintroduces a bias of the same order as the one
+// the mean-preserving discretisation exists to remove.
 function panjerNegBinCompound(r: number, beta: number, severityPmf: Float64Array, maxBins: number): Float64Array {
   const a = beta / (1 + beta);
   const b = (r - 1) * beta / (1 + beta);
+  const f0 = severityPmf[0];
   const g = new Float64Array(maxBins + 1);
-  g[0] = Math.pow(1 + beta, -r);
-  const M = severityPmf.length;
+  g[0] = Math.pow(1 + beta * (1 - f0), -r);
+  const denom = 1 - a * f0;
+  const M = severityPmf.length - 1;
   for (let s = 1; s <= maxBins; s++) {
     let sum = 0;
     const upper = Math.min(s, M);
     for (let j = 1; j <= upper; j++) {
-      sum += (a + (b * j) / s) * severityPmf[j - 1] * g[s - j];
+      sum += (a + (b * j) / s) * severityPmf[j] * g[s - j];
     }
-    g[s] = sum;
+    g[s] = sum / denom;
   }
   return g;
 }
@@ -247,5 +304,5 @@ export function quotePropertyAggregate(
 // nothing in the engine calls these directly.
 export const propertyAggregateInternals = {
   BIN, MAX_BINS,
-  neutralSeverityCdf, discretizedRetainedSeverity, panjerNegBinCompound,
+  neutralSeverityCdf, limitedExpectedValue, discretizedRetainedSeverity, panjerNegBinCompound,
 };

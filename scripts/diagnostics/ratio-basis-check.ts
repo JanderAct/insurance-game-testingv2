@@ -29,9 +29,13 @@
 // 1.000 the shortfall below 1.0000 is the funding margin and is checked to be
 // positive rather than pinned.
 //
-// PROPERTY IS THE CONTROL. It is deliberately not netted, so it was already
-// correct before the fix and must be EXACTLY unchanged by it. A fix that moves
-// Property is not this fix.
+// ⚠ PROPERTY WAS THE CONTROL AND NO LONGER IS. This note read "PROPERTY IS THE
+// CONTROL. It is deliberately not netted, so it was already correct before the
+// fix and must be EXACTLY unchanged by it." That was the isolation argument for
+// the expected-combined-ratio basis fix, and it held then. Property nets as of
+// its own occurrence layer and aggregate, so it is now an ordinary subject of
+// these checks like WC and GL. The checks below are line-generic and needed no
+// change — only this claim about which line is a control expired.
 
 import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { processYear } from '../../src/utils/simulationEngine';

@@ -95,10 +95,17 @@ export function lookupCLF(level: number): number {
 // precision in scripts/diagnostics/ratio-basis-check.ts; if it stops closing
 // exactly, this function or its callers are wrong.
 //
-// PROPERTY IS UNCHANGED BY CONSTRUCTION, which is what makes this a diagnosis
-// rather than a guess: Property is deliberately not netted, so its
-// netPurePremiumPer100 IS its gross pure premium and this returns exactly the
-// expectedLoss it already used. Property-solo must stay byte-identical.
+// ⚠ THE PROPERTY CONTROL THIS NOTE RELIED ON IS GONE. It used to read
+// "PROPERTY IS UNCHANGED BY CONSTRUCTION... Property is deliberately not
+// netted, so its netPurePremiumPer100 IS its gross pure premium and this
+// returns exactly the expectedLoss it already used. Property-solo must stay
+// byte-identical." That was true of the expected-combined-ratio fix this
+// function was written for, and it is what made that fix a diagnosis rather
+// than a guess. It stopped being true when Property got its own occurrence
+// layer: Property nets now, so this returns a genuinely net figure on all
+// three lines and PR-solo is no longer a control for anything here.
+// The function itself is unchanged and still correct — only the isolation
+// argument in this comment expired.
 function fundedNetExpectedLoss(r: { poolPremium: number; selectedFundingCLF: number }): number {
   return r.poolPremium / Math.max(r.selectedFundingCLF, 1e-9);
 }
@@ -468,9 +475,11 @@ export function processLineYear(
   // structural now: there is one definition and both callers use it.
   //
   // The long notes that lived here on why funding is NET, why the deduction
-  // must reflect which layers are placed, why WC's aggregate must be netted
-  // alongside the occurrence layers, and why Property is deliberately excluded,
-  // all moved WITH the code — see quoteLineRates.
+  // must reflect which layers are placed, and why the aggregate must be netted
+  // alongside the occurrence layers, all moved WITH the code — see
+  // quoteLineRates. (That list used to end "and why Property is deliberately
+  // excluded"; Property is not excluded any more — it nets like the other two
+  // as of its own occurrence layer.)
   const estimatedQuote = quoteLineRates({
     line,
     yearNumber,
@@ -564,8 +573,11 @@ export function processLineYear(
       )
     : null;
 
-  // NET FUNDING — see the long note at the preliminary rate above for why the
-  // pool premium funds net rather than gross, and for why Property is excluded.
+  // NET FUNDING, ALL THREE LINES — see the long note at the preliminary rate
+  // above for why the pool premium funds net rather than gross. Property is no
+  // longer the exception this line used to name: `usesTower` is what gates
+  // netting, so widening it for Property's occurrence layer widened netting
+  // with it, without a second decision being taken here.
   const expectedCededDollars =
     (towerQuote?.expectedCeded ?? 0) + (aggregateQuote?.expectedCeded ?? 0);
   const expectedCededPer100 = expectedCededDollars / Math.max(activeExposure * 10_000, 1);
