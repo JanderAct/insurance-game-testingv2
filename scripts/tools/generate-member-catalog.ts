@@ -1,29 +1,36 @@
 // One-time generator: src/data/roster_canonical_v5.csv -> src/data/memberCatalog.ts
 //
 // ============================================================================
-// ⚠⚠ DO NOT RUN THIS. IT IS STALE AND RUNNING IT BREAKS THE GAME. ⚠⚠
+// SAFE TO RUN AGAIN — REPAIRED, AND HERE IS WHAT WAS WRONG.
 //
-// src/data/memberCatalog.ts has been edited by hand since this script last
-// produced it, despite that file's own "do not edit" header. Regenerating from
-// this script DELETES:
+// This script had gone STALE against a hand-edited memberCatalog.ts. It did not
+// warn on the disagreement, it simply overwrote, and regenerating DELETED:
+//   - `wcRatingGroup` on every member, plus the wcRatingGroupFor() helper.
+//     wcClaimEngine.ts READS IT AND THROWS, so regenerating would not have
+//     degraded WC — it would have stopped it.
+//   - the note recording MARKET_TOTAL_LOCATIONS as retired, resurrecting a
+//     symbol with no consumers.
+//   - the TIV design-choice header and the v5 provenance.
+// It also still asserted v4's TIV total, so after the v5 rescale it threw
+// rather than emitting — which is the assertion doing its job, and the reason
+// a whole wrong-roster catalog was never written.
 //
-//   - `wcRatingGroup` on every member, and the wcRatingGroupFor() helper that
-//     assigns it. wcClaimEngine.ts:75 READS IT AND THROWS IF IT IS MISSING, so
-//     a regenerated catalog does not merely lose an attribute — WC stops
-//     running. It is the one member attribute that is STORED rather than
-//     derived from Type, precisely because no rule over Type can separate the
-//     eight cities that run their own police and fire from the other 24.
-//   - the note recording that MARKET_TOTAL_LOCATIONS was retired.
+// ⚠ THE MEMBER DATA NEVER DRIFTED. All 200 R(...) rows were byte-identical
+// throughout. Everything above is STRUCTURE and PROSE, which is precisely the
+// part a "the numbers are fine" spot-check would have passed.
 //
-// FOUND BY RUNNING IT AS A NULL TEST during the v5 TIV rescale — the
-// regeneration was expected to be byte-identical and was not. The rescale was
-// therefore applied by editing the catalog directly and writing the v5 CSV
-// alongside it; both were then verified to agree per member.
+// WHAT MAKES IT SAFE NOW. The emitted template was rebuilt FROM the live
+// catalog rather than hand-transcribed, so byte-identity holds by construction
+// and not by care. Verified: regenerating reproduces the committed catalog
+// exactly, and regenerating twice is idempotent.
 //
-// BEFORE THIS SCRIPT IS EVER RUN AGAIN it must be taught to emit
-// wcRatingGroup, and the regeneration must be shown byte-identical to the
-// committed catalog on an UNCHANGED CSV first. That check is the only thing
-// that makes this script safe, and it is cheap.
+// ⚠ BEFORE TRUSTING A RUN THAT FOLLOWS A CATALOG EDIT, regenerate against an
+// UNCHANGED CSV and confirm `git diff` is empty. That is the whole safety
+// property, it costs one command, and its absence is what allowed months of
+// silent drift. scripts/diagnostics/roster-catalog-check.ts is the standing
+// companion: it asserts the CSV and the catalog agree per member on every
+// AUTHORED field, so data drift surfaces whether or not this script is ever
+// run again.
 // ============================================================================
 //
 // The canonical roster (200 members, $1,300M payroll) is the permanent, fixed
@@ -165,11 +172,18 @@ for (const [type, target] of [['County', 0.30], ['City', 0.20]] as const) {
   }
 }
 
-// v4: TIV totals $14,303.5M (2.045x the v3 total of $6,993.3M), a blended
-// 11.00x payroll, from the per-type rescale documented above.
+// v5: TIV totals $17,000.0M (x1.188512 uniformly on v4's $14,303.6M), a
+// blended 13.08x payroll. A DESIGN CHOICE, not a calibration — see
+// memberCatalog.ts's header.
+//
+// ⚠ THIS ASSERTION EARNED ITS KEEP. It was still pinned to v4's $14,303.5M
+// after the v5 CSV landed, and it THREW rather than silently emitting a
+// catalog for the wrong roster. Keep it pinned to the live total: a generator
+// that will happily write any roster it is handed is not a generator, it is a
+// transcription.
 const tivSum = rows.reduce((s, r) => s + r.tiv, 0);
-if (Math.abs(tivSum - 14303.5) > 1) {
-  throw new Error(`TIV sum $${tivSum.toFixed(1)}M deviates from the expected $14,303.5M`);
+if (Math.abs(tivSum - 17000.0) > 1) {
+  throw new Error(`TIV sum $${tivSum.toFixed(1)}M deviates from the expected $17,000.0M`);
 }
 const largestTivShare = Math.max(...rows.map(r => r.tiv)) / tivSum;
 if (largestTivShare > 0.05) {
@@ -182,16 +196,23 @@ if (locationsSum !== 1866) {
 }
 
 // Zone TIV drives the cat/weather footprint engines, so it is asserted here
-// rather than rediscovered later. v4 values (v3 was North 2513.9 / Central
-// 2400.2 / South 2079.2): the per-type rescale is not uniform, so the zone
-// mix shifted along with the total — North 5039.0 / Central 4840.6 /
-// South 4423.9. THE PINNED CAT/WEATHER MU VALUES ARE STILL VALID: AAL scales
-// linearly with zone TIV in the mechanism itself, so a proportional TIV move
-// changes dollar AALs without invalidating the physical mu solve. Do not
-// re-solve mu off this change alone.
+// rather than rediscovered later. v5 values: North 5988.9 / Central 5753.1 /
+// South 5257.9 (v4 was 5039.0 / 4840.6 / 4423.9; v3 was 2513.9 / 2400.2 /
+// 2079.2).
+//
+// ⚠ v5's SCALE IS UNIFORM, so unlike v4 the zone MIX is unchanged — every zone
+// moved by the same x1.188512 and the shares are identical to v4's. That is
+// worth stating because v4's per-type rescale did shift the mix, and the two
+// look the same from the totals alone.
+//
+// THE PINNED CAT/WEATHER MU VALUES ARE STILL VALID: AAL scales linearly with
+// zone TIV in the mechanism itself, so a proportional TIV move changes dollar
+// AALs without invalidating the physical mu solve. Do not re-solve mu off this
+// change alone. (The weather band is retired in any case; the cat design is
+// unbuilt and these constants are what it would use.)
 const zoneTiv: Record<string, number> = { North: 0, Central: 0, South: 0 };
 rows.forEach(r => { zoneTiv[r.region] += r.tiv; });
-for (const [zone, expected] of [['North', 5039.0], ['Central', 4840.6], ['South', 4423.9]] as const) {
+for (const [zone, expected] of [['North', 5988.9], ['Central', 5753.1], ['South', 5257.9]] as const) {
   if (Math.abs(zoneTiv[zone] - expected) > 1) {
     throw new Error(`Zone ${zone} TIV $${zoneTiv[zone].toFixed(1)}M != expected $${expected}M`);
   }
@@ -244,9 +265,9 @@ const rowLines = rows.map(r => {
 });
 
 const out = `// Canonical 200-member marketplace — GENERATED FILE, do not edit by hand.
-// Source of truth: src/data/roster_canonical_v4.csv, converted by
+// Source of truth: src/data/roster_canonical_v5.csv, converted by
 // scripts/tools/generate-member-catalog.ts (see that script for every rule:
-// risk-quality clamping, size bucketing, satisfaction, and the full v1->v4
+// risk-quality clamping, size bucketing, satisfaction, and the full v1->v5
 // roster lineage).
 //
 // The roster is permanent and fixed: it never grows or shrinks, no entity is
@@ -256,8 +277,29 @@ const out = `// Canonical 200-member marketplace — GENERATED FILE, do not edit
 // 20% by design) and drives both WC and GL exposure — public-entity pools have
 // one payroll base, not a separate commercial-style GL revenue base.
 //
-// EVERYTHING PROPERTY NEEDS IS AUTHORED, NOT DERIVED. TIV totals $14,303.5M (a
-// blended 11.00x payroll) and carries no scale factor. v4 rescaled TIV per
+// EVERYTHING PROPERTY NEEDS IS AUTHORED, NOT DERIVED. TIV totals $17,000.0M (a
+// blended 13.08x payroll) and carries no scale factor.
+//
+// ⚠ 13.08x IS A DESIGN CHOICE, NOT A CALIBRATION, and it must not be read as
+// one. The real pool this model is built from runs about 4.6x. The model pool
+// is deliberately MORE PROPERTY-HEAVY than the book Property's severity was
+// fitted from, so that Property is a line whose reinsurance decision can
+// matter rather than a rounding error next to WC and GL.
+//
+// Measured, which is what the choice was made against: at v4's $14,303.6M
+// Property was 8.1% of gross pool loss with 9.0 enrolled claims a year and an
+// annual CV of 1.710; at $17,000.0M it is 10.4% with 11.1 claims and a CV of
+// 1.419, against WC 0.526 and GL 0.784. Property remains the most volatile
+// line — more claims damp it, they do not tame it.
+//
+// NOTHING ABOUT THE FIT MOVED. Frequency is per $1M of TIV and severity is
+// independent of the member, so scaling TIV scales expected loss exactly and
+// leaves the severity distribution, the pure premium per $100 and every fitted
+// parameter untouched.
+//
+// v5 scaled TIV x1.188512 UNIFORMLY on every member from v4's $14,303.6M, so
+// within-type and cross-type spread and rank are both preserved exactly.
+// v4 rescaled TIV per
 // member TYPE (School x3.6, Water x2.7778, Fire x2.1429, County/Recreation x2,
 // Transit x1.8333, City x1.8, Special x1.6364, Park x1.5556) off v3's
 // TIV = payroll x ratio x jitter, so within-type spread and rank are preserved
@@ -282,6 +324,7 @@ const out = `// Canonical 200-member marketplace — GENERATED FILE, do not edit
 // deleted GL_RELATIVITIES outright along with the sub-coverages it weighted.
 
 import type { CoverageLine, Member, MemberType, Region, SizeCategory } from '../types/simulation';
+import { WC_HIGH_SAFETY_CITIES, WC_RATING_GROUP_BY_TYPE, type WcRatingGroup } from './defaultAssumptions';
 
 export interface CanonicalRosterRow {
   id: string;
@@ -329,8 +372,30 @@ export const PREDEFINED_MARKET_MEMBERS: ReadonlyArray<Member> = CANONICAL_ROSTER
     // (6.2-8.4); the roster CSV carries no satisfaction column.
     satisfaction: Number((6.2 + ((index * 19) % 23) / 10).toFixed(1)),
     status: 'prospect',
+    wcRatingGroup: wcRatingGroupFor(row.type, row.name),
   })
 );
+
+// A member's WC rating group.
+//
+// ⚠ THIS IS THE ONE MEMBER ATTRIBUTE THAT IS *STORED* RATHER THAN DERIVED FROM
+// TYPE, and it contradicts the header note above only in appearance. The
+// retired WC_CLASS_MIX and GL_RELATIVITIES really were exact functions of
+// Type, so storing them per member would have been duplication. This is not:
+// the old WC_CLASS_MIX gave EVERY city a safety share of exactly 0.3500, so
+// no rule over it could separate the eight cities that run their own police
+// and fire departments from the other 24. The list is genuine additional
+// information and lives in WC_HIGH_SAFETY_CITIES.
+//
+// It is computed here, at catalog construction, and then travels ON the member —
+// so it serialises into saved games with everything else and a member cannot
+// arrive without one.
+function wcRatingGroupFor(type: MemberType, name: string): WcRatingGroup {
+  if (type === 'City') return WC_HIGH_SAFETY_CITIES.has(name) ? 'highSafety' : 'lowSafety';
+  const group = WC_RATING_GROUP_BY_TYPE[type];
+  if (!group) throw new Error(\`no WC rating group for member type '\${type}'\`);
+  return group;
+}
 
 export function getPredefinedMarketMembers(): Member[] {
   return PREDEFINED_MARKET_MEMBERS.map(member => ({ ...member }));
@@ -348,7 +413,16 @@ export const MARKET_TOTAL_EXPOSURE: Record<CoverageLine, number> = {
 };
 
 // Pool-wide location count (1,866) — the Property attritional frequency base.
-export const MARKET_TOTAL_LOCATIONS = PREDEFINED_MARKET_MEMBERS.reduce((s, m) => s + (m.locations ?? 0), 0);
+// MARKET_TOTAL_LOCATIONS RETIRED with Property's rebuild — it had no consumer
+// even before that, and the per-location frequency basis it existed to serve is
+// gone.
+//
+// ⚠ \`locations\` AND \`primaryAssetShare\` ARE KEPT ON EVERY MEMBER AND NOTHING
+// READS THEM. That is deliberate. They are AUTHORED roster facts, not derived
+// values, and deleting authored source data to chase an unused-symbol warning
+// would destroy something a future per-location treaty would have to invent
+// again from nothing. They are recorded here as unread so the next reader does
+// not spend time looking for the consumer.
 `;
 
 fs.writeFileSync(OUT_PATH, out);

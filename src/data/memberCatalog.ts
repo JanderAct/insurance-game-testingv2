@@ -1,15 +1,7 @@
 // Canonical 200-member marketplace — GENERATED FILE, do not edit by hand.
-// Source of truth: src/data/roster_canonical_v5.csv.
-//
-// ⚠ THE GENERATOR IS STALE — DO NOT RUN IT. This file has been hand-edited
-// since the generator last produced it, and regenerating DELETES wcRatingGroup
-// from every member, which wcClaimEngine throws on. See the warning block at
-// the top of scripts/tools/generate-member-catalog.ts. The v5 TIV rescale was
-// applied here directly and verified per member against the v5 CSV.
-//
-// Previously converted by
+// Source of truth: src/data/roster_canonical_v5.csv, converted by
 // scripts/tools/generate-member-catalog.ts (see that script for every rule:
-// risk-quality clamping, size bucketing, satisfaction, and the full v1->v4
+// risk-quality clamping, size bucketing, satisfaction, and the full v1->v5
 // roster lineage).
 //
 // The roster is permanent and fixed: it never grows or shrinks, no entity is
