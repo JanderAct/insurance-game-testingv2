@@ -350,20 +350,40 @@ if (changed.length === 0) {
   // 1. A bit-exact test would therefore have refused to arm on the very field
   // this rule was written for, silently, from the first recapture onward.
   //
-  // THE ASYMMETRY IS DELIBERATE. A value that should be 1 is a RATIO —
-  // dimensionless — so 1e-12 is a meaningful scale-free bound. A value that
-  // should be 0 has UNITS, so no scale-free epsilon exists for it; exact is the
-  // only defensible test there and it errs toward firing, which is the right
-  // direction for a guard.
+  // THE ASYMMETRY BETWEEN 1 AND 0 IS DELIBERATE. A value that should be 1 is a
+  // RATIO — dimensionless — so 1e-12 is a meaningful scale-free bound. A value
+  // that should be 0 has UNITS, so no scale-free epsilon exists for it; exact
+  // is the only defensible test there and it errs toward firing, which is the
+  // right direction for a guard.
+  //
+  // ⚠ BUT THE SAME BOUND MUST APPLY ON BOTH SIDES, and it did not. The rule
+  // used 1e-12 to decide the baseline "was 1" and then STRICT INEQUALITY to
+  // decide an instance had moved, so 1 -> 0.9999999999999999 counted as a break
+  // of the identity. It fired that way during the TIV rescale, on pure float
+  // noise, and a guard that cries wolf gets ignored — which is operationally
+  // the same as a guard that cannot fire. That failure mode is the one this
+  // project keeps rediscovering, and the rule had it two commits after being
+  // written to prevent it.
+  //
+  // So `realMoved` re-tests each changed instance against the identity itself
+  // rather than against its own baseline value. `changed` is still the right
+  // input — it is the ordinary value gate and must stay strict — but leaving an
+  // identity is a different question from moving at all.
   const IDENTITY_EPS = 1e-12;
-  const broken: { field: string; was: number; moved: number; of: number }[] = [];
+  const broken: { field: string; was: number; moved: number; of: number; worst: number }[] = [];
   for (const [f, keys] of byField) {
     const every = allByField.get(f) ?? [];
     const wasAllOne = every.length > 0 && every.every(k => Math.abs(base[k] - 1) <= IDENTITY_EPS);
     const wasAllZero = every.length > 0 && every.every(k => base[k] === 0);
-    if (wasAllOne || wasAllZero) {
-      broken.push({ field: f, was: wasAllOne ? 1 : 0, moved: keys.length, of: every.length });
-    }
+    if (!wasAllOne && !wasAllZero) continue;
+    const target = wasAllOne ? 1 : 0;
+    // Zero keeps its exact test, for the units reason above.
+    const realMoved = wasAllOne
+      ? keys.filter(k => Math.abs(out[k] - target) > IDENTITY_EPS)
+      : keys.filter(k => out[k] !== target);
+    if (realMoved.length === 0) continue;
+    const worst = Math.max(...realMoved.map(k => Math.abs(out[k] - target)));
+    broken.push({ field: f, was: target, moved: realMoved.length, of: every.length, worst });
   }
   if (broken.length > 0) {
     console.log(`\n  ⚠ BROKEN IDENTITIES — ${broken.length} field(s) left a value that was EXACTLY`);
@@ -371,8 +391,8 @@ if (changed.length === 0) {
     console.log(`  argued otherwise; do NOT recapture past one without deciding it is intended.`);
     for (const b of broken) {
       const ex = byField.get(b.field)![0];
-      console.log(`    ${b.field.padEnd(34)} was exactly ${b.was} on all ${b.of} instances; ` +
-        `${b.moved} moved, e.g. -> ${out[ex]}`);
+      console.log(`    ${b.field.padEnd(34)} was ${b.was} on all ${b.of} instances; ` +
+        `${b.moved} left it by more than ${IDENTITY_EPS}, worst ${b.worst.toExponential(2)}, e.g. -> ${out[ex]}`);
     }
   }
 }
