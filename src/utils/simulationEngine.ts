@@ -2064,6 +2064,15 @@ export function aggregateLineResults(
     results.reduce((total, r) => total + (r[key] as unknown as number), 0);
 
   const activeMembersSum = sum('activeMembers');
+  // ⚠ DIMENSIONALLY MEANINGLESS AT POOL SCOPE. WC/GL exposure is $M of payroll;
+  // Property's is $M of insured value (TIV). Summing across lines adds two
+  // different units together — these two sums (and any ratio built from them,
+  // like the exposure-ratio marketShare below) are pool-scope hazards, not
+  // pool-scope facts. Kept only because active display code still reads them
+  // (Dashboard/Membership/History pages, the on-screen Year-by-Year Results
+  // table, and the pool-scope Calculation Audit rows for Payroll Units / Pool
+  // Premium Rate at Selected CLF) — see marketShare below for the fix applied
+  // to the one field this bug actually corrupted at pool scope.
   const totalMarketExposureSum = sum('totalMarketExposure');
   const activeExposureSum = sum('activeExposure');
 
@@ -2102,6 +2111,26 @@ export function aggregateLineResults(
   const poolPremiumAndAdminExpenseSum = sum('poolPremiumAndAdminExpense');
   const expectedLossSum = sum('expectedLoss');
   const totalMemberChargeSum = sum('totalMemberCharge');
+
+  // Pool market share as the PREMIUM-WEIGHTED AVERAGE of each line's own
+  // (dimensionless) market share, not activeExposureSum / totalMarketExposureSum.
+  // That exposure-ratio summed $M of payroll (WC/GL) against $M of TIV
+  // (Property) before dividing — a mixed-unit fraction that read as a real
+  // number by coincidence only while the lines' shares were near-equal, and
+  // drifted as they diverged (worse the larger Property's TIV grew relative
+  // to WC/GL payroll). Each line's marketShare field is already a clean,
+  // scale-free ratio (that line's enrolled exposure over that line's own
+  // market exposure), so averaging them is legitimate — the only remaining
+  // choice is the weight, and totalMemberCharge (what members actually pay,
+  // reinsurance cost included) is the common currency across lines. Weighting
+  // by exposure again would reintroduce the identical defect one level up.
+  const marketShareChargeWeightSum = results.reduce((s, r) => s + r.marketShare * r.totalMemberCharge, 0);
+  const marketShare = totalMemberChargeSum > 0
+    ? marketShareChargeWeightSum / totalMemberChargeSum
+    // Degenerate only: no line has charged any premium yet (e.g. an all-zero
+    // bootstrap state). Falls back to a simple average of the per-line shares
+    // rather than the exposure sum, since every per-line share is still valid.
+    : results.reduce((s, r) => s + r.marketShare, 0) / results.length;
   const netIncurredLossSum = sum('netIncurredLoss');
   const adminExpenseSum = sum('adminExpense');
   const reinsuranceCostSum = sum('reinsuranceCost');
@@ -2157,7 +2186,7 @@ export function aggregateLineResults(
     withdrawnMembers: sum('withdrawnMembers'),
     activeExposure: activeExposureSum,
     totalMarketExposure: totalMarketExposureSum,
-    marketShare: activeExposureSum / Math.max(totalMarketExposureSum, 0.01),
+    marketShare,
     memberRetentionRate,
     memberSatisfaction,
     averageRiskQuality,
