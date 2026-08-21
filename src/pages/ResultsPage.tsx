@@ -18,7 +18,7 @@ import {
   colorForNetIncome,
   colorForSurplus,
 } from '../utils/formatters';
-import { placementSummary, usesTower, towerTopLabel, RETAINED_ABOVE_TOWER_CAVEAT } from '../utils/reinsuranceDisplay';
+import { placementSummary, hasTractableCeded, towerTopLabel, RETAINED_ABOVE_TOWER_CAVEAT } from '../utils/reinsuranceDisplay';
 import { lineDisplayName } from '../utils/lineDisplay';
 
 interface ResultsPageProps {
@@ -238,7 +238,7 @@ export default function ResultsPage({ lockedResults, lineView }: ResultsPageProp
                   scope three different programs are in force at once, so a single
                   value would be a fiction — say so and point at the line tabs. */}
               <Row
-                label={lineView === 'pool' ? 'Reinsurance' : usesTower(lineView) ? 'Reinsurance Program' : 'Reinsurance Level'}
+                label={lineView === 'pool' ? 'Reinsurance' : hasTractableCeded(lineView) ? 'Reinsurance Program' : 'Reinsurance Level'}
                 value={lineView === 'pool'
                   ? 'Varies by line — select a line tab'
                   : placementSummary(lineView, result.decisions)}

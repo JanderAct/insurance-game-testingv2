@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { resultUsesTower, usesTower } from '../utils/reinsuranceDisplay';
+import { resultUsesTower, hasTractableCeded } from '../utils/reinsuranceDisplay';
 import { hasStaticClf, staticClf } from '../data/clfTables';
 import { lookupCLF } from '../utils/simulationEngine';
 import {
@@ -976,7 +976,7 @@ export function computeAuditChecks(
   }
 
   // --- Pool = sum of active lines (pool scope only) ---
-  const anyTowerLine = lineKeys.some(l => usesTower(l));
+  const anyTowerLine = lineKeys.some(l => hasTractableCeded(l));
   const poolSum = isPoolView
     ? POOL_SUM_METRICS
       .filter(({ key }) => !(anyTowerLine && TOWER_MEANINGLESS_POOL_SUM_KEYS.has(key)))

@@ -571,7 +571,7 @@ export const BASE_NEW_MEMBERS_PER_YEAR = 1.0;
 //     k = (N* x d - adj) / (roster - N*)
 //
 // where d is MEMBERSHIP_DEFAULT_DEPARTURE_RATE — the REALISED departure rate at
-// defaults (4.2%), NOT the nominal 1 - BASE_RETENTION (5.0%). See that constant
+// defaults (4.45%), NOT the nominal 1 - BASE_RETENTION (5.0%). See that constant
 // for why the two differ and why using the nominal one would re-tilt the fix.
 //
 // It is derived at the call site from the LIVE roster length rather than frozen
@@ -582,8 +582,8 @@ export const BASE_NEW_MEMBERS_PER_YEAR = 1.0;
 // ⚠ THE CONDITION IS ON TOTAL JOINS, NOT ON THE BASE ALONE, and the `adj` term
 // is why. The adjustment ladder in membershipEngine's newMemberAdjustment does
 // NOT sit at zero when every decision is at its default: measured at +0.611
-// members/yr, near-identical on all three lines (WC +0.542, GL +0.658,
-// Property +0.633). Two channels drive it — competitivePressure, drawn in
+// members/yr at the last measurement and +0.5852 now (WC +0.494, GL +0.590,
+// Property +0.671 — no longer near-identical; see that constant). Two channels drive it — competitivePressure, drawn in
 // [0.3, 0.8], contributes (1 - cp) x 0.5, mean +0.225; and satisfaction starts
 // in [6.5, 8.5], so the >= 7.5 branch fires about half the time. The rate-LEVEL
 // term added with the price channel contributes essentially nothing here BY
@@ -607,10 +607,14 @@ export const BASE_NEW_MEMBERS_PER_YEAR = 1.0;
 // ONE k STILL SERVES ALL THREE, and this was re-checked rather than assumed.
 // The price channel is the first mechanism here with a genuinely per-line
 // neutral point, so the question was reopened. Per-line k values come out at
-// WC 0.016546, GL 0.015084, Property 0.015669 — a 1.097x spread, TIGHTER than
-// the 1.213x spread in the adjustment alone, because each line's higher
+// WC 0.017289, GL 0.014912, Property 0.015467 — a 1.159x spread, still TIGHTER
+// than the 1.359x spread in the adjustment alone, because each line's higher
 // adjustment is offset by its own departure rate and starting book. The pooled
-// k sits inside that range on every line.
+// 0.016192 sits inside that range. Re-checked at Property's netting rather than
+// carried forward: Property's adjustment moved the most of the three, so this
+// was exactly the change that could have broken the one-k assumption, and it
+// did not — the spread widened from 1.097x to 1.159x and stayed well inside
+// the adjustment's own.
 //
 // ⚠ N* IS MILDLY SELF-REFERENTIAL, and that is understood rather than
 // overlooked: runPriorHistory simulates three pre-game years through this same
@@ -622,7 +626,7 @@ export const BASE_NEW_MEMBERS_PER_YEAR = 1.0;
 // flat from wherever it opens, which is the property that actually matters and
 // is verified directly in scripts/diagnostics/membership-equilibrium-check.ts.
 //
-//     k = (63 x 0.044 - 0.611) / (200 - 63) = 2.161 / 137 = 0.015774
+//     k = (63 x 0.0445 - 0.5852) / (200 - 63) = 2.2183 / 137 = 0.016192
 export const MEMBERSHIP_EQUILIBRIUM_ENROLLMENT = 63;
 
 // The measured contribution of the adjustment ladder at ALL-DEFAULT decisions,
@@ -636,8 +640,17 @@ export const MEMBERSHIP_EQUILIBRIUM_ENROLLMENT = 63;
 // twice for exactly that reason: reconnecting the price channel added the
 // rate-LEVEL term to this ladder (0.60 -> 0.619), and moving the pool premium to
 // a net funding basis moved every line's load and with it the level term
-// (0.619 -> 0.611).
-export const MEMBERSHIP_DEFAULT_ADJUSTMENT = 0.611;
+// (0.619 -> 0.611). NOW THREE TIMES: Property's own netting moved its load the
+// same way WC's and GL's moved at fab85e4 (0.611 -> 0.5852).
+//
+// ⚠ THE PER-LINE SPREAD WIDENED AND IT IS PROPERTY THAT MOVED. WC +0.494,
+// GL +0.590, Property +0.671 — a 1.36x spread against the 1.21x recorded when
+// this was last measured. Property sits highest because its satisfaction runs
+// highest (mean 8.10 against WC 7.27 / GL 7.66), so the >= 7.5 branch of the
+// ladder fires far more often on it. One pooled value still serves all three —
+// see the k note above, where the per-line k spread is checked directly and is
+// tighter than this one, for the same offsetting reason.
+export const MEMBERSHIP_DEFAULT_ADJUSTMENT = 0.5852;
 
 // The REALISED share of the book that leaves per year at all-default decisions.
 //
@@ -657,12 +670,21 @@ export const MEMBERSHIP_DEFAULT_ADJUSTMENT = 0.611;
 //
 // ⚠ RE-MEASURE THIS TOO whenever the retention ladder changes. It moved from
 // 0.042 to 0.044 when the price channel was reconnected (and held at 0.044
-// through the move to net funding), and the mechanism is
-// worth naming: the rate-change retention penalty is PENALTY-ONLY, so ordinary
-// year-to-year rate noise around the neutral point produces penalties in up
-// years and nothing in down years. That asymmetry is a genuine, permanent
-// increase in the departure rate at defaults, not a measurement artefact.
-export const MEMBERSHIP_DEFAULT_DEPARTURE_RATE = 0.044;
+// through the move to net funding), then to 0.0445 at Property's netting, and
+// the mechanism is worth naming: the rate-change retention penalty is
+// PENALTY-ONLY, so ordinary year-to-year rate noise around the neutral point
+// produces penalties in up years and nothing in down years. That asymmetry is a
+// genuine, permanent increase in the departure rate at defaults, not a
+// measurement artefact.
+//
+// ⚠ PROPERTY'S SHARE OF THAT ASYMMETRY WAS SWITCHED OFF UNTIL NOW, which is
+// the substantive part of this re-measurement rather than the third decimal
+// place. Its RATE_NEUTRAL_CHANGE_PCT stood at +4.10 while its actual rate ran
+// at -0.21%/yr, so actual-minus-neutral was permanently about -4.3pp and a
+// penalty-only term could never fire on it at any realistic decision. Property
+// therefore shed 4.24%/yr against WC's 4.45% and GL's 4.47%. With the neutral
+// corrected it shows 4.43% and the three lines agree to within 0.04pp.
+export const MEMBERSHIP_DEFAULT_DEPARTURE_RATE = 0.0445;
 
 // Hard caps on annual membership movement
 export const MAX_NEW_MEMBERS_PER_YEAR = 4;
@@ -866,24 +888,59 @@ export const MEMBER_MOVEMENT_WEIGHTS = {
 // ⚠ RE-MEASURE THESE if any trend constant moves, if DEFAULT_LAYERS_PLACED
 // changes, or if the admin ratio changes. They are properties of the pricing
 // path, not constants of nature.
+// ⚠ RE-MEASURED AT PROPERTY'S NETTING. Property's own figure was the large one
+// and it was large because it was measured on the LEGACY product: 4.10 was a
+// gross-funded, percentage-of-premium Property. Netted and towered, Property's
+// rate is essentially FLAT year to year (-0.21%/yr), which is what a line with
+// no frequency trend, no severity trend and a non-wage-inflating exposure base
+// should do. Leaving 4.10 in force meant the rate-change penalty — which is
+// PENALTY-ONLY — could never fire on Property at any realistic decision,
+// because actual-minus-neutral was permanently ~-4.3pp. That is a permanent
+// subsidy, and the constant's own header calls out exactly this failure mode.
+//
+// WC and GL moved slightly too, and NOT because anything in their own lines
+// changed: the measurement arm did. price-channel-facts read its neutrals off
+// the NO-TOWER arm while these constants are defined at DEFAULTS (tower placed)
+// — see that script's section 2/3 note.
 export const RATE_NEUTRAL_CHANGE_PCT: Record<CoverageLine, number> = {
-  WC: -1.53,
-  GL: 1.23,
-  Property: 4.10,
+  WC: -1.45,
+  GL: 1.26,
+  Property: -0.21,
 };
 
 // The load — total member charge rate / pure premium rate — at all-default
 // decisions, per line. Same measurement run as above.
 //
-// Without any tower both WC and GL sit at exactly 1.1500, which is
+// Without any tower ALL THREE now sit at 1.1500 (Property 1.1497), which is
 // 1 + ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM at CLF 1.000 — the cleanest possible
 // confirmation that the load is reading what it is meant to read. The full
 // tower is what lifts them to these values, and that gap IS the tower's price
 // signal to prospects.
+//
+// ⚠ THE 1.1500 CLAIM USED TO BE WC/GL-ONLY and Property could not make it: on
+// the legacy percentage-of-premium cover its no-tower load was not 1.15,
+// because `layersPlaced` did not control its product. That Property now lands
+// on 1.1497 with its layer declined is a direct confirmation the cutover put
+// it on the same footing as the other two.
+//
+// ⚠ ONLY PROPERTY MOVED AT ITS NETTING, AND THE CRITERION IS NOT THE HEADLINE
+// MEASUREMENT. price-channel-facts and membership-recalibrate draw DIFFERENT
+// seed populations (30 games from 7_700_000 + 5171g against 40 from
+// 5_200_000 + 6353g), and their measured loads differ by up to ~0.3% on GL —
+// more than the precision this constant is quoted to. The tie-break is what
+// the constant is FOR: the level term in the join ladder must sit at zero when
+// every decision is at its default, or all-defaults stops being the neutral
+// point and k is pinned against a tilted baseline. So these are set to zero
+// the residual in the CONSUMING population (membership-recalibrate's "level
+// deviation at defaults" section), not to the other script's medians.
+//
+// Under the pre-netting values WC and GL already read -0.07% and +0.01% there
+// and are therefore LEFT ALONE; Property read -0.44%, an order of magnitude
+// out, and 1.525 -> 1.518 is what closes it.
 export const RATE_NEUTRAL_LOAD: Record<CoverageLine, number> = {
   WC: 1.472,
   GL: 1.457,
-  Property: 1.525,
+  Property: 1.521,
 };
 
 // Retention response, per percentage point of rate increase ABOVE the line's

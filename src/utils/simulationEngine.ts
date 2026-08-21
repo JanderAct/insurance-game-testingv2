@@ -308,8 +308,17 @@ export function processLineYear(
   // layer placement (declining layers costs up to ~8.9pp of label accuracy —
   // measured, and recorded at clfTables.ts).
   //
-  // Property is unaffected: it has no Claim/Occurrence objects, was never in
-  // scope, and still reads FUNDING_CLF_TABLE.
+  // ⚠ PROPERTY STILL READS THE GENERIC FUNDING_CLF_TABLE, and the REASON it
+  // used to be unaffected has expired. This said "it has no Claim/Occurrence
+  // objects, was never in scope"; it has had both since its loss-model cutover,
+  // and a tower and net funding since dbd9138. The DISPATCH is simply unchanged
+  // — Property has no derived table to dispatch to yet.
+  //
+  // That is now a measured defect, not a neutral gap: the generic table is a
+  // gross-basis chart and Property funds net, so its 60% stop delivers 54.3%
+  // (-5.7pp) and the error runs -18.7pp to +7.5pp across the range. Sized in
+  // scripts/diagnostics/property-clf-basis-report.ts; Property's own derived
+  // table is what corrects it.
   const selectedFundingConfidenceLevel = lineDecisions.fundingConfidenceLevel;
   // ⚠ THE PRE-MOVEMENT k_line / k_GL THAT USED TO BE COMPUTED HERE IS GONE.
   // It existed only to index the retired CV/lambda grids, and the static tables
@@ -446,7 +455,7 @@ export function processLineYear(
   // while exactly the same two lines did both.
   //
   //   isClaimLine  — draws individual Claim/Occurrence objects. All three now.
-  //   usesTower    — prices and cedes through the per-occurrence tower. All
+  //   hasTractableCeded    — prices and cedes through the per-occurrence tower. All
   //                  three now, as of Property's own occurrence layer and
   //                  aggregate. REINSURANCE_PROGRAMS is dead code for every
   //                  line from here — its removal is its own commit.
@@ -460,7 +469,7 @@ export function processLineYear(
   // widened to include Property, so the panel and the engine agree without a
   // second definition here.
   const isClaimLine = isWcClaimLine || isGlClaimLine || isPropertyClaimLine;
-  const usesTower = isWcClaimLine || isGlClaimLine || isPropertyClaimLine;
+  const hasTractableCeded = isWcClaimLine || isGlClaimLine || isPropertyClaimLine;
   // WC and Property are the only lines with an aggregate stop-loss (see
   // reinsuranceTower.ts's header on why GL has neither).
   const isAggregateLine = isWcClaimLine || isPropertyClaimLine;
@@ -497,7 +506,7 @@ export function processLineYear(
   // The occurrence quote is REUSED by the post-movement pass below rather than
   // re-priced: it reads only the pre-movement book and the year, so re-quoting
   // would be a second version of a figure that cannot legitimately differ.
-  const placedForCost = usesTower
+  const placedForCost = hasTractableCeded
     ? normalizeLayersPlaced(line as TowerLine, lineDecisions.layersPlaced)
     : null;
   const towerQuote = estimatedQuote.towerQuote;
@@ -575,7 +584,7 @@ export function processLineYear(
 
   // NET FUNDING, ALL THREE LINES — see the long note at the preliminary rate
   // above for why the pool premium funds net rather than gross. Property is no
-  // longer the exception this line used to name: `usesTower` is what gates
+  // longer the exception this line used to name: `hasTractableCeded` is what gates
   // netting, so widening it for Property's occurrence layer widened netting
   // with it, without a second decision being taken here.
   const expectedCededDollars =
@@ -1013,7 +1022,7 @@ export function processLineYear(
   let aggregateAttachment = 0;
   let attachment: number;
 
-  if (usesTower) {
+  if (hasTractableCeded) {
     const towerLine = line as TowerLine;
     const placed = normalizeLayersPlaced(towerLine, lineDecisions.layersPlaced);
     const totals = occurrenceTotals(generatedClaims ?? [], generatedOccurrences ?? []);

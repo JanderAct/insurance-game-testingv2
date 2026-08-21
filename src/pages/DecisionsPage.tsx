@@ -7,7 +7,7 @@ import { SLIDER_RANGES, REINSURANCE_PROGRAMS, ASSET_ALLOCATION_DEFAULT } from '.
 import { formatCurrency } from '../utils/formatters';
 import { getReinsuranceStructure } from '../utils/reinsuranceEngine';
 import { defaultLineDecisionSet } from '../utils/decisionDefaults';
-import { usesTower } from '../utils/reinsuranceDisplay';
+import { hasTractableCeded } from '../utils/reinsuranceDisplay';
 import { AGG_ATTACHMENT_LEVELS, AGG_LIMIT_MULTIPLE, REINSURANCE_TOWER, RISK_LOAD_LAMBDA, TOWER_TOP } from '../data/reinsuranceTower';
 import { normalizeLayersPlaced, quoteAggregate } from '../utils/reinsuranceTower';
 import { allLayerRiskMoments } from '../utils/towerMoments';
@@ -199,7 +199,7 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
         {outstandingLoanSlider(d, set, selectedLoanInfo, disabled)}
 
         <SectionCard title="Reinsurance Program" icon={<Shield size={16} />}>
-          {usesTower(selectedLine) ? (
+          {hasTractableCeded(selectedLine) ? (
             <TowerControls
               line={selectedLine}
               d={d}

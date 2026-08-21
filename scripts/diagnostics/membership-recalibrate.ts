@@ -122,7 +122,7 @@ for (const l of LINES) {
 }
 
 console.log('\n--- MEMBERSHIP_DEFAULT_ADJUSTMENT ---');
-console.log(`  old (fdc747c): ${MEMBERSHIP_DEFAULT_ADJUSTMENT}`);
+console.log(`  old (in force): ${MEMBERSHIP_DEFAULT_ADJUSTMENT}`);
 console.log('  line       mean     median');
 for (const l of LINES) {
   console.log(`  ${l.padEnd(10)} ${mean(adjBy[l]).toFixed(4).padStart(8)} ${q(adjBy[l], 0.5).toFixed(4).padStart(9)}`);
@@ -131,7 +131,7 @@ const pooledAdj = mean(LINES.flatMap(l => adjBy[l]));
 console.log(`  POOLED mean: ${pooledAdj.toFixed(4)}`);
 
 console.log('\n--- MEMBERSHIP_DEFAULT_DEPARTURE_RATE ---');
-console.log(`  old (fdc747c): ${MEMBERSHIP_DEFAULT_DEPARTURE_RATE}`);
+console.log(`  old (in force): ${MEMBERSHIP_DEFAULT_DEPARTURE_RATE}`);
 console.log('  line       realised departures/book');
 const dRates: number[] = [];
 for (const l of LINES) {

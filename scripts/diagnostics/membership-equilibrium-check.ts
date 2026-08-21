@@ -38,7 +38,21 @@ import { prospectCaptureRate } from '../../src/utils/membershipEngine';
 import type { CoverageLine, GameState } from '../../src/types/simulation';
 
 const LINES: CoverageLine[] = ['WC', 'GL', 'Property'];
-const GAMES = 40;
+// ⚠ 40 GAMES CANNOT ANSWER THE QUESTION THIS CHECK ASKS, and that was not
+// visible until two successive recalibrations were compared against each other.
+// The headline "games ending with a smaller book" is a proportion over GAMES,
+// so its standard error is sqrt(0.25 / GAMES) — +/-7.9pp at 40. Every value
+// this check has ever reported (47.5 / 50.0 / 47.5 at fab85e4, 52.5 / 50.0 /
+// 45.0 before Property's recalibration, 52.5 / 42.5 / 60.0 after) sits inside
+// one standard error of 50%, so NONE of them distinguished a flat equilibrium
+// from a mildly tilted one, and comparing two such readings to each other says
+// even less.
+//
+// GAMES is now an env override so the question can actually be resolved when it
+// matters: 200 games brings the share's standard error to +/-3.5pp and the
+// Y1->Y10 median ratio's to about +/-1.4pp. The default stays 40 for a fast
+// routine run; use GAMES=200 when a calibration has moved.
+const GAMES = Number(process.env.GAMES ?? 40);
 const YEARS = 10;
 
 const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;

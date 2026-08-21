@@ -119,13 +119,28 @@ for (const l of LINES) {
 }
 
 console.log('\n--- 4. E[UW INCOME] AT CLF 1.000 IS NOW ~ZERO, NOT E[CEDED] ---');
-console.log('  line       E[UW income]$M   95% CI +/-$M   E[ceded]$M (what it USED to be)');
-for (const l of ['WC', 'GL'] as const) {
+console.log('  line       E[UW income]$M   95% CI +/-$M   E[ceded]$M (what it USED to be)   CLF');
+for (const l of LINES) {
   const uw = rows[l].map(r => r.underwritingIncome);
   console.log(`  ${l.padEnd(10)} ${(mean(uw) / M).toFixed(3).padStart(14)} ${(ci95(uw) / M).toFixed(3).padStart(14)} ` +
-    `${(mean(cededPriced[l]) / M).toFixed(3).padStart(30)}`);
+    `${(mean(cededPriced[l]) / M).toFixed(3).padStart(30)}   ${mean(rows[l].map(r => r.clf)).toFixed(4)}`);
 }
 console.log('  (heavy-tailed — reported with a CI, and NOT gated on. The gated facts are 1-3 above.)');
+console.log('');
+console.log('  ⚠ THIS CHECK MEANS SOMETHING DIFFERENT ON PROPERTY, and the difference is not');
+console.log('  cosmetic. WC and GL reach CLF 1.000 because fundingAtExpected FORCES it to 1.0');
+console.log('  (simulationEngine\'s selectedFundingCLF dispatch) — their own backtested grids');
+console.log('  exist to tell the player which PERCENTILE that break-even sits at. Property has');
+console.log('  no grid: it reads the generic FUNDING_CLF_TABLE, whose 0.60 entry is the literal');
+console.log('  value 1.000, so its CLF is 1.000 by table lookup rather than by construction.');
+console.log('');
+console.log('  So on Property this tests exactly one thing: that the pricing expectation');
+console.log('  (gross expected loss less expected ceded) matches the mean the generator');
+console.log('  actually draws. It does NOT validate the 60%-confidence LABEL on that 1.000 —');
+console.log('  the multiplier is the identity there, so the table cannot be wrong in VALUE at');
+console.log('  the default, only in what percentile it claims 1.000x corresponds to. Sizing');
+console.log('  that mislabelling is the CLF basis error, measured separately in');
+console.log('  scripts/diagnostics/property-clf-basis-report.ts.');
 
 console.log('\n--- 5. MEMBER CHARGE PER $100 ---');
 console.log('  line       pure/100   pool rate/100   admin/100   reins/100   TOTAL/100');

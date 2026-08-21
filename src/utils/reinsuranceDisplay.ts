@@ -7,7 +7,7 @@
 // stop-loss; GL does not — see reinsuranceTower.ts's header on why).
 //
 // REINSURANCE_PROGRAMS / `reinsuranceLevel` ARE NOW DEAD FOR EVERY LINE. Left
-// in place — and `usesTower` left as a real function rather than collapsed to
+// in place — and `hasTractableCeded` left as a real function rather than collapsed to
 // `true` — only because their removal is its own commit, after netting, same
 // as the WC/GL cutover's own sequencing.
 //
@@ -16,18 +16,50 @@
 // renders perfectly happily as "Moderate" on a line whose product is a layer
 // tower. That is exactly the class of defect the combined-ratio readout
 // was — a display showing a plausible number that means nothing — and it went
-// unnoticed for weeks. Branch through `usesTower` instead.
+// unnoticed for weeks. Branch through `hasTractableCeded` instead.
 
 import { REINSURANCE_TOWER, AGG_ATTACHMENT_LEVELS, TOWER_TOP, type TowerLine } from '../data/reinsuranceTower';
 import { REINSURANCE_PROGRAMS } from '../data/defaultAssumptions';
 import type { CoverageLine, LineDecisionSet, LineView } from '../types/simulation';
 import { normalizeLayersPlaced } from './reinsuranceTower';
 
-// The seam, stated once. Mirrors simulationEngine's `isClaimLine`/`usesTower`
-// — if that ever changes, this must change with it. Always true today (every
-// CoverageLine is a TowerLine), kept as a real predicate rather than inlined
-// so a future fourth line has somewhere to say no.
-export const usesTower = (line: CoverageLine | LineView): line is TowerLine =>
+// ============================================================================
+// THE SEAM, STATED ONCE. Renamed from `usesTower`, which named the MECHANISM
+// and hid what actually rides on it.
+//
+// The capability is: THIS LINE'S REINSURANCE HAS A CLOSED-FORM EXPECTED CEDED
+// LOSS. A per-occurrence layer structure over a fitted severity distribution
+// has one (towerMoments integrates it band by band); a percentage-of-premium
+// quota share does not, because its cession is a function of the realised
+// annual aggregate with no tractable expectation to deduct.
+//
+// ⚠ IT IS ONE CAPABILITY, NOT SEVERAL SHARING A FLAG, AND MUST NOT BE SPLIT.
+// Netting the pool premium requires a tractable E[ceded]; a tractable E[ceded]
+// requires the layer structure; the layer structure is also what cedes the
+// realised claims. Splitting this into separate flags would make expressible a
+// state that cannot exist — a line netted against an expected cession it has
+// no way to compute, or one ceding through layers it was not priced for.
+//
+// THREE BEHAVIOURS RIDE ON IT, and the third was not on the list when the
+// Property cutover was planned:
+//   1. PRICING     reinsuranceCost comes from the placed layers' own
+//                  E[ceded] + lambda x SD[ceded], not a percentage of premium.
+//   2. NET FUNDING the pool premium funds gross expected loss LESS that same
+//                  E[ceded]. This is the one that widened silently when
+//                  Property was added.
+//   3. THE LOSS-SPLIT BASIS  `attachment` — and through it poolLosses,
+//                  excessLosses and quotaShareLosses, all three EXPORTED
+//                  fields — is the tower's own retention on this path and
+//                  125% of expected loss on the other. That is a reporting
+//                  decomposition, not a reinsurance behaviour, and it rides
+//                  here only because the two branches happen to set the same
+//                  variable. It is what the Property cutover's null test
+//                  measured as its ONLY difference.
+//
+// Always true today (every CoverageLine qualifies), kept as a real predicate
+// rather than inlined so a future line has somewhere to say no.
+// ============================================================================
+export const hasTractableCeded = (line: CoverageLine | LineView): line is TowerLine =>
   line === 'WC' || line === 'GL' || line === 'Property';
 
 // WC and Property are the only lines with an aggregate stop-loss.
@@ -36,10 +68,16 @@ const hasAggregate = (line: CoverageLine | LineView): line is 'WC' | 'Property' 
 
 // For readouts that have NO line in scope (narrativeEngine, resultMetrics,
 // deriveAnnualStatement all take a result, not a line). `cededByLayer` is
-// populated by the tower and left EMPTY on Property, so its width is a reliable
-// in-band discriminator.
+// populated by the tower, so its width discriminates a tower result from a
+// legacy one.
 //
-// PREFER `usesTower(line)` WHERE A LINE IS AVAILABLE. This exists because
+// ⚠ IT NO LONGER DISCRIMINATES BY LINE. This said "left EMPTY on Property, so
+// its width is a reliable in-band discriminator" — Property populates it now,
+// and every line does, so this returns true universally on live results. It
+// survives only to classify a result loaded from a save written before the
+// tower.
+//
+// PREFER `hasTractableCeded(line)` WHERE A LINE IS AVAILABLE. This exists because
 // threading a line parameter through those three signatures would touch more
 // surface than the readout fix is worth; it is not the better test.
 export const resultUsesTower = (r: { cededByLayer?: number[] }): boolean =>
@@ -51,7 +89,7 @@ export function placementSummary(
   line: CoverageLine,
   decisions: Pick<LineDecisionSet, 'layersPlaced' | 'aggregateStopLevel' | 'reinsuranceLevel'>,
 ): string {
-  if (!usesTower(line)) {
+  if (!hasTractableCeded(line)) {
     const prog = REINSURANCE_PROGRAMS[decisions.reinsuranceLevel];
     return `${decisions.reinsuranceLevel} — ${prog?.label ?? 'Unknown'}`;
   }
@@ -70,7 +108,7 @@ export function placementCode(
   line: CoverageLine,
   decisions: Pick<LineDecisionSet, 'layersPlaced' | 'aggregateStopLevel' | 'reinsuranceLevel'>,
 ): string {
-  if (!usesTower(line)) return String(decisions.reinsuranceLevel);
+  if (!hasTractableCeded(line)) return String(decisions.reinsuranceLevel);
   const placed = normalizeLayersPlaced(line, decisions.layersPlaced);
   const bits = placed.map((on, i) => on ? `L${i + 1}` : '').filter(Boolean).join('+') || 'NONE';
   const agg = hasAggregate(line) && decisions.aggregateStopLevel >= 0 ? `+AGG${decisions.aggregateStopLevel}` : '';
@@ -86,4 +124,4 @@ export const RETAINED_ABOVE_TOWER_CAVEAT =
   'Mean is INDICATIVE ONLY: the band is unbounded, so it has no valid confidence interval.';
 
 export const towerTopLabel = (line: CoverageLine): string =>
-  usesTower(line) ? `$${TOWER_TOP[line] / 1e6}M` : '—';
+  hasTractableCeded(line) ? `$${TOWER_TOP[line] / 1e6}M` : '—';

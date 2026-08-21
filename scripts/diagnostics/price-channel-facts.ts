@@ -58,7 +58,13 @@ function run(towerOn: boolean): Record<string, Row[]> {
       // DEFAULT decision set IS the full tower. The contrast arm is the one
       // that has to be constructed: strip every layer explicitly.
       const d = defaultDecisionSet(y);
-      for (const l of ['WC', 'GL'] as const) {
+      // ⚠ ALL THREE LINES. This looped ['WC', 'GL'] until Property got its own
+      // occurrence layer, which was correct then (Property was on
+      // REINSURANCE_PROGRAMS, which layersPlaced does not control) and became
+      // silently WRONG the moment it was not: Property kept its tower ON in
+      // BOTH arms, so its "no tower" column was really "tower on" and its load
+      // read 1.5176 where a genuinely un-reinsured line reads 1.1500.
+      for (const l of LINES) {
         d.byLine[l].layersPlaced = REINSURANCE_TOWER[l].map(() => towerOn);
       }
       // prior rate as the ENGINE sees it: lineState.ratePer100 is last year's
@@ -85,7 +91,14 @@ function run(towerOn: boolean): Record<string, Row[]> {
 
 console.log('=== PRICE CHANNEL FACTS — all-default decisions, 30 games x 10 years ===\n');
 
+// BOTH ARMS UP FRONT. The constants RATE_NEUTRAL_CHANGE_PCT and
+// RATE_NEUTRAL_LOAD are defined AT DEFAULTS, and the default decision set
+// places every purchasable layer — so the arm they must be read from is the
+// TOWER arm, not the contrast arm. Sections 2 and 3 used to read `noTower`,
+// which was right for neither line: WC/GL's constants are tower-on values and
+// Property was never stripped at all.
 const noTower = run(false);
+const tower = run(true);
 
 console.log('--- 1. IS THERE A PRIOR RATE IN YEAR 1? ---');
 console.log('  (the pre-game runs 3 years through the same engine, so year 1 should have one)');
@@ -95,12 +108,12 @@ for (const l of LINES) {
   console.log(`  ${l.padEnd(9)} year-1 line-instances with a prior rate: ${withPrior}/${y1.length}`);
 }
 
-console.log('\n--- 2. THE NEUTRAL RATE CHANGE, PER LINE (all defaults, no tower) ---');
+console.log('\n--- 2. THE NEUTRAL RATE CHANGE, PER LINE (AT DEFAULTS = full tower placed) ---');
 console.log('  This is what a player who does NOTHING already experiences.\n');
 console.log('  line       mean %/yr   median %/yr   p10      p90');
 const neutral: Record<string, number> = {};
 for (const l of LINES) {
-  const ch = noTower[l].filter(r => r.prevRate !== null)
+  const ch = tower[l].filter(r => r.prevRate !== null)
     .map(r => (r.rate / (r.prevRate as number) - 1) * 100);
   neutral[l] = mean(ch);
   console.log(`  ${l.padEnd(10)} ${mean(ch).toFixed(3).padStart(9)} ${q(ch, 0.5).toFixed(3).padStart(13)} ` +
@@ -109,18 +122,17 @@ for (const l of LINES) {
 console.log('\n  ⚠ These are the per-line neutral points. A penalty applied to the RAW rate change');
 console.log('  would tax whichever line trends up and subsidise whichever trends down, at defaults.');
 
-console.log('\n--- 3. THE RATE LEVEL AT DEFAULTS (load = total member charge rate / pure premium rate) ---');
+console.log('\n--- 3. THE RATE LEVEL AT DEFAULTS, tower placed (load = total member charge rate / pure premium rate) ---');
 console.log('  line       mean load   median   p10     p90');
 for (const l of LINES) {
-  const ld = noTower[l].filter(r => r.pure > 0).map(r => r.rate / r.pure);
+  const ld = tower[l].filter(r => r.pure > 0).map(r => r.rate / r.pure);
   console.log(`  ${l.padEnd(10)} ${mean(ld).toFixed(4).padStart(9)} ${q(ld, 0.5).toFixed(4).padStart(8)} ` +
     `${q(ld, 0.1).toFixed(3).padStart(7)} ${q(ld, 0.9).toFixed(3).padStart(7)}`);
 }
 
 console.log('\n--- 4. WHAT THE FULL TOWER COSTS, in both currencies ---');
-const tower = run(true);
 console.log('  line       rate/$100 no tower -> full tower   level increase   one-off rate change in Y1');
-for (const l of ['WC', 'GL'] as const) {
+for (const l of LINES) {
   const a = mean(noTower[l].map(r => r.rate));
   const b = mean(tower[l].map(r => r.rate));
   const y1a = mean(noTower[l].filter(r => r.year === 1).map(r => r.rate));
@@ -130,8 +142,8 @@ for (const l of ['WC', 'GL'] as const) {
     `${((b / a - 1) * 100).toFixed(1).padStart(21)}%   ` +
     `${((y1b / y1prior - 1) * 100).toFixed(1).padStart(6)}% vs ${((y1a / y1prior - 1) * 100).toFixed(1)}% without`);
 }
-console.log('\n  loads with the tower on:');
-for (const l of ['WC', 'GL'] as const) {
+console.log('\n  loads, no tower -> tower on:');
+for (const l of LINES) {
   const ld = tower[l].filter(r => r.pure > 0).map(r => r.rate / r.pure);
   const ld0 = noTower[l].filter(r => r.pure > 0).map(r => r.rate / r.pure);
   console.log(`    ${l.padEnd(8)} ${mean(ld0).toFixed(4)} -> ${mean(ld).toFixed(4)}`);

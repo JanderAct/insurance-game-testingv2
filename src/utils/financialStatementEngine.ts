@@ -84,7 +84,7 @@ export interface AnnualFinancialStatement {
   // ⚠ WAS a 12-field `reinsuranceDetail: ReinsuranceDetail` object. Eleven of
   // those fields (level, levelLabel, attachment, limit, recoveryPct,
   // reinsuranceCost, grossLoss, reinsuranceRecovery, netLoss, cessionRatio,
-  // usesTower) fed the Reinsurance Detail card and died with it at 1e7d3fb; they
+  // hasTractableCeded) fed the Reinsurance Detail card and died with it at 1e7d3fb; they
   // were computed every year and read by nothing for months.
   //
   // THE TWELFTH IS LIVE and is why the object was not deleted outright: the

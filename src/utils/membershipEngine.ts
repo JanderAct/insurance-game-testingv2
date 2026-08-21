@@ -62,8 +62,12 @@ export interface MemberMovementResult {
 // NULL HANDLING, one rule for both. A missing signal means NEUTRAL — deviation
 // exactly 0, no penalty and no bonus — never a default of "zero rate change",
 // which is a different and wrong thing on a line whose neutral is not zero.
-// Treating a null as a literal 0% change on Property, whose neutral is +4.83%,
-// would read as a 4.83-point rate CUT and hand out a bonus for missing data.
+// Treating a null as a literal 0% change on a line whose neutral is not zero
+// would read as a rate CUT of the neutral's size and hand out a bonus for
+// missing data. GL is the live example now (neutral +1.26%); Property used to
+// be the striking one at +4.83% and then +4.10%, but its netting re-measured
+// it to -0.21% — essentially flat, which is what a line with no frequency
+// trend, no severity trend and a non-inflating exposure base should read.
 //
 // In practice null is nearly unreachable: runPriorHistory simulates three
 // pre-game years through this same engine, so lineState.ratePer100 is already

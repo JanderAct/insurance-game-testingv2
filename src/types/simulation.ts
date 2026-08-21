@@ -491,7 +491,7 @@ export interface ResultSet {
   //
   // ⚠ NONZERO ON EVERY LINE NOW. This said "ZERO ON PROPERTY, exactly and by
   // construction" until Property got its own occurrence layer and aggregate;
-  // netting follows from `usesTower`, so widening that widened this with it.
+  // netting follows from `hasTractableCeded`, so widening that widened this with it.
   // Property's expectedCededPer100 is a measured quantity like WC's and GL's
   // (~25% of gross pure premium at the default placement) and only reaches 0
   // if the player declines the layer AND the aggregate.
