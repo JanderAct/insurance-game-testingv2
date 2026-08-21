@@ -1272,15 +1272,14 @@ export const PROPERTY_LOSS_MODEL = {
   // claim counts ever support it.
   memberFrequencyNoise: { shape: 44.4, scale: 1 / 44.4 },
 
-  // ⚠ INHERITED AND NOW UNANCHORED. $2M was set at roster v3, when TIV was
-  // $6,993.3M; v4's $14,303.6M already made it 2.05x looser in real terms and
-  // its own comment said so. It survives here UNCHANGED and for a different
-  // reason than it was set: severity no longer scales with TIV at all, so the
-  // TIV-proportional argument that would have re-derived it ($4.09M) is void.
-  // Against the fitted mixture, $2M is exceeded by 4.21% of claims — about 0.4
-  // breaches a year on the enrolled book. Re-derive it when Property gets its
-  // per-occurrence tower, which is the commit that will actually use it.
-  perRiskRetention: 2_000_000,
+  // ⚠ RE-DERIVED AND NOW LOAD-BEARING. Was $2M, set at roster v3 ($6,993.3M
+  // TIV) and left unanchored through two TIV rescales — its own comment used
+  // to say so. $5M is the per-occurrence tower's retention (see
+  // reinsuranceTower.ts's header), decided before this commit and consumed by
+  // reinsuranceTower.ts's REINSURANCE_TOWER.Property and by
+  // propertyAggregate.ts's aggregate pricing, not just the diagnostic breach
+  // counter this field used to serve alone.
+  perRiskRetention: 5_000_000,
 };
 
 // The held pure premium, per $100 of TIV. DERIVED, and now derived ONLY.

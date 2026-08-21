@@ -28,7 +28,7 @@ import type { CoverageLine, LineDecisionSet, ResultSet } from '../types/simulati
 // rather than guess; poolReinsuranceLevelDetail below is what the pool row
 // actually reads.
 const towerLineOf = (r: { line?: CoverageLine }): CoverageLine | undefined =>
-  r.line === 'WC' || r.line === 'GL' ? r.line : undefined;
+  r.line === 'WC' || r.line === 'GL' || r.line === 'Property' ? r.line : undefined;
 
 // THE POOL ROW HAS NO SINGLE LINE, so instead of picking one it reports every
 // active tower line by name. Reads r.byLine, which is present and accurate on
@@ -40,7 +40,7 @@ function poolReinsuranceLevelDetail(
   render: (line: CoverageLine, decisions: Pick<LineDecisionSet, 'layersPlaced' | 'aggregateStopLevel' | 'reinsuranceLevel'>) => string,
 ): string {
   const byLine = (r as unknown as ResultSet).byLine;
-  const active = (['WC', 'GL'] as const).filter(l => byLine?.[l]);
+  const active = (['WC', 'GL', 'Property'] as const).filter(l => byLine?.[l]);
   if (active.length === 0) return 'n/a';
   return active.map(l => `${l}: ${render(l, byLine[l].decisions)}`).join(' | ');
 }
@@ -108,26 +108,26 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
       csvValue: r => r.decisions.riskControlPct,
     },
     {
-      // TWO PRODUCTS SHARE THIS ROW. WC/GL export their layer placement; Property
-      // exports its quota-share level. Exporting a level for a tower line would
-      // put a meaningless "2 - Moderate" in every WC and GL spreadsheet.
+      // ONE PRODUCT NOW. All three lines run the per-occurrence tower — WC,
+      // GL and (as of its own occurrence layer and aggregate) Property — and
+      // REINSURANCE_PROGRAMS is dead for every line. The `!resultUsesTower(r)`
+      // branch below is unreachable today; kept only because
+      // REINSURANCE_PROGRAMS's removal is its own commit, after netting.
       //
-      // csvValue is now a STRING for tower lines (a placement code like
-      // "L1+L2+L3+AGG1"), so value-identity — which is numeric-only — no longer
-      // sees a numeric field here on WC/GL. That is correct: a placement is not a
+      // csvValue is a STRING for tower lines (a placement code like
+      // "L1+L2+L3+AGG1"), so value-identity — which is numeric-only — does not
+      // see a numeric field here. That is correct: a placement is not a
       // magnitude, and pretending it is one is what the old column did.
       //
-      // ⚠ THE LABEL IS STILL "Reinsurance Level", WHICH IS WRONG FOR WC AND GL.
-      // It is left wrong DELIBERATELY and only here. `label` is a static string
-      // shared by every line's export, so any rename also rewrites PROPERTY's
-      // header row — and PR-solo staying byte-identical is the leak check that
-      // proves this work did not touch Property. Renaming it, or adding a
-      // Retained Above Tower column (which would likewise appear on Property at
-      // 0), both moved PR-solo when tried. The VALUE is correct for every line;
-      // only this header is stale, and fixing it needs a deliberate re-baseline.
+      // THE LABEL WAS "Reinsurance Level" until this commit, deliberately left
+      // wrong for WC/GL because renaming it also rewrote Property's header row
+      // and PR-solo staying byte-identical was the leak check proving an
+      // earlier commit hadn't touched Property. That constraint is gone now
+      // that Property genuinely has its own tower — PR-solo is expected to
+      // move this commit for real reasons, so the label is fixed alongside it.
       key: 'reinsuranceLevel',
       category: 'Decisions',
-      label: 'Reinsurance Level',
+      label: 'Reinsurance Program',
       value: r => {
         if (!resultUsesTower(r)) return `${r.decisions.reinsuranceLevel} - ${REINSURANCE_PROGRAMS[r.decisions.reinsuranceLevel]?.label ?? ''}`;
         const line = towerLineOf(r);

@@ -24,10 +24,12 @@ import {
   type TowerLine,
 } from '../data/reinsuranceTower';
 import { lognormalPartialMoment } from './claimMath';
+import { quotePropertyAggregate } from './propertyAggregate';
 import { allLayerRiskMoments, layerRiskMoments, retainedRiskMoments } from './towerMoments';
 import type { Claim, CoverageLine, Member, Occurrence } from '../types/simulation';
 
-export const isTowerLine = (line: CoverageLine): line is TowerLine => line === 'WC' || line === 'GL';
+export const isTowerLine = (line: CoverageLine): line is TowerLine =>
+  line === 'WC' || line === 'GL' || line === 'Property';
 
 // --- the waterfall (J14) ----------------------------------------------------
 
@@ -187,8 +189,15 @@ function layerMoments(mean: number, cv: number, a: number, b: number) {
   return { expected: Math.max(0, e1), sd: Math.sqrt(variance) };
 }
 
-// Quote the WC aggregate for a given occurrence-layer selection. `level` indexes
-// AGG_ATTACHMENT_LEVELS; expectedGrossLoss is the line's own E[gross].
+// Quote the aggregate for a given occurrence-layer selection. `level` indexes
+// AGG_ATTACHMENT_LEVELS[line]; expectedGrossLoss is the line's own E[gross].
+// WC and Property are the only lines with an aggregate — GL has neither market
+// capacity nor (separately) a retained-loss distribution the lognormal fit
+// below is valid for. Property does NOT use that lognormal fit even though it
+// has an aggregate: see propertyAggregate.ts's header for why, and
+// quotePropertyAggregate for the Panjer-recursion replacement. This function is
+// the single call site every caller (engine, Decisions panel) uses regardless
+// of which line it is pricing; only the body branches.
 //
 // ============================================================================
 // TWO DEFECTS FIXED HERE, AND THE SECOND ONE IS NOT A TREND PROBLEM.
@@ -233,12 +242,24 @@ function layerMoments(mean: number, cv: number, a: number, b: number) {
 // double-count it.
 // ============================================================================
 export function quoteAggregate(
+  line: 'WC' | 'Property',
   placed: boolean[],
   members: Member[],
   expectedGrossLoss: number,
   level: number,
   yearNumber: number,
 ): AggregateQuote {
+  if (line === 'Property') {
+    // ONE moment pass for the (single) layer, at neutral basis — same role as
+    // WC's layerMoms below, feeding expectedRetained = expectedGrossLoss minus
+    // what the occurrence layer cedes.
+    const layerMoms = allLayerRiskMoments('Property', members, yearNumber);
+    return quotePropertyAggregate(
+      placed, members, expectedGrossLoss, level,
+      AGG_ATTACHMENT_LEVELS.Property, layerMoms[0].expected,
+    );
+  }
+
   const effective = placed.map((on, i) => on && REINSURANCE_TOWER.WC[i].purchasable);
 
   // m1 is DERIVED from the layer prices rather than measured separately, so the
@@ -254,7 +275,7 @@ export function quoteAggregate(
   const retained = retainedRiskMoments('WC', effective, members, yearNumber);
   const sdRetained = expectedRetained * retained.sdOverExpected;
 
-  const attachment = expectedRetained * AGG_ATTACHMENT_LEVELS[level];
+  const attachment = expectedRetained * AGG_ATTACHMENT_LEVELS.WC[level];
   const limit = expectedRetained * AGG_LIMIT_MULTIPLE;
   const { expected, sd } = layerMoments(expectedRetained, sdRetained / expectedRetained, attachment, attachment + limit);
 

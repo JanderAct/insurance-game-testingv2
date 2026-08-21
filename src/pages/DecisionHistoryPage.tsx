@@ -38,7 +38,7 @@ export default function DecisionHistoryPage({ lockedResults, lineView }: Decisio
     ? ['Yr', 'Calendar', 'Cash %', 'Bonds %', 'Equities %', 'Risk Control %']
     : [
         'Yr', 'Calendar', 'Funding Confidence', 'Dividend %', 'Assessment %',
-        'Underwriting Strictness', 'Reinsurance Level',
+        'Underwriting Strictness', 'Reinsurance Program',
         ...(showLoanColumn ? ['Loan Repayment Aggressiveness'] : []),
       ];
 

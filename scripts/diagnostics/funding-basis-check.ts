@@ -3,8 +3,9 @@
 // Run: npx tsx scripts/diagnostics/funding-basis-check.ts
 //
 // The pool premium now funds NET expected loss: gross pure premium less the
-// expected ceded of the layers ACTUALLY PLACED (plus the WC aggregate's own
-// expected ceded), before the CLF is applied.
+// expected ceded of the layers ACTUALLY PLACED (plus the WC/Property
+// aggregate's own expected ceded), before the CLF is applied. All three lines
+// net now — Property joined as of its own occurrence layer and aggregate.
 //
 // THE ASSERTIONS THAT MATTER:
 //
@@ -65,14 +66,13 @@ for (let g = 0; g < GAMES; g++) {
     const d = defaultDecisionSet(y);
     // The expected ceded the engine itself priced on: same pre-movement book,
     // same placement, same function.
-    for (const l of ['WC', 'GL'] as const) {
+    for (const l of ['WC', 'GL', 'Property'] as const) {
       const book = (gs.poolState as never as {
         lines: Record<string, { members: Member[] }>
       }).lines[l].members.filter(m => m.status === 'active');
       const placed = REINSURANCE_TOWER[l].map(x => x.purchasable);
       cededPriced[l].push(occurrenceProgramCost(l, placed, book, y).expectedCeded);
     }
-    cededPriced.Property.push(0);
 
     const p = processYear(gs, d);
     for (const line of LINES) {
@@ -94,7 +94,7 @@ console.log('=== NET FUNDING BASIS CHECK — 60 games x 10 years, all defaults =
 console.log('All-defaults = CLF 1.000 on WC/GL and the FULL occurrence tower placed.\n');
 
 console.log('--- 1. poolPremium FUNDS NET, NOT GROSS ---');
-for (const l of ['WC', 'GL'] as const) {
+for (const l of ['WC', 'GL', 'Property'] as const) {
   const gross = rows[l].map(r => r.poolPremium / Math.max(r.expectedLoss, 1));
   const net = rows[l].map((r, i) => r.poolPremium / Math.max(r.expectedLoss - cededPriced[l][i], 1));
   console.log(`  ${l}: poolPremium/GROSS expected = ${mean(gross).toFixed(4)}  ` +
@@ -102,11 +102,6 @@ for (const l of ['WC', 'GL'] as const) {
   check(Math.abs(mean(net) - 1) < 2e-3,
     `${l}: poolPremium / (gross - expected ceded) == CLF 1.000`, `${mean(net).toFixed(6)}`);
   check(mean(gross) < 0.95, `${l}: and it is NO LONGER the gross figure`, `gross ratio ${mean(gross).toFixed(4)}`);
-}
-{
-  const pr = rows.Property.map(r => r.poolPremium / Math.max(r.expectedLoss, 1));
-  console.log(`  Property: poolPremium/GROSS = ${mean(pr).toFixed(6)} — UNCHANGED, deliberately not netted`);
-  check(Math.abs(mean(pr) - 1) < 1e-9, 'Property still funds gross (known, documented residual)');
 }
 
 console.log('\n--- 2. ADMIN IS STILL ON THE GROSS EXPECTED LOSS ---');

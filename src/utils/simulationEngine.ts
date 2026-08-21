@@ -439,19 +439,24 @@ export function processLineYear(
   // while exactly the same two lines did both.
   //
   //   isClaimLine  — draws individual Claim/Occurrence objects. All three now.
-  //   usesTower    — prices and cedes through the per-occurrence tower. WC and
-  //                  GL only; Property is still on the legacy aggregate quota
-  //                  share from REINSURANCE_PROGRAMS until it gets a tower.
+  //   usesTower    — prices and cedes through the per-occurrence tower. All
+  //                  three now, as of Property's own occurrence layer and
+  //                  aggregate. REINSURANCE_PROGRAMS is dead code for every
+  //                  line from here — its removal is its own commit.
   //
-  // Collapsing these back together would silently put Property through a tower
-  // that does not exist for it, or strand it on the aggregate loss path it no
-  // longer uses. Every site below picks one deliberately.
+  // Kept as two separate flags rather than collapsed into one, even though
+  // they agree today: the distinction is what let Property's claim generator
+  // and its tower land in separate commits, and collapsing them would make
+  // that impossible to do again if a fourth line ever needs the same staging.
   //
-  // linePricing.quoteLineRates keeps its OWN tower-only test and correctly
-  // still excludes Property, so the panel and the engine agree without a
+  // linePricing.quoteLineRates keeps its OWN tower-only test, now also
+  // widened to include Property, so the panel and the engine agree without a
   // second definition here.
   const isClaimLine = isWcClaimLine || isGlClaimLine || isPropertyClaimLine;
-  const usesTower = isWcClaimLine || isGlClaimLine;
+  const usesTower = isWcClaimLine || isGlClaimLine || isPropertyClaimLine;
+  // WC and Property are the only lines with an aggregate stop-loss (see
+  // reinsuranceTower.ts's header on why GL has neither).
+  const isAggregateLine = isWcClaimLine || isPropertyClaimLine;
 
   // --- THE PRE-MOVEMENT QUOTE ------------------------------------------------
   //
@@ -549,12 +554,13 @@ export function processLineYear(
   // not move the loss quantities.
   const expectedLoss = activeExposure * newPurePremiumPer100 * 10_000;
 
-  // The WC aggregate, priced on the REAL post-movement expectedLoss. Its
-  // expected ceded is netted out of the pool premium below alongside the
+  // The WC/Property aggregate, priced on the REAL post-movement expectedLoss.
+  // Its expected ceded is netted out of the pool premium below alongside the
   // occurrence layers'.
-  const aggregateQuote = isWcClaimLine && placedForCost && lineDecisions.aggregateStopLevel >= 0
+  const aggregateQuote = isAggregateLine && placedForCost && lineDecisions.aggregateStopLevel >= 0
     ? quoteAggregate(
-        placedForCost, currentActiveMembers, expectedLoss, lineDecisions.aggregateStopLevel, yearNumber,
+        line as 'WC' | 'Property', placedForCost, currentActiveMembers,
+        expectedLoss, lineDecisions.aggregateStopLevel, yearNumber,
       )
     : null;
 
@@ -925,6 +931,19 @@ export function processLineYear(
     // WHEN THE CAT BAND LANDS, THE LOAD AND THE LOSSES GO BACK IN THE SAME
     // COMMIT. Restoring either alone recreates the defect: the load alone is a
     // certain over-collection, the losses alone a certain under-collection.
+    //
+    // ⚠ AND WHEN IT DOES, EACH CAT EVENT MUST BE ONE OCCURRENCE, NOT ONE
+    // OCCURRENCE PER MEMBER HIT. The occurrence tower above already groups
+    // claims by occurrenceId before layering (see reinsuranceTower.ts's
+    // occurrenceTotals and the header note in data/reinsuranceTower.ts) — it
+    // requires no change to price a multi-claim cat event correctly. The
+    // requirement is entirely on the generator: `generatePropertyClaims`'s cat
+    // band must emit one Occurrence per event with every hit member's claim in
+    // that occurrence's claimIds, the same shape a GL abuse batch or WC's
+    // (retired) weather band used. Get this wrong — one occurrence per claim,
+    // as today's attritional band correctly does for a single loss — and a
+    // catastrophe that should pierce the $5M retention as one $74M occurrence
+    // instead looks like twenty $3.7M claims, none of which reaches it.
     shockOccurred = false;
   } else {
     shockOccurred = commonLossFactor > catastropheThreshold;
@@ -967,14 +986,13 @@ export function processLineYear(
 
   grossUltimateLoss = Math.max(0, grossUltimateLoss);
 
-  // --- REINSURANCE: two products, split at the isClaimLine seam -------------
+  // --- REINSURANCE: the per-occurrence tower, all three lines ---------------
   //
-  // WC and GL run the PER-OCCURRENCE TOWER (cap -> retention -> layers, then WC's
-  // aggregate stop-loss on what remains retained). Property runs the LEGACY
-  // AGGREGATE QUOTA SHARE, untouched, because it has no Claim/Occurrence objects
-  // to layer — it still draws the aggregate member-Gamma above. That is why
-  // `reinsuranceLevel` and REINSURANCE_PROGRAMS are still live: they are
-  // Property's product now, not dead code.
+  // WC, GL and Property all run the PER-OCCURRENCE TOWER (cap -> retention ->
+  // layers, then the aggregate stop-loss — WC and Property only — on what
+  // remains retained). REINSURANCE_PROGRAMS and `reinsuranceLevel` are dead for
+  // every line now; the `else` branch below and reinsuranceEngine.ts stay in
+  // place only because their removal is its own commit, after netting.
   let reinsuranceRecovery: number;
   let cededByLayer: number[] = [];
   let retainedAboveTower = 0;
@@ -994,8 +1012,9 @@ export function processLineYear(
     // The aggregate sits on RETAINED loss, so it applies AFTER the occurrence
     // layers — including loss retained through layers the player DECLINED. That
     // scope is what makes the aggregate respond to the layer selection at all.
-    if (towerLine === 'WC' && lineDecisions.aggregateStopLevel >= 0) {
+    if ((towerLine === 'WC' || towerLine === 'Property') && lineDecisions.aggregateStopLevel >= 0) {
       const quote = quoteAggregate(
+        towerLine,
         placed,
         currentActiveMembers,
         expectedLoss,

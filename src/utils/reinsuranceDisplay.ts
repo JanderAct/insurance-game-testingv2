@@ -1,28 +1,38 @@
 // WHICH REINSURANCE PRODUCT DOES A LINE HAVE, AND HOW IS IT NAMED.
 //
-// ONE definition, shared by every readout, because there are now TWO products
-// live at once and a display that picks the wrong one is the failure mode this
-// module exists to prevent:
+// ONE definition, shared by every readout, because a display that picks the
+// wrong product is the failure mode this module exists to prevent. As of
+// Property's own occurrence layer and aggregate, all three lines run the
+// PER-OCCURRENCE TOWER (WC and Property additionally carry an aggregate
+// stop-loss; GL does not — see reinsuranceTower.ts's header on why).
 //
-//   WC, GL   -> the PER-OCCURRENCE TOWER (layers + WC's aggregate stop-loss)
-//   Property -> the LEGACY AGGREGATE QUOTA SHARE (`reinsuranceLevel`)
+// REINSURANCE_PROGRAMS / `reinsuranceLevel` ARE NOW DEAD FOR EVERY LINE. Left
+// in place — and `usesTower` left as a real function rather than collapsed to
+// `true` — only because their removal is its own commit, after netting, same
+// as the WC/GL cutover's own sequencing.
 //
-// ⚠ DO NOT READ `reinsuranceLevel` FOR WC OR GL ANYWHERE IN THE UI. The field
-// is still on LineDecisionSet and still carries whatever value it was last set
-// to, so it renders perfectly happily as "Moderate" on a line whose product is
-// a layer tower. That is exactly the class of defect the combined-ratio readout
+// ⚠ DO NOT READ `reinsuranceLevel` ANYWHERE IN THE UI. The field is still on
+// LineDecisionSet and still carries whatever value it was last set to, so it
+// renders perfectly happily as "Moderate" on a line whose product is a layer
+// tower. That is exactly the class of defect the combined-ratio readout
 // was — a display showing a plausible number that means nothing — and it went
 // unnoticed for weeks. Branch through `usesTower` instead.
 
-import { REINSURANCE_TOWER, AGG_ATTACHMENT_LEVELS, type TowerLine } from '../data/reinsuranceTower';
+import { REINSURANCE_TOWER, AGG_ATTACHMENT_LEVELS, TOWER_TOP, type TowerLine } from '../data/reinsuranceTower';
 import { REINSURANCE_PROGRAMS } from '../data/defaultAssumptions';
 import type { CoverageLine, LineDecisionSet, LineView } from '../types/simulation';
 import { normalizeLayersPlaced } from './reinsuranceTower';
 
-// The seam, stated once. Mirrors simulationEngine's `isClaimLine` — if that ever
-// changes, this must change with it.
+// The seam, stated once. Mirrors simulationEngine's `isClaimLine`/`usesTower`
+// — if that ever changes, this must change with it. Always true today (every
+// CoverageLine is a TowerLine), kept as a real predicate rather than inlined
+// so a future fourth line has somewhere to say no.
 export const usesTower = (line: CoverageLine | LineView): line is TowerLine =>
-  line === 'WC' || line === 'GL';
+  line === 'WC' || line === 'GL' || line === 'Property';
+
+// WC and Property are the only lines with an aggregate stop-loss.
+const hasAggregate = (line: CoverageLine | LineView): line is 'WC' | 'Property' =>
+  line === 'WC' || line === 'Property';
 
 // For readouts that have NO line in scope (narrativeEngine, resultMetrics,
 // deriveAnnualStatement all take a result, not a line). `cededByLayer` is
@@ -48,8 +58,8 @@ export function placementSummary(
   const layers = REINSURANCE_TOWER[line];
   const placed = normalizeLayersPlaced(line, decisions.layersPlaced);
   const bought = layers.filter((_, i) => placed[i]).map(l => l.name);
-  const agg = line === 'WC' && decisions.aggregateStopLevel >= 0
-    ? ` + agg @ ${(AGG_ATTACHMENT_LEVELS[decisions.aggregateStopLevel] * 100).toFixed(0)}%`
+  const agg = hasAggregate(line) && decisions.aggregateStopLevel >= 0
+    ? ` + agg @ ${(AGG_ATTACHMENT_LEVELS[line][decisions.aggregateStopLevel] * 100).toFixed(0)}%`
     : '';
   if (!bought.length) return `Full retention — no layers placed${agg}`;
   return `${bought.join(' + ')}${agg}`;
@@ -63,7 +73,7 @@ export function placementCode(
   if (!usesTower(line)) return String(decisions.reinsuranceLevel);
   const placed = normalizeLayersPlaced(line, decisions.layersPlaced);
   const bits = placed.map((on, i) => on ? `L${i + 1}` : '').filter(Boolean).join('+') || 'NONE';
-  const agg = line === 'WC' && decisions.aggregateStopLevel >= 0 ? `+AGG${decisions.aggregateStopLevel}` : '';
+  const agg = hasAggregate(line) && decisions.aggregateStopLevel >= 0 ? `+AGG${decisions.aggregateStopLevel}` : '';
   return bits + agg;
 }
 
@@ -76,4 +86,4 @@ export const RETAINED_ABOVE_TOWER_CAVEAT =
   'Mean is INDICATIVE ONLY: the band is unbounded, so it has no valid confidence interval.';
 
 export const towerTopLabel = (line: CoverageLine): string =>
-  usesTower(line) ? (line === 'GL' ? '$25M' : '$50M') : '—';
+  usesTower(line) ? `$${TOWER_TOP[line] / 1e6}M` : '—';

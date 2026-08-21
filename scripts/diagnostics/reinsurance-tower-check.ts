@@ -165,17 +165,17 @@ console.log('\n=== 4. THE AGGREGATE RESPONDS TO THE OCCURRENCE-LAYER SELECTION =
   const all = REINSURANCE_TOWER.WC.map(l => l.purchasable);
   const none = REINSURANCE_TOWER.WC.map(() => false);
   console.log('  att%   all layers premium    none placed premium    ratio');
-  for (let lv = 0; lv < AGG_ATTACHMENT_LEVELS.length; lv++) {
-    const qa = quoteAggregate(all, AGG_BOOK, EGROSS, lv, REF_YEAR), qn = quoteAggregate(none, AGG_BOOK, EGROSS, lv, REF_YEAR);
+  for (let lv = 0; lv < AGG_ATTACHMENT_LEVELS.WC.length; lv++) {
+    const qa = quoteAggregate('WC', all, AGG_BOOK, EGROSS, lv, REF_YEAR), qn = quoteAggregate('WC', none, AGG_BOOK, EGROSS, lv, REF_YEAR);
     const ratio = qn.premium / Math.max(qa.premium, 1);
-    console.log(`  ${(AGG_ATTACHMENT_LEVELS[lv] * 100).toFixed(0)}%   ${fmt$(qa.premium).padStart(18)}    ${fmt$(qn.premium).padStart(18)}    x${ratio.toFixed(1)}  ` +
-      `${note(ratio > 1.4, `aggregate barely responds to selection at ${AGG_ATTACHMENT_LEVELS[lv]} (x${ratio.toFixed(1)})`)}`);
+    console.log(`  ${(AGG_ATTACHMENT_LEVELS.WC[lv] * 100).toFixed(0)}%   ${fmt$(qa.premium).padStart(18)}    ${fmt$(qn.premium).padStart(18)}    x${ratio.toFixed(1)}  ` +
+      `${note(ratio > 1.4, `aggregate barely responds to selection at ${AGG_ATTACHMENT_LEVELS.WC[lv]} (x${ratio.toFixed(1)})`)}`);
   }
   console.log('  ^^ declining occurrence layers puts catastrophic claims back into the retention,');
   console.log('     raising retained volatility and so the aggregate\'s price. Without this,');
   console.log('     "decline everything, buy the aggregate" would be free volatility transfer.');
   // Not linear in exposure — the reason this price is computed, not frozen.
-  const small = quoteAggregate(all, AGG_SMALL, EGROSS / 2, 1, REF_YEAR), big = quoteAggregate(all, AGG_BIG, EGROSS * 2, 1, REF_YEAR);
+  const small = quoteAggregate('WC', all, AGG_SMALL, EGROSS / 2, 1, REF_YEAR), big = quoteAggregate('WC', all, AGG_BIG, EGROSS * 2, 1, REF_YEAR);
   const rs = small.premium / unitsOf(AGG_SMALL), rb = big.premium / unitsOf(AGG_BIG);
   console.log(`  premium per $100 at $145M exposure ${rs.toFixed(4)} vs $580M ${rb.toFixed(4)} — FALLS as the book grows: ` +
     `${note(rb < rs, 'aggregate price per $100 did not fall with exposure — linearity bug')}`);
@@ -245,11 +245,34 @@ console.log('\n=== 6. LIVE GAME: ceded reconciles, and GL above-tower exceeds th
         `${note(above === 0 || wcTop >= REINSURANCE_TOWER.WC[2].limit - 1, 'WC retained above the tower while its top layer had unused limit')}`);
     }
   }
-  // Property must be untouched by all of this.
+  // Property now runs the SAME tower, one layer, $5M retention.
   const pr = locked[0].byLine.Property!;
-  console.log(`  Property still on the LEGACY path: cededByLayer empty ${note(pr.cededByLayer.length === 0, 'Property got tower layers')}` +
-    `, aggregate zero ${note(pr.aggregateRecovery === 0 && pr.aggregatePremium === 0, 'Property got a tower aggregate')}` +
-    `, reinsuranceCost ${fmt$(pr.reinsuranceCost)} from REINSURANCE_PROGRAMS`);
+  console.log(`  Property is on the tower now: cededByLayer populated ${note(pr.cededByLayer.length === 1, 'Property has no tower layer')}` +
+    `, default decline of the aggregate ${note(pr.aggregateRecovery === 0 && pr.aggregatePremium === 0, 'Property aggregate fired on the default decision set')}` +
+    `, reinsuranceCost ${fmt$(pr.reinsuranceCost)} from the occurrence layer (not REINSURANCE_PROGRAMS)`);
+
+  // NULL TEST: decline the layer AND the aggregate — full self-insurance must
+  // recover nothing and cost nothing, every year. This is what "tower declined
+  // reproduces the parent byte-for-byte" reduces to as a STANDING check: the
+  // one-time cross-commit comparison (against 5faf053, from an identical
+  // pre-game-free bootstrap so the two products' different default pre-game
+  // behaviour cannot contaminate it) is recorded in the cutover commit; this
+  // is the mechanism it verified, kept runnable forever. Measured there: only
+  // `attachment`/`poolLosses`/`excessLosses`/`quotaShareLosses` differed from
+  // the old REINSURANCE_PROGRAMS "Self Fund" run — expected, because those are
+  // display-split fields keyed off `attachment`, and the tower's $5M retention
+  // is a genuinely different number from the old model's 125%-of-expected-loss
+  // attachment. Every field with real economic weight (premium, cost,
+  // recovery, net/gross loss, membership, surplus) was exactly unchanged.
+  const declined = play('TOWERCHK-DECLINE', ['WC', 'GL', 'Property'], 5, d => ({
+    ...d, byLine: { ...d.byLine, Property: { ...d.byLine.Property, layersPlaced: [false], aggregateStopLevel: -1 } },
+  }));
+  let declineOk = true;
+  for (const r of declined) {
+    const lr = r.byLine.Property!;
+    if (lr.reinsuranceRecovery !== 0 || lr.reinsuranceCost !== 0 || lr.netUltimateLoss !== lr.grossUltimateLoss) declineOk = false;
+  }
+  console.log(`  Property fully declined (layer + aggregate): reinsuranceRecovery, reinsuranceCost === 0 and net === gross every year: ${note(declineOk, 'declining Property\'s tower did not zero out reinsurance')}`);
 }
 
 console.log(problems.length === 0

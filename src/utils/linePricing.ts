@@ -97,7 +97,9 @@ export function quoteLineRates(input: LineRateInputs): LineRateQuote {
   } = input;
 
   const isWcClaimLine = line === 'WC';
-  const isClaimLine = isWcClaimLine || line === 'GL';
+  const isPropertyClaimLine = line === 'Property';
+  const isAggregateLine = isWcClaimLine || isPropertyClaimLine;
+  const isClaimLine = isWcClaimLine || line === 'GL' || isPropertyClaimLine;
 
   const placedForCost = isClaimLine
     ? normalizeLayersPlaced(line as TowerLine, layersPlaced)
@@ -111,9 +113,9 @@ export function quoteLineRates(input: LineRateInputs): LineRateQuote {
   // ceding transfers the loss and not the handling cost.
   const adminRatePer100 = purePremiumPer100 * ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM;
 
-  const aggregateQuote = isWcClaimLine && placedForCost && aggregateStopLevel >= 0
+  const aggregateQuote = isAggregateLine && placedForCost && aggregateStopLevel >= 0
     ? quoteAggregate(
-        placedForCost, members,
+        line as 'WC' | 'Property', placedForCost, members,
         exposure * purePremiumPer100 * 10_000,
         aggregateStopLevel, yearNumber,
       )
@@ -132,9 +134,10 @@ export function quoteLineRates(input: LineRateInputs): LineRateQuote {
   const poolPremium =
     exposure * poolPremiumRatePer100 * 10_000;
 
-  // WC/GL: the placed layers' premiums plus WC's aggregate, priced at runtime
-  // off the book. Property: unchanged legacy percentage of pool premium, which
-  // is genuinely the structure it is on.
+  // WC/GL/Property: the placed layers' premiums plus the aggregate (WC and
+  // Property only), priced at runtime off the book. The `else` branch is dead
+  // for every line as of the Property cutover — REINSURANCE_PROGRAMS retains a
+  // caller only until its own retirement commit.
   const reinsuranceCost = towerQuote !== null
     ? towerQuote.premium + (aggregateQuote?.premium ?? 0)
     : calculateReinsuranceCost(reinsuranceLevel, poolPremium, competitivePressure);

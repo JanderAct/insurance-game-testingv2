@@ -1280,7 +1280,7 @@ function buildAssumptionRows(): AuditRow[] {
         `  Assessment % (engine field): ${formatSliderPct(SLIDER_RANGES.assessmentPct)}\n` +
         `Underwriting Strictness: ${formatSliderNumber(SLIDER_RANGES.underwritingStrictness)}\n` +
         `Risk Control %: ${formatSliderPct(SLIDER_RANGES.riskControlPct)}\n` +
-        `Reinsurance Level (Property only — WC/GL use the layer tower): ${formatSliderNumber(SLIDER_RANGES.reinsuranceLevel)}\n` +
+        `Reinsurance Level (unread by every line as of Property's own occurrence layer and aggregate — all three now use the layer tower): ${formatSliderNumber(SLIDER_RANGES.reinsuranceLevel)}\n` +
         `Asset Allocation Default: Cash ${ASSET_ALLOCATION_DEFAULT.cashPct}% / Bonds ${ASSET_ALLOCATION_DEFAULT.bondsPct}% / Equities ${ASSET_ALLOCATION_DEFAULT.equitiesPct}%`,
       formula: 'Player decision slider configuration.',
       note:

@@ -74,6 +74,7 @@ import {
   GL_LOSS_MODEL,
   GL_SEVERITY_CAP,
   GL_SEVERITY_COMPONENTS,
+  PROPERTY_LOSS_MODEL,
   WC_LOSS_MODEL,
   WC_RATING_GROUPS,
   WC_SEVERITY_COMPONENTS,
@@ -82,11 +83,13 @@ import {
 import { REINSURANCE_TOWER, TOWER_TOP, type TowerLine } from '../data/reinsuranceTower';
 import { normalCdf } from './claimMath';
 import { glSeverityTrend, thetaGl, untiltedGlWeights } from './glClaimEngine';
+import { propertyInternals } from './propertyClaimEngine';
 import { ratingGroupOf, regionMultiplier, thetaWc, trendedMu, wcFrequencyTrend } from './wcClaimEngine';
 import type { Member, Region } from '../types/simulation';
 
 const GM = GL_LOSS_MODEL;
 const WM = WC_LOSS_MODEL;
+const PM = PROPERTY_LOSS_MODEL;
 
 // gPool's variance. GL's generator multiplies EVERY member's rate by one shared
 // Gamma(25, 1/25) draw per year; WC's equivalent (commonLossFactor) is pinned to
@@ -95,6 +98,10 @@ const WM = WC_LOSS_MODEL;
 const VG = 1 / WM.poolYearFactor.shape;
 const GL_ALPHA_FREQ = GM.memberFrequencyNoise.shape;
 const WC_ALPHA_FREQ = WM.memberFrequencyNoise.shape;
+// Property has no gPool term either — propertyClaimEngine.ts's generator draws
+// no shared pool factor (see its "NO gPool" note), so Property's vg is 0, same
+// structural case as WC.
+const PR_ALPHA_FREQ = PM.memberFrequencyNoise.shape;
 
 // Index lookups as RECORDS, not Array.indexOf. These run once per member per
 // layer on the pricing path; an indexOf is a linear scan with string compares
@@ -131,12 +138,17 @@ export interface BandMoments {
 // call and rebuilds the same 12 entries on the next.
 const glBandCache = new Map<number, BandMoments[]>();
 const wcBandCache = new Map<number, BandMoments[]>();
+// Property has exactly one slot, not a Map: nothing it depends on varies by
+// year (see propertyBandMomentsAll's header) or by any per-member dimension,
+// so there is no key to cache on.
+let propertyBandCache: BandMoments[] | null = null;
 
 // Exported for the harness, which must be able to force a cold cache to prove
 // warm and cold agree. Nothing in the engine calls this.
 export function resetTowerMomentCache(): void {
   glBandCache.clear();
   wcBandCache.clear();
+  propertyBandCache = null;
   edgeMomentCache.clear();
 }
 
@@ -269,6 +281,29 @@ function wcBandMomentsAll(yearNumber: number, group: WcRatingGroup, region: Regi
   return out;
 }
 
+// PROPERTY: one flat mixture, NEUTRAL RQ (severityFactor(5) is identically 1,
+// so no shift term — unlike GL's trend shift or WC's region shift, there is
+// nothing to apply), and NO YEAR DEPENDENCE AT ALL. Property's
+// frequencyTrendPerYear is 0 and, unlike WC/GL, the live generator applies no
+// settlement-trend multiplier to severity either (propertyClaimEngine.ts's
+// PAYOUT_TREND_FACTOR = 1 note) — both trend knobs exist in
+// PROPERTY_LOSS_MODEL for a future accident-year parameterisation but neither
+// is wired into a draw today, so nothing here would have a year to key on even
+// if it wanted one. The `yearNumber` parameter on the exported accessor exists
+// only for call-site symmetry with the WC/GL versions.
+function propertyBandMomentsAll(): BandMoments[] {
+  if (propertyBandCache) return propertyBandCache;
+  const comps = PM.severityMixture.map((c, j) => ({
+    mu: c.mu, sigma: c.sigma, weight: c.weight, cacheKey: `pr|${j}`,
+  }));
+  // Single layer, $70M xs $5M, running to the severity cap exactly — see
+  // reinsuranceTower.ts's header on why that is not a coincidence.
+  const bounds = REINSURANCE_TOWER.Property.map(l => ({ lo: l.attachment, hi: l.attachment + l.limit }));
+  const out = bandMomentsForEdges(comps, bounds);
+  propertyBandCache = out;
+  return out;
+}
+
 // Single-layer accessors, kept for the harness (which probes one band at a time
 // to prove the memo key separates them).
 export function glBandMoments(layerIndex: number, yearNumber: number): BandMoments {
@@ -276,6 +311,9 @@ export function glBandMoments(layerIndex: number, yearNumber: number): BandMomen
 }
 export function wcBandMoments(layerIndex: number, yearNumber: number, group: WcRatingGroup, region: Region): BandMoments {
   return wcBandMomentsAll(yearNumber, group, region)[layerIndex];
+}
+export function propertyBandMoments(layerIndex: number): BandMoments {
+  return propertyBandMomentsAll()[layerIndex];
 }
 
 // --- aggregation over a book ---------------------------------------------------
@@ -294,10 +332,17 @@ export interface LayerRiskMoments {
 // severity trend — does not floor at year 1. Getting these two the wrong way
 // round is the same defect class as finding 37, so both are read from the
 // line's own engine rather than restated here.
+//
+// PROPERTY reads TIV, not payroll, and carries no frequency trend either
+// (frequencyTrendPerYear is 0 and unwired — see propertyBandMomentsAll).
 function memberLambda(line: TowerLine, member: Member, yearNumber: number): number {
   if (line === 'GL') {
     const payroll = member.exposureByLine.GL ?? 0;
     return payroll <= 0 ? 0 : payroll * GM.ratePer1M * thetaGl(NEUTRAL_RQ);
+  }
+  if (line === 'Property') {
+    const tiv = member.exposureByLine.Property ?? 0;
+    return tiv <= 0 ? 0 : tiv * PM.frequencyPer1mTiv * propertyInternals.thetaFrequency(NEUTRAL_RQ);
   }
   const payroll = member.exposureByLine.WC ?? 0;
   if (payroll <= 0) return 0;
@@ -339,7 +384,7 @@ export function allLayerRiskMoments(
   const layers = REINSURANCE_TOWER[line];
   const n = layers.length;
   const vg = line === 'GL' ? VG : 0;
-  const alphaFreq = line === 'GL' ? GL_ALPHA_FREQ : WC_ALPHA_FREQ;
+  const alphaFreq = line === 'GL' ? GL_ALPHA_FREQ : line === 'Property' ? PR_ALPHA_FREQ : WC_ALPHA_FREQ;
 
   // THE BOOK IS COLLAPSED TO ITS SUFFICIENT STATISTICS BEFORE ANY BAND MOMENT IS
   // TOUCHED. Every term in the variance depends on the members only through two
@@ -352,9 +397,9 @@ export function allLayerRiskMoments(
   // B2 needs the sum of SQUARES, which is why both are accumulated rather than
   // just the total — it does not factor out of a single total the way A1 and A2
   // do. With that, a 200-member book costs 200 cheap accumulations plus at most
-  // 12 x 3 cached band lookups, instead of 200 x 3 lookups. GL has exactly one
-  // cell (flat mixture, no group or region dimension).
-  const CELLS = line === 'GL' ? 1 : WC_RATING_GROUPS.length * 3;
+  // 12 x 3 cached band lookups, instead of 200 x 3 lookups. GL and Property have
+  // exactly one cell each (flat mixture, no group or region dimension).
+  const CELLS = line === 'GL' || line === 'Property' ? 1 : WC_RATING_GROUPS.length * 3;
   const sumLam = new Float64Array(CELLS);
   const sumLamSq = new Float64Array(CELLS);
   let lambda = 0;
@@ -363,10 +408,14 @@ export function allLayerRiskMoments(
   // Math.exp, both of loop-INVARIANT arguments — calling them per member cost
   // more than every band moment in the function put together. thetaGl(5) is
   // identically 1 (neutral RQ is the exponent's own origin), so GL's rate needs
-  // no per-member risk-quality term at all on this basis.
+  // no per-member risk-quality term at all on this basis. Property's
+  // thetaFrequency(5) is identically 1 for the same reason (linear in
+  // NEUTRAL_RQ - rq) and it carries no frequency trend, so prRate is the whole
+  // per-member rate with nothing further to hoist.
   const wcTrend = line === 'WC' ? wcFrequencyTrend(yearNumber) : 1;
   const wcTheta = line === 'WC' ? thetaWc(NEUTRAL_RQ) : 1;
   const glRate = line === 'GL' ? GM.ratePer1M * thetaGl(NEUTRAL_RQ) : 0;
+  const prRate = line === 'Property' ? PM.frequencyPer1mTiv * propertyInternals.thetaFrequency(NEUTRAL_RQ) : 0;
 
   for (const member of members) {
     let lam: number, cell: number;
@@ -374,6 +423,11 @@ export function allLayerRiskMoments(
       const payroll = member.exposureByLine.GL ?? 0;
       if (payroll <= 0) continue;
       lam = payroll * glRate;
+      cell = 0;
+    } else if (line === 'Property') {
+      const tiv = member.exposureByLine.Property ?? 0;
+      if (tiv <= 0) continue;
+      lam = tiv * prRate;
       cell = 0;
     } else {
       const payroll = member.exposureByLine.WC ?? 0;
@@ -393,7 +447,9 @@ export function allLayerRiskMoments(
     if (sumLam[cell] === 0) continue;
     const bands = line === 'GL'
       ? glBandMomentsAll(yearNumber)
-      : wcBandMomentsAll(yearNumber, WC_RATING_GROUPS[Math.floor(cell / 3)], REGIONS[cell % 3]);
+      : line === 'Property'
+        ? propertyBandMomentsAll()
+        : wcBandMomentsAll(yearNumber, WC_RATING_GROUPS[Math.floor(cell / 3)], REGIONS[cell % 3]);
     for (let i = 0; i < n; i++) {
       const { m1, m2 } = bands[i];
       A1[i] += sumLam[cell] * m1;
@@ -453,20 +509,28 @@ export function retainedOccurrenceMoments(
   }
   if (!edges.includes(TOWER_TOP[line])) edges.push(TOWER_TOP[line]);
   edges.sort((a, b) => a - b);
-  const ceiling = line === 'GL' ? GL_SEVERITY_CAP : Number.POSITIVE_INFINITY;
-  edges.push(ceiling);
+  // Property's ceiling EQUALS TOWER_TOP.Property (both are the severity cap,
+  // $75M — see reinsuranceTower.ts's header on why that is structural, not a
+  // coincidence), so the two are already the same edge; guard against pushing
+  // it twice, which the GL/WC cases never needed since GL_SEVERITY_CAP (100M)
+  // and TOWER_TOP.GL (25M) differ and WC's ceiling is infinite.
+  const ceiling = line === 'GL' ? GL_SEVERITY_CAP : line === 'Property' ? PM.severityCap : Number.POSITIVE_INFINITY;
+  if (!edges.includes(ceiling)) edges.push(ceiling);
 
   // Which layer, if any, covers the band starting at `from`?
   const cededBand = (from: number) =>
     layers.findIndex((l, i) => placed[i] && l.purchasable && from >= l.attachment && from < l.attachment + l.limit);
 
-  // Component list differs by line; both are (mu, sigma, weight) triples once the
-  // trend, region and group are resolved.
+  // Component list differs by line; all are (mu, sigma, weight) triples once
+  // the trend, region and group are resolved. Property has neither a trend nor
+  // a region/group shift to apply — see propertyBandMomentsAll.
   const comps: { mu: number; sigma: number; weight: number }[] = [];
   if (line === 'GL') {
     const w = untiltedGlWeights();
     const shift = Math.log(glSeverityTrend(yk));
     GL_SEVERITY_COMPONENTS.forEach((c, j) => comps.push({ mu: c.mu + shift, sigma: c.sigma, weight: w[j] }));
+  } else if (line === 'Property') {
+    PM.severityMixture.forEach(c => comps.push({ mu: c.mu, sigma: c.sigma, weight: c.weight }));
   } else {
     const spec = WM.ratingGroups[group ?? 'county'];
     const shift = Math.log(regionMultiplier(region ?? 'Central'));
@@ -515,10 +579,15 @@ export function retainedRiskMoments(
   yearNumber: number,
 ): LayerRiskMoments {
   const vg = line === 'GL' ? VG : 0;
-  const alphaFreq = line === 'GL' ? GL_ALPHA_FREQ : WC_ALPHA_FREQ;
+  const alphaFreq = line === 'GL' ? GL_ALPHA_FREQ : line === 'Property' ? PR_ALPHA_FREQ : WC_ALPHA_FREQ;
   let A1 = 0, A2 = 0, B2 = 0, lambda = 0;
 
-  const flat = line === 'GL' ? retainedOccurrenceMoments('GL', placed, yearNumber) : null;
+  // GL and Property are both flat (no per-member group/region dimension); WC's
+  // depends on the member's rating group and region, so it has no single
+  // "flat" value and is computed per member below instead.
+  const flat = line === 'GL' || line === 'Property'
+    ? retainedOccurrenceMoments(line, placed, yearNumber)
+    : null;
   for (const member of members) {
     const lam = memberLambda(line, member, yearNumber);
     if (lam <= 0) continue;

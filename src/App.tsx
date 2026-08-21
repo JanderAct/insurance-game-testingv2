@@ -139,9 +139,12 @@ export default function App() {
           const byLine = (cd as DecisionSet | undefined)?.byLine as
             Record<string, { layersPlaced?: boolean[]; aggregateStopLevel?: number }> | undefined;
           if (byLine) {
-            for (const ld of Object.values(byLine)) {
+            // KEYED BY LINE — DEFAULT_LAYERS_PLACED is now a Record<TowerLine,
+            // boolean[]>, not one flat array, because Property's one-layer
+            // tower and WC/GL's three-layer towers must not share a default.
+            for (const [line, ld] of Object.entries(byLine)) {
               if (!ld) continue;
-              if (!Array.isArray(ld.layersPlaced)) ld.layersPlaced = [...DEFAULT_LAYERS_PLACED];
+              if (!Array.isArray(ld.layersPlaced)) ld.layersPlaced = [...DEFAULT_LAYERS_PLACED[line as CoverageLine]];
               if (typeof ld.aggregateStopLevel !== 'number') ld.aggregateStopLevel = -1;
             }
           }

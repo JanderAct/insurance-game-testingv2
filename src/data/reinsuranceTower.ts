@@ -1,11 +1,46 @@
 // PER-OCCURRENCE REINSURANCE TOWER — structure, measured expected-loss constants
 // and the aggregate stop-loss parameters.
 //
-// Replaces the aggregate quota-share model (REINSURANCE_PROGRAMS) for WC and GL.
-// PROPERTY STILL USES THE OLD MODEL: it runs the legacy aggregate loss path and
-// has no Claim/Occurrence objects to layer, so `reinsuranceLevel` and
-// REINSURANCE_PROGRAMS remain live for Property and ONLY for Property. The seam
-// is simulationEngine's existing `isClaimLine` flag.
+// Replaces the aggregate quota-share model (REINSURANCE_PROGRAMS) for WC, GL and
+// (as of the retention/aggregate commit) Property. REINSURANCE_PROGRAMS and
+// reinsuranceEngine.ts are left in place, now dead for every line — their
+// removal is its own commit, after netting, per the same sequencing the WC/GL
+// cutover used.
+//
+// ============================================================================
+// PROPERTY'S TOWER IS ONE LAYER, NOT THREE, AND THAT IS THE WHOLE STRUCTURE.
+//
+// $70M xs $5M, to the fitted severity mixture's own cap ($75M) — see
+// PROPERTY_LOSS_MODEL.severityCap. There is no band above it to retain
+// unlimited, unlike WC/GL: the model itself caps every claim at $75M, so
+// TOWER_TOP.Property equals the severity cap exactly and `retainedAboveTower`
+// is always ~0 by construction, not a market-capacity choice.
+//
+// RETENTION IS $5M, decided before this commit (perRiskRetention in
+// PROPERTY_LOSS_MODEL was $2M, inherited from roster v3 and explicitly flagged
+// there as needing re-derivation "when Property gets its per-occurrence tower" —
+// this is that commit, and $5M supersedes it).
+//
+// OCCURRENCE == CLAIM for the fitted (attritional) severity mixture, so
+// min(claim, $5M) is the correct per-occurrence retained amount today. THIS IS
+// NOT GUARANTEED TO STAY TRUE. If a cat band is ever added, a single
+// catastrophe must be modeled as ONE OCCURRENCE whose claims (one per member
+// hit) share that occurrence's id — see the Occurrence/Claim note below. Get
+// the grouping wrong and a $74M storm hitting 20 members becomes 20 claims
+// averaging $3.7M each, none of which reaches the $5M retention, and the
+// programme cedes nothing on the exact event it exists to cover.
+//
+// THE MECHANISM ALREADY HANDLES THIS CORRECTLY, TODAY, WITH ZERO CAT CLAIMS.
+// `occurrenceTotals` (below) groups by `occurrenceId` and sums every claim in
+// an occurrence BEFORE the layer sees it — it does not assume one claim per
+// occurrence, it is simply never exercised on more than one because
+// `generatePropertyClaims` does not yet emit a multi-claim occurrence. A future
+// cat band only has to construct its Occurrence/Claim objects correctly
+// (multiple claims, one shared occurrenceId, all in `occurrence.claimIds`); the
+// tower requires no change to layer them as one event. This is written here,
+// now, so the requirement is load-bearing on the generator from day one rather
+// than discovered the day the first cat claim silently under-cedes.
+// ============================================================================
 //
 // ============================================================================
 // THE TOWER, AND WHY IT IS ASYMMETRIC
@@ -57,7 +92,9 @@
 // consumption tracked per layer) and would change every price here.
 // ============================================================================
 
-export type TowerLine = 'WC' | 'GL';
+import { PROPERTY_LOSS_MODEL } from './defaultAssumptions';
+
+export type TowerLine = 'WC' | 'GL' | 'Property';
 
 export interface TowerLayer {
   name: string;
@@ -164,10 +201,30 @@ export const REINSURANCE_TOWER: Record<TowerLine, TowerLayer[]> = {
     // priceable — the remaining objection is capacity alone, which has not
     // changed. Adding the layer would still assert a market exists to write it.
   ],
+  // ONE LAYER. See the header note above for why this is the whole structure
+  // rather than a starting point: occurrence == claim for the fitted
+  // (attritional) mixture, the retention is $5M, and the layer runs to the
+  // model's own severity cap because nothing the generator produces exceeds
+  // it. BOTH BOUNDS READ FROM PROPERTY_LOSS_MODEL rather than restating the
+  // numbers — perRiskRetention and severityCap are the single source for
+  // both this tower and propertyAggregate.ts's Panjer pricing.
+  Property: [
+    {
+      name: `$${(PROPERTY_LOSS_MODEL.severityCap - PROPERTY_LOSS_MODEL.perRiskRetention) / 1e6}M xs $${PROPERTY_LOSS_MODEL.perRiskRetention / 1e6}M`,
+      attachment: PROPERTY_LOSS_MODEL.perRiskRetention,
+      limit: PROPERTY_LOSS_MODEL.severityCap - PROPERTY_LOSS_MODEL.perRiskRetention,
+      purchasable: true,
+    },
+  ],
 };
 
 // Top of each tower. Above this the pool retains, unlimited.
-export const TOWER_TOP: Record<TowerLine, number> = { WC: 50e6, GL: 25e6 };
+//
+// PROPERTY IS NOT "UNLIMITED" IN THE SAME SENSE AS WC/GL. Their tops are market
+// capacity limits with real unbounded severity above them. Property's $75M
+// equals PROPERTY_LOSS_MODEL.severityCap exactly — nothing the generator draws
+// exceeds it, so `retainedAboveTower` is a structural ~0, not a market retention.
+export const TOWER_TOP: Record<TowerLine, number> = { WC: 50e6, GL: 25e6, Property: PROPERTY_LOSS_MODEL.severityCap };
 
 // ============================================================================
 // THE RISK LOAD — one market parameter, not four chosen multiples.
@@ -286,7 +343,31 @@ export const RISK_LOAD_LAMBDA = 0.60;
 // and why only the lowest is meaningful once they are bought ($263k / $50k /
 // $1k with all four). THAT IS THE CORRECT SIGNAL, NOT A BUG: an aggregate on top
 // of full occurrence cover genuinely is nearly worthless, and the price says so.
-export const AGG_ATTACHMENT_LEVELS = [1.10, 1.25, 1.50] as const;
+//
+// ⚠ ONLY WC AND PROPERTY HAVE AN AGGREGATE. GL does not (market capacity, and —
+// separately — its retained-loss CV fails the lognormal fit quoteAggregate uses
+// for WC; see that function's header). Keyed on the two lines that actually
+// have one rather than carrying a meaningless GL entry.
+export const AGG_ATTACHMENT_LEVELS: Record<'WC' | 'Property', readonly number[]> = {
+  WC: [1.10, 1.25, 1.50],
+
+  // TWO LEVELS, chosen for a WIDE FREQUENCY SPREAD rather than a market-range
+  // triple like WC's — two levels close together would be one decision with a
+  // nudge. Derived by Monte Carlo against the roster v6 enrolled book
+  // (scripts/diagnostics/property-tower-mc.ts), NOT the pre-rescale plan's
+  // figures — the roster moved twice since that plan and would have made those
+  // numbers wrong by construction, not just stale.
+  //
+  // Measured at that book (E[retained[ $12.12M, occurrence layer purchased):
+  //   0.83 x E[R] -> attachment rounds to $10M, fires ~61% of years (~3-in-5,
+  //                  matching the real-market aggregate reference the decision
+  //                  to build one at all was argued from)
+  //   1.49 x E[R] -> attachment rounds to $18M, fires ~14% of years (~1-in-7)
+  // A >4x gap in firing frequency and an $8M gap in dollar attachment — a real
+  // choice between "smooths a bad year" and "catastrophe backstop only", not
+  // two numbers a player would treat as the same decision.
+  Property: [0.83, 1.49],
+};
 
 // LIMIT, as a multiple of expected retained loss. A LIMIT IS REQUIRED: an
 // unlimited aggregate is hard to price honestly and would make the upper
@@ -299,9 +380,24 @@ export const AGG_ATTACHMENT_LEVELS = [1.10, 1.25, 1.50] as const;
 // $37M occurrence against a ~$12.8M limit still leaves the pool most of it. So
 // the aggregate complements the occurrence tower instead of substituting for it,
 // and it scales with the book automatically.
+//
+// SHARED ACROSS WC AND PROPERTY, not re-derived per line — a limit expressed as
+// a multiple of the line's OWN expected retained loss already scales with that
+// line's book, which is the property that made re-deriving it for Property
+// unnecessary. Re-derive it separately only if a line-specific reason to differ
+// ever appears.
 export const AGG_LIMIT_MULTIPLE = 1.00;
 
 // Default placement for a NEW game and for any save that predates the tower:
-// every PURCHASABLE layer placed, no aggregate. Length matches the longest tower
-// (WC, 4 entries); normalizeLayersPlaced trims per line.
-export const DEFAULT_LAYERS_PLACED: boolean[] = REINSURANCE_TOWER.WC.map(l => l.purchasable);
+// every PURCHASABLE layer placed, no aggregate. KEYED PER LINE, not one flat
+// array — a flat array sized to WC's layer count silently discarded every
+// placement decision on any line whose tower has a different number of layers,
+// via normalizeLayersPlaced's length check (`placed.length !== layers.length`
+// -> revert to all-purchasable). Property's one-layer tower is exactly that
+// case: reusing WC's 3-element array would have made every Property placement
+// a no-op.
+export const DEFAULT_LAYERS_PLACED: Record<TowerLine, boolean[]> = {
+  WC: REINSURANCE_TOWER.WC.map(l => l.purchasable),
+  GL: REINSURANCE_TOWER.GL.map(l => l.purchasable),
+  Property: REINSURANCE_TOWER.Property.map(l => l.purchasable),
+};

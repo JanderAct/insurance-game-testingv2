@@ -86,7 +86,7 @@ function resetLineToDefaults(decisions: DecisionSet, line: CoverageLine): Decisi
     ...decisions,
     byLine: {
       ...decisions.byLine,
-      [line]: defaultLineDecisionSet(),
+      [line]: defaultLineDecisionSet(line),
     },
   };
 }
@@ -656,8 +656,9 @@ function TowerControls({
   members: Member[];
   yearNumber: number;
 }) {
-  const layers = REINSURANCE_TOWER[line as 'WC' | 'GL'];
-  const placed = normalizeLayersPlaced(line as 'WC' | 'GL', d.layersPlaced);
+  const layers = REINSURANCE_TOWER[line];
+  const placed = normalizeLayersPlaced(line, d.layersPlaced);
+  const hasAggregate = line === 'WC' || line === 'Property';
 
   const toggle = (i: number) => {
     if (disabled || !layers[i].purchasable) return;
@@ -668,7 +669,7 @@ function TowerControls({
 
   // One moment pass for the whole tower, reused by every row below — calling
   // layerPremium/expectedCededForLayer per row walked the book six times.
-  const layerMoms = allLayerRiskMoments(line as 'WC' | 'GL', members, yearNumber);
+  const layerMoms = allLayerRiskMoments(line, members, yearNumber);
   const occCost = layers.reduce((s, l, i) =>
     s + (placed[i] && l.purchasable ? layerMoms[i].expected + RISK_LOAD_LAMBDA * layerMoms[i].sd : 0), 0);
   // LIVE, not cached: the aggregate is re-quoted from the CURRENT placements on
@@ -676,8 +677,8 @@ function TowerControls({
   // responsiveness is the whole reason the price is computed rather than stored —
   // without it, "decline everything and buy the aggregate" is free volatility
   // transfer.
-  const aggQuote = line === 'WC' && d.aggregateStopLevel >= 0
-    ? quoteAggregate(placed, members, expectedLoss, d.aggregateStopLevel, yearNumber)
+  const aggQuote = hasAggregate && d.aggregateStopLevel >= 0
+    ? quoteAggregate(line, placed, members, expectedLoss, d.aggregateStopLevel, yearNumber)
     : null;
   const totalCost = occCost + (aggQuote?.premium ?? 0);
 
@@ -685,7 +686,7 @@ function TowerControls({
     <div className="space-y-3">
       <div>
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-          Occurrence Layers — Retention $1M
+          Occurrence Layers — Retention ${layers[0].attachment / 1e6}M
         </p>
         <div className="space-y-1.5">
           {layers.map((l, i) => {
@@ -753,12 +754,17 @@ function TowerControls({
         </div>
       )}
 
-      {line === 'WC' && (
+      {(line === 'WC' || line === 'Property') && (
         <div>
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
             Aggregate Stop-Loss — total annual retained loss
           </p>
-          <div className="grid grid-cols-4 gap-1">
+          {/* Column count matches "None" plus however many levels this line
+              offers — WC has 3 (market-range triple), Property has 2 (a wide
+              frequency spread; see AGG_ATTACHMENT_LEVELS.Property's header).
+              Literal class names, not an interpolated grid-cols-${n}, so
+              Tailwind's scanner picks them up. */}
+          <div className={AGG_ATTACHMENT_LEVELS[line].length === 2 ? 'grid grid-cols-3 gap-1' : 'grid grid-cols-4 gap-1'}>
             <button
               disabled={disabled}
               onClick={() => !disabled && set('aggregateStopLevel', -1)}
@@ -770,8 +776,8 @@ function TowerControls({
             >
               <span className="font-bold">None</span>
             </button>
-            {AGG_ATTACHMENT_LEVELS.map((mult, lv) => {
-              const q = quoteAggregate(placed, members, expectedLoss, lv, yearNumber);
+            {AGG_ATTACHMENT_LEVELS[line].map((mult, lv) => {
+              const q = quoteAggregate(line, placed, members, expectedLoss, lv, yearNumber);
               return (
                 <button
                   key={lv}
@@ -808,13 +814,18 @@ function TowerControls({
       <div className="bg-blue-50 rounded-lg p-3 border border-blue-200 text-xs">
         <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
           <DataRow label="Occurrence Layers" value={`${formatCurrency(occCost)}/yr`} />
-          {/* WC ONLY. Showing "Not purchased" on GL would imply an aggregate is
-              available to decline, and none is offered — see the capacity note. */}
-          {line === 'WC' && (
+          {/* WC AND PROPERTY ONLY. Showing "Not purchased" on GL would imply an
+              aggregate is available to decline, and none is offered — see the
+              capacity note. */}
+          {(line === 'WC' || line === 'Property') && (
             <DataRow label="Aggregate Stop-Loss" value={aggQuote ? `${formatCurrency(aggQuote.premium)}/yr` : 'Not purchased'} />
           )}
           <DataRow label="Total Reinsurance Cost" value={`${formatCurrency(totalCost)}/yr`} />
-          <DataRow label="Retained Above Tower" value={`Above ${TOWER_TOP[line as 'WC' | 'GL'] / 1e6}M — unlimited`} />
+          {/* Property's "above tower" band is structurally ~0, not a market
+              retention like WC/GL's — TOWER_TOP.Property equals the severity
+              cap itself, so nothing the generator draws ever lands there. Still
+              shown for consistency; the number just reads near-zero. */}
+          <DataRow label="Retained Above Tower" value={`Above ${TOWER_TOP[line] / 1e6}M — unlimited`} />
         </div>
         <p className="text-blue-700 mt-2 text-xs leading-relaxed border-t border-blue-200 pt-2">
           Priced as expected ceded loss plus a risk load on its standard deviation, both computed from

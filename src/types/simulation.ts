@@ -315,22 +315,25 @@ export interface LineDecisionSet {
   assessmentPct: number;          // 0.00 to 0.25 of premium
   underwritingStrictness: number; // 0-10
   riskControlPct: number;         // 0.00 to 0.08 of premium (projected from DecisionSet.riskControlPct)
-  // ⚠ PROPERTY ONLY as of the per-occurrence tower. Property still runs the
-  // legacy aggregate loss path and constructs no Claim/Occurrence objects, so
-  // there is nothing to layer and REINSURANCE_PROGRAMS remains its product.
-  // WC and GL IGNORE THIS FIELD and read layersPlaced / aggregateStopLevel
-  // instead. Not deleted, because Property genuinely needs it.
-  reinsuranceLevel: number;       // 0-4 — Property only
+  // ⚠ DEAD FOR EVERY LINE as of Property's own occurrence layer and
+  // aggregate — WC and GL ignored it from their own tower cutover, and
+  // Property now reads layersPlaced / aggregateStopLevel instead too. Not
+  // deleted: REINSURANCE_PROGRAMS and this field's removal is its own commit,
+  // after netting, same sequencing the WC/GL cutover used.
+  reinsuranceLevel: number;       // 0-4 — unread by every line now
   // Per-occurrence tower placement, index-aligned to REINSURANCE_TOWER[line].
   // false = that band is RETAINED. ANY COMBINATION IS PERMITTED, including a
   // corridor retention (buying $15M xs $10M while declining $5M xs $5M) — that
   // is unusual in the market but real, and choosing which bands to keep is the
-  // point of the decision. Unread for Property.
+  // point of the decision. Property's tower is one layer, so its only choice
+  // is buy it or retain it — no corridor is possible with a single band.
   layersPlaced: boolean[];
-  // WC AGGREGATE STOP-LOSS on total annual retained loss: index into
-  // AGG_ATTACHMENT_LEVELS, or -1 for not purchased. WC ONLY — GL is
-  // occurrence-only (market capacity, and the pricing model's lognormal fit is
-  // not valid at GL's retained-loss CV; see reinsuranceTower.ts).
+  // AGGREGATE STOP-LOSS on total annual retained loss: index into
+  // AGG_ATTACHMENT_LEVELS[line], or -1 for not purchased. WC AND PROPERTY
+  // ONLY — GL is occurrence-only (market capacity, and the pricing model's
+  // lognormal fit is not valid at GL's retained-loss CV; see
+  // reinsuranceTower.ts). Property's aggregate is priced by Panjer recursion
+  // rather than WC's lognormal fit — see propertyAggregate.ts.
   aggregateStopLevel: number;
   assetAllocation: AssetAllocation;    // projected from DecisionSet.assetAllocation
   loanRepaymentAggressiveness: number; // 0.00 to 1.00 — share of positive net income used to

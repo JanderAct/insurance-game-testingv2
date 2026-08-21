@@ -87,9 +87,12 @@ lognormal severity mixture capped at $75M. It replaced a design that was never f
 in both directions at once — ~112 claims/yr at a $190,179 mean against a fitted 15.5 at $435,254 —
 which is why its AAL had looked roughly right.
 
-⚠ **Property still runs the LEGACY AGGREGATE reinsurance** (REINSURANCE_PROGRAMS), is NOT netted,
-and has no CLF table of its own. Generating claims and running a per-occurrence tower are separate
-questions and Property has only crossed the first.
+Property now runs the SAME PER-OCCURRENCE TOWER as WC/GL: one layer, $70M xs $5M, to the model's
+own severity cap, plus an aggregate stop-loss (two attachment levels, Panjer-priced rather than
+WC's lognormal fit — see propertyAggregate.ts). REINSURANCE_PROGRAMS is dead for every line now,
+kept only pending its own retirement commit. Net funding follows automatically from `usesTower`,
+the same mechanism WC/GL already used. ⚠ Property still has NO CLF table of its own — it reads
+FUNDING_CLF_TABLE like a line with no backtested grid — that is a separate, still-open question.
 
 Conventions established by this work and binding on all future lines:
 - **Accident-year dollars + explicit settlement trend.** Severities are drawn and stored in
