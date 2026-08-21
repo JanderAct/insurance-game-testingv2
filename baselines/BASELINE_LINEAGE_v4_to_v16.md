@@ -1,4 +1,4 @@
-# Baseline Lineage — v4 through v15
+# Baseline Lineage — v4 through v16
 
 A genealogy of the multi-line baselines: what each version represents, what change caused the jump
 to it, which numbers moved and why. Covers the multi-line-meaningful baselines (v4–v11). Earlier
@@ -356,6 +356,97 @@ the immediate predecessor. The v11 workbook set is untouched — separate lineag
 
 ---
 
+## v16 — eight commits: Property's loss model rebuilt from scratch, two TIV rescales, then the pool market-share fix
+
+**Trigger:** Property's loss model was never fitted — it ran a per-member Gamma aggregate with no
+anchor to real claims data. Nine years of the pool's own history said the frequency and severity were
+each wrong by an order of magnitude in opposite directions (~112 claims/yr at a $190K mean, against a
+fitted 15.5 at $435K), so the product landed within 3x by accident. The rebuild, replacing that model
+with a fitted four-component lognormal severity mixture, then required two follow-on TIV rescales
+(pull an unincurred cat load out of the price; rescale the roster twice, to $17B marketplace TIV and
+then again so the *enrolled* book reaches ~$17B) before the book was back at a defensible scale. The
+eighth commit is unrelated — a pool-scope display defect (market share summed mismatched units across
+lines) found and fixed while the roster work was fresh.
+
+**The gates could not be used directly on this range.** By the time the eighth commit landed, ~80
+fields were already showing red against the v15 baseline for reasons the seventh commit's own report
+had already explained (TIV/roster rescales, correctly, moving nearly everything downstream of exposure
+and premium). Comparing straight to v15 would have meant re-deriving that explanation from a diff too
+coarse to attribute it. Every commit below was instead measured against its own immediate parent, via
+a worktree at each of the nine checkpoints (v15 itself plus the eight commits) — the same technique
+v14's PR-solo attribution used, applied here for the same reason: the endpoint alone cannot distinguish
+"one commit moved these fields" from "three moved them and something else reversed part of it."
+
+**The eight, in order, and what each moved (value-dump diff against its own parent; export-hash diff
+in parentheses):**
+- `645c15e` rebuild Property's loss model and cut over — **PR-solo and tri move (4,313 instances / 78
+  field names); WC-solo and GL-solo byte-identical, both in the raw value dump and the export hash.**
+  A real line control: nothing about a Property-only model swap should touch WC or GL, and nothing did.
+  Also the only shape change at the `LineResultSet`/`ResultSet` level in the whole range: +60 instances
+  across 2 field names (`claimCount`, `kLineApplied`), 0 removed.
+- `22672a4` pull Property's asserted cat load from the price — **PR-solo and tri move (4,039 / 79); WC
+  and GL identical.**
+- `b3c6635` rescale Property TIV to $17B (roster v5) — **PR-solo and tri move (3,865 / 73); WC and GL
+  identical.**
+- `55e43ce` apply the identity tolerance on both sides of the broken-identities rule — **0 instances,
+  0 field names, all 12 export hashes unchanged.** Diagnostic-only, exactly as advertised.
+- `59a3411` repair the member-catalog generator and add the CSV-vs-catalog check — **0 / 0 / 0
+  unchanged.** Tooling-only.
+- `da08663` check the catalog against the generator's own output, not just the CSV — **0 / 0 / 0
+  unchanged.** Diagnostic-only.
+- `997a4fd` rescale the roster so the enrolled Property book is ~$17B (roster v6) — **PR-solo and tri
+  move (4,078 / 73); WC and GL identical.**
+- `f0a43c7` fix pool-scope market share — **60 instances, exactly 1 field name (`marketShare`), on
+  ALL FOUR configs** (WC-solo and GL-solo move too, 30 of the 60 instances between them — every config
+  has a pool scope, even a solo one, and the weighting formula runs there regardless of how many lines
+  are active). **All 12 export hashes unchanged** — `resultsExport.ts` already split `marketShare` (and
+  `activeExposure`/`totalMarketExposure`/`writtenExposure`) into per-line rows on the Pool tab before
+  this commit, so the exported workbook never read the field this commit changed.
+
+**Shape movement (`LineResultSet`/`ResultSet` numeric fields, visible to `value-identity-check`):**
+15,840 → 15,900 fields, +60 instances across 2 field names (`claimCount`, `kLineApplied`), 0 removed,
+all at `645c15e`.
+
+**Shape movement invisible to BOTH gates, found only by diffing `src/types/simulation.ts` directly —
+the second time this has mattered (see v14's IBNR-fields note above):** `645c15e` also deleted
+`Claim.locationTiv` and `Claim.damageRatio` (the legacy Property severity model's two claim-level
+fields — severity was `damageRatio x locationTiv`, now a free-standing fitted mixture with neither
+input) and retired `MARKET_TOTAL_LOCATIONS` (no remaining consumer). None of the three was ever a
+`LineResultSet`/`ResultSet` field, so `value-identity-check`'s added/removed count is blind to them;
+none was ever in `RESULT_METRICS`, so `solo-export-guard`'s hash never saw them either. Confirmed via
+`git show 645c15e -- src/types/simulation.ts` (the only type-shape change in the entire v15→v16 range)
+and a repo-wide grep for all three names post-recapture: every remaining hit is a comment recording the
+retirement, no live reference.
+
+**Value movement, cumulative (v15 baseline vs. this recapture directly, not summed across the
+per-commit steps above — the per-commit steps are the attribution, this is the total):** 4,394 of
+15,840 baseline fields changed, across 79 field names.
+
+**Isolation:** WC-solo and GL-solo are byte-identical, on both gates, at every one of the six commits
+that touch Property (`645c15e`, `22672a4`, `b3c6635`, `997a4fd`) or nothing (`55e43ce`, `59a3411`,
+`da08663`) — a real line control held at every intermediate point, not just the endpoints. `f0a43c7` is
+the one commit that legitimately touches all four configs, because pool-scope market share exists even
+for a single-line pool.
+
+**BROKEN IDENTITIES check:** confirmed firing correctly across the full range. `expectedCombinedRatio`
+moved in 15 of 150 instances between v15 and this recapture; every one is within 2 ULPs (2.22e-16 at
+worst) of exactly 1 — ordering noise from summing per-line terms at pool scope, the same phenomenon the
+rule was built to tolerate at v15. The rule printed nothing (it only prints when `realMoved.length > 0`
+for some field), confirming zero spurious fires across all 79 changed field names in this range,
+`expectedCombinedRatio` included. `expectedCombinedRatio` reads exactly 1.000 at display precision
+everywhere the underlying identity requires it.
+
+**Catalog-vs-generator check:** `997a4fd` (roster v6) is the first roster change since this check
+landed at `da08663`. Ran clean: section 0 (regenerate to scratch, byte-diff against the live catalog)
+confirms `memberCatalog.ts` was regenerated, not hand-edited, reproducing the live file exactly at
+31,398 bytes; sections 1–4 (CSV field-by-field, exposure mapping, derived-attribute presence, totals)
+all pass.
+
+**Retired at this recapture:** `SOLO_EXPORT_GUARD_v14.json` and `VALUE_IDENTITY_v14.json`, now that v15
+is the immediate predecessor.
+
+---
+
 ## Quick "why did the numbers change" reference
 | Jump | Cause | WC-only affected? |
 |---|---|---|
@@ -371,6 +462,7 @@ the immediate predecessor. The v11 workbook set is untouched — separate lineag
 | v12 → v13 | Reinsurance tower priced at runtime (both lines); WC aggregate lambda basis fixed | Yes — pricing-basis only, no loss-model change |
 | v13 → v14 | Eight commits: membership/pricing rework (all lines), net funding + static CLF tables (WC/GL), GL supplied table, WC IBNR removed, opening band decoupled to premium (all lines) | No — Property moves twice, at the membership/pricing pair and at the opening-band commit |
 | v14 → v15 | Expected-combined-ratio basis fix (`d80aa9e`) plus seven display/diagnostic commits | **Yes — WC and GL only.** Property was already correct, being deliberately un-netted, and is byte-identical |
+| v15 → v16 | Property loss-model rebuild + cat-load pull + two TIV rescales (roster v5, v6), then the pool market-share fix | No — Property moves on four of the eight commits; WC and GL are byte-identical throughout except the last commit, which moves all four configs |
 
 ## Still pending (would drive a future v11)
 - **⚠️ Systematic underpricing (finding 6)** — actual loss ratio ~46% against a 66.8% expected
@@ -413,6 +505,6 @@ git log --all --diff-filter=D -- 'baselines/*'     # find the removing commit
 
 **This document is why the removal was safe** — it records what each retired
 version represented and what moved between them, which is the part worth
-keeping. What remains in `baselines/` is the current gate pair (v15), its
-immediate predecessor (v14, the one to reach for if a v15 capture ever needs
+keeping. What remains in `baselines/` is the current gate pair (v16), its
+immediate predecessor (v15, the one to reach for if a v16 capture ever needs
 checking), and the v11 workbook set.
