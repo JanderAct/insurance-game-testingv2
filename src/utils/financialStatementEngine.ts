@@ -10,10 +10,6 @@ export interface IncomeStatement {
   grossPremium: number;
   assessments: number;
   grossUltimateLoss: number;
-  attachment: number;
-  poolLosses: number;
-  excessLosses: number;
-  quotaShareLosses: number;
   reinsuranceRecovery: number;
   netUltimateLoss: number;
   netIncurredLoss: number;
@@ -105,10 +101,6 @@ export function deriveAnnualStatement(result: LineResultSet): AnnualFinancialSta
     grossPremium: result.grossPremium,
     assessments: result.assessments,
     grossUltimateLoss: result.grossUltimateLoss,
-    attachment: result.attachment,
-    poolLosses: result.poolLosses,
-    excessLosses: result.excessLosses,
-    quotaShareLosses: result.quotaShareLosses,
     reinsuranceRecovery: result.reinsuranceRecovery,
     netUltimateLoss: result.netUltimateLoss,
     netIncurredLoss: result.netIncurredLoss,

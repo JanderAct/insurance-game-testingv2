@@ -25,7 +25,7 @@ function mergeShockRecords(lineResults: LineResultSet[]): ShockRecord[] | undefi
 }
 import { SeededRandom, deriveSubRng } from './random';
 import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, PROPERTY_HELD_PURE_PREMIUM_PER_100, FUNDING_CLF_TABLE, MEMBER_LOSS_VOLATILITY, RISK_CONTROL_PARAMS, LINE_RESERVE_PAYDOWN_PCT, OPERATING_CASH_PCT_OF_PREMIUM, WC_LOSS_MODEL } from '../data/defaultAssumptions';
-import { REINSURANCE_TOWER, type TowerLine } from '../data/reinsuranceTower';
+import type { TowerLine } from '../data/reinsuranceTower';
 import {
   aggregateRecovery,
   cedeOccurrences,
@@ -765,10 +765,8 @@ export function processLineYear(
       // expectedLoss is activeExposure x the HELD purePremiumPer100, not this
       // generator's analytic, so a legislative change raises realized losses
       // while premium stands still. The player must re-rate or bleed — a law
-      // that makes claims more expensive does not politely raise your rates for
-      // you. Second-order and equally deliberate: the reinsurance attachment is
-      // 125% of that same unchanged expectedLoss, so the treaty does not adjust
-      // either. Do not "fix" either of these.
+      // that makes claims more expensive does not politely raise your rates
+      // for you. Do not "fix" this.
       componentFreqMultipliers: ctx.shock?.componentFreqMultipliers,
       // Risk control acts on the DRAW ONLY (finding 17): it reduces realized
       // frequency without touching the pricing expectation, so it genuinely
@@ -1018,7 +1016,6 @@ export function processLineYear(
   let aggregateRecoveryAmount = 0;
   let aggregatePremium = 0;
   let aggregateAttachment = 0;
-  let attachment: number;
 
   if (hasTractableCeded) {
     const towerLine = line as TowerLine;
@@ -1049,16 +1046,11 @@ export function processLineYear(
     }
 
     reinsuranceRecovery = cession.totalCeded + aggregateRecoveryAmount;
-    // The tower's own retention, for the Pool/Excess display split.
-    attachment = REINSURANCE_TOWER[towerLine][0].attachment;
   } else {
     throw new Error(`processLineYear: no tractable ceded reinsurance for line ${line}`);
   }
 
   const netUltimateLoss = grossUltimateLoss - reinsuranceRecovery;
-  const poolLosses = Math.min(grossUltimateLoss, attachment);
-  const excessLosses = Math.max(0, grossUltimateLoss - attachment);
-  const quotaShareLosses = excessLosses - reinsuranceRecovery;
 
   // --- Investment Income ---
   // This line's own segregated portfolio (Stage 2.9): drawn in processYear from
@@ -1454,10 +1446,6 @@ export function processLineYear(
         }))
       : undefined,
     reinsuranceCost,
-    attachment,
-    poolLosses,
-    excessLosses,
-    quotaShareLosses,
     reinsuranceRecovery,
     cededByLayer,
     retainedAboveTower,
@@ -2263,9 +2251,6 @@ export function aggregateLineResults(
     // would read as two events.
     shockEvents: mergeShockRecords(results),
     reinsuranceCost: reinsuranceCostSum,
-    attachment: sum('attachment'),
-    poolLosses: sum('poolLosses'),
-    excessLosses: sum('excessLosses'),
     // Tower outputs pooled across lines. cededByLayer is summed ELEMENTWISE and
     // is only meaningful because WC and GL share identical attachments and limits
     // on their first three layers; WC's fourth has no GL counterpart and simply
@@ -2282,7 +2267,6 @@ export function aggregateLineResults(
     aggregateRecovery: sum('aggregateRecovery'),
     aggregatePremium: sum('aggregatePremium'),
     aggregateAttachment: sum('aggregateAttachment'),
-    quotaShareLosses: sum('quotaShareLosses'),
     reinsuranceRecovery: sum('reinsuranceRecovery'),
     netUltimateLoss: sum('netUltimateLoss'),
     netIncurredLoss: netIncurredLossSum,

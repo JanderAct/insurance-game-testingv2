@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { hasTractableCeded } from '../utils/reinsuranceDisplay';
 import { hasStaticClf, staticClf } from '../data/clfTables';
 import { lookupCLF } from '../utils/simulationEngine';
 import {
@@ -355,24 +354,6 @@ export default function CalculationAuditPage({ lockedResults, priorHistory, inst
           note: check.note,
           status: check.status,
         })),
-        // The omission is STATED, not silent — an absent row reads as "nothing
-        // to say here", which is the opposite of the truth.
-        ...(checks.poolSumOmitsTowerLossSplit
-          ? [{
-              metric: 'Pool Losses / Excess Losses / Quota Share Losses',
-              value: 'not shown',
-              formula: { kind: 'echo' as const, value: 0, text: 'omitted at pool scope while a tower line is active' },
-              note:
-                'These three split GROSS loss at the reinsurance attachment. For WC and GL that attachment ' +
-                'is the tower\'s first layer at $1M PER OCCURRENCE, compared against an ANNUAL aggregate loss — ' +
-                'so Pool Losses pins at exactly $1M every year, Excess Losses is just the remainder, and ' +
-                '"Quota Share Losses" is not a quota share but all retained loss above $1M. Summing them ' +
-                'across lines would also add a per-occurrence retention to Property\'s annual aggregate ' +
-                'attachment. They remain correct and are still shown on the Pool History tab, where ' +
-                'Pool Losses sits beside Excess Losses as the split it was built for.',
-              status: 'na' as const,
-            }]
-          : []),
         ...(checks.reserveCurrentNoncurrent
           ? [{
               metric: 'Reserve Current + Noncurrent (reserve-weighted)',
@@ -631,9 +612,6 @@ export interface AuditCheckSet {
   endingInvestmentsSweep: AuditCheck;
   // Pool-only: one entry per summable metric, plus the reserve-weighted split.
   poolSum: { metric: string; check: AuditCheck }[];
-  // True when the three attachment-split loss rows were dropped from the pool
-  // card because a tower line is active — see TOWER_MEANINGLESS_POOL_SUM_KEYS.
-  poolSumOmitsTowerLossSplit: boolean;
   reserveCurrentNoncurrent: AuditCheck | null;
   // Derived display values the cards also need.
   totalOperatingRevenuesValue: number;
@@ -679,31 +657,33 @@ function mkCheck(
   return { derived, statement, diff, note, status, buildUp: opts.buildUp };
 }
 
-// ⚠ MEANINGLESS ON WC AND GL, AND THE CHECK CANNOT TELL YOU SO. For a tower
-// line `attachment` is REINSURANCE_TOWER[line][0].attachment — $1M PER
-// OCCURRENCE — while grossUltimateLoss is an ANNUAL AGGREGATE, so
-// poolLosses = min(annual gross, $1M) pins at exactly $1M in 100% of WC and GL
-// line-years (measured, 30 games x 8 years). excessLosses is then just
-// "annual gross minus $1M", and quotaShareLosses is not a quota share at all —
-// it is every retained dollar above the first $1M including the gaps between
-// layers and the band above the tower (it is not retainedAboveTower either:
-// mean gap $9.5M on WC, $10.9M on GL).
+// attachment / poolLosses / excessLosses / quotaShareLosses REMOVED FROM
+// LineResultSet ENTIRELY (this Set and its consuming filter used to live
+// here). They split GROSS loss at the reinsurance attachment, and for every
+// tower line that attachment is REINSURANCE_TOWER[line][0].attachment — a
+// PER-OCCURRENCE dollar constant — compared against grossUltimateLoss, an
+// ANNUAL AGGREGATE. poolLosses = min(annual gross, that constant) pinned at
+// exactly the constant in effectively 100% of line-years (measured, 30 games
+// x 8 years on WC and GL); excessLosses was just the remainder; and
+// "quotaShareLosses" was not a quota share at all — every retained dollar
+// above the pin, including the gaps between purchased layers and the band
+// above the tower (not retainedAboveTower either: mean gap $9.5M on WC,
+// $10.9M on GL).
 //
-// The pool card reconciles them PERFECTLY, because both sides compute the same
-// wrong thing — a constant column with a green check, which is worse than an
-// absent one. They are DROPPED rather than branched-per-line because the pool
-// card's job is a cross-line SUM, and adding a WC per-occurrence retention to
-// Property's 125%-of-expected-loss annual aggregate attachment is not a
-// quantity even in principle.
+// ⚠ "KEPT WHEN PROPERTY IS THE ONLY ACTIVE LINE" WAS ALREADY WRONG by the
+// time this comment was last read. It said Property's own figures were
+// genuine because Property still ran the retired 125%-of-expected-loss
+// REINSURANCE_PROGRAMS path — true when written, but Property got its own
+// occurrence tower before that path was retired, and a tower attachment is
+// exactly the per-occurrence-vs-annual-aggregate mismatch described above.
+// There was no line, including Property, for which this split was still
+// correct by the time it was deleted.
 //
-// KEPT when Property is the only active line, where all three are genuinely
-// what they say (a real annual aggregate against a real aggregate attachment),
-// and the absence is stated on the card rather than left silent.
-// NOT REMOVED FROM THE ENGINE: HistoryPage uses poolLosses correctly, beside
-// excessLosses, which is the split it was built for.
-const TOWER_MEANINGLESS_POOL_SUM_KEYS = new Set<keyof LineResultSet>([
-  'poolLosses', 'excessLosses', 'quotaShareLosses',
-]);
+// "HistoryPage uses poolLosses correctly" WAS ALSO WRONG, for the same
+// reason — toHistoricalYear echoes the same engine-computed fields, so a
+// pre-game WC/GL/Property year pinned exactly like a live one. Both HistoryPage
+// rows and this pool-card omission are gone together; see HistoryPage's own
+// note on what replaces them (Reinsurance Recovery, Retained Above Tower).
 
 // Every metric where the pool figure must equal the sum of its active lines.
 const POOL_SUM_METRICS: { key: keyof LineResultSet; label: string }[] = [
@@ -713,9 +693,6 @@ const POOL_SUM_METRICS: { key: keyof LineResultSet; label: string }[] = [
   { key: 'totalMemberCharge', label: 'Gross Premium & Admin Expense' },
   { key: 'assessments', label: 'Assessments' },
   { key: 'grossUltimateLoss', label: 'Gross Ultimate Loss' },
-  { key: 'poolLosses', label: 'Pool Losses' },
-  { key: 'excessLosses', label: 'Excess Losses' },
-  { key: 'quotaShareLosses', label: 'Quota Share Losses' },
   { key: 'reinsuranceRecovery', label: 'Reinsurance Recovery' },
   { key: 'netUltimateLoss', label: 'Net Ultimate Loss' },
   { key: 'netIncurredLoss', label: 'Net Incurred Loss' },
@@ -937,10 +914,8 @@ export function computeAuditChecks(
   }
 
   // --- Pool = sum of active lines (pool scope only) ---
-  const anyTowerLine = lineKeys.some(l => hasTractableCeded(l));
   const poolSum = isPoolView
     ? POOL_SUM_METRICS
-      .filter(({ key }) => !(anyTowerLine && TOWER_MEANINGLESS_POOL_SUM_KEYS.has(key)))
       .map(({ key, label }) => {
         const sumOfLines = lineKeys.reduce(
           (s, l) => s + Number(poolResult.byLine[l][key]),
@@ -986,7 +961,6 @@ export function computeAuditChecks(
     endingCashSweep,
     endingInvestmentsSweep,
     poolSum,
-    poolSumOmitsTowerLossSplit: isPoolView && anyTowerLine,
     reserveCurrentNoncurrent,
     totalOperatingRevenuesValue,
     totalOperatingExpensesValue,

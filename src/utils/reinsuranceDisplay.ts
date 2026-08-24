@@ -33,21 +33,23 @@ import { normalizeLayersPlaced } from './reinsuranceTower';
 // state that cannot exist — a line netted against an expected cession it has
 // no way to compute, or one ceding through layers it was not priced for.
 //
-// THREE BEHAVIOURS RIDE ON IT, and the third was not on the list when the
-// Property cutover was planned:
+// TWO BEHAVIOURS RIDE ON IT today:
 //   1. PRICING     reinsuranceCost comes from the placed layers' own
 //                  E[ceded] + lambda x SD[ceded], not a percentage of premium.
 //   2. NET FUNDING the pool premium funds gross expected loss LESS that same
 //                  E[ceded]. This is the one that widened silently when
 //                  Property was added.
-//   3. THE LOSS-SPLIT BASIS  `attachment` — and through it poolLosses,
-//                  excessLosses and quotaShareLosses, all three EXPORTED
-//                  fields — is the tower's own retention on this path and
-//                  125% of expected loss on the other. That is a reporting
-//                  decomposition, not a reinsurance behaviour, and it rides
-//                  here only because the two branches happen to set the same
-//                  variable. It is what the Property cutover's null test
-//                  measured as its ONLY difference.
+//
+// ⚠ A THIRD USED TO RIDE HERE. `attachment` — and through it poolLosses,
+// excessLosses and quotaShareLosses, all three exported — was the tower's own
+// retention on this path and 125% of expected loss on the other, riding here
+// only because the two branches happened to set the same variable. It was
+// what the Property cutover's null test measured as its ONLY difference. All
+// four fields are gone now: attachment compared against grossUltimateLoss (an
+// ANNUAL AGGREGATE) at a PER-OCCURRENCE constant, so poolLosses pinned at
+// that constant in effectively every line-year and quotaShareLosses was not a
+// quota share at all. See CalculationAuditPage's retirement note for the
+// measurement.
 //
 // Always true today (every CoverageLine qualifies), kept as a real predicate
 // rather than inlined so a future line has somewhere to say no.

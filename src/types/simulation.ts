@@ -207,11 +207,7 @@ export interface HistoricalYear {
   reinsuranceCost: number;
   totalMemberCharge: number;
   grossUltimateLoss: number;
-  attachment: number;          // per-level attachment; boundary between Pool Losses and Excess Losses
-  poolLosses: number;          // min(grossUltimateLoss, attachment) — retained below attachment
-  excessLosses: number;        // max(0, grossUltimateLoss - attachment) — the layer above attachment
-  quotaShareLosses: number;    // pool's retained share of Excess Losses = (1 - quota%) x excessLosses
-  reinsuranceRecovery: number; // reinsurer's paid share of Excess Losses = quota% x excessLosses
+  reinsuranceRecovery: number; // reinsurer's paid share of ceded loss
   // Per-occurrence tower outputs. OPTIONAL HERE ONLY: the pre-game bootstrap
   // predates the tower decision, so seeded history carries no placement. The
   // LIVE result types require these.
@@ -557,13 +553,9 @@ export interface ResultSet {
   // only numeric fields) is blind to it by construction.
   shockEvents?: ShockRecord[];
   reinsuranceCost: number;
-  attachment: number;          // 100% of expected loss; boundary between Pool Losses and Excess Losses
-  poolLosses: number;          // min(grossUltimateLoss, attachment) — retained below attachment
-  excessLosses: number;        // max(0, grossUltimateLoss - attachment) — the layer above attachment
-  quotaShareLosses: number;    // pool's retained share of Excess Losses = (1 - quota%) x excessLosses
-  reinsuranceRecovery: number; // reinsurer's paid share of Excess Losses = quota% x excessLosses
-  // --- per-occurrence tower outputs (WC/GL only; zero/empty on Property) ---
-  // Ceded by layer, index-aligned to REINSURANCE_TOWER[line]. Empty on Property.
+  reinsuranceRecovery: number; // reinsurer's paid share of ceded loss
+  // --- per-occurrence tower outputs, every line ---
+  // Ceded by layer, index-aligned to REINSURANCE_TOWER[line].
   cededByLayer: number[];
   // What the pool keeps ABOVE THE TOP OF THE TOWER. On GL this is the band no
   // market will write and it EXCEEDS the top layer the pool buys, so it is

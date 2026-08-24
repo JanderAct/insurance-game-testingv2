@@ -40,9 +40,16 @@ export default function HistoryPage({ historicalYears, lineView }: HistoryPagePr
     { label: 'Reinsurance Cost', value: year => formatCurrency(year.reinsuranceCost) },
     { label: 'Gross Premium & Admin Expense', value: year => formatCurrency(year.totalMemberCharge) },
     { label: 'Ultimate Losses', value: year => formatCurrency(year.grossUltimateLoss) },
-    { label: 'Pool Losses', value: year => formatCurrency(year.poolLosses) },
-    { label: 'Excess Losses', value: year => formatCurrency(year.excessLosses) },
-    { label: 'Quota Share Losses', value: year => formatCurrency(year.quotaShareLosses) },
+    // Pool Losses / Excess Losses / Quota Share Losses REMOVED. They split
+    // gross loss at a per-occurrence attachment ($1M for WC/GL) compared
+    // against an ANNUAL AGGREGATE loss, so Pool Losses pinned at exactly $1M
+    // in effectively every line-year and "Quota Share Losses" was not a quota
+    // share at all — every retained dollar above that $1M, including the gaps
+    // between purchased layers and the band above the tower. See
+    // CalculationAuditPage's TOWER_MEANINGLESS_POOL_SUM_KEYS header for the
+    // fuller measurement. Reinsurance Recovery (below) and Retained Above
+    // Tower (per-line tabs) are the real, correct figures this split was
+    // trying to approximate.
     { label: 'Reinsurance Losses', value: year => formatCurrency(year.reinsuranceRecovery) },
     { label: 'Net Ultimate Loss', value: year => formatCurrency(year.netUltimateLoss) },
     {

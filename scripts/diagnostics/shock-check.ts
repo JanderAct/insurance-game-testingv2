@@ -382,16 +382,23 @@ console.log('\n--- 7. #10 WC Presumption Expansion — componentFreqMultiplier a
 
   // THE RULED DYNAMIC, ASSERTED. A legislative change raises realized losses
   // and leaves premium standing still, because expectedLoss is built from the
-  // HELD purePremiumPer100 rather than the generator's analytic. The player must
-  // re-rate or bleed. The reinsurance attachment, being 125% of that same
-  // unchanged expectedLoss, does not adjust either. Both are deliberate.
+  // HELD purePremiumPer100 rather than the generator's analytic. The player
+  // must re-rate or bleed. Both are deliberate.
+  //
+  // ⚠ THIS USED TO ALSO ASSERT "the reinsurance attachment... does not adjust
+  // either", on the premise that attachment was 125% of expectedLoss (the
+  // retired REINSURANCE_PROGRAMS model). That was already stale before the
+  // field itself was removed: the tower's attachment is
+  // REINSURANCE_TOWER.WC[0].attachment, a fixed per-occurrence dollar
+  // constant with no dependence on expectedLoss at all, so the assertion held
+  // trivially for a reason the comment did not describe. Deleted along with
+  // the field rather than kept testing a constant against itself.
   const clean = play('MAMC6EA4', 5, []);
   const wcShock = results[4].byLine.WC!, wcClean = clean[4].byLine.WC!;
   console.log(`  Y5 premium unchanged by the shock: pure premium ${wcShock.purePremiumPer100.toFixed(6)} vs ${wcClean.purePremiumPer100.toFixed(6)}  ${note(wcShock.purePremiumPer100 === wcClean.purePremiumPer100, 'the shock moved the pure premium — it must not')}`);
   console.log(`  Y5 expectedLoss unchanged: ${fmt$(wcShock.expectedLoss)} vs ${fmt$(wcClean.expectedLoss)}  ${note(wcShock.expectedLoss === wcClean.expectedLoss, 'the shock moved the priced expected loss')}`);
-  console.log(`  Y5 attachment unchanged: ${fmt$(wcShock.attachment)} vs ${fmt$(wcClean.attachment)}  ${note(wcShock.attachment === wcClean.attachment, 'the shock moved the reinsurance attachment')}`);
   console.log(`    RULED AND INTENDED: a law that makes claims more expensive does not politely raise your`);
-  console.log(`    rates for you, and the treaty does not adjust either. Do not "fix" either of these.`);
+  console.log(`    rates for you. Do not "fix" this.`);
 }
 
 console.log('\n--- 8. #28 Pandemic — THE CROSS-LINE TEST ---');
