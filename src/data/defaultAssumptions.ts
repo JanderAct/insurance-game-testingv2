@@ -1224,10 +1224,36 @@ export const LINE_RESERVE_PAYDOWN_PCT: Record<string, number> = {
 // Total development SD over the whole runoff, per line. The ANNUAL step is
 // total / sqrt(E[horizon]), so a cohort accumulates approximately this much
 // relative SD by the time it matures.
+//
+// ⚠ PROPERTY'S 15% IS A PLAYABILITY ADJUSTMENT, NOT A FITTED FIGURE, AND THE
+// TWO SHOULD NOT BE CONFUSED. WC's 25% and GL's 20% are judgement calls about
+// what a long-tail casualty runoff looks like. Property's ORIGINAL 8% was the
+// same kind of call and was defensible on its own terms — a short-tail line
+// genuinely does settle fast. It was raised to 15% for a different reason: at
+// 8% the per-accident-year exhibit had almost nothing to show. Measured over
+// 200 games, only 27.0% of Property rows ever moved more than 1%, none were
+// still developing by game year 5, and a ten-year exhibit rendered as columns
+// of repeated identical numbers for every accident year older than about
+// three. 15% is chosen so the display has content. Both numbers are honest;
+// they are answering different questions, and this note exists so a later
+// reader does not mistake the second for the first.
+//
+// THE HORIZON DELIBERATELY DID NOT MOVE. Lengthening it would make each step
+// QUIETER (the step is total/sqrt(E[H])), which is the opposite of what the
+// exhibit needed — a longer runoff spreads the same total over more years and
+// shows less per year, not more.
+//
+// AND THERE IS A REAL ARGUMENT FOR THE HIGHER NUMBER, worth stating so it does
+// not read as pure display tuning. Property's book carries claims to $75M, and
+// a large fire or flood genuinely takes years to adjust — scope disputes,
+// business-interruption measurement, subrogation. A property book whose
+// ultimates never move more than 8% is a book without large losses in it.
+// Short-tail describes the PAYMENT pattern; it does not mean the first
+// estimate of a $40M fire is within 8% of the final one.
 export const IBNER_TOTAL_SD: Record<string, number> = {
   WC: 0.25,
   GL: 0.20,
-  Property: 0.08,
+  Property: 0.15,
 };
 
 // Runoff horizon in years, drawn PER COHORT (inclusive), so the player cannot

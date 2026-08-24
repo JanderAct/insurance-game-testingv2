@@ -62,7 +62,7 @@ import { generateGameInstance, generateStartingPoolState } from '../../src/utils
 import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
-import { IBNER_HORIZON } from '../../src/data/defaultAssumptions';
+import { IBNER_HORIZON, IBNER_TOTAL_SD } from '../../src/data/defaultAssumptions';
 import type { CoverageLine, GameState, ReserveCohort } from '../../src/types/simulation';
 
 const LINES: CoverageLine[] = ['WC', 'GL', 'Property'];
@@ -223,11 +223,12 @@ console.log(`\n=== 4. PROPERTY'S EXHIBIT ACROSS ${YEARS} YEARS — every acciden
     console.log(`  ${String(ay).padStart(11)} | ${origin} | ${fmt$(f).padStart(10)} | ${fmt$(c.netUltimate).padStart(10)} | ` +
       `${pct(f > 0 ? c.netUltimate / f - 1 : 0).padStart(9)} | ${String(c.horizon)} | ${steps.get(ay) ?? 0}`);
   }
-  console.log('\n  ⚠ A PROPERTY ROW IS DONE MOVING BY ITS THIRD OR FOURTH APPEARANCE, and the');
-  console.log('    exhibit will show that as a column of repeated identical numbers for every');
-  console.log('    accident year older than about three. That follows from the 2-4 horizon, not');
-  console.log('    from anything IBNER does: with an 8% total SD spread over 2-4 steps there is');
-  console.log('    very little to show even while a row IS developing.');
+  console.log(`\n  ⚠ A PROPERTY ROW STILL STOPS MOVING BY ITS THIRD OR FOURTH APPEARANCE. The 2-4`);
+  console.log('    horizon was deliberately NOT lengthened (a longer runoff spreads the same');
+  console.log('    total over more years and shows LESS per year, not more), so every accident');
+  console.log('    year older than about three is a column of repeated identical numbers. What');
+  console.log(`    the ${(IBNER_TOTAL_SD.Property * 100).toFixed(0)}% total SD changes is how much a row moves WHILE it is developing —`);
+  console.log('    the rows are as short as before and considerably louder.');
 }
 
 console.log('\nREPORT ONLY — nothing above is asserted.');

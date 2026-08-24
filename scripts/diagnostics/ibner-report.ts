@@ -213,7 +213,7 @@ console.log('    what the constants should be judged against. A cohort can only 
 console.log('    matured column if its horizon was SHORT enough to finish inside the game, so');
 console.log('    the matured WC set is drawn from horizons near 5-7 rather than 5-12 and');
 console.log('    accumulates correspondingly less — 18.5% measured against the walk\'s own');
-console.log('    26.8%. Property shows the same effect (6.7% against 8.0%); GL barely does');
+console.log('    26.8%. Property shows the same effect (12.6% against 15.2%); GL barely does');
 console.log('    (20.2% against 20.7%) because its horizon mostly fits. This is survivorship in');
 console.log('    the MEASUREMENT, not under-delivery by the model.');
 console.log('\n  still-developing cohorts, for reference (partial runoff, SD must be LOWER):');
