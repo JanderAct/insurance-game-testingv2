@@ -76,6 +76,33 @@ Things that were discovered expensively and live only in conversation memory. Re
   what had become a keyed string lookup (`North`/`Central`/`South`), so every probe hit the `?? 1` default
   and the assertion was structurally incapable of failing. It passed for as long as it existed. When a
   type or key space changes, re-read every assertion that touches it and confirm it can still go red.
+- **A check passing for its entire life while unable to fail is a category, not one unlucky harness.** Five
+  more instances, each built on a premise that later stopped being true and was never re-checked against it:
+  - **region check** (above) — a keyed lookup outgrew the integers probing it.
+  - **BROKEN IDENTITIES** (value-identity-check) — tolerated 1e-12 to decide a baseline "was exactly 1" but
+    used strict inequality to decide "changed"; it would have called its own target field not-an-identity on
+    the first recapture and never armed cleanly again.
+  - **membership equilibrium check** — reports the share of games ending smaller against 50%, at 40 games.
+    Standard error is 7.9pp, ~24% power against a genuine 10pp tilt: it found the original 82% collapse
+    easily and could never verify the correction that followed.
+  - **line control** (solo-config byte-identity, above) — 3 seeds; a shared-but-small change crosses
+    membership's rounding boundary in only ~5.7% of line-years, so the gate read clean 42% of the time on a
+    line that had moved.
+  - **shock-check's WC attachment assertion** — checked that a shock does not move "the attachment, being
+    125% of expected loss." The tower removed that dependence; the assertion had decayed into constant ==
+    constant.
+
+  **The rule, widened.** Already written down above for type and key-space changes: when a premise changes,
+  re-read every assertion resting on it and confirm it can still go red. A premise is any fact an assertion
+  depends on — a distribution's shape, a field's basis, a sample size adequate for one question and
+  reassigned to another, a constant that used to be derived from something else.
+
+  **The second-order rule.** A diagnostic built to catch a GROSS error gets silently repurposed as a
+  PRECISION instrument once that error is fixed, and its sample size does not follow the reassignment. The
+  equilibrium check is the clean case: right tool for a 12% collapse, wrong tool for confirming a 1%
+  residual. This project already separates gross-error detectors from precision instruments for
+  heavy-tailed gates (below); it is the same distinction, applied to a check nobody had classified either
+  way.
 - **Heavy-tailed lines cannot be gated on a realized mean.** Use a two-part check: HARD ASSERT the
   deterministic analytic ratio, REPORT the realized draw with its confidence interval, and flag only if
   realized falls outside its own CI of the analytic. GL's realized loss ratio swung from 0.9361× to
