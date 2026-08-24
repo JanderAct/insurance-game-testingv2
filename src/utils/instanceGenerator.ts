@@ -20,6 +20,8 @@ import {
   PROPERTY_EXPECTED_LOSS_RATIO,
   PROPERTY_STARTING_FINANCIALS,
   LINE_RESERVE_PAYDOWN_PCT,
+  IBNER_HORIZON,
+  IBNER_STEP_MIXTURE,
 } from '../data/defaultAssumptions';
 import type { CoverageLine } from '../types/simulation';
 
@@ -72,12 +74,46 @@ function enrollLabel(line: CoverageLine): string {
   return line === 'WC' ? 'enroll' : `enroll_${line}`;
 }
 
+// One draw from IBNER_STEP_MIXTURE. Duplicated from simulationEngine's
+// drawStepMultiplier rather than imported: instanceGenerator is upstream of the
+// engine and importing from it would make a cycle. Both read the SAME exported
+// constant, so the mixture itself has one definition.
+function drawStepMultiplierFor(rng: SeededRandom): number {
+  const u = rng.next();
+  let acc = 0;
+  for (const bucket of IBNER_STEP_MIXTURE) {
+    acc += bucket.weight;
+    if (u < acc) return bucket.multiplier;
+  }
+  return IBNER_STEP_MIXTURE[IBNER_STEP_MIXTURE.length - 1].multiplier;
+}
+
 // Generate starting reserve cohorts from the beginning NET unpaid reserve
 // These are prior accident-year cohorts that exist before gameplay starts
+// ⚠ PRE-GAME COHORTS ARE SYNTHETIC AND HAVE NO CLAIM REGISTER BEHIND THEM.
+// They are apportioned from a drawn reserve TOTAL, so there is no "sum of drawn
+// claims" that ever existed for them. `registerSum` is therefore set equal to
+// the generated `netUltimate`, which makes their IBNER provision exactly zero at
+// game start — they begin honest and develop forward from there. Their history
+// is NOT back-filled: the Actuarial exhibit shows blanks for their pre-game
+// years and measures their total development FROM GAME START, because inventing
+// a development history that never happened would put fiction in the one exhibit
+// whose whole value is showing real movement.
+//
+// They carry NO booking bias. The bias is a consequence of a funding decision
+// the player made, and they predate the player.
+//
+// ⚠ THE IBNER DRAWS USE THEIR OWN SUB-STREAM, not the instance `rng` threaded
+// through here. Drawing horizon and step multiplier from the shared stream would
+// re-roll every later instance-generation draw for reasons unrelated to this
+// change, and the `deriveSubRng(seed, 0, label)` pattern beside enrollLabel is
+// the existing precedent for exactly this.
 function generateStartingReserveCohorts(
   netUnpaidReserve: number,
   startingYear: number,
   rng: SeededRandom,
+  line: CoverageLine,
+  ibnerRng: SeededRandom,
   paydownPct: number = RESERVE_PAYDOWN_PCT
 ): ReserveCohort[] {
   if (netUnpaidReserve <= 0) return [];
@@ -117,14 +153,19 @@ function generateStartingReserveCohorts(
     const netUltimate = cohortNetUnpaid / (1 - paidRatio);
     const netPaid = netUltimate * paidRatio;
 
-    // Development factor based on age (older cohorts have settled more)
-    const devFactor = 1 + rng.range(-0.03, 0.05) / age;
-
     // Year number is negative for prior accident years (relative to game start)
     // yearNumber 0 = accident year before game starts
     // Calendar year is game starting year minus age
     const cohortYearNumber = -age;
     const cohortCalendarYear = startingYear - age;
+
+    // ⚠ HORIZON IS DRAWN THEN AGED. A cohort five years old has already used
+    // five years of its runoff, so it develops only for whatever remains. Giving
+    // every pre-game cohort a full fresh horizon would hand the oldest ones more
+    // remaining uncertainty than a brand-new accident year, which is backwards.
+    // `age` is carried so processIbner's `age < horizon` test does the rest, and
+    // a cohort drawn shorter than its own age is simply already mature.
+    const horizon = ibnerRng.intRange(IBNER_HORIZON[line].min, IBNER_HORIZON[line].max);
 
     cohorts.push({
       yearNumber: cohortYearNumber,
@@ -133,8 +174,12 @@ function generateStartingReserveCohorts(
       netPaid,
       netUnpaid: cohortNetUnpaid,
       paydownPct,
-      developmentFactor: devFactor,
       closed: false,
+      registerSum: netUltimate,
+      horizon,
+      age,
+      stepMultiplier: drawStepMultiplierFor(ibnerRng),
+      bookingBias: 0,
     });
 
     remainingReserve -= cohortNetUnpaid;
@@ -286,7 +331,9 @@ export function generateStartingPoolState(
   const startingReserveCohorts = generateStartingReserveCohorts(
     netUnpaidReserve,
     startingYear,
-    rng
+    rng,
+    'WC',
+    deriveSubRng(instance.seed, 0, 'ibner_seed_WC'),
   );
 
   // Validate sum
@@ -317,7 +364,9 @@ export function generateStartingPoolState(
         const glStartingReserveCohorts = generateStartingReserveCohorts(
           glNetUnpaidReserve,
           startingYear,
-          rng
+          rng,
+          'GL',
+          deriveSubRng(instance.seed, 0, 'ibner_seed_GL'),
         );
         return {
           rateLevel: 100,
@@ -362,7 +411,9 @@ export function generateStartingPoolState(
           propertyNetUnpaidReserve,
           startingYear,
           rng,
-          LINE_RESERVE_PAYDOWN_PCT.Property
+          'Property',
+          deriveSubRng(instance.seed, 0, 'ibner_seed_Property'),
+          LINE_RESERVE_PAYDOWN_PCT.Property,
         );
         return {
           rateLevel: 100,

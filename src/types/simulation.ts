@@ -402,12 +402,37 @@ export interface DecisionSet {
 export interface ReserveCohort {
   yearNumber: number;
   calendarYear: number;
+  // The cohort's CURRENT estimate of ultimate, net of reinsurance. This is what
+  // develops: IBNER moves it each year until the cohort matures. `netUnpaid`
+  // follows from it, and `netPaid` accumulates against it.
   netUltimate: number;
   netPaid: number;
   netUnpaid: number;
   paydownPct: number;           // portion paid each year
-  developmentFactor: number;    // seeded favorable/adverse dev
   closed: boolean;
+
+  // --- IBNER (see defaultAssumptions.ts's IBNER_* block) -------------------
+  // ⚠ `developmentFactor` IS GONE. It was written at two sites and READ AT
+  // NONE — processReserveDevelopment drew its own factor fresh and ignored the
+  // stored one — while still spending an RNG draw to fill it. The fields below
+  // replace it with state that is actually consulted.
+
+  // Sum of the claims the generator drew for this accident year, NET of
+  // reinsurance, frozen at inception. The claim register keeps showing exactly
+  // this; it never develops. `netUltimate - registerSum` IS the IBNER provision.
+  registerSum: number;
+  // Runoff length in years, drawn per cohort. The cohort stops developing once
+  // it has taken this many steps.
+  horizon: number;
+  // Steps taken so far. Development stops at `age >= horizon`.
+  age: number;
+  // This cohort's draw from IBNER_STEP_MIXTURE — its "boring or eventful"
+  // character, fixed for the cohort's whole life.
+  stepMultiplier: number;
+  // The optimistic booking bias applied at inception, as a fraction. Unwinds at
+  // bias/horizon per year so E[netUltimate at maturity] = registerSum exactly.
+  // Zero whenever the line was funded at or above break-even.
+  bookingBias: number;
 }
 
 // Full result for one completed simulation year

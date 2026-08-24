@@ -1187,6 +1187,109 @@ export const LINE_RESERVE_PAYDOWN_PCT: Record<string, number> = {
 };
 
 // ===========================================================================
+// IBNER — INCURRED BUT NOT ENOUGH REPORTED.
+//
+// Friedland's structure: reported claims + IBNER = ultimate. The claim register
+// is untouched — it keeps showing exactly what the generator drew, and that sum
+// IS the accident year's INITIAL ESTIMATE of ultimate. Development is a separate
+// AGGREGATE provision carried per cohort on top of it:
+//
+//   registerSum   = sum of drawn claims                     (never changes)
+//   estimate(1)   = registerSum x (1 - b)                   b = booking bias
+//   estimate(t+1) = estimate(t) x (1 + m x s x z_t + b/H)   z_t ~ N(0,1)
+//   ultimate      = estimate(H), fixed thereafter
+//   provision     = estimate - registerSum                  (the IBNER balance)
+//
+// ⚠ THESE ARE STARTING VALUES CHOSEN TO FEEL RIGHT, NOT FITTED TO ANY BOOK.
+// Nothing here was measured off real triangles. They are a first playable set,
+// expected to move once the loss behaviour has been played with, and no
+// calibration should be anchored to them until they settle.
+//
+// ⚠ A MARTINGALE PLUS A KNOWN DRIFT, and the drift is deliberate.
+// The z_t term has zero mean, so the STOCHASTIC component is a pure martingale:
+// no mean reversion, and a player cannot infer from a cohort's history where it
+// is heading. The b/H term is a deterministic unwind of the initial optimistic
+// booking, present so E[estimate(H)] = registerSum EXACTLY, per cohort — the
+// pool cannot end up paying less than it drew. A player who works out that
+// drift from their own funding choice is reading their own decision back, which
+// is the intended lesson rather than a leak.
+//
+// ⚠ DEVELOPMENT IS ENTIRELY RETAINED. The tower cedes PER CLAIM and no claim
+// changed size; this is an aggregate overlay on top of a register the tower has
+// already run against. So reinsuranceRecovery is unmoved and 100% of
+// development lands on the pool. That is CONSERVATIVE and DELIBERATE — a real
+// treaty would pick some of it up — and it is recorded here so it is not later
+// read as a bug. See reinsuranceDisplay.ts's seam note.
+
+// Total development SD over the whole runoff, per line. The ANNUAL step is
+// total / sqrt(E[horizon]), so a cohort accumulates approximately this much
+// relative SD by the time it matures.
+export const IBNER_TOTAL_SD: Record<string, number> = {
+  WC: 0.25,
+  GL: 0.20,
+  Property: 0.08,
+};
+
+// Runoff horizon in years, drawn PER COHORT (inclusive), so the player cannot
+// tell how much development a given accident year has left.
+export const IBNER_HORIZON: Record<string, { min: number; max: number }> = {
+  WC: { min: 5, max: 12 },
+  GL: { min: 3, max: 8 },
+  Property: { min: 2, max: 4 },
+};
+
+// ⚠ NORMALISED TO RMS 1, AND THAT NORMALISATION IS LOAD-BEARING.
+// The mixture exists so roughly half of accident years barely move: real books
+// have boring years, and the boring ones are what make the others visible. It
+// is drawn ONCE PER COHORT (not per step) — "boring YEAR" is a property of the
+// accident year, not of each individual step.
+//
+// The weights below were first written as bridge sigmas (0.04 / 0.15 / 0.45)
+// and would have been applied as step multipliers. Their RMS is
+// sqrt(0.5(0.04^2) + 0.4(0.15^2) + 0.1(0.45^2)) = 0.1734, so used raw they
+// would have delivered 17.3% of every stated total above — WC's "25%" arriving
+// as 4.3%. Dividing through by that RMS gives the multipliers here, whose RMS
+// is 1.000, so IBNER_TOTAL_SD means what it says while the shape is preserved:
+// the 50% bucket still moves at 23% of nominal (about 2.0%/yr on WC).
+export const IBNER_STEP_MIXTURE: readonly { weight: number; multiplier: number }[] = [
+  { weight: 0.50, multiplier: 0.231 },
+  { weight: 0.40, multiplier: 0.865 },
+  { weight: 0.10, multiplier: 2.596 },
+];
+
+// FUNDING BIASES THE BOOKING. A squeezed pool books optimistically and the
+// shortfall emerges later as adverse development.
+//
+//   squeeze = max(0, 1 - selectedFundingCLF)     b = COEFF x squeeze
+//
+// CLF 1.000 is break-even by construction, so `squeeze` is exactly "how far
+// below break-even you chose to fund". Maximum available squeeze is close on
+// all three lines — WC 0.234 (its slider reaches stop 10, CLF 0.7661), GL 0.250,
+// Property 0.261 — so ONE pool-wide coefficient works without per-line
+// normalisation.
+//
+// SIZED so 0.40 x ~0.25 gives a ~10% optimistic booking at maximum squeeze. On
+// WC that is about $1.14M/yr understated against an ~$11.4M book; with horizons
+// averaging 8.5 against a ten-year game the accumulated un-emerged deficiency at
+// year 10 is roughly $5.2M, about 22% of a typical year-10 WC surplus — and a
+// larger share in practice, since a maximally-squeezed pool has less surplus to
+// begin with. Large enough to change how the balance sheet reads, small enough
+// not to swamp the loss draw. STARTING VALUE, to be measured once running.
+//
+// ⚠ INERT AT DEFAULTS. defaultLineDecisionSet sets fundingAtExpected, pinning
+// CLF to 1.000, so squeeze is 0 and no bias applies on a default run. That keeps
+// default-run gates and the CLF derivation (which runs at defaults) clean of it.
+//
+// ⚠ THIS REPLACES fundingImpactOnDevelopment, WHICH NEVER APPLIED AT ALL. That
+// term read priorFundingAdequacyRatio, which reads fundingAdequacyRatio, which
+// is assigned from premiumFundingRatio — a hardcoded 1. Measured across 40
+// games x 10 years x 3 lines at funding levels 0.30/0.60/0.95, that ratio took
+// exactly one distinct value: 1. So the old bias was identically zero on every
+// path, not merely weak. premiumFundingRatio is a separate defect and is
+// deliberately NOT fixed here.
+export const IBNER_BOOKING_BIAS_COEFF = 0.40;
+
+// ===========================================================================
 // PROPERTY loss model — FITTED, and it replaces a design that was never fitted.
 //
 // ⚠ WHAT WAS WRONG, IN BOTH DIRECTIONS AT ONCE. The retired design drew ~112
