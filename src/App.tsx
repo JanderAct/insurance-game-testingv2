@@ -1,5 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { DEFAULT_LAYERS_PLACED } from './data/reinsuranceTower';
+import type { TowerLine } from './data/reinsuranceTower';
+import { normalizeAggregateStopLevel, normalizeLayersPlaced } from './utils/reinsuranceTower';
 import {
   LayoutDashboard,
   ClipboardList,
@@ -146,6 +148,18 @@ export default function App() {
               if (!ld) continue;
               if (!Array.isArray(ld.layersPlaced)) ld.layersPlaced = [...DEFAULT_LAYERS_PLACED[line as CoverageLine]];
               if (typeof ld.aggregateStopLevel !== 'number') ld.aggregateStopLevel = -1;
+              // AGGREGATE-OVER-DECLINED-TOWER: reachable in any save written
+              // before the gate existed. Cleared to none rather than rejected —
+              // the save is otherwise valid and the state is now simply not
+              // purchasable, so the honest migration is to drop the purchase.
+              // Only lines with an aggregate at all reach the normalizer; GL
+              // and any non-tower key pass through untouched.
+              if (line === 'WC' || line === 'Property') {
+                const l = line as TowerLine;
+                ld.aggregateStopLevel = normalizeAggregateStopLevel(
+                  l, normalizeLayersPlaced(l, ld.layersPlaced), ld.aggregateStopLevel,
+                );
+              }
             }
           }
           // WC SEVERITY REBUILD: wcRatingGroup re-stamped onto every member from

@@ -30,6 +30,7 @@ import { REINSURANCE_TOWER, type TowerLine } from '../data/reinsuranceTower';
 import {
   aggregateRecovery,
   cedeOccurrences,
+  normalizeAggregateStopLevel,
   normalizeLayersPlaced,
   occurrenceTotals,
   quoteAggregate,
@@ -575,10 +576,18 @@ export function processLineYear(
   // The WC/Property aggregate, priced on the REAL post-movement expectedLoss.
   // Its expected ceded is netted out of the pool premium below alongside the
   // occurrence layers'.
-  const aggregateQuote = isAggregateLine && placedForCost && lineDecisions.aggregateStopLevel >= 0
+  // ⚠ READ THROUGH normalizeAggregateStopLevel, NOT OFF THE DECISION. Property's
+  // aggregate is conditional on its occurrence layer being placed, so a save or
+  // a hand-edited decision holding aggregate-with-layer-declined must price as
+  // no aggregate rather than as the treaty nobody writes. See that function.
+  // Inert on every default run — the default places the layer.
+  const aggLevel = placedForCost
+    ? normalizeAggregateStopLevel(line as TowerLine, placedForCost, lineDecisions.aggregateStopLevel)
+    : -1;
+  const aggregateQuote = isAggregateLine && placedForCost && aggLevel >= 0
     ? quoteAggregate(
         line as 'WC' | 'Property', placedForCost, currentActiveMembers,
-        expectedLoss, lineDecisions.aggregateStopLevel, yearNumber,
+        expectedLoss, aggLevel, yearNumber,
       )
     : null;
 
@@ -1033,13 +1042,16 @@ export function processLineYear(
     // The aggregate sits on RETAINED loss, so it applies AFTER the occurrence
     // layers — including loss retained through layers the player DECLINED. That
     // scope is what makes the aggregate respond to the layer selection at all.
-    if ((towerLine === 'WC' || towerLine === 'Property') && lineDecisions.aggregateStopLevel >= 0) {
+    // Same normalization as the pricing side above, so the cession and the
+    // price can never disagree about whether an aggregate exists.
+    const cededAggLevel = normalizeAggregateStopLevel(towerLine, placed, lineDecisions.aggregateStopLevel);
+    if ((towerLine === 'WC' || towerLine === 'Property') && cededAggLevel >= 0) {
       const quote = quoteAggregate(
         towerLine,
         placed,
         currentActiveMembers,
         expectedLoss,
-        lineDecisions.aggregateStopLevel,
+        cededAggLevel,
         yearNumber,
       );
       aggregatePremium = quote.premium;

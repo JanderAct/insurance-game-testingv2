@@ -41,7 +41,7 @@
 // that residual rather than pretending it is zero.
 
 import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM } from '../data/defaultAssumptions';
-import { normalizeLayersPlaced, occurrenceProgramCost, quoteAggregate } from './reinsuranceTower';
+import { normalizeAggregateStopLevel, normalizeLayersPlaced, occurrenceProgramCost, quoteAggregate } from './reinsuranceTower';
 import { calculateReinsuranceCost } from './reinsuranceEngine';
 import type { TowerLine } from '../data/reinsuranceTower';
 import type { CoverageLine, Member } from '../types/simulation';
@@ -113,11 +113,17 @@ export function quoteLineRates(input: LineRateInputs): LineRateQuote {
   // ceding transfers the loss and not the handling cost.
   const adminRatePer100 = purePremiumPer100 * ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM;
 
-  const aggregateQuote = isAggregateLine && placedForCost && aggregateStopLevel >= 0
+  // Read through the same normalizer the engine uses — see its header. Keeps
+  // the panel and the engine agreeing about whether an aggregate exists at all,
+  // which is the parity property this module exists to guarantee.
+  const aggLevel = placedForCost
+    ? normalizeAggregateStopLevel(line as TowerLine, placedForCost, aggregateStopLevel)
+    : -1;
+  const aggregateQuote = isAggregateLine && placedForCost && aggLevel >= 0
     ? quoteAggregate(
         line as 'WC' | 'Property', placedForCost, members,
         exposure * purePremiumPer100 * 10_000,
-        aggregateStopLevel, yearNumber,
+        aggLevel, yearNumber,
       )
     : null;
 

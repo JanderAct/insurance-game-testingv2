@@ -9,7 +9,7 @@ import { getReinsuranceStructure } from '../utils/reinsuranceEngine';
 import { defaultLineDecisionSet } from '../utils/decisionDefaults';
 import { hasTractableCeded } from '../utils/reinsuranceDisplay';
 import { AGG_ATTACHMENT_LEVELS, AGG_LIMIT_MULTIPLE, REINSURANCE_TOWER, RISK_LOAD_LAMBDA, TOWER_TOP } from '../data/reinsuranceTower';
-import { normalizeLayersPlaced, quoteAggregate } from '../utils/reinsuranceTower';
+import { normalizeAggregateStopLevel, normalizeLayersPlaced, quoteAggregate } from '../utils/reinsuranceTower';
 import { allLayerRiskMoments } from '../utils/towerMoments';
 import { lineDisplayName } from '../utils/lineDisplay';
 import { lookupCLF } from '../utils/simulationEngine';
@@ -99,6 +99,13 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
 
   const set = (key: keyof LineDecisionSet, val: number | boolean | boolean[] | LineDecisionSet['assetAllocation']) =>
     onChange({ ...decisions, byLine: { ...decisions.byLine, [selectedLine]: { ...d, [key]: val } } });
+
+  // ⚠ FOR CHANGING TWO FIELDS AT ONCE. `set` closes over `d` as it stood at
+  // render, so two calls in a row both write from the same stale snapshot and
+  // the second silently drops the first. The tower's layer/aggregate gate has
+  // to move both together, so it uses this.
+  const setMany = (patch: Partial<LineDecisionSet>) =>
+    onChange({ ...decisions, byLine: { ...decisions.byLine, [selectedLine]: { ...d, ...patch } } });
 
   // WC/GL ONLY: dragging the slider always exits Expected mode (a manual
   // percentile choice), landing exactly on the dragged value. Selecting
@@ -194,6 +201,7 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
               line={selectedLine}
               d={d}
               set={set}
+              setMany={setMany}
               disabled={disabled}
               expectedLoss={estimatedExpectedLoss}
               members={activeMembers}
@@ -628,11 +636,12 @@ function DataRow({ label, value }: { label: string; value: string }) {
 // market but real, and choosing which bands to keep is the point.
 // ===========================================================================
 function TowerControls({
-  line, d, set, disabled, expectedLoss, members, yearNumber,
+  line, d, set, setMany, disabled, expectedLoss, members, yearNumber,
 }: {
   line: CoverageLine;
   d: LineDecisionSet;
   set: (key: keyof LineDecisionSet, val: number | boolean[]) => void;
+  setMany: (patch: Partial<LineDecisionSet>) => void;
   disabled: boolean;
   expectedLoss: number;
   members: Member[];
@@ -642,11 +651,26 @@ function TowerControls({
   const placed = normalizeLayersPlaced(line, d.layersPlaced);
   const hasAggregate = line === 'WC' || line === 'Property';
 
+  // Is an aggregate selectable AT ALL on this line's current placement? Asked
+  // by probing the normalizer with level 0 rather than re-implementing its
+  // condition here — the gate has exactly one definition and this screen reads
+  // it, so the panel cannot drift from the engine.
+  const aggAvailable = hasAggregate && normalizeAggregateStopLevel(line, placed, 0) >= 0;
+  const aggLevel = hasAggregate
+    ? normalizeAggregateStopLevel(line, placed, d.aggregateStopLevel)
+    : -1;
+
+  // Declining the last placed layer CLEARS the aggregate in the same update.
+  // Leaving it selected-but-normalized-away would show a purchase the engine
+  // will not price, which is the drift this gate exists to prevent.
   const toggle = (i: number) => {
     if (disabled || !layers[i].purchasable) return;
     const next = [...placed];
     next[i] = !next[i];
-    set('layersPlaced', next);
+    const nextAgg = hasAggregate
+      ? normalizeAggregateStopLevel(line, normalizeLayersPlaced(line, next), d.aggregateStopLevel)
+      : d.aggregateStopLevel;
+    setMany({ layersPlaced: next, aggregateStopLevel: nextAgg });
   };
 
   // One moment pass for the whole tower, reused by every row below — calling
@@ -659,8 +683,8 @@ function TowerControls({
   // responsiveness is the whole reason the price is computed rather than stored —
   // without it, "decline everything and buy the aggregate" is free volatility
   // transfer.
-  const aggQuote = hasAggregate && d.aggregateStopLevel >= 0
-    ? quoteAggregate(line, placed, members, expectedLoss, d.aggregateStopLevel, yearNumber)
+  const aggQuote = hasAggregate && aggLevel >= 0
+    ? quoteAggregate(line as 'WC' | 'Property', placed, members, expectedLoss, aggLevel, yearNumber)
     : null;
   const totalCost = occCost + (aggQuote?.premium ?? 0);
 
@@ -751,7 +775,7 @@ function TowerControls({
               disabled={disabled}
               onClick={() => !disabled && set('aggregateStopLevel', -1)}
               className={`flex flex-col items-center p-2 rounded-lg border text-center transition-all text-xs ${
-                d.aggregateStopLevel < 0
+                aggLevel < 0
                   ? 'bg-blue-600 text-white border-blue-600 shadow-md'
                   : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:bg-blue-50'
               } ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
@@ -759,17 +783,21 @@ function TowerControls({
               <span className="font-bold">None</span>
             </button>
             {AGG_ATTACHMENT_LEVELS[line].map((mult, lv) => {
+              // Priced even while unavailable, so the disabled button still
+              // shows what the cover WOULD cost once a layer is placed —
+              // greying out a blank tile reads as a broken control.
               const q = quoteAggregate(line, placed, members, expectedLoss, lv, yearNumber);
+              const off = disabled || !aggAvailable;
               return (
                 <button
                   key={lv}
-                  disabled={disabled}
-                  onClick={() => !disabled && set('aggregateStopLevel', lv)}
+                  disabled={off}
+                  onClick={() => !off && set('aggregateStopLevel', lv)}
                   className={`flex flex-col items-center p-2 rounded-lg border text-center transition-all text-xs ${
-                    d.aggregateStopLevel === lv
+                    aggLevel === lv
                       ? 'bg-blue-600 text-white border-blue-600 shadow-md'
                       : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:bg-blue-50'
-                  } ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
+                  } ${off ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                 >
                   <span className="font-bold">{(mult * 100).toFixed(0)}%</span>
                   <span className="text-xs opacity-75 mt-0.5">{formatCurrency(q.premium)}</span>
@@ -777,6 +805,17 @@ function TowerControls({
               );
             })}
           </div>
+          {/* A disabled control with no reason reads as a bug. Say the reason. */}
+          {!aggAvailable && (
+            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2.5 mt-2 leading-relaxed">
+              <strong>Unavailable while every occurrence layer is declined.</strong> The aggregate
+              protects <em>retained</em> loss and it has a limit. With no per-occurrence layer capping
+              each claim at the retention, one large claim can exceed the aggregate's
+              attachment plus limit on its own, with nothing above it — so the cover would not
+              answer the exposure it is being bought against. Place a layer to enable it.
+              Declining everything remains available: that is self-insurance, and it is a real choice.
+            </p>
+          )}
           {aggQuote && (
             <div className="bg-gray-50 rounded-lg p-3 border border-gray-200 text-xs mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5">
               <DataRow label="Attaches At" value={formatCurrency(aggQuote.attachment)} />
@@ -798,9 +837,15 @@ function TowerControls({
           <DataRow label="Occurrence Layers" value={`${formatCurrency(occCost)}/yr`} />
           {/* WC AND PROPERTY ONLY. Showing "Not purchased" on GL would imply an
               aggregate is available to decline, and none is offered — see the
-              capacity note. */}
+              capacity note. And "Not purchased" implies a choice was made, so
+              the gated state reads "Unavailable" instead. */}
           {(line === 'WC' || line === 'Property') && (
-            <DataRow label="Aggregate Stop-Loss" value={aggQuote ? `${formatCurrency(aggQuote.premium)}/yr` : 'Not purchased'} />
+            <DataRow
+              label="Aggregate Stop-Loss"
+              value={aggQuote
+                ? `${formatCurrency(aggQuote.premium)}/yr`
+                : (aggAvailable ? 'Not purchased' : 'Unavailable — no layer placed')}
+            />
           )}
           <DataRow label="Total Reinsurance Cost" value={`${formatCurrency(totalCost)}/yr`} />
           {/* Property's "above tower" band is structurally ~0, not a market

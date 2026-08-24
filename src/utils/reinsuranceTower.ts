@@ -301,3 +301,52 @@ export function normalizeLayersPlaced(line: TowerLine, placed: boolean[] | undef
   if (!placed || placed.length !== layers.length) return layers.map(l => l.purchasable);
   return layers.map((l, i) => !!placed[i] && l.purchasable);
 }
+
+// ============================================================================
+// THE AGGREGATE IS CONDITIONAL ON THE OCCURRENCE LAYER — Property.
+//
+// Returns -1 (not purchased) when the line's occurrence cover is fully
+// declined, and the requested level otherwise. Paired with
+// normalizeLayersPlaced above and applied at every entry point, so
+// "aggregate placed over a fully-declined occurrence tower" is a state the
+// model cannot be put into: the UI, a loaded save, and the engine all read
+// the decision through here.
+//
+// ⚠ CONDITIONAL, NOT THE LAYER MANDATORY. Declining EVERYTHING stays
+// reachable — it is the legitimate self-insured choice and the tower's null
+// test depends on it. What is removed is only the aggregate-WITHOUT-layer
+// combination.
+//
+// WHY, and it is structural rather than a balance judgement. The aggregate has
+// a LIMIT. With the occurrence layer capping each claim at the retention, no
+// single claim can consume the whole limit. Without it, one claim can exceed
+// attachment-plus-limit and everything above is retained unconditionally with
+// no second backstop. Measured over six arms x 50 games on test/pr-aggregate,
+// aggregate-only is a TRAP rather than a tradeoff: it looks better on both
+// figures a player can see — cost/recovery 2.060x against occurrence-only's
+// 2.885x, mean underwriting -$1.37M against -$3.93M — while being materially
+// worse where they cannot: 9/50 games touching negative surplus against 6/50,
+// worst multiple -3.949 against -0.723. Seed 00CT5DKA goes 0.979 to -3.949 on
+// exactly one uncapped claim.
+//
+// And it is not a product a reinsurer writes. An aggregate over an uncapped
+// per-occurrence retention is a stop-loss on GROSS severity, which is a
+// different treaty from the one quoteAggregate prices.
+//
+// ⚠ WC HAS THE SAME HOLE AND IS DELIBERATELY NOT GATED HERE. Measured: with
+// all three layers declined WC's aggregate attaches at $19.17M with a $17.42M
+// limit, so it tops out at $36.59M — and WC severity is UNBOUNDED (no cap; the
+// tower reaches $50M and above that the pool retains without limit), so the
+// exposed band is larger than Property's, not smaller. The same gate applies on
+// the merits. It is excluded from this commit only because gating WC moves
+// WC-solo, and the line control on this commit is worth more than bundling the
+// two. See the commit message.
+export function normalizeAggregateStopLevel(
+  line: TowerLine,
+  placedNormalized: boolean[],
+  requested: number,
+): number {
+  if (!(requested >= 0)) return -1;
+  if (line !== 'Property') return requested;
+  return placedNormalized.some(Boolean) ? requested : -1;
+}

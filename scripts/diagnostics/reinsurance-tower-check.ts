@@ -13,7 +13,7 @@ import {
 } from '../../src/data/reinsuranceTower';
 import {
   cedeOccurrences, claimContribution, layerMask, layerPremium,
-  occurrenceProgramCost, occurrenceTotals, quoteAggregate,
+  normalizeAggregateStopLevel, occurrenceProgramCost, occurrenceTotals, quoteAggregate,
 } from '../../src/utils/reinsuranceTower';
 import { layerRiskMoments } from '../../src/utils/towerMoments';
 import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
@@ -273,6 +273,35 @@ console.log('\n=== 6. LIVE GAME: ceded reconciles, and GL above-tower exceeds th
     if (lr.reinsuranceRecovery !== 0 || lr.reinsuranceCost !== 0 || lr.netUltimateLoss !== lr.grossUltimateLoss) declineOk = false;
   }
   console.log(`  Property fully declined (layer + aggregate): reinsuranceRecovery, reinsuranceCost === 0 and net === gross every year: ${note(declineOk, 'declining Property\'s tower did not zero out reinsurance')}`);
+
+  // THE AGGREGATE GATE, asserted at the engine and not only at the normalizer.
+  // Ask for the aggregate WITH the layer declined — an ill-formed decision the
+  // UI now prevents, but a save or a script can still express it — and the
+  // engine must price and pay NOTHING for it. If aggregatePremium is ever
+  // non-zero here, the gate is not on the path the engine actually takes.
+  const gated = play('TOWERCHK-AGGGATE', ['WC', 'GL', 'Property'], 5, d => ({
+    ...d, byLine: { ...d.byLine, Property: { ...d.byLine.Property, layersPlaced: [false], aggregateStopLevel: 1 } },
+  }));
+  let gateOk = true;
+  for (const r of gated) {
+    const lr = r.byLine.Property!;
+    if (lr.aggregatePremium !== 0 || lr.aggregateRecovery !== 0 || lr.reinsuranceCost !== 0) gateOk = false;
+  }
+  console.log(`  Property aggregate requested with the layer DECLINED: premium, recovery, reinsuranceCost all 0 every year: ` +
+    `${note(gateOk, 'the aggregate gate is not reaching the engine — an aggregate was priced over a fully-declined tower')}`);
+  // And it is CONDITIONAL, not the layer mandatory: with the layer placed the
+  // same request goes through untouched. A gate that swallowed the aggregate
+  // unconditionally would also pass the check above.
+  console.log(`  with the layer PLACED the same level passes through: ` +
+    `${note(normalizeAggregateStopLevel('Property', [true], 1) === 1, 'the gate suppressed a legitimate aggregate')}`);
+  // ⚠ WC IS KNOWN-UNGATED AND THIS RECORDS IT rather than asserting the hole
+  // shut. Measured: all three layers declined, WC's aggregate attaches at
+  // $19.17M with a $17.42M limit, so it tops out at $36.59M — and WC severity
+  // is unbounded, so the exposed band is LARGER than Property's. The same gate
+  // applies on the merits; it is deferred to its own commit because gating WC
+  // moves WC-solo. When that commit lands, flip this line into an assertion.
+  console.log(`  WC still permits an aggregate over a fully-declined tower (KNOWN, deferred): ` +
+    `${normalizeAggregateStopLevel('WC', [false, false, false], 1) === 1 ? 'yes — unchanged' : 'NO — WC has been gated; make this an assertion'}`);
 }
 
 console.log(problems.length === 0
