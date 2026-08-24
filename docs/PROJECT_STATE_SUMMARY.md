@@ -90,9 +90,16 @@ which is why its AAL had looked roughly right.
 Property now runs the SAME PER-OCCURRENCE TOWER as WC/GL: one layer, $70M xs $5M, to the model's
 own severity cap, plus an aggregate stop-loss (two attachment levels, Panjer-priced rather than
 WC's lognormal fit — see propertyAggregate.ts). REINSURANCE_PROGRAMS is dead for every line now,
-kept only pending its own retirement commit. Net funding follows automatically from `usesTower`,
-the same mechanism WC/GL already used. ⚠ Property still has NO CLF table of its own — it reads
-FUNDING_CLF_TABLE like a line with no backtested grid — that is a separate, still-open question.
+kept only pending its own retirement commit. Net funding follows automatically from
+`hasTractableCeded` (renamed from `usesTower`, which named the mechanism and hid that netting rides
+on it), the same mechanism WC/GL already used.
+
+Property also has its OWN DERIVED CLF TABLE now, on the net basis, crossing at 54.0% — so all three
+lines read `STATIC_CLF_TABLE` and `FUNDING_CLF_TABLE` has no line left reading it for pricing (it
+still serves the catastrophe threshold, a different use). The generic table had been a gross-basis
+real-pool chart applied to a net-funded line: its 60% stop delivered 54.3%, with error running
+-18.7pp to +6.9pp across the range. The derived table reads within 0.9pp at every stop, validated
+out of sample.
 
 Conventions established by this work and binding on all future lines:
 - **Accident-year dollars + explicit settlement trend.** Severities are drawn and stored in
@@ -262,7 +269,7 @@ so the pool's loss-absorption structure is known-wrong for the tails two lines a
   work synced). UI_REFINEMENTS.md, baseline docs and the two SPEC files remain behind the
   /mnt/user-data/outputs versions. (This item previously cited BASELINE_v8_ALL_CONFIGS.md and
   BASELINE_LINEAGE_v4_to_v10.md — neither has ever existed at those paths in this repo; the
-  lineage doc is baselines/BASELINE_LINEAGE_v4_to_v16.md, and it now carries a closing note on
+  lineage doc is baselines/BASELINE_LINEAGE_v4_to_v17.md, and it now carries a closing note on
   the v4–v9 artifacts removed from the tree on 2026-08-19.)
 - **Pass to distribution chat:** E[commonLossFactor] prediction; the draw-vs-pure-premium constraint;
   existing dead scaffolding (shockProbability etc.); catastropheFactor hook (restore, don't delete).

@@ -23,6 +23,34 @@ Things that were discovered expensively and live only in conversation memory. Re
 - **Baseline-neutrality is the strongest test for a structural change.** If defaults produce byte-identical
   output, the restructure provably didn't leak into the math. The "projection" pattern (copy pool values
   into line slices at `processYear` entry) achieved this for the pool-wide decisions change.
+- **⚠ BYTE-IDENTITY ON A SOLO CONFIG IS PROOF ONLY WHEN THE CHANGE IS STRUCTURALLY CONFINED** — meaning no
+  code path exists from the change to the other line. For a change that IS shared but small it has a large
+  FALSE-NEGATIVE rate, because membership joins are `Math.round` of a float
+  (`rawNewCount = Math.round(expectedNew * rng.range(0.3, 1.7))`, membershipEngine). A small parameter
+  change only shows up where it happens to cross a rounding boundary.
+  Measured at `265b1ce` (the recalibration cascade): `k` moved +2.65%, WC's `expectedNew` moved
+  +0.057 members/yr, and the boundary was crossed on only ~5.7% of line-years — giving the 3-seed × 5-year
+  gate a **42% chance of reading WC-solo byte-identical on a line that genuinely moved**. It did read
+  byte-identical. Widening to 40 seeds × 8 years, WC changed on 171 of 1,280 fields across 18 of 40 games.
+  So when a commit touches SHARED machinery, either widen the seed set or rely on the mechanism null test.
+- **The null test and the line control answer DIFFERENT questions, and are not interchangeable.** We
+  treated them as such and it produced the error above.
+  - **Mechanism null test** proves **ATTRIBUTION**: force the new code to reproduce the old behaviour
+    (revert just the constants, decline the new cover) and assert byte-identity against the parent. A pass
+    says *the moved values are the thing you changed, not the refactor around it*. It says nothing about
+    which lines moved.
+  - **Line control** (solo-config hashes) proves **SCOPE**: which lines the change reached. Valid only
+    under structural confinement, per the point above.
+  A shared-machinery commit needs the null test for attribution and a widened seed set for scope. `265b1ce`
+  had the former (reverting four constants reproduced the parent on 15,900 of 15,900 fields) and the latter
+  was missing.
+- **Earlier commits NOT affected by this caveat — do not re-audit them.** Each was structurally confined,
+  so its line control stands as proof of scope: Property's loss-model rebuild (`645c15e`), the cat-load
+  pull (`22672a4`), both TIV rescales (`b3c6635`, `997a4fd`), roster v6, the Property tower and aggregate
+  (`dbd9138`), and Property's derived CLF table (`0bfd899`). All touch `PROPERTY_*` constants,
+  `propertyClaimEngine`, `REINSURANCE_TOWER.Property` or `STATIC_CLF_TABLE.Property` — none of which WC or
+  GL reads. The caveat applies specifically to commits that move SHARED constants: the membership
+  equilibrium constants, `RATE_NEUTRAL_*`, `FUNDING_CLF_TABLE`, and anything in `membershipEngine`.
 - **Never use background-task + polling-loop patterns for verification.** Run verification in the
   foreground and let it print, or redirect to a file and cat it in the SAME command. A polling loop
   watching a task-wrapper output file while the task redirects into a scratchpad file deadlocks
@@ -33,6 +61,17 @@ Things that were discovered expensively and live only in conversation memory. Re
   solo-export guard and its baselines, and both the WC and GL cutover harnesses (which hold the two-part
   6b check) — all lived only in the ephemeral scratchpad while their *results* were recorded in commit
   messages. Results without reproducible tooling are assertions, not verification.
+- **⚠ AND THE CITED EVIDENCE MUST ACTUALLY SUPPORT THE CLAIM — check it against the output in front of you
+  before writing it down.** `265b1ce`'s commit message asserted "All three lines move, as expected with k
+  pool-wide" while the measurement printed in that same turn read `configs: GL-solo, PR-solo, tri` — WC-solo
+  absent. The MECHANISM was right (WC is genuinely affected; see the false-negative point under
+  Verification), so the conclusion happened to be true, but the evidence cited did not establish it and the
+  gap went unnoticed for two commits.
+  This is a DIFFERENT error from being wrong, and the more common one: reasoning forward from a mechanism to
+  what the numbers *should* say, then writing that down as though it were the reading. It is also harder to
+  catch, because a true claim attracts no scrutiny. When a commit message states what moved, the sentence
+  must be transcribed from the measurement, not derived from the design — and if the two disagree, that
+  disagreement is the finding.
 - **A test that cannot fail is worse than no test.** The WC harness's region check fed integers 1–5 into
   what had become a keyed string lookup (`North`/`Central`/`South`), so every probe hit the `?? 1` default
   and the assertion was structurally incapable of failing. It passed for as long as it existed. When a

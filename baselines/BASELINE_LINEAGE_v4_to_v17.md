@@ -1,4 +1,4 @@
-# Baseline Lineage — v4 through v16
+# Baseline Lineage — v4 through v17
 
 A genealogy of the multi-line baselines: what each version represents, what change caused the jump
 to it, which numbers moved and why. Covers the multi-line-meaningful baselines (v4–v11). Earlier
@@ -447,6 +447,78 @@ is the immediate predecessor.
 
 ---
 
+## v17 — four commits: Property's reinsurance programme, and the recalibration it should have carried
+
+**Trigger:** Property got the per-occurrence tower and aggregate stop-loss WC and GL had had since
+`aa0838a`. Netting followed structurally rather than by decision — `usesTower` (now `hasTractableCeded`) is
+what gates it — which meant the calibration cascade `fab85e4` ran when WC and GL were netted did not
+happen. Two of these four commits are that omission being paid off.
+
+**The four, in order:**
+- `dbd9138` Property's occurrence layer ($70M xs $5M, to the fitted severity cap) plus a two-level
+  aggregate stop-loss, Panjer-priced rather than lognormal. **PR-solo and tri move (4,367 instances / 78
+  field names); WC-solo and GL-solo have ZERO value instances.** All 12 export hashes move anyway, on one
+  shared RESULT_METRICS label — `Reinsurance Level` → `Reinsurance Program`, now accurate for every line.
+  Verified by dumping the actual CSV rather than trusting the hash: WC-solo's diff is exactly two lines,
+  both that label, every value identical. This is the display-vs-value split the two gates exist to
+  separate, in its cleanest form yet.
+- `7752826` the Panjer discretisation fix. **NOTHING MOVES — 0 values, 0 hashes, 0 shape.** The aggregate
+  defaults to declined, so the corrected code is on a path no default run takes. The commit claimed a
+  bit-identical 15,900-field capture and that is confirmed here independently.
+- `265b1ce` the recalibration cascade (`RATE_NEUTRAL_CHANGE_PCT`, `RATE_NEUTRAL_LOAD`, the two membership
+  constants, and `k` through them). **5,699 instances / 78 field names, on GL-solo, PR-solo and tri.**
+  See the correction below — WC-solo reads byte-identical and that is a false negative, not isolation.
+- `0bfd899` Property's own derived CLF table, on the net basis. **420 instances / 7 field names, PR-solo
+  and tri only, every one reserve-margin or capital-adequacy** (`reserveRiskMarginNeeded` $6.76M → $4.21M,
+  ratio 0.6228 = exactly `0.5923/0.951`). WC-solo and GL-solo byte-identical on both gates. Pricing at
+  defaults does not move at all, because `fundingAtExpected` pins the CLF to 1.000 on either curve.
+
+**Shape:** 0 added and 0 removed at every one of the four steps. The only export-shape change in the whole
+range is the single label rename at `dbd9138` — caught by the hash guard, correctly invisible to
+value-identity, and *invisible to both* as a "shape" change since the field KEY (`reinsuranceLevel`) never
+moved. `usesTower` → `hasTractableCeded` and the deleted `FUNDING_LEVEL_LABELS` are internal symbols in
+neither saved state nor the export. Confirmed by diffing `src/types/simulation.ts` across the range: no
+field added or removed on any exported type.
+
+**⚠ THE LINE CONTROL RETURNED A FALSE NEGATIVE HERE, AND THE RULE IT BROKE IS NOW IN
+docs/WORKING_PRACTICES.md.** Read that, not this, for the practice — this entry records only the
+measurement.
+
+At `265b1ce` WC-solo is byte-identical on both gates. That reads as "the recalibration did not reach WC",
+and it is wrong. `k` is pool-wide and WC is genuinely affected; the gate simply could not see it. Membership
+joins are `Math.round(expectedNew * rng.range(0.3, 1.7))`, so a small parameter change only surfaces where
+it crosses a rounding boundary. Measured: `k` +2.65%, WC's `expectedNew` +0.057 members/yr, boundary crossed
+on ~5.7% of line-years — giving the 3-seed × 5-year gate a **42% chance of reading byte-identical on a line
+that moved.** Widening to 40 seeds × 8 years, WC changed on **171 of 1,280 fields across 18 of 40 games.**
+
+So byte-identity on a solo config proves scope only under STRUCTURAL CONFINEMENT. It held legitimately at
+`dbd9138` and `0bfd899` (Property-only constants and tables, which WC and GL do not read) and did not at
+`265b1ce` (shared membership machinery). The null test is what carried attribution at `265b1ce` — reverting
+the four constants reproduced `7752826` on 15,900 of 15,900 fields — and the two checks are not
+interchangeable: the null test proves the moved values are the constants rather than the refactor, the line
+control proves which lines moved.
+
+**⚠ A COMMIT-MESSAGE CORRECTION, recorded because the error class matters more than the instance.**
+`265b1ce`'s message asserted "All three lines move, as expected with k pool-wide" while the measurement
+printed in that same turn read `configs: GL-solo, PR-solo, tri`. The mechanism was right and the conclusion
+was true, but the evidence cited did not establish it. That is reasoning forward from the design to what the
+numbers ought to say and then writing it down as the reading — harder to catch than being wrong, because a
+true claim attracts no scrutiny. The practice entry is in WORKING_PRACTICES under the commit-message rule.
+
+**Guards:** BROKEN IDENTITIES fires nothing across the range — its second range since the tolerance fix at
+`55e43ce`. `expectedCombinedRatio` holds at 150 instances with a worst departure of 2.22e-16, exactly 1.0
+ULP. The catalog-vs-generator check is green and trivially so: no roster change in this range, and
+regeneration reproduces the live catalog byte-for-byte at 31,398 bytes.
+
+**Gate re-run before baselining:** `property-tower-mc` had been killed partway at `0bfd899`. Re-run at the
+full 200 seeds × 25,000 trials: Panjer +0.22% / +4.70% mean error against the lognormal comparator's
+−8.10% / +7.13%, sign-stable where the lognormal changes sign, all three assertions green.
+
+**Retired at this recapture:** `SOLO_EXPORT_GUARD_v15.json` and `VALUE_IDENTITY_v15.json`, now that v16 is
+the immediate predecessor.
+
+---
+
 ## Quick "why did the numbers change" reference
 | Jump | Cause | WC-only affected? |
 |---|---|---|
@@ -463,6 +535,7 @@ is the immediate predecessor.
 | v13 → v14 | Eight commits: membership/pricing rework (all lines), net funding + static CLF tables (WC/GL), GL supplied table, WC IBNR removed, opening band decoupled to premium (all lines) | No — Property moves twice, at the membership/pricing pair and at the opening-band commit |
 | v14 → v15 | Expected-combined-ratio basis fix (`d80aa9e`) plus seven display/diagnostic commits | **Yes — WC and GL only.** Property was already correct, being deliberately un-netted, and is byte-identical |
 | v15 → v16 | Property loss-model rebuild + cat-load pull + two TIV rescales (roster v5, v6), then the pool market-share fix | No — Property moves on four of the eight commits; WC and GL are byte-identical throughout except the last commit, which moves all four configs |
+| v16 → v17 | Property's occurrence tower + aggregate, the Panjer fix, the recalibration cascade it should have carried, and Property's derived CLF table | No — all three lines are reached by the cascade (k is pool-wide), though WC-solo reads byte-identical there: a false negative, see the v17 entry |
 
 ## Still pending (would drive a future v11)
 - **⚠️ Systematic underpricing (finding 6)** — actual loss ratio ~46% against a 66.8% expected
@@ -505,6 +578,6 @@ git log --all --diff-filter=D -- 'baselines/*'     # find the removing commit
 
 **This document is why the removal was safe** — it records what each retired
 version represented and what moved between them, which is the part worth
-keeping. What remains in `baselines/` is the current gate pair (v16), its
-immediate predecessor (v15, the one to reach for if a v16 capture ever needs
+keeping. What remains in `baselines/` is the current gate pair (v17), its
+immediate predecessor (v16, the one to reach for if a v17 capture ever needs
 checking), and the v11 workbook set.

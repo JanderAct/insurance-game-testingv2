@@ -235,7 +235,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // separate their contribution from fdc747c/bdc98ec/a3d7760's inside one
 // cumulative diff, which is why the hash guard's per-commit run is the
 // isolation tool here, not this one.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v16.json');
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v17.json');
 
 function seedOf(id: string) {
   let h = 5381;
