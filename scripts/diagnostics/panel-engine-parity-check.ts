@@ -36,7 +36,7 @@ import { getMemberExposure } from '../../src/utils/lineHelpers';
 import { quoteLineRates } from '../../src/utils/linePricing';
 import { currentPurePremiumPer100, lookupCLF } from '../../src/utils/simulationEngine';
 import { hasStaticClf, staticClf } from '../../src/data/clfTables';
-import { REINSURANCE_PROGRAMS, ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM } from '../../src/data/defaultAssumptions';
+
 import type { CoverageLine, GameState, LineResultSet } from '../../src/types/simulation';
 
 const LINES: CoverageLine[] = ['WC', 'GL', 'Property'];
@@ -87,7 +87,7 @@ console.log('  Panel vs engine, per component, at every level the slider can rea
           // the default (Expected, CLF 1.000) is covered by level-independence
           // and separately in section 2.
           const panel = computeFundingConsequence(
-            level, dec.reinsuranceLevel, lineState.ratePer100, line, false,
+            level, lineState.ratePer100, line, false,
             {
               yearNumber: y,
               members,
@@ -95,7 +95,6 @@ console.log('  Panel vs engine, per component, at every level the slider can rea
               layersPlaced: dec.layersPlaced,
               aggregateStopLevel: dec.aggregateStopLevel,
               pricingAdjustment: lineState.rateLevel / 100,
-              competitivePressure: inst.marketEnvironment.competitivePressure,
               priorPurePremiumPer100: lineState.purePremiumPer100,
               lossTrend: inst.lossEnvironment.lossTrend,
               priorRcEffectiveness: lineState.riskControlEffectiveness,
@@ -113,8 +112,6 @@ console.log('  Panel vs engine, per component, at every level the slider can rea
             line, yearNumber: y, members, exposure, purePremiumPer100: pp, clf,
             pricingAdjustment: lineState.rateLevel / 100,
             layersPlaced: dec.layersPlaced, aggregateStopLevel: dec.aggregateStopLevel,
-            reinsuranceLevel: dec.reinsuranceLevel,
-            competitivePressure: inst.marketEnvironment.competitivePressure,
           });
 
           const rel = (a: number, b: number) => Math.abs(a - b) / Math.max(Math.abs(b), 1e-9);
@@ -183,7 +180,7 @@ console.log('\n--- 1b. PANEL vs THE ENGINE\'S STORED FIELDS ---');
         const dec = defaultDecisionSet(y).byLine[line];
         const ls = pre[line].ls;
         const panel = computeFundingConsequence(
-          dec.fundingConfidenceLevel, dec.reinsuranceLevel, ls.ratePer100, line, dec.fundingAtExpected,
+          dec.fundingConfidenceLevel, ls.ratePer100, line, dec.fundingAtExpected,
           {
             yearNumber: y,
             members: pre[line].members as never,
@@ -191,7 +188,6 @@ console.log('\n--- 1b. PANEL vs THE ENGINE\'S STORED FIELDS ---');
             layersPlaced: dec.layersPlaced,
             aggregateStopLevel: dec.aggregateStopLevel,
             pricingAdjustment: ls.rateLevel / 100,
-            competitivePressure: inst.marketEnvironment.competitivePressure,
             priorPurePremiumPer100: ls.purePremiumPer100,
             lossTrend: inst.lossEnvironment.lossTrend,
             priorRcEffectiveness: ls.riskControlEffectiveness,
@@ -232,52 +228,17 @@ console.log('\n--- 1b. PANEL vs THE ENGINE\'S STORED FIELDS ---');
   }
 }
 
-// --- 2. THE REGRESSION THIS COMMIT FIXES, STATED AS A NUMBER -----------------
-console.log('\n--- 2. WHAT THE OLD PANEL WOULD HAVE SHOWN ---');
-console.log('  The retired formulas, recomputed here, against what the engine charges.');
-console.log('  Reported (not asserted): its purpose is to keep the size of the defect on');
-console.log('  the record, not to gate on the old code continuing to be wrong.\n');
-{
-  const inst = generateGameInstance('PEPOLD', 3_300_000);
-  const setup = { poolName: 'O', gameLength: 2, startingYear: 2026, instanceId: 'PEPOLD', activeLines: LINES };
-  const { poolState, priorHistory } = runPriorHistory(inst, setup as never);
-  const gs: GameState = {
-    setup: setup as never, instance: inst, currentYearNumber: 1, isStarted: true, isComplete: false,
-    poolState, lockedResults: [], currentDecisions: defaultDecisionSet(1), priorHistory,
-  };
-  console.log('  line       old pool rate   new pool rate   old reins   new reins   old was');
-  for (const line of LINES) {
-    const lineState = gs.poolState.lines[line];
-    const members = lineState.members.filter(m => m.status === 'active');
-    const exposure = members.reduce((s, m) => s + getMemberExposure(m, line, 1), 0);
-    const dec = defaultDecisionSet(1).byLine[line];
-    const panel = computeFundingConsequence(
-      0.60, dec.reinsuranceLevel, lineState.ratePer100, line, false,
-      {
-        yearNumber: 1, members, exposure, layersPlaced: dec.layersPlaced,
-        aggregateStopLevel: dec.aggregateStopLevel, pricingAdjustment: lineState.rateLevel / 100,
-        competitivePressure: inst.marketEnvironment.competitivePressure,
-        priorPurePremiumPer100: lineState.purePremiumPer100,
-        lossTrend: inst.lossEnvironment.lossTrend,
-        priorRcEffectiveness: lineState.riskControlEffectiveness,
-        riskControlPct: dec.riskControlPct,
-      },
-    );
-    // The retired derivation, verbatim: gross x CLF, reinsurance as a
-    // mid-range percentage of pool premium, pure premium taken from last year.
-    const prog = REINSURANCE_PROGRAMS[dec.reinsuranceLevel];
-    const oldPct = prog ? (prog.costPctOfPremiumMin + prog.costPctOfPremiumMax) / 2 : 0;
-    const oldPool = lineState.purePremiumPer100 * panel.clf;
-    const oldReins = oldPool * oldPct;
-    void ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM;
-    const over = (a: number, b: number) => b > 0 ? `${((a / b - 1) * 100).toFixed(0)}%` : 'n/a';
-    console.log(`  ${line.padEnd(10)} $${oldPool.toFixed(2).padStart(8)}      $${panel.poolPremiumRatePer100.toFixed(2).padStart(8)}` +
-      `      $${oldReins.toFixed(2).padStart(6)}     $${panel.reinsRatePer100.toFixed(2).padStart(6)}     ${over(oldPool, panel.poolPremiumRatePer100)} high`);
-  }
-}
+// A section used to live here reporting "what the old REINSURANCE_PROGRAMS
+// panel would have shown" against the engine's real charge, to keep the size
+// of the fixed regression on the record. Deleted along with
+// REINSURANCE_PROGRAMS itself — it was pure reporting (nothing here asserted
+// on it) and it cannot run without data that no longer exists. The number it
+// recorded is preserved in this repository's history rather than kept
+// runnable: at the fix, GL's pool premium rate read $5.63 on the panel
+// against the engine's $3.26 (73% high).
 
-// --- 3. THE RESIDUAL THAT REMAINS, MEASURED ----------------------------------
-console.log('\n--- 3. PRE-MOVEMENT vs THE ENGINE\'S FINAL PREMIUM ---');
+// --- 2. THE RESIDUAL THAT REMAINS, MEASURED ----------------------------------
+console.log('\n--- 2. PRE-MOVEMENT vs THE ENGINE\'S FINAL PREMIUM ---');
 console.log('  The one gap parity CANNOT close: the panel quotes before member movement,');
 console.log('  the engine settles after it. Measured so the comment can state its size.\n');
 {
@@ -299,11 +260,10 @@ console.log('  the engine settles after it. Measured so the comment can state it
         const exposure = members.reduce((s, m) => s + getMemberExposure(m, line, y), 0);
         const dec = defaultDecisionSet(y).byLine[line];
         const panel = computeFundingConsequence(
-          dec.fundingConfidenceLevel, dec.reinsuranceLevel, lineState.ratePer100, line, dec.fundingAtExpected,
+          dec.fundingConfidenceLevel, lineState.ratePer100, line, dec.fundingAtExpected,
           {
             yearNumber: y, members, exposure, layersPlaced: dec.layersPlaced,
             aggregateStopLevel: dec.aggregateStopLevel, pricingAdjustment: lineState.rateLevel / 100,
-            competitivePressure: inst.marketEnvironment.competitivePressure,
             priorPurePremiumPer100: lineState.purePremiumPer100,
             lossTrend: inst.lossEnvironment.lossTrend,
             priorRcEffectiveness: lineState.riskControlEffectiveness,

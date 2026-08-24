@@ -1,4 +1,3 @@
-import { resultUsesTower } from './reinsuranceDisplay';
 // Rule-based narrative explanation engine for Risk Pool Simulation v1
 
 import type { ResultSet } from '../types/simulation';
@@ -43,9 +42,13 @@ export function generateNarrative(result: ResultSet, _priorResult?: ResultSet): 
   }
 
   // --- Reinsurance ---
-  // TWO PRODUCTS. `reinsuranceLevel` is Property's; WC and GL run the tower and
-  // their level is meaningless, so it must not be narrated for them.
-  if (resultUsesTower(result)) {
+  // ONE PRODUCT NOW. Every line runs the per-occurrence tower, so
+  // resultUsesTower(result) is always true; the percentage-of-premium branch
+  // this used to fall back to (keyed on the now-removed `reinsuranceLevel`)
+  // is deleted rather than narrated, per the same reasoning as
+  // reinsuranceDisplay.ts: a narrative describing a quota share on a line
+  // with a tower would be worse than no narrative.
+  {
     const anyPlaced = (result.cededByLayer ?? []).length > 0
       && (result.decisions.layersPlaced ?? []).some(Boolean);
     if (reinsuranceRecovery > 0) {
@@ -59,12 +62,6 @@ export function generateNarrative(result: ResultSet, _priorResult?: ResultSet): 
     if (above > 0) {
       parts.push(`$${fmt(above)} fell ABOVE the top of the tower and could not be reinsured at any price.`);
     }
-  } else if (decisions.reinsuranceLevel === 0) {
-    parts.push(`The pool self-funded rather than buying external reinsurance, retaining that budget in cash and investments.`);
-  } else if (reinsuranceRecovery > 0) {
-    parts.push(`Reinsurance generated $${fmt(reinsuranceRecovery)} in recoveries, reducing net losses.`);
-  } else if (decisions.reinsuranceLevel > 0) {
-    parts.push(`Reinsurance was in place but losses did not reach the attachment point.`);
   }
 
   // --- Investment ---

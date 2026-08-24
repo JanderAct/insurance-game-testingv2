@@ -129,17 +129,18 @@ export default function App() {
             gs.poolState.memberLossHistory = {};
           }
           // PER-OCCURRENCE TOWER: saves written before it carry only
-          // `reinsuranceLevel`, and there is NO honest mapping from a quota-share
-          // level to a set of layer placements — they are different products, not
-          // two settings of one. So the default is every purchasable layer placed
-          // and no aggregate, and an old save silently adopts that rather than
+          // `reinsuranceLevel` (now removed — see the delete below), and there
+          // is NO honest mapping from a quota-share level to a set of layer
+          // placements — they are different products, not two settings of
+          // one. So the default is every purchasable layer placed and no
+          // aggregate, and an old save silently adopts that rather than
           // pretending its old program survived the change. The save KEY is
           // unchanged; only this defaulting is new.
           // Patch the LIVE decision set (`cd`), which is what the next turn
           // reads. lockedResults keep their own historical decisions untouched —
           // those are a record of what was played, not an input.
           const byLine = (cd as DecisionSet | undefined)?.byLine as
-            Record<string, { layersPlaced?: boolean[]; aggregateStopLevel?: number }> | undefined;
+            Record<string, { layersPlaced?: boolean[]; aggregateStopLevel?: number; reinsuranceLevel?: number }> | undefined;
           if (byLine) {
             // KEYED BY LINE — DEFAULT_LAYERS_PLACED is now a Record<TowerLine,
             // boolean[]>, not one flat array, because Property's one-layer
@@ -148,6 +149,13 @@ export default function App() {
               if (!ld) continue;
               if (!Array.isArray(ld.layersPlaced)) ld.layersPlaced = [...DEFAULT_LAYERS_PLACED[line as CoverageLine]];
               if (typeof ld.aggregateStopLevel !== 'number') ld.aggregateStopLevel = -1;
+              // REINSURANCE_PROGRAMS RETIRED: a save from before this commit
+              // carries `reinsuranceLevel`. Nothing reads it any more — no
+              // validation walks LineDecisionSet's shape, so it would sit
+              // inert rather than throw — but discarded on load anyway so a
+              // resaved game does not keep writing a field that no longer
+              // means anything.
+              delete ld.reinsuranceLevel;
               // AGGREGATE-OVER-DECLINED-TOWER: reachable in any save written
               // before the gate existed. Cleared to none rather than rejected —
               // the save is otherwise valid and the state is now simply not
@@ -381,17 +389,6 @@ export default function App() {
   // total member charge rate) is used directly.
   const decisionLine = effectiveLineView === 'pool' ? 'WC' : (effectiveLineView as CoverageLine);
 
-  const estimatedPremium = React.useMemo(() => {
-    if (!gameState) return 5_000_000;
-
-    const lineState = gameState.poolState.lines[decisionLine];
-    const exposure = lineState.members
-      .filter(m => m.status === 'active')
-      .reduce((s, m) => s + getMemberExposure(m, decisionLine, gameState.currentYearNumber), 0);
-
-    return exposure * lineState.ratePer100 * 10_000;
-  }, [gameState, decisionLine]);
-
   // (The `estimatedExposure` memo that used to live here is gone. It existed
   // solely to feed the reinsurance tower a per-$100 exposure base; the tower now
   // prices off `decisionLineActiveMembers` and the year directly, so a nominal
@@ -427,10 +424,10 @@ export default function App() {
   }, [gameState, decisionLine]);
 
   // CLF-only pricing consequence panel (Decisions page). lineState.ratePer100
-  // is already last year's totalMemberChargeRatePer100 — the SAME field
-  // estimatedPremium above reads — so it doubles as the "vs last year" basis
-  // with no separate lookup. Narrow deps (not all of currentDecisions) so this
-  // does not recompute when an unrelated line's or pool decision changes.
+  // is already last year's totalMemberChargeRatePer100, so it doubles as the
+  // "vs last year" basis with no separate lookup. Narrow deps (not all of
+  // currentDecisions) so this does not recompute when an unrelated line's or
+  // pool decision changes.
   // The decision line's active book. Shared by the funding-consequence panel and
   // by the reinsurance tower, which now prices off the members themselves rather
   // than off a frozen per-$100 rate card times exposure.
@@ -440,7 +437,6 @@ export default function App() {
   }, [gameState, decisionLine]);
 
   const decisionLineFundingLevel = currentDecisions.byLine[decisionLine].fundingConfidenceLevel;
-  const decisionLineReinsuranceLevel = currentDecisions.byLine[decisionLine].reinsuranceLevel;
   const decisionLineFundingAtExpected = currentDecisions.byLine[decisionLine].fundingAtExpected;
   const fundingConsequence = React.useMemo(() => {
     if (!gameState) return null;
@@ -448,7 +444,6 @@ export default function App() {
     const d = currentDecisions.byLine[decisionLine];
     return computeFundingConsequence(
       decisionLineFundingLevel,
-      decisionLineReinsuranceLevel,
       lineState.ratePer100,
       decisionLine,
       decisionLineFundingAtExpected,
@@ -463,14 +458,13 @@ export default function App() {
         layersPlaced: d.layersPlaced,
         aggregateStopLevel: d.aggregateStopLevel,
         pricingAdjustment: lineState.rateLevel / 100,
-        competitivePressure: gameState.instance.marketEnvironment.competitivePressure,
         priorPurePremiumPer100: lineState.purePremiumPer100,
         lossTrend: gameState.instance.lossEnvironment.lossTrend,
         priorRcEffectiveness: lineState.riskControlEffectiveness,
         riskControlPct: d.riskControlPct,
       },
     );
-  }, [gameState, decisionLine, decisionLineFundingLevel, decisionLineReinsuranceLevel, decisionLineFundingAtExpected, decisionLineActiveMembers, currentDecisions]);
+  }, [gameState, decisionLine, decisionLineFundingLevel, decisionLineFundingAtExpected, decisionLineActiveMembers, currentDecisions]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -530,7 +524,6 @@ export default function App() {
             decisions={currentDecisions}
             onChange={handleDecisionsChange}
             yearNumber={gameState.currentYearNumber}
-            estimatedPremium={estimatedPremium}
             estimatedExpectedLoss={estimatedExpectedLoss}
             disabled={gameState.isComplete}
             lineView={effectiveLineView}
@@ -570,7 +563,6 @@ export default function App() {
             lockedResults={gameState.lockedResults}
             priorHistory={gameState.priorHistory}
             instanceSeed={gameState.instance.seed}
-            competitivePressure={gameState.instance.marketEnvironment.competitivePressure}
             lineView={effectiveLineView}
           />
         )}

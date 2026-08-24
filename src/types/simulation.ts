@@ -318,12 +318,6 @@ export interface LineDecisionSet {
   assessmentPct: number;          // 0.00 to 0.25 of premium
   underwritingStrictness: number; // 0-10
   riskControlPct: number;         // 0.00 to 0.08 of premium (projected from DecisionSet.riskControlPct)
-  // ⚠ DEAD FOR EVERY LINE as of Property's own occurrence layer and
-  // aggregate — WC and GL ignored it from their own tower cutover, and
-  // Property now reads layersPlaced / aggregateStopLevel instead too. Not
-  // deleted: REINSURANCE_PROGRAMS and this field's removal is its own commit,
-  // after netting, same sequencing the WC/GL cutover used.
-  reinsuranceLevel: number;       // 0-4 — unread by every line now
   // Per-occurrence tower placement, index-aligned to REINSURANCE_TOWER[line].
   // false = that band is RETAINED. ANY COMBINATION IS PERMITTED, including a
   // corridor retention (buying $15M xs $10M while declining $5M xs $5M) — that
@@ -383,16 +377,6 @@ export interface DecisionSet {
   byLine: Record<CoverageLine, LineDecisionSet>;
   assetAllocation: AssetAllocation;  // pool-wide investment policy
   riskControlPct: number;            // pool-wide risk-control intensity (0.00-0.08 of each line's own premium)
-}
-
-// Reinsurance structure derived from level selection
-export interface ReinsuranceStructure {
-  level: number;
-  label: string;
-  attachment: number;           // dollar amount
-  limit: number;                // dollar amount
-  recoveryPct: number;          // fraction recovered above attachment up to limit
-  costPctOfPremium: number;     // approximate annual cost as % of premium
 }
 
 // Annual reserve cohort for simplified development. NET basis: losses enter

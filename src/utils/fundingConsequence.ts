@@ -138,7 +138,6 @@ export interface FundingConsequenceBook {
   /** rateLevel / 100 — permanently 1 today, threaded so it cannot silently
    *  desync if the rate level moves again. */
   pricingAdjustment: number;
-  competitivePressure: number;
   /** Last year's stored pure premium and the loss trend — PROPERTY ONLY, which
    *  compounds off its own prior value. Ignored for WC/GL, which re-derive. */
   priorPurePremiumPer100: number;
@@ -148,7 +147,7 @@ export interface FundingConsequenceBook {
 }
 
 function ratesAt(
-  confidenceLevel: number, reinsuranceLevel: number, line: CoverageLine,
+  confidenceLevel: number, line: CoverageLine,
   atExpected: boolean, book: FundingConsequenceBook,
 ) {
   // ⚠ NO priorPurePremiumPer100 / lossTrend / rcEffectiveness ANY MORE. They
@@ -169,8 +168,6 @@ function ratesAt(
     pricingAdjustment: book.pricingAdjustment,
     layersPlaced: book.layersPlaced,
     aggregateStopLevel: book.aggregateStopLevel,
-    reinsuranceLevel,
-    competitivePressure: book.competitivePressure,
   });
   return {
     clf,
@@ -186,7 +183,6 @@ function ratesAt(
 
 export function computeFundingConsequence(
   confidenceLevel: number,
-  reinsuranceLevel: number,
   priorTotalMemberChargeRatePer100: number | null,
   line: CoverageLine,
   atExpected: boolean,
@@ -195,7 +191,7 @@ export function computeFundingConsequence(
   const {
     clf, purePremiumPer100, netPurePremiumPer100, expectedCededPer100,
     poolPremiumRatePer100, adminRatePer100, reinsRatePer100, totalMemberChargeRatePer100,
-  } = ratesAt(confidenceLevel, reinsuranceLevel, line, atExpected, book);
+  } = ratesAt(confidenceLevel, line, atExpected, book);
 
   // Computed UNCONDITIONALLY (not only while atExpected) — cheap, and useful
   // for the UI to show "Expected (~X%)" even before the player selects it.
@@ -230,7 +226,7 @@ export function computeFundingConsequence(
   const isAtMax = nextLevel > max + 1e-9;
   const marginalCostPct = isAtMax
     ? null
-    : (ratesAt(nextLevel, reinsuranceLevel, line, false, book).poolPremiumRatePer100 / Math.max(poolPremiumRatePer100, 1e-9) - 1) * 100;
+    : (ratesAt(nextLevel, line, false, book).poolPremiumRatePer100 / Math.max(poolPremiumRatePer100, 1e-9) - 1) * 100;
 
   return {
     // Overridden to the crossing percentile while atExpected, so "Adequate in

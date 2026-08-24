@@ -3,9 +3,7 @@
 //
 // Replaces the aggregate quota-share model (REINSURANCE_PROGRAMS) for WC, GL and
 // (as of the retention/aggregate commit) Property. REINSURANCE_PROGRAMS and
-// reinsuranceEngine.ts are left in place, now dead for every line — their
-// removal is its own commit, after netting, per the same sequencing the WC/GL
-// cutover used.
+// reinsuranceEngine.ts are gone — Property was the model's last consumer.
 //
 // ============================================================================
 // PROPERTY'S TOWER IS ONE LAYER, NOT THREE, AND THAT IS THE WHOLE STRUCTURE.

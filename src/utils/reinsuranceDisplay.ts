@@ -6,20 +6,13 @@
 // PER-OCCURRENCE TOWER (WC and Property additionally carry an aggregate
 // stop-loss; GL does not — see reinsuranceTower.ts's header on why).
 //
-// REINSURANCE_PROGRAMS / `reinsuranceLevel` ARE NOW DEAD FOR EVERY LINE. Left
-// in place — and `hasTractableCeded` left as a real function rather than collapsed to
-// `true` — only because their removal is its own commit, after netting, same
-// as the WC/GL cutover's own sequencing.
-//
-// ⚠ DO NOT READ `reinsuranceLevel` ANYWHERE IN THE UI. The field is still on
-// LineDecisionSet and still carries whatever value it was last set to, so it
-// renders perfectly happily as "Moderate" on a line whose product is a layer
-// tower. That is exactly the class of defect the combined-ratio readout
-// was — a display showing a plausible number that means nothing — and it went
-// unnoticed for weeks. Branch through `hasTractableCeded` instead.
+// REINSURANCE_PROGRAMS / `reinsuranceLevel` / reinsuranceEngine.ts ARE GONE.
+// Property was the model's last consumer and now runs its own tower like WC
+// and GL. `hasTractableCeded` is kept as a real function rather than
+// collapsed to `true`, so a future line without a closed-form E[ceded] has
+// somewhere to say no.
 
 import { REINSURANCE_TOWER, AGG_ATTACHMENT_LEVELS, TOWER_TOP, type TowerLine } from '../data/reinsuranceTower';
-import { REINSURANCE_PROGRAMS } from '../data/defaultAssumptions';
 import type { CoverageLine, LineDecisionSet, LineView } from '../types/simulation';
 import { normalizeLayersPlaced } from './reinsuranceTower';
 
@@ -87,11 +80,10 @@ export const resultUsesTower = (r: { cededByLayer?: number[] }): boolean =>
 // printed "2 — Moderate".
 export function placementSummary(
   line: CoverageLine,
-  decisions: Pick<LineDecisionSet, 'layersPlaced' | 'aggregateStopLevel' | 'reinsuranceLevel'>,
+  decisions: Pick<LineDecisionSet, 'layersPlaced' | 'aggregateStopLevel'>,
 ): string {
   if (!hasTractableCeded(line)) {
-    const prog = REINSURANCE_PROGRAMS[decisions.reinsuranceLevel];
-    return `${decisions.reinsuranceLevel} — ${prog?.label ?? 'Unknown'}`;
+    throw new Error(`placementSummary: ${line} has no tractable ceded reinsurance to summarize`);
   }
   const layers = REINSURANCE_TOWER[line];
   const placed = normalizeLayersPlaced(line, decisions.layersPlaced);
@@ -106,9 +98,11 @@ export function placementSummary(
 // Compact machine-friendly form for the spreadsheet export's csv column.
 export function placementCode(
   line: CoverageLine,
-  decisions: Pick<LineDecisionSet, 'layersPlaced' | 'aggregateStopLevel' | 'reinsuranceLevel'>,
+  decisions: Pick<LineDecisionSet, 'layersPlaced' | 'aggregateStopLevel'>,
 ): string {
-  if (!hasTractableCeded(line)) return String(decisions.reinsuranceLevel);
+  if (!hasTractableCeded(line)) {
+    throw new Error(`placementCode: ${line} has no tractable ceded reinsurance to encode`);
+  }
   const placed = normalizeLayersPlaced(line, decisions.layersPlaced);
   const bits = placed.map((on, i) => on ? `L${i + 1}` : '').filter(Boolean).join('+') || 'NONE';
   const agg = hasAggregate(line) && decisions.aggregateStopLevel >= 0 ? `+AGG${decisions.aggregateStopLevel}` : '';

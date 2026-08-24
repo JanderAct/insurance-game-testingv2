@@ -25,7 +25,6 @@ function mergeShockRecords(lineResults: LineResultSet[]): ShockRecord[] | undefi
 }
 import { SeededRandom, deriveSubRng } from './random';
 import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, PROPERTY_HELD_PURE_PREMIUM_PER_100, FUNDING_CLF_TABLE, MEMBER_LOSS_VOLATILITY, RISK_CONTROL_PARAMS, LINE_RESERVE_PAYDOWN_PCT, OPERATING_CASH_PCT_OF_PREMIUM, WC_LOSS_MODEL } from '../data/defaultAssumptions';
-import { getReinsuranceStructure, calculateReinsuranceCost, calculateReinsuranceRecovery } from './reinsuranceEngine';
 import { REINSURANCE_TOWER, type TowerLine } from '../data/reinsuranceTower';
 import {
   aggregateRecovery,
@@ -458,8 +457,7 @@ export function processLineYear(
   //   isClaimLine  — draws individual Claim/Occurrence objects. All three now.
   //   hasTractableCeded    — prices and cedes through the per-occurrence tower. All
   //                  three now, as of Property's own occurrence layer and
-  //                  aggregate. REINSURANCE_PROGRAMS is dead code for every
-  //                  line from here — its removal is its own commit.
+  //                  aggregate. REINSURANCE_PROGRAMS is gone rather than dead.
   //
   // Kept as two separate flags rather than collapsed into one, even though
   // they agree today: the distinction is what let Property's claim generator
@@ -500,8 +498,6 @@ export function processLineYear(
     pricingAdjustment,
     layersPlaced: lineDecisions.layersPlaced,
     aggregateStopLevel: lineDecisions.aggregateStopLevel,
-    reinsuranceLevel: lineDecisions.reinsuranceLevel,
-    competitivePressure: instance.marketEnvironment.competitivePressure,
   });
 
   // The occurrence quote is REUSED by the post-movement pass below rather than
@@ -625,42 +621,32 @@ export function processLineYear(
   // above member movement, because the price signal fed into movement needs the
   // reinsurance cost and therefore needs to know which product this line buys.
 
-  const reinsStructure = getReinsuranceStructure(
-    lineDecisions.reinsuranceLevel,
-    poolPremium,
-    expectedLoss
-  );
-
-  // REINSURANCE COST — two products, same seam as the recovery below.
+  // REINSURANCE COST. Sum of the PLACED occurrence layers' premiums, each
+  // priced as E[ceded] + lambda x SD[ceded] off the measured
+  // per-$100-of-exposure constants, PLUS the aggregate's (WC and Property)
+  // runtime-computed premium. This replaced a flat percentage of pool
+  // premium, which scaled with the CLF and therefore charged 69% more at 85%
+  // confidence than at 60% for IDENTICAL cover — a price with no connection
+  // to the risk transferred.
   //
-  // WC/GL: sum of the PLACED occurrence layers' premiums, each priced as
-  // E[ceded] + lambda x SD[ceded] off the measured per-$100-of-exposure
-  // constants, PLUS the WC aggregate's runtime-computed premium. This replaces a
-  // flat 37.5% of pool premium, which scaled with the CLF and therefore charged
-  // 69% more at 85% confidence than at 60% for IDENTICAL cover — a price with no
-  // connection to the risk transferred.
+  // COMPUTED FROM THE BOOK AND THE YEAR, not a frozen per-$100 rate times
+  // nominal exposure. The old form charged a premium that grew at the wage
+  // rate while the cover's value grew with the severity trend, and it applied
+  // one book's SD/E to every book size. See towerMoments.ts.
   //
-  // Property: unchanged, still a percentage of premium off REINSURANCE_PROGRAMS.
-  let reinsuranceCost: number;
-  if (towerQuote !== null && placedForCost) {
-    // COMPUTED FROM THE BOOK AND THE YEAR, not a frozen per-$100 rate times
-    // nominal exposure. The old form charged a premium that grew at the wage rate
-    // while the cover's value grew with the severity trend, and it applied one
-    // book's SD/E to every book size. See towerMoments.ts.
-    //
-    // The occurrence component is REUSED from above rather than recomputed: it
-    // reads only the pre-movement book and the year, so hoisting it to build the
-    // price signal did not change it. The aggregate is quoted once, just above,
-    // off the real post-movement expectedLoss, and both its premium and its
-    // expected ceded come from that single quote.
-    reinsuranceCost = towerQuote.premium + (aggregateQuote?.premium ?? 0);
-  } else {
-    reinsuranceCost = calculateReinsuranceCost(
-      lineDecisions.reinsuranceLevel,
-      poolPremium,
-      instance.marketEnvironment.competitivePressure
-    );
+  // The occurrence component is REUSED from above rather than recomputed: it
+  // reads only the pre-movement book and the year, so hoisting it to build the
+  // price signal did not change it. The aggregate is quoted once, just above,
+  // off the real post-movement expectedLoss, and both its premium and its
+  // expected ceded come from that single quote.
+  //
+  // `hasTractableCeded` is exhaustive over CoverageLine today, so towerQuote
+  // is never actually null — thrown rather than silently defaulted, so a
+  // future line without one fails here instead of billing nothing.
+  if (towerQuote === null || !placedForCost) {
+    throw new Error(`processLineYear: no tower quote for line ${line}`);
   }
+  const reinsuranceCost = towerQuote.premium + (aggregateQuote?.premium ?? 0);
 
   const totalMemberCharge = poolPremiumAndAdminExpense + reinsuranceCost;
   const totalMemberRatePer100 = totalMemberCharge / Math.max(activeExposure * 10_000, 1);
@@ -1020,9 +1006,12 @@ export function processLineYear(
   //
   // WC, GL and Property all run the PER-OCCURRENCE TOWER (cap -> retention ->
   // layers, then the aggregate stop-loss — WC and Property only — on what
-  // remains retained). REINSURANCE_PROGRAMS and `reinsuranceLevel` are dead for
-  // every line now; the `else` branch below and reinsuranceEngine.ts stay in
-  // place only because their removal is its own commit, after netting.
+  // remains retained). REINSURANCE_PROGRAMS, `reinsuranceLevel` and
+  // reinsuranceEngine.ts are gone; `hasTractableCeded` is exhaustive over
+  // CoverageLine today, so the branch below never actually takes the `else` —
+  // kept as a real predicate (rather than collapsed to `true`) and thrown
+  // rather than silently defaulted, so a future line without a closed-form
+  // E[ceded] fails here instead of silently retaining everything.
   let reinsuranceRecovery: number;
   let cededByLayer: number[] = [];
   let retainedAboveTower = 0;
@@ -1063,10 +1052,7 @@ export function processLineYear(
     // The tower's own retention, for the Pool/Excess display split.
     attachment = REINSURANCE_TOWER[towerLine][0].attachment;
   } else {
-    reinsuranceRecovery = calculateReinsuranceRecovery(grossUltimateLoss, reinsStructure);
-    // Pool Losses / Excess Losses split uses each level's real attachment point
-    // (125% of expected loss for Self Fund/Low/Moderate/High, 100% for Full Transfer).
-    attachment = reinsStructure.attachment;
+    throw new Error(`processLineYear: no tractable ceded reinsurance for line ${line}`);
   }
 
   const netUltimateLoss = grossUltimateLoss - reinsuranceRecovery;

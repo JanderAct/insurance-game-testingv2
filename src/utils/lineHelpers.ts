@@ -67,7 +67,6 @@ export function emptyLineDecisionSet(): LineDecisionSet {
     assessmentPct: 0,
     underwritingStrictness: 5,
     riskControlPct: 0,
-    reinsuranceLevel: 0,
     layersPlaced: [...DEFAULT_LAYERS_PLACED.WC],
     aggregateStopLevel: -1,
     assetAllocation: { ...ASSET_ALLOCATION_DEFAULT },

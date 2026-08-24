@@ -22,7 +22,6 @@ export function defaultLineDecisionSet(line: CoverageLine): LineDecisionSet {
     assessmentPct: SLIDER_RANGES.assessmentPct.default,
     underwritingStrictness: SLIDER_RANGES.underwritingStrictness.default,
     riskControlPct: SLIDER_RANGES.riskControlPct.default,
-    reinsuranceLevel: SLIDER_RANGES.reinsuranceLevel.default,
     // Default: every purchasable occurrence layer placed, no aggregate. Matches
     // the default-on-load rule for saves that predate the tower. KEYED BY
     // LINE — Property's one-layer tower must not receive WC's three-element

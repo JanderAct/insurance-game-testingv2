@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { resultUsesTower, hasTractableCeded } from '../utils/reinsuranceDisplay';
+import { hasTractableCeded } from '../utils/reinsuranceDisplay';
 import { hasStaticClf, staticClf } from '../data/clfTables';
 import { lookupCLF } from '../utils/simulationEngine';
 import {
@@ -30,7 +30,6 @@ import {
   FUNDING_CLF_TABLE,
   ASSET_CLASS_ASSUMPTIONS,
   ASSET_ALLOCATION_DEFAULT,
-  REINSURANCE_PROGRAMS,
   MEMBER_MOVEMENT_WEIGHTS,
   RISK_CONTROL_PARAMS,
   EXPOSURE_RANGES,
@@ -55,9 +54,6 @@ interface CalculationAuditPageProps {
   // Needed to re-derive a year's investment-return draw rather than reading
   // the engine's own stored echo of it.
   instanceSeed: number;
-  // Needed to recompute the reinsurance rate the way the engine does, rather
-  // than reverse-engineering it from the answer.
-  competitivePressure: number;
   lineView: LineView;
 }
 
@@ -193,33 +189,18 @@ function factorTerm(value: number, label?: string): FormulaTerm {
   return { value, format: 'factor', label };
 }
 
-// The engine's own reinsurance rate: max − pressure × (max − min). Shared by
-// the statement card's "Premiums for transferred risk" and the supporting
-// Losses and Reinsurance card's "Reinsurance Cost", so both rows can never
-// silently drift apart on how the rate is computed.
-// PROPERTY'S PRODUCT ONLY. WC and GL price per layer off measured expected ceded
-// loss, not as a percentage of premium, so there is no "rate" to compute for
-// them — callers must check resultUsesTower first.
+// How a tower line's reinsurance cost is actually built. ONE PRODUCT NOW —
+// every line runs the per-occurrence tower, so this is simply how
+// "Premiums for transferred risk" and "Reinsurance Cost" are described; there
+// is no percentage-of-premium alternative left to branch on.
 //
-// ⚠ `prog` IS null FOR TOWER LINES, AND THAT IS THE POINT. This function
-// previously returned the Property programme object regardless, so the
-// docstring above was advice a caller could ignore silently — and both callers
-// did. They rendered `$9.96M x 0.0% (Moderate rate)` next to a stored
-// reinsurance cost of $8.368M on WC and $15.683M on GL: a seven-figure value
-// beside a derivation evaluating to zero, labelled with a quota-share programme
-// on a line that has no quota share. Returning null makes the same mistake a
-// TYPE ERROR instead of a rendering artefact, so this class of defect cannot
-// recur by omission.
-function computeReinsRate(x: LineResultSet, competitivePressure: number) {
-  if (resultUsesTower(x)) return { pct: 0, prog: null, spread: 0 };
-  const prog = REINSURANCE_PROGRAMS[x.decisions.reinsuranceLevel];
-  if (x.decisions.reinsuranceLevel === 0) return { pct: 0, prog, spread: 0 };
-  const spread = prog.costPctOfPremiumMax - prog.costPctOfPremiumMin;
-  return { pct: prog.costPctOfPremiumMax - competitivePressure * spread, prog, spread };
-}
-
-// How a tower line's reinsurance cost is actually built — the honest
-// replacement for the percentage-of-premium product, which does not describe it.
+// This replaces computeReinsRate / reinsRateSubFormula, which existed only to
+// derive REINSURANCE_PROGRAMS' rate for a line that had one. `prog` was null
+// on every live result even before those functions were deleted — Property
+// was the last line with a rate to compute, and it left that product for its
+// own occurrence tower. Keeping a function whose real branch never fires is
+// the same defect its own header warned about (a plausible number that means
+// nothing); deleted rather than left dead.
 function towerReinsCostFormula(x: LineResultSet): FormulaSpec {
   const layersPaid = (x.cededByLayer ?? []).length;
   const agg = (x.aggregatePremium ?? 0) > 0;
@@ -229,26 +210,6 @@ function towerReinsCostFormula(x: LineResultSet): FormulaSpec {
     text: `Per-occurrence tower: sum of ${layersPaid} placed layer premium(s)` +
       `${agg ? ' + aggregate stop-loss premium' : ''}, each priced off measured expected ceded loss — ` +
       'NOT a percentage of pool premium.',
-  };
-}
-
-// Sub-formula spec for the rate itself — shared by both rows above. Returns
-// undefined for tower lines, which have no such rate to decompose.
-function reinsRateSubFormula(ownRate: ReturnType<typeof computeReinsRate>, competitivePressure: number) {
-  if (!ownRate.prog) return undefined;
-  return {
-    label: `${ownRate.prog.label} rate`,
-    value: ownRate.pct,
-    spec: {
-      kind: 'sum' as const,
-      terms: [
-        pctTerm(ownRate.prog.costPctOfPremiumMax, 'program max'),
-        {
-          product: [factorTerm(competitivePressure, 'competitive pressure'), pctTerm(ownRate.spread, 'max − min spread')],
-          negate: true,
-        },
-      ],
-    },
   };
 }
 
@@ -330,7 +291,7 @@ const CLAIMS_VARIANCE_CAP = 10_000;
 const CLAIMS_VARIANCE_REASON =
   'a prior-year reserve cohort closed and its residual balance was floored to zero in the rollforward rather than absorbed into the development figure';
 
-export default function CalculationAuditPage({ lockedResults, priorHistory, instanceSeed, competitivePressure, lineView }: CalculationAuditPageProps) {
+export default function CalculationAuditPage({ lockedResults, priorHistory, instanceSeed, lineView }: CalculationAuditPageProps) {
   // Chronological order: earliest pre-game year first, Year 0 (opening) last
   // among prior years, then live Year 1 onward — same convention as the
   // Financial Statements tab, so the audit reaches pre-game history too.
@@ -374,11 +335,11 @@ export default function CalculationAuditPage({ lockedResults, priorHistory, inst
   // buildRevExpRows / buildNetPositionRows pattern below) so a regression
   // script can evaluate every formula without rendering the page.
   const { exposureRows, rateRows, lossRows, reserveRows, ratioRows, capitalRows } =
-    buildSupportingRows(poolResult, lineView, competitivePressure);
+    buildSupportingRows(poolResult, lineView);
 
   // The two statement-mirroring cards, built from exported pure functions so a
   // regression script can assert their correspondence to the statements.
-  const revExpRows = buildRevExpRows(poolResult, lineView, checks, competitivePressure);
+  const revExpRows = buildRevExpRows(poolResult, lineView, checks);
   const netPositionRows = buildNetPositionRows(poolResult, lineView, checks);
   const cashInvestmentRows = buildCashInvestmentRows(poolResult, lineView, checks);
 
@@ -1226,18 +1187,6 @@ function buildAssumptionRows(): AuditRow[] {
         'Investment income should be secondary to underwriting results. If surplus grows too easily in bad underwriting years, review these assumptions first.',
     },
     {
-      metric: 'Reinsurance Programs',
-      value: REINSURANCE_PROGRAMS.map(program =>
-        `Level ${program.level} - ${program.label}: ` +
-        `Attach ${program.attachmentMultiplierOfExpectedLoss.toFixed(2)}x expected loss, ` +
-        `Quota Share ${formatPct(program.recoveryPct)} (uncapped), ` +
-        `Cost ${formatPct(program.costPctOfPremiumMin)} to ${formatPct(program.costPctOfPremiumMax)}`
-      ).join('\n'),
-      formula: 'Default reinsurance program structure by selected level.',
-      note:
-        'Higher levels should reduce severe loss volatility but cost more. If reinsurance almost never pays, players will avoid it; if it pays too often, it may be too valuable.',
-    },
-    {
       metric: 'Member Retention Weights',
       value: Object.entries(MEMBER_MOVEMENT_WEIGHTS.retention)
         .map(([k, v]) => `${labelize(k)}: ${formatPct(v)}`)
@@ -1280,7 +1229,6 @@ function buildAssumptionRows(): AuditRow[] {
         `  Assessment % (engine field): ${formatSliderPct(SLIDER_RANGES.assessmentPct)}\n` +
         `Underwriting Strictness: ${formatSliderNumber(SLIDER_RANGES.underwritingStrictness)}\n` +
         `Risk Control %: ${formatSliderPct(SLIDER_RANGES.riskControlPct)}\n` +
-        `Reinsurance Level (unread by every line as of Property's own occurrence layer and aggregate — all three now use the layer tower): ${formatSliderNumber(SLIDER_RANGES.reinsuranceLevel)}\n` +
         `Asset Allocation Default: Cash ${ASSET_ALLOCATION_DEFAULT.cashPct}% / Bonds ${ASSET_ALLOCATION_DEFAULT.bondsPct}% / Equities ${ASSET_ALLOCATION_DEFAULT.equitiesPct}%`,
       formula: 'Player decision slider configuration.',
       note:
@@ -1346,7 +1294,6 @@ function formatSliderNumber(range: { min: number; max: number; step: number; def
 export function buildSupportingRows(
   poolResult: ResultSet,
   lineView: LineView,
-  competitivePressure: number,
 ): { exposureRows: AuditRow[]; rateRows: AuditRow[]; lossRows: AuditRow[]; reserveRows: AuditRow[]; ratioRows: AuditRow[]; capitalRows: AuditRow[] } {
   const isPoolView = lineView === 'pool';
   const result: LineResultSet = isPoolView ? poolResult : poolResult.byLine[lineView];
@@ -1708,14 +1655,10 @@ export function buildSupportingRows(
       metric: 'Reinsurance Recovery',
       value: formatCurrency(result.reinsuranceRecovery),
       numericValue: result.reinsuranceRecovery,
-      formula: resultUsesTower(result)
-        // The tower is a SUM OVER LAYERS of per-occurrence cessions plus WC's
-        // aggregate — not a quota share of an annual excess, so the old
-        // two-factor product would misdescribe it entirely.
-        ? { kind: 'echo', value: result.reinsuranceRecovery, text: `Per-occurrence tower: ${(result.cededByLayer ?? []).filter(v => v > 0).length} layer(s) paid${(result.aggregateRecovery ?? 0) > 0 ? ' + aggregate stop-loss' : ''}` }
-        : result.decisions.reinsuranceLevel === 0
-        ? { kind: 'echo', value: 0, text: 'Self Fund — no external reinsurance, nothing to recover' }
-        : { kind: 'product', factors: [curTerm(result.excessLosses, 'losses above attachment'), pctTerm(REINSURANCE_PROGRAMS[result.decisions.reinsuranceLevel].recoveryPct, 'quota share')] },
+      // ONE PRODUCT NOW — the tower is a SUM OVER LAYERS of per-occurrence
+      // cessions plus WC/Property's aggregate, not a quota share of an annual
+      // excess, so a two-factor product would misdescribe it entirely.
+      formula: { kind: 'echo', value: result.reinsuranceRecovery, text: `Per-occurrence tower: ${(result.cededByLayer ?? []).filter(v => v > 0).length} layer(s) paid${(result.aggregateRecovery ?? 0) > 0 ? ' + aggregate stop-loss' : ''}` },
     },
     {
       metric: 'Net Ultimate Loss + LAE',
@@ -1734,11 +1677,8 @@ export function buildSupportingRows(
       metric: 'Reinsurance Cost',
       value: formatCurrency(result.reinsuranceCost),
       numericValue: result.reinsuranceCost,
-      formula: resultUsesTower(result)
-        ? towerReinsCostFormula(result)
-        : { kind: 'product', factors: [curTerm(result.poolPremium), { value: computeReinsRate(result, competitivePressure).pct, format: 'pct', label: `${computeReinsRate(result, competitivePressure).prog?.label ?? ''} rate` }] },
-      subFormula: reinsRateSubFormula(computeReinsRate(result, competitivePressure), competitivePressure),
-      explain: 'Same figure and rate as "Premiums for transferred risk" on the Statement of Revenues, Expenses & Changes in Net Position.',
+      formula: towerReinsCostFormula(result),
+      explain: 'Same figure as "Premiums for transferred risk" on the Statement of Revenues, Expenses & Changes in Net Position.',
     },
   ];
 
@@ -2109,7 +2049,6 @@ export function buildRevExpRows(
   poolResult: ResultSet,
   lineView: LineView,
   checks: AuditCheckSet,
-  competitivePressure: number
 ): AuditRow[] {
   const isPoolView = lineView === 'pool';
   const result: LineResultSet = isPoolView ? poolResult : poolResult.byLine[lineView];
@@ -2120,9 +2059,9 @@ export function buildRevExpRows(
   const restatements = 0;
 
   // A component line is a per-line product, and the per-line factors can
-  // differ (confidence level, reinsurance level and assessment rate are all
-  // per-line decisions). So at pool scope the honest arithmetic is the sum of
-  // the lines, not a single product against a blended factor.
+  // differ (confidence level and assessment rate are both per-line
+  // decisions). So at pool scope the honest arithmetic is the sum of the
+  // lines, not a single product against a blended factor.
   const perLineSum = (pick: (x: LineResultSet) => number): FormulaSpec => ({
     kind: 'sum',
     terms: lineKeys.map(l => ({ value: pick(poolResult.byLine[l]), format: 'currency' as const, label: l })),
@@ -2131,7 +2070,6 @@ export function buildRevExpRows(
     isPoolView ? perLineSum(pick) : lineSpec();
 
   const cur = (value: number, label?: string): FormulaTerm => ({ value, format: 'currency', label });
-  const ownRate = computeReinsRate(result, competitivePressure);
 
   return [
     { kind: 'section', metric: 'Operating revenues', value: '', formula: '' },
@@ -2139,16 +2077,7 @@ export function buildRevExpRows(
       metric: 'Premiums for transferred risk',
       value: formatCurrency(result.reinsuranceCost),
       numericValue: result.reinsuranceCost,
-      formula: scoped(
-        () => ownRate.prog === null
-          ? towerReinsCostFormula(result)
-          : {
-            kind: 'product',
-            factors: [cur(result.poolPremium), { value: ownRate.pct, format: 'pct', label: `${ownRate.prog.label} rate` }],
-          },
-        x => x.reinsuranceCost
-      ),
-      subFormula: isPoolView ? undefined : reinsRateSubFormula(ownRate, competitivePressure),
+      formula: scoped(() => towerReinsCostFormula(result), x => x.reinsuranceCost),
       explain: 'Collected from members, then paid to the reinsurer — appears again below as an operating expense.',
       indent: 1,
     },
@@ -2273,15 +2202,7 @@ export function buildRevExpRows(
           value: `(${formatCurrency(result.reinsuranceRecovery)})`,
           numericValue: result.reinsuranceRecovery,
           formula: scoped(
-            () => resultUsesTower(result)
-              ? { kind: 'echo' as const, value: result.reinsuranceRecovery, text: 'Per-occurrence tower — sum of layer cessions' }
-              : {
-              kind: 'product' as const,
-              factors: [
-                cur(result.excessLosses, 'losses above attachment'),
-                { value: REINSURANCE_PROGRAMS[result.decisions.reinsuranceLevel].recoveryPct, format: 'pct' as const, label: 'quota share' },
-              ],
-            },
+            () => ({ kind: 'echo' as const, value: result.reinsuranceRecovery, text: 'Per-occurrence tower — sum of layer cessions' }),
             x => x.reinsuranceRecovery
           ),
           indent: 2 as const,

@@ -11,8 +11,9 @@
 //                     Decisions screen against the engine's $3.26 — 73% high,
 //                     on the screen where the decision is made.
 //   TOWER PRICING     the engine prices WC/GL per layer off measured expected
-//                     ceded loss; the panel charged REINSURANCE_PROGRAMS'
-//                     percentage of premium, a structure those lines left.
+//                     ceded loss; the panel charged the (now-retired)
+//                     REINSURANCE_PROGRAMS' percentage of premium, a
+//                     structure those lines left.
 //
 // Both were invisible for the worst possible reason: the panel's combined ratio
 // was internally consistent ON ITS OWN GROSS BASIS and read 100.0%, and when
@@ -42,7 +43,6 @@
 
 import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM } from '../data/defaultAssumptions';
 import { normalizeAggregateStopLevel, normalizeLayersPlaced, occurrenceProgramCost, quoteAggregate } from './reinsuranceTower';
-import { calculateReinsuranceCost } from './reinsuranceEngine';
 import type { TowerLine } from '../data/reinsuranceTower';
 import type { CoverageLine, Member } from '../types/simulation';
 
@@ -65,8 +65,6 @@ export interface LineRateInputs {
   pricingAdjustment: number;
   layersPlaced: boolean[];
   aggregateStopLevel: number;
-  reinsuranceLevel: number;
-  competitivePressure: number;
 }
 
 export interface LineRateQuote {
@@ -93,7 +91,7 @@ export interface LineRateQuote {
 export function quoteLineRates(input: LineRateInputs): LineRateQuote {
   const {
     line, yearNumber, members, exposure, purePremiumPer100, clf,
-    pricingAdjustment, layersPlaced, aggregateStopLevel, reinsuranceLevel, competitivePressure,
+    pricingAdjustment, layersPlaced, aggregateStopLevel,
   } = input;
 
   const isWcClaimLine = line === 'WC';
@@ -141,12 +139,14 @@ export function quoteLineRates(input: LineRateInputs): LineRateQuote {
     exposure * poolPremiumRatePer100 * 10_000;
 
   // WC/GL/Property: the placed layers' premiums plus the aggregate (WC and
-  // Property only), priced at runtime off the book. The `else` branch is dead
-  // for every line as of the Property cutover — REINSURANCE_PROGRAMS retains a
-  // caller only until its own retirement commit.
-  const reinsuranceCost = towerQuote !== null
-    ? towerQuote.premium + (aggregateQuote?.premium ?? 0)
-    : calculateReinsuranceCost(reinsuranceLevel, poolPremium, competitivePressure);
+  // Property only), priced at runtime off the book. `isClaimLine` is
+  // exhaustive over CoverageLine, so towerQuote is never actually null —
+  // thrown rather than silently defaulted, so a future line without one
+  // fails here instead of billing nothing for reinsurance.
+  if (towerQuote === null) {
+    throw new Error(`quoteLineRates: no tower quote for line ${line}`);
+  }
+  const reinsuranceCost = towerQuote.premium + (aggregateQuote?.premium ?? 0);
 
   const reinsRatePer100 = reinsuranceCost / Math.max(exposure * 10_000, 1);
 

@@ -209,10 +209,9 @@ for (const { lines, name } of CONFIGS) {
         const result = isPoolView ? poolResult : poolResult.byLine[scope as CoverageLine];
         if (!result) continue;
         const ctx = { config: name, seed: id, year: y, scope: String(scope) };
-        const cp = inst.marketEnvironment.competitivePressure;
         const checks = computeAuditChecks(poolResult, scope, inst.seed);
 
-        const sup = buildSupportingRows(poolResult, scope, cp);
+        const sup = buildSupportingRows(poolResult, scope);
         auditRows('Exposure and Membership', sup.exposureRows, ctx);
         auditRows('Funding Rate Build-Up', sup.rateRows, ctx);
         auditRows('Losses and Reinsurance', sup.lossRows, ctx);
@@ -221,7 +220,7 @@ for (const { lines, name } of CONFIGS) {
         auditRows('Capital and Reserve Confidence', sup.capitalRows, ctx);
 
         auditRows('Statement of Revenues, Expenses & Changes in Net Position',
-          buildRevExpRows(poolResult, scope, checks, cp), ctx);
+          buildRevExpRows(poolResult, scope, checks), ctx);
         // ⚠ THE TWO SECTIONS NEVER READ ROW-BY-ROW, now covered by construction.
         auditRows('Statement of Net Position', buildNetPositionRows(poolResult, scope, checks), ctx);
         auditRows('Cash & Investments Rollforward', buildCashInvestmentRows(poolResult, scope, checks), ctx);

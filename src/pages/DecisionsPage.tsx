@@ -3,9 +3,8 @@ import { DollarSign, TrendingUp, BarChart2, Shield, RotateCcw, Lock, Info } from
 import type { DecisionSet, LineDecisionSet, CoverageLine, LineView, LineResultSet, Member } from '../types/simulation';
 import SliderInput from '../components/SliderInput';
 import AllocationBar from '../components/AllocationBar';
-import { SLIDER_RANGES, REINSURANCE_PROGRAMS, ASSET_ALLOCATION_DEFAULT } from '../data/defaultAssumptions';
+import { SLIDER_RANGES, ASSET_ALLOCATION_DEFAULT } from '../data/defaultAssumptions';
 import { formatCurrency } from '../utils/formatters';
-import { getReinsuranceStructure } from '../utils/reinsuranceEngine';
 import { defaultLineDecisionSet } from '../utils/decisionDefaults';
 import { hasTractableCeded } from '../utils/reinsuranceDisplay';
 import { AGG_ATTACHMENT_LEVELS, AGG_LIMIT_MULTIPLE, REINSURANCE_TOWER, RISK_LOAD_LAMBDA, TOWER_TOP } from '../data/reinsuranceTower';
@@ -25,7 +24,6 @@ interface DecisionsPageProps {
   decisions: DecisionSet;
   onChange: (d: DecisionSet) => void;
   yearNumber: number;
-  estimatedPremium: number;
   estimatedExpectedLoss: number;
   disabled?: boolean;
   // 'pool' hosts the two pool-wide decisions (investment allocation, risk
@@ -83,7 +81,7 @@ function resetLineToDefaults(decisions: DecisionSet, line: CoverageLine): Decisi
   };
 }
 
-export default function DecisionsPage({ decisions, onChange, yearNumber, estimatedPremium, estimatedExpectedLoss, disabled = false, lineView, lineLoanInfo, lastLineResult, fundingConsequence, activeMembers }: DecisionsPageProps) {
+export default function DecisionsPage({ decisions, onChange, yearNumber, estimatedExpectedLoss, disabled = false, lineView, lineLoanInfo, lastLineResult, fundingConsequence, activeMembers }: DecisionsPageProps) {
   // Pool tab: the two pool-wide decisions. One allocation policy and one
   // risk-control intensity for the whole pool — each line applies them to its
   // OWN base (own segregated portfolio / own premium).
@@ -113,11 +111,6 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
   const setFundingLevel = (v: number) =>
     onChange({ ...decisions, byLine: { ...decisions.byLine, [selectedLine]: { ...d, fundingConfidenceLevel: v, fundingAtExpected: false } } });
   const setFundingAtExpected = () => set('fundingAtExpected', true);
-
-  const reinsStructure = getReinsuranceStructure(d.reinsuranceLevel, estimatedPremium, estimatedExpectedLoss);
-  const prog = REINSURANCE_PROGRAMS[d.reinsuranceLevel];
-  const reinsCostPct = prog ? (prog.costPctOfPremiumMin + prog.costPctOfPremiumMax) / 2 : 0;
-  const reinsCost = estimatedPremium * reinsCostPct;
 
   // COMBINED DIVIDEND/ASSESSMENT CONTROL (Part 1). One slider, zero at centre:
   // positive is a dividend, negative is an assessment. dividendPct and
@@ -196,6 +189,12 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
         {outstandingLoanSlider(d, set, selectedLoanInfo, disabled)}
 
         <SectionCard title="Reinsurance Program" icon={<Shield size={16} />}>
+          {/* REINSURANCE_PROGRAMS RETIRED. Every CoverageLine runs the
+              per-occurrence tower now — hasTractableCeded(selectedLine) is
+              exhaustively true — so the percentage-of-premium branch that used
+              to render here is gone rather than kept dead. hasTractableCeded
+              stays imported and checked (thrown on else) so a future line
+              without one fails loudly here instead of rendering nothing. */}
           {hasTractableCeded(selectedLine) ? (
             <TowerControls
               line={selectedLine}
@@ -207,40 +206,7 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
               members={activeMembers}
               yearNumber={yearNumber}
             />
-          ) : (
-          <>
-          <div className="mb-3">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Reinsurance Level</p>
-            <div className="grid grid-cols-5 gap-1">
-              {REINSURANCE_PROGRAMS.map(prog => (
-                <button key={prog.level} disabled={disabled} onClick={() => !disabled && set('reinsuranceLevel', prog.level)} className={`flex flex-col items-center p-2 rounded-lg border text-center transition-all text-xs ${d.reinsuranceLevel === prog.level ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:bg-blue-50'} ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}>
-                  <span className="font-bold">{prog.label}</span>
-                  <span className="text-xs opacity-75 mt-0.5 leading-tight hidden sm:block">{prog.description}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="bg-gray-50 rounded-lg p-3 border border-gray-200 text-xs space-y-1">
-            {d.reinsuranceLevel > 0 ? (
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-                <DataRow label="Attachment Point" value={formatCurrency(reinsStructure.attachment)} />
-                <DataRow label="Attachment (% of Exp. Loss)" value={`${(REINSURANCE_PROGRAMS[d.reinsuranceLevel].attachmentMultiplierOfExpectedLoss * 100).toFixed(0)}%`} />
-                <DataRow label="Quota Share % (Pool Retains)" value={`${((1 - reinsStructure.recoveryPct) * 100).toFixed(0)}%`} />
-                <DataRow label="Coverage" value="Uncapped above attachment" />
-                <DataRow label="Est. Annual Cost" value={`${formatCurrency(reinsCost)}/yr (${(reinsCostPct * 100).toFixed(0)}% of prem.)`} />
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-                <DataRow label="Attachment Point" value={formatCurrency(reinsStructure.attachment)} />
-                <DataRow label="Attachment (% of Exp. Loss)" value={`${(REINSURANCE_PROGRAMS[0].attachmentMultiplierOfExpectedLoss * 100).toFixed(0)}%`} />
-                <DataRow label="Self-Funded Amount" value={`${formatCurrency(estimatedPremium * REINSURANCE_PROGRAMS[4].costPctOfPremiumMax)}/yr`} />
-                <p className="col-span-2 text-gray-500 italic mt-1">No external reinsurance — the pool retains all losses up to 125% of expected loss. Instead of paying the self-funded amount to a reinsurer, it stays in the pool's cash and earns investment income for the pool's own account.</p>
-              </div>
-            )}
-            <p className="text-blue-700 mt-2 text-xs leading-relaxed border-t border-blue-100 pt-2">Reinsurance does not reduce gross losses. Above the attachment point, the reinsurer pays its quota share of the excess; the pool retains the rest.</p>
-          </div>
-          </>
-          )}
+          ) : (() => { throw new Error(`DecisionsPage: ${selectedLine} has no tractable ceded reinsurance`); })()}
         </SectionCard>
 
       </div>
@@ -623,8 +589,8 @@ function DataRow({ label, value }: { label: string; value: string }) {
 }
 
 // ===========================================================================
-// PER-OCCURRENCE TOWER CONTROLS (WC and GL). Property keeps the level selector
-// above — it legitimately still uses REINSURANCE_PROGRAMS.
+// PER-OCCURRENCE TOWER CONTROLS — WC, GL and Property, every line now that
+// REINSURANCE_PROGRAMS is retired.
 //
 // EVERY LAYER'S PRICE IS SHOWN, because the loading rising with attachment IS
 // the mechanic. A player who cannot see that the $15M xs $10M layer costs 3.3x

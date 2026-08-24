@@ -5,8 +5,7 @@
 // the app actually exports.
 import type { SpreadsheetMetric } from './resultsExport';
 import { formatCurrency, formatPct } from './formatters';
-import { REINSURANCE_PROGRAMS } from '../data/defaultAssumptions';
-import { placementCode, placementSummary, resultUsesTower } from './reinsuranceDisplay';
+import { placementCode, placementSummary } from './reinsuranceDisplay';
 import type { CoverageLine, LineDecisionSet, ResultSet } from '../types/simulation';
 
 // Which tower line a result row belongs to — WC or GL ONLY, never a guess.
@@ -37,7 +36,7 @@ const towerLineOf = (r: { line?: CoverageLine }): CoverageLine | undefined =>
 // this function is declared against (LineResultSet) does not carry it.
 function poolReinsuranceLevelDetail(
   r: { line?: CoverageLine },
-  render: (line: CoverageLine, decisions: Pick<LineDecisionSet, 'layersPlaced' | 'aggregateStopLevel' | 'reinsuranceLevel'>) => string,
+  render: (line: CoverageLine, decisions: Pick<LineDecisionSet, 'layersPlaced' | 'aggregateStopLevel'>) => string,
 ): string {
   const byLine = (r as unknown as ResultSet).byLine;
   const active = (['WC', 'GL', 'Property'] as const).filter(l => byLine?.[l]);
@@ -108,33 +107,21 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
       csvValue: r => r.decisions.riskControlPct,
     },
     {
-      // ONE PRODUCT NOW. All three lines run the per-occurrence tower — WC,
-      // GL and (as of its own occurrence layer and aggregate) Property — and
-      // REINSURANCE_PROGRAMS is dead for every line. The `!resultUsesTower(r)`
-      // branch below is unreachable today; kept only because
-      // REINSURANCE_PROGRAMS's removal is its own commit, after netting.
+      // ONE PRODUCT NOW, and REINSURANCE_PROGRAMS is gone rather than merely
+      // dead — all three lines run the per-occurrence tower.
       //
-      // csvValue is a STRING for tower lines (a placement code like
-      // "L1+L2+L3+AGG1"), so value-identity — which is numeric-only — does not
-      // see a numeric field here. That is correct: a placement is not a
-      // magnitude, and pretending it is one is what the old column did.
-      //
-      // THE LABEL WAS "Reinsurance Level" until this commit, deliberately left
-      // wrong for WC/GL because renaming it also rewrote Property's header row
-      // and PR-solo staying byte-identical was the leak check proving an
-      // earlier commit hadn't touched Property. That constraint is gone now
-      // that Property genuinely has its own tower — PR-solo is expected to
-      // move this commit for real reasons, so the label is fixed alongside it.
+      // csvValue is a STRING (a placement code like "L1+L2+L3+AGG1"), so
+      // value-identity — which is numeric-only — does not see a numeric field
+      // here. That is correct: a placement is not a magnitude, and pretending
+      // it is one is what the old column did.
       key: 'reinsuranceLevel',
       category: 'Decisions',
       label: 'Reinsurance Program',
       value: r => {
-        if (!resultUsesTower(r)) return `${r.decisions.reinsuranceLevel} - ${REINSURANCE_PROGRAMS[r.decisions.reinsuranceLevel]?.label ?? ''}`;
         const line = towerLineOf(r);
         return line ? placementSummary(line, r.decisions) : poolReinsuranceLevelDetail(r, placementSummary);
       },
       csvValue: r => {
-        if (!resultUsesTower(r)) return r.decisions.reinsuranceLevel;
         const line = towerLineOf(r);
         return line ? placementCode(line, r.decisions) : poolReinsuranceLevelDetail(r, placementCode);
       },

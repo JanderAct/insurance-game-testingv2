@@ -774,65 +774,13 @@ export const ASSET_ALLOCATION_DEFAULT = { cashPct: 10, bondsPct: 80, equitiesPct
 // (recoveryPct) of the excess, uncapped (no limit) — this is aggregate-basis for
 // now; occurrence-basis layering is deferred until a claim-level frequency/
 // severity model exists.
-// Full Transfer costs a flat 50% of premium; other paid levels scale that cost
-// linearly by their quota share (cost and quota share move together). Self Fund
-// (level 0) pays nothing externally — instead it retains that same 50%-of-premium
-// budget in cash, which the general cash-sweep mechanism carries into investments
-// where it earns a return, rather than paying it away with nothing in exchange.
-export const FULL_TRANSFER_COST_PCT_OF_PREMIUM = 0.50;
-
-export const REINSURANCE_PROGRAMS = [
-  {
-    level: 0,
-    label: 'Self Fund',
-    description: '125% attachment — no external reinsurance; the pool retains and invests the amount it would otherwise pay for full coverage',
-    attachmentMultiplierOfExpectedLoss: 1.25,
-    limitPctOfPremium: 0,
-    recoveryPct: 0,
-    costPctOfPremiumMin: 0,
-    costPctOfPremiumMax: 0,
-  },
-  {
-    level: 1,
-    label: 'Low',
-    description: '125% attachment, pool retains 50% of excess, uncapped',
-    attachmentMultiplierOfExpectedLoss: 1.25,
-    limitPctOfPremium: Infinity,
-    recoveryPct: 0.50,
-    costPctOfPremiumMin: 0.50 * FULL_TRANSFER_COST_PCT_OF_PREMIUM,
-    costPctOfPremiumMax: 0.50 * FULL_TRANSFER_COST_PCT_OF_PREMIUM,
-  },
-  {
-    level: 2,
-    label: 'Moderate',
-    description: '125% attachment, pool retains 25% of excess, uncapped',
-    attachmentMultiplierOfExpectedLoss: 1.25,
-    limitPctOfPremium: Infinity,
-    recoveryPct: 0.75,
-    costPctOfPremiumMin: 0.75 * FULL_TRANSFER_COST_PCT_OF_PREMIUM,
-    costPctOfPremiumMax: 0.75 * FULL_TRANSFER_COST_PCT_OF_PREMIUM,
-  },
-  {
-    level: 3,
-    label: 'High',
-    description: '125% attachment, pool retains 10% of excess, uncapped',
-    attachmentMultiplierOfExpectedLoss: 1.25,
-    limitPctOfPremium: Infinity,
-    recoveryPct: 0.90,
-    costPctOfPremiumMin: 0.90 * FULL_TRANSFER_COST_PCT_OF_PREMIUM,
-    costPctOfPremiumMax: 0.90 * FULL_TRANSFER_COST_PCT_OF_PREMIUM,
-  },
-  {
-    level: 4,
-    label: 'Full Transfer',
-    description: '100% attachment, pool retains 0% of excess (full transfer), uncapped',
-    attachmentMultiplierOfExpectedLoss: 1.00,
-    limitPctOfPremium: Infinity,
-    recoveryPct: 1.00,
-    costPctOfPremiumMin: FULL_TRANSFER_COST_PCT_OF_PREMIUM,
-    costPctOfPremiumMax: FULL_TRANSFER_COST_PCT_OF_PREMIUM,
-  },
-];
+//
+// RETIRED. Property was this model's last consumer and now runs its own
+// per-occurrence tower (see reinsuranceTower.ts) — no line reads a
+// percentage-of-premium quota share any more. FULL_TRANSFER_COST_PCT_OF_PREMIUM
+// and the REINSURANCE_PROGRAMS table that scaled off it are gone with it, along
+// with reinsuranceEngine.ts (getReinsuranceStructure / calculateReinsuranceCost
+// / calculateReinsuranceRecovery) and the `reinsuranceLevel` decision field.
 
 // Member movement weight parameters
 export const MEMBER_MOVEMENT_WEIGHTS = {
@@ -1223,7 +1171,6 @@ export const SLIDER_RANGES = {
   dividendAssessment: { min: -0.25, max: 0.15, step: 0.005, default: 0 },
   underwritingStrictness: { min: 0, max: 10, step: 1, default: 5 },
   riskControlPct: { min: 0, max: 0.08, step: 0.01, default: 0 },
-  reinsuranceLevel: { min: 0, max: 4, step: 1, default: 2 },
 };
 
 // Reserve paydown percentage per year
