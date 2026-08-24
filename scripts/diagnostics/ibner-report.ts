@@ -80,6 +80,7 @@ function play(id: string, seed: number, mutate?: (d: DecisionSet) => DecisionSet
   const calendar: Record<string, number[]> = { WC: [], GL: [], Property: [] };
   const surplusY10: Record<string, number> = {};
   const devCal: Record<string, number[]> = { WC: [], GL: [], Property: [] };
+  const byYear: Record<string, Record<number, number[]>> = { WC: {}, GL: {}, Property: {} };
   // Latest sighting of each in-play cohort, keyed by accident year. A cohort
   // that closes is filtered out of the array, so the last sighting is kept
   // rather than read from the final state.
@@ -93,6 +94,7 @@ function play(id: string, seed: number, mutate?: (d: DecisionSet) => DecisionSet
       if (!r) continue;
       calendar[l].push(r.netIncurredLoss);
       devCal[l].push(r.priorYearDevelopment);
+      (byYear[l][y] ??= []).push(r.priorYearDevelopment);
       if (y === YEARS) surplusY10[l] = r.endingSurplus;
       for (const c of p.updatedPoolState.lines[l].reserveCohorts) {
         if (c.yearNumber >= 1) last[l].set(c.yearNumber, c);
@@ -113,7 +115,7 @@ function play(id: string, seed: number, mutate?: (d: DecisionSet) => DecisionSet
       });
     }
   }
-  return { calendar, cohorts, devCal, surplusY10 };
+  return { calendar, cohorts, devCal, surplusY10, byYear };
 }
 
 function runArm(label: string, mutate?: (d: DecisionSet) => DecisionSet) {
@@ -121,6 +123,7 @@ function runArm(label: string, mutate?: (d: DecisionSet) => DecisionSet) {
   const cohorts: Record<string, CohortObs[]> = { WC: [], GL: [], Property: [] };
   const devCal: Record<string, number[]> = { WC: [], GL: [], Property: [] };
   const surplus: Record<string, number[]> = { WC: [], GL: [], Property: [] };
+  const byYear: Record<string, Record<number, number[]>> = { WC: {}, GL: {}, Property: {} };
   for (let g = 0; g < GAMES; g++) {
     const r = play(`IBN${label}${g}`, 4_200_000 + g * 8117, mutate);
     for (const l of LINES) {
@@ -128,9 +131,10 @@ function runArm(label: string, mutate?: (d: DecisionSet) => DecisionSet) {
       cohorts[l].push(...r.cohorts[l]);
       devCal[l].push(...r.devCal[l]);
       if (r.surplusY10[l] !== undefined) surplus[l].push(r.surplusY10[l]);
+      for (const [y, xs] of Object.entries(r.byYear[l])) (byYear[l][Number(y)] ??= []).push(...xs);
     }
   }
-  return { calendar, cohorts, devCal, surplus };
+  return { calendar, cohorts, devCal, surplus, byYear };
 }
 
 console.log(`IBNER BEHAVIOUR — ${GAMES} games x ${YEARS} years, all three lines\n`);
@@ -281,6 +285,26 @@ console.log('    funding confidence at the bottom of the slider, other lines lef
   console.log(`  ALL in-play cohorts : n=${allDev.length}  mean development ${pct(mean(allDev))}`);
   console.log(`  calendar development: mean ${fmt$(mean(arm.devCal[l]))}/yr  (defaults ${fmt$(mean(base.devCal[l]))}/yr)`);
   console.log(`  year-${YEARS} surplus      : mean ${fmt$(mean(arm.surplus[l]))}  (defaults ${fmt$(mean(base.surplus[l]))})`);
+
+  // ⚠ THE NUMBER THE DISCLOSURE RULING TURNS ON. End-of-game-only disclosure
+  // was ruled on the premise that the exhibit shows the drift year by year. It
+  // only does if the drift is READABLE against the year's own noise, so this
+  // reports it in units of that noise rather than in dollars.
+  const noise = sd(base.calendar[l]);
+  console.log(`\n  DRIFT PER GAME YEAR, in units of this line's calendar-year sd (${fmt$(noise)}):`);
+  console.log('  game yr |   mean drift | as sigma | biased cohorts carrying the unwind');
+  console.log('  (year 1 carries NO biased cohort, so its figure is sampling noise, not drift)');
+  for (let y = 1; y <= YEARS; y++) {
+    const xs = arm.byYear[l][y] ?? [];
+    if (!xs.length) continue;
+    const m = mean(xs);
+    console.log(`  ${String(y).padStart(7)} | ${fmt$(m).padStart(12)} | ${(Math.abs(m) / noise).toFixed(3).padStart(8)} | ${Math.max(0, y - 1)}`);
+  }
+  console.log('\n  ⚠ THE EARLY YEARS ARE THIN FOR A STRUCTURAL REASON, NOT A SIZING ONE. Only');
+  console.log('    cohorts the PLAYER wrote carry the unwind — pre-game cohorts have bookingBias');
+  console.log('    0 by construction — so year 2 has one biased cohort and year 3 has two. The');
+  console.log('    coefficient scales the steady state and cannot fix the opening window; that');
+  console.log('    would need the unwind FRONT-LOADED rather than spread evenly at b/H.');
   console.log('\n  ⚠ THE SURPLUS COMPARISON IS NOT THE COST OF THE BIAS. A squeezed pool also');
   console.log('    collects far less premium, and that dominates. The bias figure to read is the');
   console.log('    mean development above: at defaults it is noise around zero, here it is a');

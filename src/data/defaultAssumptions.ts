@@ -1268,13 +1268,26 @@ export const IBNER_STEP_MIXTURE: readonly { weight: number; multiplier: number }
 // Property 0.261 — so ONE pool-wide coefficient works without per-line
 // normalisation.
 //
-// SIZED so 0.40 x ~0.25 gives a ~10% optimistic booking at maximum squeeze. On
-// WC that is about $1.14M/yr understated against an ~$11.4M book; with horizons
-// averaging 8.5 against a ten-year game the accumulated un-emerged deficiency at
-// year 10 is roughly $5.2M, about 22% of a typical year-10 WC surplus — and a
-// larger share in practice, since a maximally-squeezed pool has less surplus to
-// begin with. Large enough to change how the balance sheet reads, small enough
-// not to swamp the loss draw. STARTING VALUE, to be measured once running.
+// ⚠ RAISED FROM 0.40 TO 0.80 AFTER MEASURING, AND THE REASON IS THE RULING IT
+// SUPPORTS. At 0.40 the maximum-squeeze drift measured 0.14 sigma of WC's
+// calendar-year noise at steady state and about a third of that in years 1-3.
+// The end-of-game deficiency disclosure was ruled on the premise that the
+// exhibit shows the drift year by year, so the player sees the consequence and
+// works out the cause; at 0.14 sigma it does not show, which makes a player
+// unable to change course during the window when changing course is still
+// possible. 0.80 gives a ~19% optimistic booking at maximum squeeze.
+//
+// ⚠ AND DOUBLING DOES NOT FIX THE EARLY-GAME WINDOW, because the coefficient is
+// not what gates it. The unwind is only carried by cohorts the PLAYER wrote —
+// pre-game cohorts carry bookingBias 0 by construction, since the player made
+// none of those decisions — so in year 2 there is exactly one biased cohort and
+// in year 3 there are two. The early signal is limited by cohort COUNT, and no
+// value of this constant changes that. Raising it doubles the steady-state
+// signal and leaves the first two or three years thin. If an early signal is
+// wanted, the lever is the SHAPE of the unwind (front-loading it rather than
+// spreading b/H evenly), not this number.
+//
+// STARTING VALUE still, measured but not fitted.
 //
 // ⚠ INERT AT DEFAULTS. defaultLineDecisionSet sets fundingAtExpected, pinning
 // CLF to 1.000, so squeeze is 0 and no bias applies on a default run. That keeps
@@ -1287,7 +1300,7 @@ export const IBNER_STEP_MIXTURE: readonly { weight: number; multiplier: number }
 // exactly one distinct value: 1. So the old bias was identically zero on every
 // path, not merely weak. premiumFundingRatio is a separate defect and is
 // deliberately NOT fixed here.
-export const IBNER_BOOKING_BIAS_COEFF = 0.40;
+export const IBNER_BOOKING_BIAS_COEFF = 0.80;
 
 // ===========================================================================
 // PROPERTY loss model — FITTED, and it replaces a design that was never fitted.
