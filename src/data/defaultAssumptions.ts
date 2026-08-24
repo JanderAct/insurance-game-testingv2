@@ -1302,6 +1302,25 @@ export const IBNER_STEP_MIXTURE: readonly { weight: number; multiplier: number }
 // deliberately NOT fixed here.
 export const IBNER_BOOKING_BIAS_COEFF = 0.80;
 
+// ⚠ THE UNWIND IS FRONT-LOADED, NOT SPREAD EVENLY, and the shape is the point.
+// A flat b/H left years 2-3 of a squeezed game at 0.03-0.04 sigma of the line's
+// own calendar noise — invisible during exactly the window when the player could
+// still change course, because the early signal is gated by how many biased
+// cohorts EXIST (one in year 2, two in year 3) rather than by how big the bias
+// is. Doubling the coefficient scales every year equally and cannot fix that.
+//
+// Front-loading is also the more realistic shape. Friedland's age-to-age factors
+// are largest at the earliest ages: a deficient case reserve gets corrected as
+// soon as information arrives, not evenly across the runoff.
+//
+// The step weights are geometric with this ratio — half the remaining unwind at
+// each step. On a WC cohort at maximum squeeze that is roughly 9.4% / 4.7% /
+// 2.3% against the flat schedule's 2.2% every year.
+// Typed `number` rather than left to narrow to the literal 0.5, so
+// ibnerUnwindStep's rho === 1 guard (the degenerate flat-weights case) stays a
+// legitimate branch instead of a compile error the day someone tries it.
+export const IBNER_UNWIND_DECAY: number = 0.5;
+
 // ===========================================================================
 // PROPERTY loss model — FITTED, and it replaces a design that was never fitted.
 //

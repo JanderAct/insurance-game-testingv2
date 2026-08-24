@@ -24,7 +24,7 @@ function mergeShockRecords(lineResults: LineResultSet[]): ShockRecord[] | undefi
   return merged.size > 0 ? [...merged.values()] : undefined;
 }
 import { SeededRandom, deriveSubRng } from './random';
-import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, PROPERTY_HELD_PURE_PREMIUM_PER_100, FUNDING_CLF_TABLE, MEMBER_LOSS_VOLATILITY, RISK_CONTROL_PARAMS, LINE_RESERVE_PAYDOWN_PCT, OPERATING_CASH_PCT_OF_PREMIUM, WC_LOSS_MODEL, IBNER_TOTAL_SD, IBNER_HORIZON, IBNER_STEP_MIXTURE, IBNER_BOOKING_BIAS_COEFF } from '../data/defaultAssumptions';
+import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, PROPERTY_HELD_PURE_PREMIUM_PER_100, FUNDING_CLF_TABLE, MEMBER_LOSS_VOLATILITY, RISK_CONTROL_PARAMS, LINE_RESERVE_PAYDOWN_PCT, OPERATING_CASH_PCT_OF_PREMIUM, WC_LOSS_MODEL, IBNER_TOTAL_SD, IBNER_HORIZON, IBNER_STEP_MIXTURE, IBNER_BOOKING_BIAS_COEFF, IBNER_UNWIND_DECAY } from '../data/defaultAssumptions';
 import type { TowerLine } from '../data/reinsuranceTower';
 import {
   aggregateRecovery,
@@ -2438,10 +2438,18 @@ function processIbner(
       if (developing) {
         const step = IBNER_TOTAL_SD[line] / Math.sqrt(expectedHorizon(line));
         const shock = c.stepMultiplier * step * rng.normal(0, 1);
-        // The deterministic unwind of the optimistic booking. Zero unless the
-        // line was funded below break-even in this cohort's accident year.
-        const unwind = c.bookingBias / c.horizon;
-        newUltimate = c.netUltimate * (1 + shock + unwind);
+        // The deterministic unwind of the optimistic booking, front-loaded.
+        // Zero unless the line was funded below break-even in this cohort's
+        // accident year. `age` is the number of steps already taken, so the
+        // step about to be taken is age + 1.
+        const unwind = ibnerUnwindStep(c.bookingBias, c.horizon, c.age + 1);
+        // ⚠ APPLIED AS A SEPARATE FACTOR, not added into the shock. The shock
+        // has mean zero, so E[(1 + shock)(1 + unwind)] = 1 + unwind and the
+        // product identity in ibnerUnwindStep survives the stochastic term
+        // exactly. Folding them into one bracket would still have the right
+        // expectation but would make the exactness an accident of the algebra
+        // rather than a property the schedule owns.
+        newUltimate = c.netUltimate * (1 + shock) * (1 + unwind);
         // An estimate cannot go negative. Binds essentially never (it would
         // take a step below -100%), but a negative ultimate would silently
         // invert the whole rollforward if it ever did.
@@ -2516,4 +2524,42 @@ function drawStepMultiplier(rng: SeededRandom): number {
 // honestly and returns 0.
 export function ibnerBookingBias(selectedFundingCLF: number): number {
   return IBNER_BOOKING_BIAS_COEFF * Math.max(0, 1 - selectedFundingCLF);
+}
+
+// ============================================================================
+// THE UNWIND SCHEDULE — front-loaded, and EXACT.
+//
+// Returns the relative step to apply on the `step`-th year of a cohort's runoff
+// (step 1 is its first development), such that
+//
+//     PRODUCT over step = 1..H of (1 + u_step)  ===  1 / (1 - bias)
+//
+// exactly. That identity is the whole reason the unwind exists: the estimate is
+// booked at registerSum x (1 - bias), so the unwind has to multiply it back to
+// registerSum by maturity or the cohort permanently mis-states its ultimate.
+//
+// ⚠ IT IS COMPUTED IN LOG SPACE BECAUSE THE OBVIOUS ARITHMETIC IS WRONG, and it
+// was wrong here until this was written. The previous schedule used a flat
+// `bias / horizon` per step, reasoning that H steps of b/H total b. They do not:
+// the steps COMPOUND, so the total is (1 + b/H)^H ~ e^b, while landing on
+// registerSum needs 1/(1 - b). Those differ at second order in b, so the error
+// grows with the bias and with SHORT horizons where each step is large.
+// Measured before the fix, at each line's own reachable slider minimum: WC
+// missed registerSum by -2.32%, GL by -4.14%, Property by -14.73% on a
+// two-year horizon. A cohort would mature having quietly kept part of the
+// optimism forever, which is precisely the thing the unwind is for.
+//
+// Distributing the required LOG-unwind L = -ln(1 - bias) across the steps by
+// weights that sum to 1 makes the product exact for any weights at all, which
+// is what lets the shape be chosen freely without re-deriving the arithmetic.
+// The weights here are geometric (IBNER_UNWIND_DECAY), so the first step
+// carries about half.
+export function ibnerUnwindStep(bias: number, horizon: number, step: number): number {
+  if (!(bias > 0) || horizon <= 0 || step < 1 || step > horizon) return 0;
+  const L = -Math.log(1 - bias);
+  const rho = IBNER_UNWIND_DECAY;
+  // Sum of rho^0..rho^(H-1), the normaliser that makes the weights total 1.
+  const denom = rho === 1 ? horizon : (1 - Math.pow(rho, horizon)) / (1 - rho);
+  const weight = Math.pow(rho, step - 1) / denom;
+  return Math.expm1(weight * L);
 }

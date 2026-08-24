@@ -36,7 +36,7 @@ import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
-import { IBNER_TOTAL_SD, IBNER_BOOKING_BIAS_COEFF } from '../../src/data/defaultAssumptions';
+import { IBNER_TOTAL_SD, IBNER_BOOKING_BIAS_COEFF, SLIDER_RANGES, WC_FUNDING_CONFIDENCE_RANGE } from '../../src/data/defaultAssumptions';
 import type { CoverageLine, GameState, LineResultSet, DecisionSet } from '../../src/types/simulation';
 
 const LINES: CoverageLine[] = ['WC', 'GL', 'Property'];
@@ -152,6 +152,72 @@ console.log('  With no stochastic term the bias must show as STRICTLY adverse de
   console.log('\n  ⚠ ~zero rows are EXPECTED and are not a failure: year 1 has no prior cohort to');
   console.log('    develop, and pre-game cohorts carry bookingBias 0 by construction, so a game');
   console.log('    whose open cohorts are all pre-game shows no unwind at all.');
+}
+
+// --- THE EXACTNESS ARM ------------------------------------------------------
+// ⚠ THE UNWIND MUST LAND EXACTLY ON registerSum, NOT MERELY POINT UPWARDS.
+// Section 3 only checks the SIGN, which a schedule that under- or over-shoots
+// would still pass. With the stochastic term off, a MATURED cohort's estimate
+// is a deterministic function of its booking bias and its schedule, so
+// netUltimate/registerSum must be exactly 1 — any residual is a permanent
+// mis-statement of ultimate that no later year corrects.
+console.log('\n=== 4. MATURED COHORTS LAND EXACTLY ON registerSum (scales 0, squeezed) ===');
+console.log('  E[estimate(H)] = registerSum is the whole reason the unwind exists.\n');
+{
+  // ⚠ EACH LINE'S OWN REACHABLE MINIMUM, not a flat 0.10. WC's slider runs to
+  // stop 10 (WC_FUNDING_CONFIDENCE_RANGE); GL and Property stop at 30
+  // (SLIDER_RANGES). Driving all three to 0.10 would measure Property at a
+  // 41.5% booking bias the UI cannot produce, which overstates the residual
+  // without testing anything the game can reach.
+  const MIN_STOP: Record<string, number> = {
+    WC: WC_FUNDING_CONFIDENCE_RANGE.min,
+    GL: SLIDER_RANGES.fundingConfidenceLevel.min,
+    Property: SLIDER_RANGES.fundingConfidenceLevel.min,
+  };
+  const squeezeAll = (d: DecisionSet): DecisionSet => ({
+    ...d,
+    byLine: Object.fromEntries(LINES.map(l =>
+      [l, { ...d.byLine[l], fundingConfidenceLevel: MIN_STOP[l], fundingAtExpected: false }])) as never,
+  });
+  const worst: Record<string, { resid: number; n: number; bias: number; H: number }> = {};
+  for (const l of LINES) worst[l] = { resid: 0, n: 0, bias: 0, H: 0 };
+
+  for (let g = 0; g < GAMES; g++) {
+    const id = `EXACT${g}`;
+    const inst = generateGameInstance(id, 8_400_000 + g * 5443);
+    const setup = { poolName: 'E', gameLength: 20, startingYear: 2026, instanceId: id, activeLines: LINES };
+    const { poolState, priorHistory } = runPriorHistory(inst, setup as never);
+    let gs: GameState = {
+      setup: setup as never, instance: inst, currentYearNumber: 1, isStarted: true, isComplete: false,
+      poolState, lockedResults: [], currentDecisions: defaultDecisionSet(1), priorHistory,
+    };
+    const seen = new Map<string, { dev: number; bias: number; H: number }>();
+    // TWENTY years, not ten: a cohort has to MATURE for this assertion to mean
+    // anything, and WC draws horizons up to 12.
+    for (let y = 1; y <= 20; y++) {
+      const p = processYear(gs, squeezeAll(defaultDecisionSet(y)));
+      for (const l of LINES) {
+        for (const c of p.updatedPoolState.lines[l].reserveCohorts) {
+          if (c.yearNumber >= 1 && c.bookingBias > 0 && c.age >= c.horizon && c.registerSum > 0) {
+            seen.set(`${l}:${c.yearNumber}`, { dev: c.netUltimate / c.registerSum - 1, bias: c.bookingBias, H: c.horizon });
+          }
+        }
+      }
+      gs = { ...gs, currentYearNumber: y + 1, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result] };
+    }
+    for (const [k, v] of seen) {
+      const l = k.split(':')[0];
+      worst[l].n++;
+      if (Math.abs(v.dev) > Math.abs(worst[l].resid)) worst[l] = { resid: v.dev, n: worst[l].n, bias: v.bias, H: v.H };
+    }
+  }
+  const EXACT_EPS = 1e-9;
+  for (const l of LINES) {
+    const w = worst[l];
+    console.log(`  ${l.padEnd(9)} n=${String(w.n).padStart(4)} matured biased cohorts  worst residual ` +
+      `${(w.resid * 100).toFixed(4).padStart(9)}%  (bias ${(w.bias * 100).toFixed(2)}%, H=${w.H})  ` +
+      `${note(Math.abs(w.resid) <= EXACT_EPS, `${l}: a matured cohort missed registerSum by ${(w.resid * 100).toFixed(4)}% — the unwind schedule does not total the booking bias`)}`);
+  }
 }
 
 for (const l of LINES) (IBNER_TOTAL_SD as Record<string, number>)[l] = SAVED[l];

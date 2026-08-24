@@ -67,7 +67,7 @@ import type { CoverageLine, GameState, ReserveCohort } from '../../src/types/sim
 
 const LINES: CoverageLine[] = ['WC', 'GL', 'Property'];
 const GAMES = Number(process.env.GAMES ?? 200);
-const YEARS = 5;
+const YEARS = Number(process.env.YEARS ?? 5);
 
 const fmt$ = (x: number) => Math.abs(x) >= 1e6 ? `$${(x / 1e6).toFixed(2)}M` : `$${(x / 1e3).toFixed(0)}k`;
 const pct = (x: number) => `${(x >= 0 ? '+' : '')}${(x * 100).toFixed(2)}%`;
@@ -186,6 +186,48 @@ console.log('line      | rows | developing at y1 | at y3 | at y5 | mean |dev| by
     console.log(`${line.padEnd(9)} | ${String(rows).padStart(4)} | ${sh(d1).padStart(16)} | ${sh(d3).padStart(5)} | ${sh(d5).padStart(5)} | ` +
       `${(100 * sumAbs / rows).toFixed(2)}%`.padStart(15) + ` | ${sh(moved).padStart(19)}`);
   }
+}
+
+// --- 4. PROPERTY'S WHOLE EXHIBIT, REPORT ONLY ------------------------------
+// ⚠ REPORTED, NOT FIXED. A 2-4 horizon is defensible for a short-tail line;
+// whether "short-tail lines do not develop" should be the lesson, or whether
+// the horizon should be lengthened against realism, is a ruling and not a bug.
+console.log(`\n=== 4. PROPERTY'S EXHIBIT ACROSS ${YEARS} YEARS — every accident year ===\n`);
+{
+  const inst = generateGameInstance('PROPEX', 3_300_000);
+  const setup = { poolName: 'X', gameLength: YEARS, startingYear: 2026, instanceId: 'PROPEX', activeLines: LINES };
+  const { poolState, priorHistory } = runPriorHistory(inst, setup as never);
+  let gs: GameState = {
+    setup: setup as never, instance: inst, currentYearNumber: 1, isStarted: true, isComplete: false,
+    poolState, lockedResults: [], currentDecisions: defaultDecisionSet(1), priorHistory,
+  };
+  const first = new Map<number, number>();
+  const latest = new Map<number, ReserveCohort>();
+  const steps = new Map<number, number>();
+  for (const c of gs.poolState.lines.Property.reserveCohorts) {
+    if (c.yearNumber < 1) { first.set(c.yearNumber, c.netUltimate); latest.set(c.yearNumber, c); }
+  }
+  for (let y = 1; y <= YEARS; y++) {
+    const p = processYear(gs, defaultDecisionSet(y));
+    for (const c of p.updatedPoolState.lines.Property.reserveCohorts) {
+      if (!first.has(c.yearNumber)) first.set(c.yearNumber, c.netUltimate);
+      latest.set(c.yearNumber, c);
+      if (c.age < c.horizon) steps.set(c.yearNumber, (steps.get(c.yearNumber) ?? 0) + 1);
+    }
+    gs = { ...gs, currentYearNumber: y + 1, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result] };
+  }
+  console.log('  accident yr | origin | first seen |    final   | total dev | H | yrs it actually developed');
+  for (const ay of [...latest.keys()].sort((a, b) => a - b)) {
+    const c = latest.get(ay)!, f = first.get(ay)!;
+    const origin = ay >= 1 ? 'in-game' : (ay >= -2 ? 'played ' : 'seed   ');
+    console.log(`  ${String(ay).padStart(11)} | ${origin} | ${fmt$(f).padStart(10)} | ${fmt$(c.netUltimate).padStart(10)} | ` +
+      `${pct(f > 0 ? c.netUltimate / f - 1 : 0).padStart(9)} | ${String(c.horizon)} | ${steps.get(ay) ?? 0}`);
+  }
+  console.log('\n  ⚠ A PROPERTY ROW IS DONE MOVING BY ITS THIRD OR FOURTH APPEARANCE, and the');
+  console.log('    exhibit will show that as a column of repeated identical numbers for every');
+  console.log('    accident year older than about three. That follows from the 2-4 horizon, not');
+  console.log('    from anything IBNER does: with an 8% total SD spread over 2-4 steps there is');
+  console.log('    very little to show even while a row IS developing.');
 }
 
 console.log('\nREPORT ONLY — nothing above is asserted.');

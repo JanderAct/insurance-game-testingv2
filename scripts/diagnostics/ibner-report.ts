@@ -300,11 +300,12 @@ console.log('    funding confidence at the bottom of the slider, other lines lef
     const m = mean(xs);
     console.log(`  ${String(y).padStart(7)} | ${fmt$(m).padStart(12)} | ${(Math.abs(m) / noise).toFixed(3).padStart(8)} | ${Math.max(0, y - 1)}`);
   }
-  console.log('\n  ⚠ THE EARLY YEARS ARE THIN FOR A STRUCTURAL REASON, NOT A SIZING ONE. Only');
-  console.log('    cohorts the PLAYER wrote carry the unwind — pre-game cohorts have bookingBias');
-  console.log('    0 by construction — so year 2 has one biased cohort and year 3 has two. The');
-  console.log('    coefficient scales the steady state and cannot fix the opening window; that');
-  console.log('    would need the unwind FRONT-LOADED rather than spread evenly at b/H.');
+  console.log('\n  ⚠ THE EARLY YEARS ARE STILL CARRIED BY VERY FEW COHORTS — year 2 by exactly one,');
+  console.log('    year 3 by two, because only cohorts the PLAYER wrote carry the unwind (pre-game');
+  console.log('    cohorts have bookingBias 0 by construction). What makes them readable anyway is');
+  console.log('    the FRONT-LOADED schedule: that one year-1 cohort surrenders about half its bias');
+  console.log('    in its first step instead of an eighth. Under the retired flat b/H these years');
+  console.log('    measured 0.04 and 0.03 sigma. The coefficient was never the lever here.');
   console.log('\n  ⚠ THE SURPLUS COMPARISON IS NOT THE COST OF THE BIAS. A squeezed pool also');
   console.log('    collects far less premium, and that dominates. The bias figure to read is the');
   console.log('    mean development above: at defaults it is noise around zero, here it is a');
