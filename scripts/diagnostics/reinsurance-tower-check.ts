@@ -294,14 +294,35 @@ console.log('\n=== 6. LIVE GAME: ceded reconciles, and GL above-tower exceeds th
   // unconditionally would also pass the check above.
   console.log(`  with the layer PLACED the same level passes through: ` +
     `${note(normalizeAggregateStopLevel('Property', [true], 1) === 1, 'the gate suppressed a legitimate aggregate')}`);
-  // ⚠ WC IS KNOWN-UNGATED AND THIS RECORDS IT rather than asserting the hole
-  // shut. Measured: all three layers declined, WC's aggregate attaches at
-  // $19.17M with a $17.42M limit, so it tops out at $36.59M — and WC severity
-  // is unbounded, so the exposed band is LARGER than Property's. The same gate
-  // applies on the merits; it is deferred to its own commit because gating WC
-  // moves WC-solo. When that commit lands, flip this line into an assertion.
-  console.log(`  WC still permits an aggregate over a fully-declined tower (KNOWN, deferred): ` +
-    `${normalizeAggregateStopLevel('WC', [false, false, false], 1) === 1 ? 'yes — unchanged' : 'NO — WC has been gated; make this an assertion'}`);
+  // WC IS NOW GATED THE SAME WAY, one commit after Property so that commit's
+  // line control stayed clean. Measured: all three layers declined, WC's
+  // aggregate attaches at $19.17M with a $17.42M limit, so it tops out at
+  // $36.59M — and WC severity is UNBOUNDED, so the exposed band is LARGER
+  // than Property's, whose worst case is at least finite. Same two-sided
+  // check as Property's above: the gate bites with everything declined, and
+  // a layer-placed request still passes through untouched.
+  const wcGated = play('TOWERCHK-WCAGGGATE', ['WC', 'GL', 'Property'], 5, d => ({
+    ...d, byLine: { ...d.byLine, WC: { ...d.byLine.WC, layersPlaced: [false, false, false], aggregateStopLevel: 1 } },
+  }));
+  let wcGateOk = true;
+  for (const r of wcGated) {
+    const lr = r.byLine.WC!;
+    // reinsuranceCost, NOT asserted to 0: with all occurrence layers declined
+    // it already excludes their premium, but the field also carries whatever
+    // GL's or Property's cost happened to be summed elsewhere in a pool-scope
+    // read — checking aggregatePremium/aggregateRecovery directly is the
+    // precise assertion, same as Property's above.
+    if (lr.aggregatePremium !== 0 || lr.aggregateRecovery !== 0) wcGateOk = false;
+  }
+  console.log(`  WC aggregate requested with ALL THREE layers declined: premium, recovery all 0 every year: ` +
+    `${note(wcGateOk, 'the WC aggregate gate is not reaching the engine — an aggregate was priced over a fully-declined tower')}`);
+  console.log(`  with a layer PLACED the same level passes through: ` +
+    `${note(normalizeAggregateStopLevel('WC', [true, false, false], 1) === 1, 'the WC gate suppressed a legitimate aggregate')}`);
+  // ⚠ ONE LAYER IS ENOUGH, not all three. The condition is "some layer
+  // placed", the same test Property's uses — WC's three-layer tower must not
+  // read as "everything or nothing".
+  console.log(`  one of three layers is enough to enable it: ` +
+    `${note(normalizeAggregateStopLevel('WC', [false, true, false], 1) === 1, 'a single placed layer did not enable the WC aggregate')}`);
 }
 
 console.log(problems.length === 0

@@ -805,8 +805,10 @@ function TowerControls({
               );
             })}
           </div>
-          {/* A disabled control with no reason reads as a bug. Say the reason. */}
-          {!aggAvailable && (
+          {/* A disabled control with no reason reads as a bug. Say the reason —
+              and WC's is worse than Property's, because WC severity has no
+              cap at all, so it gets its own copy rather than sharing Property's. */}
+          {!aggAvailable && line === 'Property' && (
             <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2.5 mt-2 leading-relaxed">
               <strong>Unavailable while every occurrence layer is declined.</strong> The aggregate
               protects <em>retained</em> loss and it has a limit. With no per-occurrence layer capping
@@ -814,6 +816,16 @@ function TowerControls({
               attachment plus limit on its own, with nothing above it — so the cover would not
               answer the exposure it is being bought against. Place a layer to enable it.
               Declining everything remains available: that is self-insurance, and it is a real choice.
+            </p>
+          )}
+          {!aggAvailable && line === 'WC' && (
+            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2.5 mt-2 leading-relaxed">
+              <strong>Unavailable while every occurrence layer is declined.</strong> The aggregate
+              protects <em>retained</em> loss and it has a limit. WC's severity has no ceiling — with
+              no per-occurrence layer capping each claim at the retention, there is no bound at all
+              on what a single claim can leave sitting above the aggregate's attachment plus limit.
+              Place a layer to enable it. Declining everything remains available: that is
+              self-insurance, and it is a real choice.
             </p>
           )}
           {aggQuote && (

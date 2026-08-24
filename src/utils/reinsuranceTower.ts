@@ -303,7 +303,8 @@ export function normalizeLayersPlaced(line: TowerLine, placed: boolean[] | undef
 }
 
 // ============================================================================
-// THE AGGREGATE IS CONDITIONAL ON THE OCCURRENCE LAYER — Property.
+// THE AGGREGATE IS CONDITIONAL ON THE OCCURRENCE LAYERS — WC AND Property,
+// every line that offers an aggregate at all.
 //
 // Returns -1 (not purchased) when the line's occurrence cover is fully
 // declined, and the requested level otherwise. Paired with
@@ -311,6 +312,11 @@ export function normalizeLayersPlaced(line: TowerLine, placed: boolean[] | undef
 // "aggregate placed over a fully-declined occurrence tower" is a state the
 // model cannot be put into: the UI, a loaded save, and the engine all read
 // the decision through here.
+//
+// GL passes through untouched. It offers no aggregate — see
+// AGG_ATTACHMENT_LEVELS, which has no GL key — so there is nothing to gate,
+// and routing it through the condition anyway would assert a rule about a
+// product that does not exist.
 //
 // ⚠ CONDITIONAL, NOT THE LAYER MANDATORY. Declining EVERYTHING stays
 // reachable — it is the legitimate self-insured choice and the tower's null
@@ -333,20 +339,29 @@ export function normalizeLayersPlaced(line: TowerLine, placed: boolean[] | undef
 // per-occurrence retention is a stop-loss on GROSS severity, which is a
 // different treaty from the one quoteAggregate prices.
 //
-// ⚠ WC HAS THE SAME HOLE AND IS DELIBERATELY NOT GATED HERE. Measured: with
-// all three layers declined WC's aggregate attaches at $19.17M with a $17.42M
-// limit, so it tops out at $36.59M — and WC severity is UNBOUNDED (no cap; the
-// tower reaches $50M and above that the pool retains without limit), so the
-// exposed band is larger than Property's, not smaller. The same gate applies on
-// the merits. It is excluded from this commit only because gating WC moves
-// WC-solo, and the line control on this commit is worth more than bundling the
-// two. See the commit message.
+// WC IS THE WORSE CASE OF THE TWO, and it was gated one commit after Property
+// so that commit's line control stayed clean. Measured: with all three layers
+// declined WC's aggregate attaches at $19.17M with a $17.42M limit, so it tops
+// out at $36.59M — and WC severity is UNBOUNDED. Property tops out at $28.75M
+// against a $75M cap, so Property's ungated worst case is at least FINITE;
+// WC's is not. WC's measured tail carries a 1-in-250-year claim at $71.2M and
+// a $248.84M claim observed in 1,000 game-years. Ungated, that $248M claim
+// leaves the pool retaining $231M against an opening surplus near $11M — the
+// aggregate's limit is consumed by a fraction of one claim and there is no
+// bound on what sits above it.
+//
+// ⚠ WHAT THIS GATE DOES NOT CLOSE. Only the all-declined case. With
+// EVERYTHING purchased WC's tower reaches $50M and the pool still retains
+// above that without limit, because the severity cap is what is missing, not
+// the cover. That is a severity-cap question and deliberately not answered
+// here; scripts/diagnostics/wc-above-tower-report.ts measures what the band
+// costs so the decision has numbers behind it.
 export function normalizeAggregateStopLevel(
   line: TowerLine,
   placedNormalized: boolean[],
   requested: number,
 ): number {
   if (!(requested >= 0)) return -1;
-  if (line !== 'Property') return requested;
+  if (line !== 'WC' && line !== 'Property') return requested;
   return placedNormalized.some(Boolean) ? requested : -1;
 }
