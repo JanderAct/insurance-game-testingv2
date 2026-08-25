@@ -13,10 +13,23 @@
 // nothing is worse than one that fails loudly.
 //
 // RETRO HORIZON IS OUT OF SCOPE and is not represented here at all. It requires
-// prior accident years to be re-valuable, which needs Phase 3 reserving; the
-// current model carries aggregate cohorts with a random developmentFactor
-// wobble, so there is nothing to reach back into. Roughly a third of the matrix
-// waits on that.
+// prior accident years to be re-valuable, which needs Phase 3 reserving.
+//
+// ⚠ THE REASON CHANGED SHAPE WITH IBNER AND IS WORTH RE-READING BEFORE ANYONE
+// ACTS ON IT. This said "the current model carries aggregate cohorts with a
+// random developmentFactor wobble, so there is nothing to reach back into".
+// The wobble is gone; cohorts now carry a real IBNER state — registerSum, a
+// horizon, an age, a step multiplier and a booking bias — and DO get re-valued
+// each year. So prior accident years are no longer inert.
+//
+// That does NOT make retro horizon in scope. What is still missing is the
+// ability to re-value a prior year under CHANGED PARAMETERS: IBNER walks a
+// cohort's estimate forward, but the claim register behind it is pinned at the
+// draw (see ReserveCohort's header on why that pinning is deliberate), so a
+// retroactive shock has nothing to re-draw against. The blocker moved from "no
+// reserving state" to "the register is immutable by design", which is a
+// narrower and more specific obstacle. Roughly a third of the matrix waits on
+// that.
 
 import type { CoverageLine, Region } from './simulation';
 

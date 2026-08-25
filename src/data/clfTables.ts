@@ -114,8 +114,15 @@
 // hoped for as a side effect of the removal and did not happen.
 //
 // The residual 3.0pp incurred-vs-ultimate gap is CASE-reserve rollforward — the
-// paydown schedule and developmentFactor — which this change did not touch. So
-// the gap was never purely IBNR.
+// paydown schedule and the per-cohort development on top of it — which this
+// change did not touch. So the gap was never purely IBNR.
+//
+// (That mechanism was `developmentFactor`, a uniform wobble, when this was
+// written. IBNER replaced it, and the gap SURVIVED the replacement at
+// essentially the same size — 2.8pp measured on the merged branch, 44.3%
+// incurred against 47.1% ultimate. Naming the old mechanism here would now
+// point at code that does not exist, and would also imply the wobble was the
+// cause when swapping it out did not move the gap.)
 //
 // ============================================================================
 // THE MEASURED CROSSING of the DERIVED curves — where the ratio reaches 1.000,

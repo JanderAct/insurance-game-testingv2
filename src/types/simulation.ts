@@ -872,9 +872,15 @@ export interface LossDistributionConfig {
   cv: number;
 }
 
-// V2: ReserveDevelopmentState for full accident-year triangle
-export interface ReserveDevelopmentState {
-  accidentYear: number;
-  developmentPattern: number[];
-  selectedFactors: number[];
-}
+// ⚠ `ReserveDevelopmentState` IS GONE, and IBNER is why. It was a speculative
+// "V2" placeholder for a full accident-year triangle —
+// { accidentYear, developmentPattern, selectedFactors } — never referenced from
+// anywhere. It described a DIFFERENT reserving design from the one that now
+// exists: IBNER develops a per-cohort estimate through a horizon and a step
+// walk, with no triangle and no selected factors to hold. Keeping it would
+// advertise a direction the engine has already taken elsewhere.
+//
+// Its sibling `LossDistributionConfig` above is the same kind of placeholder and
+// is deliberately LEFT: nothing in the cap work or IBNER retired it, and
+// deleting it here would fold an unrelated cleanup into this commit. It is
+// reported as part of a wider orphan cluster instead.

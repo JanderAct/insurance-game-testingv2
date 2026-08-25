@@ -85,7 +85,15 @@ console.log('\n  --- prior-year quantities: is there anything real behind them? 
     `p90 $${(q(dev, 0.9) / M).toFixed(3)}M`);
   console.log('\n  ⚠ THESE TWO ARE INDEPENDENT QUANTITIES, which is the point of measuring both.');
   console.log('  emergedPriorYearLoss is real: claims drawn in an earlier accident year, reported now.');
-  console.log('  priorYearDevelopment comes from processReserveDevelopment\'s developmentFactor,');
-  console.log('  1 + rng.range(-0.05, 0.08) per cohort — a random wobble that never reads emergence.');
-  console.log('  So removing the lag removes the REAL one and leaves the wobble untouched.');
+  console.log('  priorYearDevelopment comes from IBNER: a per-cohort martingale step plus a');
+  console.log('  deterministic unwind of the booking bias. It does not read emergence either.');
+  console.log('  So removing the lag removes the REAL one and leaves development untouched.');
+  console.log('');
+  console.log('  ⚠ THIS SCRIPT IS A SPENT ONE-SHOT, kept for its reserve/surplus ratios only.');
+  console.log('  It was written to be run at the parent and again after the report-lag/IBNR');
+  console.log('  removal, with the two compared in that commit message — a comparison long');
+  console.log('  since made. The three lines above USED to name processReserveDevelopment and');
+  console.log('  its 1 + rng.range(-0.05, 0.08) wobble, which IBNER has since replaced; they');
+  console.log('  were describing code that no longer exists. Read any figure here as a');
+  console.log('  measurement of the CURRENT engine, not as the before-state it was built for.');
 }
