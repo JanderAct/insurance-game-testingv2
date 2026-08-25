@@ -555,6 +555,80 @@ the immediate predecessor.
 
 ---
 
+## v18 — nine commits: two aggregate gates, the reinsurance retirement, then WC's severity and pricing rebuilt
+
+**Trigger:** WC's CLF crossing sat at 43-48%, below 50%, which a compound-Poisson loss cannot produce.
+Chasing it produced this range. The first five commits are structural cleanup that moved nothing; the
+last four are the actual answer, in dependency order — cap WC's unbounded severity, make all three
+ceilings trend, take region out of chronic severity, then price WC on four held class rates.
+
+**The nine, in order, measured per commit against the v17 baseline rather than only at the endpoint:**
+
+| commit | WC-solo | GL-solo | PR-solo | tri | fields | values |
+|---|---|---|---|---|---|---|
+| `2587f32` Property aggregate gate | . | . | . | . | 15900 | 0 |
+| `38a0fb9` WC aggregate gate | . | . | . | . | 15900 | 0 |
+| `d8c76a4` REINSURANCE_PROGRAMS retired | . | . | . | . | 15900 | 0 |
+| `6614e4a` four loss-split fields removed | . | . | . | . | **15300** | 0 |
+| `0b2e537` WORKING_PRACTICES entry | . | . | . | . | 15300 | 0 |
+| `1eab18f` WC capped at $85M | **MOVE** | . | . | **MOVE** | 15300 | 3162 |
+| `cb00971` ceilings trend with their line | . | **MOVE** | . | **MOVE** | 15300 | 4766 |
+| `a9faf09` region out of WC severity | **MOVE** | . | . | **MOVE** | 15300 | 5641 |
+| `0a465df` WC on four held class rates | **MOVE** | . | . | **MOVE** | 15300 | 6062 |
+
+(`.` = byte-identical to the previous commit on all three seeds. Value counts are cumulative against
+v17, which is why they grow. Property-solo is `.` at every one of the nine.)
+
+**BOTH AGGREGATE GATES AND THE REINSURANCE RETIREMENT MOVED NOTHING, as their own reports claimed.**
+The two gates are unreachable on a default run — defaults place the occurrence layer, so no default game
+reaches the gated state. `d8c76a4` deleted an entire engine (`reinsuranceEngine.ts`, REINSURANCE_PROGRAMS,
+the `reinsuranceLevel` decision and its UI) and moved not one value, because nothing read the legacy path.
+It is the only commit in the range that touched `resultMetrics.ts` — the file the hash guard reads — and
+even that did not move a hash: the edit was comments, a type narrowing and an unreachable branch.
+
+**`6614e4a` IS SHAPE-ONLY AND THE HASH GUARD DID NOT SEE IT.** 600 fields removed (`attachment`,
+`excessLosses`, `poolLosses`, `quotaShareLosses`), 0 added, 0 values changed — and all twelve export
+hashes byte-identical. Those four were never in RESULT_METRICS, so they never reached the CSV. This is the
+fourth time the hash guard's blindness to anything outside RESULT_METRICS has mattered, and it is exactly
+why the two gates are not redundant: value-identity is keyed on FIELD NAME and saw the removal; the hash
+guard is keyed on the exported CSV and could not.
+
+**⚠ THE EXPECTATION THAT `cb00971` WOULD MOVE WC WAS WRONG, AND THE CAVEAT BELONGS TO THIS COMMIT RATHER
+THAN THE ONE BEFORE IT.** WC-solo is byte-identical across `1eab18f` → `cb00971` on all three seeds
+(`ce7c19843acc`, `0cddf9ee50c9`, `217fdf6d8333` unchanged). It is **`cb00971`**, not `1eab18f`, whose WC
+half the gate cannot exercise — the record lives in `cb00971`'s own commit message and it is not a finding
+to re-open:
+
+- `1eab18f` (the cap) DID move WC, because imposing a ceiling changes the ANALYTIC — held pure premium
+  -0.32%, the CLF table, the tower moments — and that reaches every WC value whether or not any claim in
+  the sample is clipped.
+- `cb00971` (trending the ceiling) did NOT, because WC prices off the held pure premium times its RAW
+  trend; the held figure is derived at year 1, where the trending ceiling equals the fixed one, and
+  `computeKLine` takes no year. The only channel left is the draw, and WC's ceiling binds about 1 claim in
+  176,530 against a gate that draws ~27,000. GL moved at `cb00971` because its PRICE moved
+  (`glCappedSeverityTrend` collapsed to the raw trend), which needs no claim to bind at all.
+- Verified separately at the time over 20 years x 12 seeds (112,062 claims): largest claim $85.000M before
+  against $94.516M after, with WC's loss series differing. The wiring is live; the gate simply cannot see
+  it at its sample size. This is the WORKING_PRACTICES "passes while unable to fail" pattern, in the
+  benign direction.
+
+**Shape movement:** 15,900 → 15,300 fields (0 added, 600 removed), all at `6614e4a`, four field names.
+
+**Guards at the endpoint:** no broken identities — `expectedCombinedRatio` appears in the changed list
+moving `0.9999999999999999 -> 1`, which is the identity becoming MORE exact and is correctly not flagged
+(the guard's 1e-12 epsilon treats arrival at exactly 1 as no departure). roster-catalog-check and
+marketplace-generation-check both green; no roster change in this range. `0a465df`'s class-rate exactness
+assertion still holds at the endpoint: 2.00e-15 worst over 2,000 random roster subsets, and the four rates
+blend back to the held single rate at 3.73913905 both ways.
+
+**What a reader should carry forward:** WC's economics changed twice in this range and the second change
+was an across-the-board increase, not a redistribution. The median enrolled book's blended rate lands
+~2.3% above the old single rate, because the books that actually enrol are worse than the full-market
+average. WC's crossing moved 44.1% -> 43.2% (a re-measurement, not a move) -> 50.4%. Every WC figure
+measured before `0a465df` was taken against a line that undercharged.
+
+---
+
 ## ⚠️ The v4–v9 artifacts described above are HISTORY-ONLY as of 2026-08-19
 
 The workbooks, CSVs and per-version `.md` summaries this document narrates —
@@ -578,6 +652,6 @@ git log --all --diff-filter=D -- 'baselines/*'     # find the removing commit
 
 **This document is why the removal was safe** — it records what each retired
 version represented and what moved between them, which is the part worth
-keeping. What remains in `baselines/` is the current gate pair (v17), its
-immediate predecessor (v16, the one to reach for if a v17 capture ever needs
+keeping. What remains in `baselines/` is the current gate pair (v18), its
+immediate predecessor (v17, the one to reach for if a v18 capture ever needs
 checking), and the v11 workbook set.
