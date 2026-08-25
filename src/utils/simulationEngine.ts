@@ -24,7 +24,7 @@ function mergeShockRecords(lineResults: LineResultSet[]): ShockRecord[] | undefi
   return merged.size > 0 ? [...merged.values()] : undefined;
 }
 import { SeededRandom, deriveSubRng } from './random';
-import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, PROPERTY_HELD_PURE_PREMIUM_PER_100, FUNDING_CLF_TABLE, MEMBER_LOSS_VOLATILITY, RISK_CONTROL_PARAMS, LINE_RESERVE_PAYDOWN_PCT, OPERATING_CASH_PCT_OF_PREMIUM, WC_LOSS_MODEL } from '../data/defaultAssumptions';
+import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, IBNER_BOOKING_BIAS_COEFF, IBNER_HORIZON, IBNER_OPEN_FRACTION, IBNER_STEP_MIXTURE, IBNER_TOTAL_SD, IBNER_UNWIND_DECAY, LINE_RESERVE_PAYDOWN_PCT, MEMBER_LOSS_VOLATILITY, OPERATING_CASH_PCT_OF_PREMIUM, PROPERTY_HELD_PURE_PREMIUM_PER_100, RISK_CONTROL_PARAMS, WC_LOSS_MODEL } from '../data/defaultAssumptions';
 import type { TowerLine } from '../data/reinsuranceTower';
 import {
   aggregateRecovery,
@@ -1112,41 +1112,56 @@ export function processLineYear(
   const investmentIncome = ctx.investmentIncome;
   const investmentReturnRate = ctx.investmentReturnRate;
 
-  // --- Reserve Development ---
+  // --- Reserve Development (IBNER) ---
   // Process existing reserve cohorts. These are accounting reserve cohorts.
   // CLF does not multiply booked reserves.
-  const devRng = deriveSubRng(instance.seed, yearNumber, lineRngLabel('dev', line));
-
-  // Legacy compatibility: this currently uses prior premium funding adequacy.
-  // Later, this could be renamed or separated from reserve adequacy.
-  const priorFundingAdequacyRatio = priorResult?.fundingAdequacyRatio ?? 1.0;
+  //
+  // ⚠ A NEW NAMED SUB-STREAM, NOT `dev`. The old mechanism drew one uniform per
+  // open cohort from `dev`, and separately spent a `dev` draw filling the
+  // never-read developmentFactor field. IBNER's draw count and shape both
+  // differ, so reusing that label would have re-rolled the stream in a way that
+  // confounds the mechanism change with a reseed. `ibner` is its own stream;
+  // `dev` is retired with the function that consumed it.
+  const ibnerRng = deriveSubRng(instance.seed, yearNumber, lineRngLabel('ibner', line));
 
   const {
     developmentImpact,
     updatedCohorts,
     netPaidThisYear,
-  } = processReserveDevelopment(
-    lineState.reserveCohorts,
-    devRng,
-    priorFundingAdequacyRatio
-  );
+  } = processIbner(lineState.reserveCohorts, line, ibnerRng);
 
   // Current year reserve assumption: 60% unpaid, 40% paid. NET basis —
   // reinsurance recovery cash arrives in lockstep with the claim payments it
   // offsets, so losses enter the reserve rollforward net of recoveries and no
   // separate recoverable receivable exists.
-  const currentYearNetReserve = netUltimateLoss * 0.60;
-  const netPaidCurrentYear = netUltimateLoss * 0.40;
+  //
+  // THE ACCIDENT YEAR'S INITIAL BOOKING. netUltimateLoss is the register sum —
+  // exactly what the generator drew, net of the tower — and it is frozen as
+  // `registerSum`. What gets BOOKED is that figure less the optimistic bias,
+  // which then unwinds over the horizon (see the IBNER_* block).
+  const bookingBias = ibnerBookingBias(selectedFundingCLF);
+  const bookedUltimate = netUltimateLoss * (1 - bookingBias);
+  // ⚠ ONE CONSTANT, READ IN TWO PLACES. reserveStepSigma derives its scale from
+  // the SAME opening split, because the share of the ultimate still unpaid is
+  // exactly what sets how much leverage a reserve walk has. Writing 0.60 here
+  // and again in the derivation would let a change to one drift from the other,
+  // and the symptom would be a line quietly developing at the wrong scale.
+  const currentYearNetReserve = bookedUltimate * IBNER_OPEN_FRACTION;
+  const netPaidCurrentYear = bookedUltimate * (1 - IBNER_OPEN_FRACTION);
 
   const currentYearCohort: ReserveCohort = {
     yearNumber,
     calendarYear,
-    netUltimate: netUltimateLoss,
+    netUltimate: bookedUltimate,
     netPaid: netPaidCurrentYear,
     netUnpaid: currentYearNetReserve,
     paydownPct: LINE_RESERVE_PAYDOWN_PCT[line],
-    developmentFactor: 1 + devRng.range(-0.05, 0.08),
     closed: false,
+    registerSum: netUltimateLoss,
+    horizon: ibnerRng.intRange(IBNER_HORIZON[line].min, IBNER_HORIZON[line].max),
+    age: 0,
+    stepMultiplier: drawStepMultiplier(ibnerRng),
+    bookingBias,
   };
 
   const allCohorts = [...updatedCohorts, currentYearCohort];
@@ -1176,13 +1191,13 @@ export function processLineYear(
   // ibnrReserve / ibnrAccrual. currentAccidentYearGross collapsed into
   // grossUltimateLoss because with no deferral they are the same number.
   //
-  // ⚠ priorYearDevelopment IS NOW PURE WOBBLE, and it was mostly wobble before.
-  // It reads processReserveDevelopment's developmentFactor, 1 + rng.range(-0.05,
-  // 0.08) per cohort — it never read emergence. The REAL prior-year quantity was
-  // emergedPriorYearLoss (median $1.54M/yr, non-zero in 100% of line-years), and
-  // that is what this removal takes away. So reserve development is now a random
-  // walk with nothing behind it until IBNER lands, which is precisely the gap
-  // IBNER is meant to fill — recorded here rather than left to be rediscovered.
+  // ⚠ THE GAP THIS NOTE PREDICTED IS NOW CLOSED. It read: "priorYearDevelopment
+  // IS NOW PURE WOBBLE... reserve development is a random walk with nothing
+  // behind it until IBNER lands, which is precisely the gap IBNER is meant to
+  // fill." IBNER has landed — see processIbner below and the IBNER_* block in
+  // defaultAssumptions. priorYearDevelopment now reads a per-cohort estimate of
+  // ultimate that develops on its own horizon and stops, biased at inception by
+  // the funding decision, so it is a reserving quantity rather than noise.
 
   // --- Accounting Reserves ---
   // These are expected unpaid losses (net of reinsurance) from all accident
@@ -2422,10 +2437,42 @@ export function aggregateLineResults(
   return pooled;
 }
 
-function processReserveDevelopment(
+// A cohort is closed once it has matured and its remaining balance falls below
+// this. The residual is PAID at closure, never dropped — see processIbner.
+const RESERVE_COHORT_CLOSE_FLOOR = 1000;
+
+// ============================================================================
+// IBNER — the per-cohort development walk. See defaultAssumptions.ts's IBNER_*
+// block for the model, the parameters, and why each is what it is.
+//
+// ⚠ THIS REPLACED processReserveDevelopment, WHOSE FUNDING TERM NEVER APPLIED.
+// The old function multiplied each open cohort's UNPAID balance by
+// rng.range(0.92, 1.10) shifted by `fundingImpactOnDevelopment`, which read
+// priorFundingAdequacyRatio -> fundingAdequacyRatio -> premiumFundingRatio, a
+// HARDCODED 1. Measured over 40 games x 10 years x 3 lines at funding levels
+// 0.30/0.60/0.95, that ratio took exactly one distinct value, so the shift was
+// identically zero on every path the game can reach.
+//
+// The wobble ITSELF worked and did reach the P&L — the rollforward identity
+// netIncurredLoss === netUltimateLoss - developmentImpact held to the
+// closed-cohort floor over 1,350 line-years, and forcing the band to a flat
+// 1.40 swung year-10 WC surplus by $153.7M. What was broken was the INPUT to
+// its only interesting term, not its plumbing. That is why this is a
+// replacement rather than a retune: an unbiased wobble on the unpaid balance
+// is not a reserving mechanic, it is noise.
+//
+// TWO STRUCTURAL CHANGES beyond the parameters:
+//   THE ESTIMATE DEVELOPS, NOT THE UNPAID BALANCE. Development applies to the
+//   cohort's whole estimate of ultimate and the unpaid balance follows. The old
+//   form moved only what was still unpaid, so an old cohort that had already
+//   paid most of its losses could barely develop at all — backwards, since
+//   long-tail uncertainty is precisely about the years that have paid least.
+//   IT STOPS. A cohort matures at its horizon and its ultimate is then fixed.
+//   The old form developed every open cohort forever.
+function processIbner(
   cohorts: ReserveCohort[],
+  line: CoverageLine,
   rng: SeededRandom,
-  priorFundingAdequacyRatio: number
 ): {
   developmentImpact: number;
   updatedCohorts: ReserveCohort[];
@@ -2434,36 +2481,117 @@ function processReserveDevelopment(
   let developmentImpact = 0;
   let netPaidThisYear = 0;
 
-  // Reserve development is affected by prior year funding adequacy.
-  // When prior funding adequacy was low, there is pressure toward adverse development.
-  // When prior funding adequacy was high, development is more likely favorable or neutral.
-  const fundingImpactOnDevelopment = (priorFundingAdequacyRatio - 1.0) * 0.05;
-
   const updatedCohorts = cohorts
     .filter(c => !c.closed)
     .map(c => {
-      let devMin = 0.92 - fundingImpactOnDevelopment;
-      let devMax = 1.10 - fundingImpactOnDevelopment;
+      // MATURED COHORTS STILL PAY, THEY JUST STOP MOVING. Runoff and
+      // development are separate clocks: the horizon governs how long the
+      // ESTIMATE is uncertain, paydownPct governs how fast it is settled.
+      const developing = c.age < c.horizon;
 
-      devMin = Math.max(0.85, Math.min(1.05, devMin));
-      devMax = Math.max(0.95, Math.min(1.20, devMax));
+      // ⚠ PAY FIRST, THEN DEVELOP WHAT REMAINS. Paid is history and never moves.
+      // This ordering is the whole fix — see the block comment above.
+      let paydown = c.netUnpaid * c.paydownPct;
+      let newUnpaid = c.netUnpaid - paydown;
+      let newPaid = c.netPaid + paydown;
 
-      const devFactor = rng.range(devMin, devMax);
-      const devAdjustedUnpaid = c.netUnpaid * devFactor;
-      const devImpact = c.netUnpaid - devAdjustedUnpaid;
+      // ⚠ SIGN. developmentImpact is POSITIVE for FAVORABLE development
+      // (the estimate FELL), matching priorYearDevelopment's documented
+      // convention on LineResultSet. netIncurredLoss subtracts it.
+      if (developing) {
+        // ⚠ LOGNORMAL, NOT (1 + normal), AND THIS IS WHAT MAKES THE FLOOR
+        // UNREACHABLE RATHER THAN MERELY UNLIKELY. exp(s z - s^2/2) has mean
+        // EXACTLY 1 and is strictly positive for any s, so the reserve is a
+        // martingale that cannot cross zero.
+        //
+        // A linear (1 + s z) step would NOT survive this change. Moving the
+        // walk onto the reserve costs a factor of ~4.6-7.7 in leverage (see
+        // reserveStepSigma), so preserving each line's stated total SD needs a
+        // per-step sigma of 0.39-0.67 — and at those sizes the eventful decile
+        // (stepMultiplier 2.596) drives 1 + s z below zero on 16% of GL steps,
+        // 21% of WC's and 28% of Property's. The floor would have come straight
+        // back, more often than before. Measured, not assumed.
+        const sigma = c.stepMultiplier * reserveStepSigma(line);
+        newUnpaid *= Math.exp(sigma * rng.normal(0, 1) - (sigma * sigma) / 2);
 
-      const paydown = devAdjustedUnpaid * c.paydownPct;
+        // The deterministic unwind of the optimistic booking, front-loaded.
+        // Zero unless the line was funded below break-even in this cohort's
+        // accident year. `age` is the number of steps already taken, so the
+        // step about to be taken is age + 1.
+        //
+        // ⚠ ADDITIVE DOLLARS NOW, NOT A MULTIPLICATIVE FACTOR, and the change
+        // was forced by this commit rather than chosen. The old schedule
+        // distributed L = -ln(1 - bias) in log space so that the PRODUCT of the
+        // per-step factors was exactly 1/(1 - bias) — exact because it
+        // multiplied the whole ULTIMATE. Applied to a reserve that is paying
+        // down, the same factors deliver only a fraction of the bias, because
+        // the base they multiply shrinks: the identical shrinking-base problem
+        // this commit exists to fix, arriving through the deterministic term.
+        //
+        // Distributing the required DOLLARS instead makes it exact again, and
+        // for a better reason than before: adding X to the reserve adds X to
+        // paid + unpaid immediately, so the total added over the runoff is
+        // exactly sum(w_t) x registerSum x bias = registerSum x bias for ANY
+        // weights summing to 1 — pathwise, not merely in expectation, and
+        // independent of the stochastic path. The weights stay geometric so the
+        // front-loading decision is unchanged.
+        newUnpaid += c.registerSum * c.bookingBias * ibnerUnwindWeight(c.horizon, c.age + 1);
+      }
+
+      // ⚠ THE FLOORS ARE GONE, AND THEY ARE NOW UNREACHABLE RATHER THAN MERELY
+      // UNUSED. Three of them stood here:
+      //
+      //   Math.max(0, newUltimate)                 a negative estimate
+      //   Math.max(0, newUltimate - c.netPaid)     the reserve floor — THE BUG
+      //   Math.max(0, newUnpaid)                   a negative reserve
+      //
+      // The middle one was the defect this commit fixes. The walk moved the
+      // ULTIMATE and the reserve was then recovered as ultimate - paid, so an
+      // estimate revised below what the cohort had already paid was clipped:
+      // favourable development truncated, adverse recognised in full. One-sided,
+      // so E[incurred] > E[ultimate] and the martingale broke. It was NOT a tail
+      // event — 9.04% of WC cohorts sat below their own paid-to-date, because by
+      // age 5 WC has paid ~87% and the estimate only had to fall 13% to cross.
+      //
+      // Developing the reserve directly removes the crossing entirely: paid is
+      // never revisited, and a lognormal factor on a positive balance stays
+      // positive. ibner-null-check asserts the floored count is exactly 0.
+      const newUltimate = newPaid + newUnpaid;
+      developmentImpact += c.netUltimate - newUltimate;
+
+      // ⚠ A COHORT MAY ONLY CLOSE ONCE IT HAS MATURED. Closing a still-
+      // developing cohort would freeze its ultimate early and break
+      // E[ultimate] = registerSum.
+      //
+      // ⚠ AND WHEN IT DOES CLOSE, THE RESIDUAL IS PAID, NOT DROPPED. The old
+      // form marked a cohort closed at `newUnpaid < 1000` and then filtered it
+      // out of the array the following year, so up to $1,000 of booked
+      // liability silently vanished from the balance sheet — the source of the
+      // audit page's declared closed-cohort variance (worst measured $2,278 at
+      // pool scope). Paying it out instead makes the reserve rollforward an
+      // EXACT identity, which is what lets ibner-null-check assert
+      // netIncurredLoss === netUltimateLoss with no tolerance at all rather
+      // than with an allowance that a real leak could hide under.
+      //
+      // Closing is ULTIMATE-NEUTRAL: the residual moves from unpaid to paid and
+      // newUltimate = newPaid + newUnpaid is unchanged by it, so it cannot
+      // disturb the martingale. That is why it is applied after newUltimate is
+      // read off rather than before.
+      const closing = !developing && newUnpaid < RESERVE_COHORT_CLOSE_FLOOR;
+      if (closing) {
+        paydown += newUnpaid;
+        newPaid += newUnpaid;
+        newUnpaid = 0;
+      }
       netPaidThisYear += paydown;
-
-      const newUnpaid = devAdjustedUnpaid - paydown;
-
-      developmentImpact += devImpact;
 
       return {
         ...c,
-        netUnpaid: Math.max(0, newUnpaid),
-        netPaid: c.netPaid + paydown,
-        closed: newUnpaid < 1000,
+        netUltimate: newUltimate,
+        netUnpaid: newUnpaid,
+        netPaid: newPaid,
+        age: c.age + 1,
+        closed: closing,
       };
     });
 
@@ -2472,4 +2600,166 @@ function processReserveDevelopment(
     updatedCohorts,
     netPaidThisYear,
   };
+}
+
+// THE PER-STEP LOG SIGMA ON THE REMAINING RESERVE that delivers this line's
+// stated IBNER_TOTAL_SD as the total relative SD of the ULTIMATE.
+//
+// ⚠ DERIVED AT RUNTIME FROM THE LINE'S OWN PAYOUT PATTERN, NOT STORED. It is a
+// function of paydownPct, the horizon range and the step mixture, and storing it
+// would let it drift silently the first time any of those moved — which is the
+// exact failure this file keeps finding elsewhere. Solved once per line and
+// cached; the root-find is a few dozen closed-form evaluations.
+//
+// WHY A MULTIPLIER IS NEEDED AT ALL. Developing a SHRINKING balance moves the
+// ultimate far less than developing the whole estimate did, because step k only
+// reaches the fraction of the ultimate still unpaid. The leverage lost is large
+// and it is NOT transferable between lines — it depends on how fast each line
+// pays:
+//
+//   line       paydown   E[H]   sum r_k^2   sqrt   old sqrt(H)   multiplier
+//   WC          0.35      8.5    0.26326   0.5131    2.9155         5.68x
+//   GL          0.35      5.5    0.26188   0.5117    2.3452         4.58x
+//   Property    0.65      3.0    0.05016   0.2240    1.7321         7.73x
+//
+// (r_k = openFraction x (1 - p)^k is the share of ultimate exposed to step k.
+// Property's is worst because it pays 65% a year — almost nothing is left to
+// develop by its third step.)
+//
+// THE CLOSED FORM, and it is exact rather than fitted. Writing R_k for the
+// balance remaining at step k and f_k for its lognormal factor,
+//
+//   ultimate(k+1) - ultimate(k) = R_k (f_k - 1)
+//
+// and E[R_k(f_k - 1) | F_k] = 0, so the increments are MARTINGALE DIFFERENCES:
+// uncorrelated, and their variances add with no covariance terms.
+//
+//   Var = sum_k E[R_k^2] (e^{s^2} - 1),  E[R_k^2] = OPEN^2 (1-p)^{2(k+1)} e^{k s^2}
+//
+// which is geometric in a = (1-p)^2 e^{s^2}. Verified against a term-by-term sum
+// to 12 significant figures.
+//
+// ⚠ DO NOT "CHECK" THIS BY MONTE CARLO AND BELIEVE THE MONTE CARLO. At the
+// eventful decile's sigma the per-step factor is lognormal with s ~ 0.8 over up
+// to 12 steps, and the sample variance of that is not estimable at practical
+// sample sizes: 1M trials reported 87.5% of the true variance, 48M reported
+// 93.3%, climbing monotonically toward the closed form from below. A run that
+// "disagrees by 7%" is the run being wrong. Same lesson as WC's calendar CV.
+// ⚠ THE CACHE IS KEYED ON THE TARGET, NOT JUST THE LINE, and that is not
+// premature generality. ibner-null-check ZEROES IBNER_TOTAL_SD at runtime and
+// asserts development is then identically zero; a line-only key would hand it a
+// sigma solved before the mutation and the null test would silently measure the
+// wrong thing — passing or failing for a reason unrelated to the code under
+// test. Keying on the value makes the mutation work by construction.
+const RESERVE_STEP_SIGMA_CACHE = new Map<string, number>();
+function reserveStepSigma(line: CoverageLine): number {
+  const target = IBNER_TOTAL_SD[line];
+  const key = `${line}|${target}`;
+  const hit = RESERVE_STEP_SIGMA_CACHE.get(key);
+  if (hit !== undefined) return hit;
+  const p = LINE_RESERVE_PAYDOWN_PCT[line];
+  const h = IBNER_HORIZON[line];
+  // Total SD of ultimate/booked at a given sigma, averaged over the horizon
+  // draw (inclusive uniform) and the step mixture — the same two dimensions a
+  // real cohort draws from.
+  const sdAt = (sigma: number): number => {
+    let v = 0, n = 0;
+    for (let H = h.min; H <= h.max; H++) {
+      for (const b of IBNER_STEP_MIXTURE) {
+        const s2 = (b.multiplier * sigma) ** 2;
+        const a = (1 - p) ** 2 * Math.exp(s2);
+        const geo = Math.abs(a - 1) < 1e-12 ? H : (Math.pow(a, H) - 1) / (a - 1);
+        v += b.weight * IBNER_OPEN_FRACTION ** 2 * (1 - p) ** 2 * (Math.exp(s2) - 1) * geo;
+        n += b.weight;
+      }
+    }
+    return Math.sqrt(v / n);
+  };
+  if (!(target > 0)) { RESERVE_STEP_SIGMA_CACHE.set(key, 0); return 0; }
+  // Monotonic in sigma, so bisection is safe. 200 halvings of [0, 8] is far
+  // past double precision — cheap, and it makes the result deterministic
+  // rather than tolerance-dependent.
+  let lo = 0, hi = 8;
+  for (let i = 0; i < 200; i++) {
+    const mid = (lo + hi) / 2;
+    if (sdAt(mid) < target) lo = mid; else hi = mid;
+  }
+  const sigma = (lo + hi) / 2;
+  RESERVE_STEP_SIGMA_CACHE.set(key, sigma);
+  return sigma;
+}
+
+// One draw from IBNER_STEP_MIXTURE. Drawn ONCE PER COHORT — see the constant.
+function drawStepMultiplier(rng: SeededRandom): number {
+  const u = rng.next();
+  let acc = 0;
+  for (const bucket of IBNER_STEP_MIXTURE) {
+    acc += bucket.weight;
+    if (u < acc) return bucket.multiplier;
+  }
+  return IBNER_STEP_MIXTURE[IBNER_STEP_MIXTURE.length - 1].multiplier;
+}
+
+// The optimistic booking bias for a cohort written at this funding level.
+// CLF 1.000 is break-even by construction, so anything at or above it books
+// honestly and returns 0.
+export function ibnerBookingBias(selectedFundingCLF: number): number {
+  return IBNER_BOOKING_BIAS_COEFF * Math.max(0, 1 - selectedFundingCLF);
+}
+
+// ============================================================================
+// THE UNWIND SCHEDULE — front-loaded, and EXACT.
+//
+// Returns the relative step to apply on the `step`-th year of a cohort's runoff
+// (step 1 is its first development), such that
+//
+//     PRODUCT over step = 1..H of (1 + u_step)  ===  1 / (1 - bias)
+//
+// exactly. That identity is the whole reason the unwind exists: the estimate is
+// booked at registerSum x (1 - bias), so the unwind has to multiply it back to
+// registerSum by maturity or the cohort permanently mis-states its ultimate.
+//
+// ⚠ IT IS COMPUTED IN LOG SPACE BECAUSE THE OBVIOUS ARITHMETIC IS WRONG, and it
+// was wrong here until this was written. The previous schedule used a flat
+// `bias / horizon` per step, reasoning that H steps of b/H total b. They do not:
+// the steps COMPOUND, so the total is (1 + b/H)^H ~ e^b, while landing on
+// registerSum needs 1/(1 - b). Those differ at second order in b, so the error
+// grows with the bias and with SHORT horizons where each step is large.
+// Measured before the fix, at each line's own reachable slider minimum: WC
+// missed registerSum by -2.32%, GL by -4.14%, Property by -14.73% on a
+// two-year horizon. A cohort would mature having quietly kept part of the
+// optimism forever, which is precisely the thing the unwind is for.
+//
+// Distributing the required LOG-unwind L = -ln(1 - bias) across the steps by
+// weights that sum to 1 makes the product exact for any weights at all, which
+// is what lets the shape be chosen freely without re-deriving the arithmetic.
+// The weights here are geometric (IBNER_UNWIND_DECAY), so the first step
+// carries about half.
+// ⚠ THIS RETURNS A WEIGHT, NOT A FACTOR, AND THE CHANGE IS LOAD-BEARING. It used
+// to be `ibnerUnwindStep`, returning the MULTIPLICATIVE factor
+// expm1(weight x -ln(1 - bias)) whose product over the horizon was exactly
+// 1/(1 - bias). That exactness was a property of multiplying the whole ULTIMATE.
+//
+// Once development moves onto the reserve, a multiplicative unwind inherits the
+// shrinking-base problem the reserve walk was introduced to fix: the factors
+// would multiply a balance that is paying down, so a cohort would mature having
+// recovered only part of its booked optimism. The bias is inert at default
+// funding (measured: 0.00% on all three lines), so this would have been a defect
+// visible only on squeezed play — the worst kind.
+//
+// The caller now multiplies this weight by registerSum x bias and ADDS the
+// dollars to the reserve. Adding X to the reserve adds X to paid + unpaid at
+// once, so the total delivered over the runoff is exactly registerSum x bias for
+// ANY weights summing to 1 — pathwise, independent of the stochastic path, and
+// with no second-order term to go wrong. Strictly stronger than the log-space
+// identity it replaces.
+//
+// The weights are geometric in IBNER_UNWIND_DECAY, so the first step carries
+// about half. That front-loading decision is unchanged.
+export function ibnerUnwindWeight(horizon: number, step: number): number {
+  if (horizon <= 0 || step < 1 || step > horizon) return 0;
+  const rho = IBNER_UNWIND_DECAY;
+  // Sum of rho^0..rho^(H-1), the normaliser that makes the weights total 1.
+  const denom = rho === 1 ? horizon : (1 - Math.pow(rho, horizon)) / (1 - rho);
+  return Math.pow(rho, step - 1) / denom;
 }

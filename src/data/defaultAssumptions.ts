@@ -1272,6 +1272,179 @@ export const LINE_RESERVE_PAYDOWN_PCT: Record<string, number> = {
 };
 
 // ===========================================================================
+// IBNER — INCURRED BUT NOT ENOUGH REPORTED.
+//
+// Friedland's structure: reported claims + IBNER = ultimate. The claim register
+// is untouched — it keeps showing exactly what the generator drew, and that sum
+// IS the accident year's INITIAL ESTIMATE of ultimate. Development is a separate
+// AGGREGATE provision carried per cohort on top of it:
+//
+//   registerSum   = sum of drawn claims                     (never changes)
+//   estimate(1)   = registerSum x (1 - b)                   b = booking bias
+//   estimate(t+1) = estimate(t) x (1 + m x s x z_t + b/H)   z_t ~ N(0,1)
+//   ultimate      = estimate(H), fixed thereafter
+//   provision     = estimate - registerSum                  (the IBNER balance)
+//
+// ⚠ THESE ARE STARTING VALUES CHOSEN TO FEEL RIGHT, NOT FITTED TO ANY BOOK.
+// Nothing here was measured off real triangles. They are a first playable set,
+// expected to move once the loss behaviour has been played with, and no
+// calibration should be anchored to them until they settle.
+//
+// ⚠ A MARTINGALE PLUS A KNOWN DRIFT, and the drift is deliberate.
+// The z_t term has zero mean, so the STOCHASTIC component is a pure martingale:
+// no mean reversion, and a player cannot infer from a cohort's history where it
+// is heading. The b/H term is a deterministic unwind of the initial optimistic
+// booking, present so E[estimate(H)] = registerSum EXACTLY, per cohort — the
+// pool cannot end up paying less than it drew. A player who works out that
+// drift from their own funding choice is reading their own decision back, which
+// is the intended lesson rather than a leak.
+//
+// ⚠ DEVELOPMENT IS ENTIRELY RETAINED. The tower cedes PER CLAIM and no claim
+// changed size; this is an aggregate overlay on top of a register the tower has
+// already run against. So reinsuranceRecovery is unmoved and 100% of
+// development lands on the pool. That is CONSERVATIVE and DELIBERATE — a real
+// treaty would pick some of it up — and it is recorded here so it is not later
+// read as a bug. See reinsuranceDisplay.ts's seam note.
+
+// Total development SD over the whole runoff, per line. The ANNUAL step is
+// total / sqrt(E[horizon]), so a cohort accumulates approximately this much
+// relative SD by the time it matures.
+//
+// ⚠ PROPERTY'S 15% IS A PLAYABILITY ADJUSTMENT, NOT A FITTED FIGURE, AND THE
+// TWO SHOULD NOT BE CONFUSED. WC's 25% and GL's 20% are judgement calls about
+// what a long-tail casualty runoff looks like. Property's ORIGINAL 8% was the
+// same kind of call and was defensible on its own terms — a short-tail line
+// genuinely does settle fast. It was raised to 15% for a different reason: at
+// 8% the per-accident-year exhibit had almost nothing to show. Measured over
+// 200 games, only 27.0% of Property rows ever moved more than 1%, none were
+// still developing by game year 5, and a ten-year exhibit rendered as columns
+// of repeated identical numbers for every accident year older than about
+// three. 15% is chosen so the display has content. Both numbers are honest;
+// they are answering different questions, and this note exists so a later
+// reader does not mistake the second for the first.
+//
+// THE HORIZON DELIBERATELY DID NOT MOVE. Lengthening it would make each step
+// QUIETER (the step is total/sqrt(E[H])), which is the opposite of what the
+// exhibit needed — a longer runoff spreads the same total over more years and
+// shows less per year, not more.
+//
+// AND THERE IS A REAL ARGUMENT FOR THE HIGHER NUMBER, worth stating so it does
+// not read as pure display tuning. Property's book carries claims to $75M, and
+// a large fire or flood genuinely takes years to adjust — scope disputes,
+// business-interruption measurement, subrogation. A property book whose
+// ultimates never move more than 8% is a book without large losses in it.
+// Short-tail describes the PAYMENT pattern; it does not mean the first
+// estimate of a $40M fire is within 8% of the final one.
+export const IBNER_TOTAL_SD: Record<string, number> = {
+  WC: 0.25,
+  GL: 0.20,
+  Property: 0.15,
+};
+
+// Runoff horizon in years, drawn PER COHORT (inclusive), so the player cannot
+// tell how much development a given accident year has left.
+// THE SHARE OF A FRESH ACCIDENT YEAR'S BOOKED ULTIMATE THAT IS STILL UNPAID at
+// the end of its own year — the other 40% is paid within it.
+//
+// ⚠ IT SETS HOW MUCH LEVERAGE DEVELOPMENT HAS, which is why it is a named
+// constant rather than a literal at the booking site. Development applies to the
+// UNPAID balance, so a cohort can only ever move the fraction of its ultimate it
+// has not yet settled. simulationEngine reads this twice — once to book the
+// cohort, once inside reserveStepSigma to derive the per-step scale that hits
+// IBNER_TOTAL_SD — and the two must be the same number or a line develops at the
+// wrong scale with no other symptom.
+export const IBNER_OPEN_FRACTION = 0.60;
+
+export const IBNER_HORIZON: Record<string, { min: number; max: number }> = {
+  WC: { min: 5, max: 12 },
+  GL: { min: 3, max: 8 },
+  Property: { min: 2, max: 4 },
+};
+
+// ⚠ NORMALISED TO RMS 1, AND THAT NORMALISATION IS LOAD-BEARING.
+// The mixture exists so roughly half of accident years barely move: real books
+// have boring years, and the boring ones are what make the others visible. It
+// is drawn ONCE PER COHORT (not per step) — "boring YEAR" is a property of the
+// accident year, not of each individual step.
+//
+// The weights below were first written as bridge sigmas (0.04 / 0.15 / 0.45)
+// and would have been applied as step multipliers. Their RMS is
+// sqrt(0.5(0.04^2) + 0.4(0.15^2) + 0.1(0.45^2)) = 0.1734, so used raw they
+// would have delivered 17.3% of every stated total above — WC's "25%" arriving
+// as 4.3%. Dividing through by that RMS gives the multipliers here, whose RMS
+// is 1.000, so IBNER_TOTAL_SD means what it says while the shape is preserved:
+// the 50% bucket still moves at 23% of nominal (about 2.0%/yr on WC).
+export const IBNER_STEP_MIXTURE: readonly { weight: number; multiplier: number }[] = [
+  { weight: 0.50, multiplier: 0.231 },
+  { weight: 0.40, multiplier: 0.865 },
+  { weight: 0.10, multiplier: 2.596 },
+];
+
+// FUNDING BIASES THE BOOKING. A squeezed pool books optimistically and the
+// shortfall emerges later as adverse development.
+//
+//   squeeze = max(0, 1 - selectedFundingCLF)     b = COEFF x squeeze
+//
+// CLF 1.000 is break-even by construction, so `squeeze` is exactly "how far
+// below break-even you chose to fund". Maximum available squeeze is close on
+// all three lines — WC 0.234 (its slider reaches stop 10, CLF 0.7661), GL 0.250,
+// Property 0.261 — so ONE pool-wide coefficient works without per-line
+// normalisation.
+//
+// ⚠ RAISED FROM 0.40 TO 0.80 AFTER MEASURING, AND THE REASON IS THE RULING IT
+// SUPPORTS. At 0.40 the maximum-squeeze drift measured 0.14 sigma of WC's
+// calendar-year noise at steady state and about a third of that in years 1-3.
+// The end-of-game deficiency disclosure was ruled on the premise that the
+// exhibit shows the drift year by year, so the player sees the consequence and
+// works out the cause; at 0.14 sigma it does not show, which makes a player
+// unable to change course during the window when changing course is still
+// possible. 0.80 gives a ~19% optimistic booking at maximum squeeze.
+//
+// ⚠ AND DOUBLING DOES NOT FIX THE EARLY-GAME WINDOW, because the coefficient is
+// not what gates it. The unwind is only carried by cohorts the PLAYER wrote —
+// pre-game cohorts carry bookingBias 0 by construction, since the player made
+// none of those decisions — so in year 2 there is exactly one biased cohort and
+// in year 3 there are two. The early signal is limited by cohort COUNT, and no
+// value of this constant changes that. Raising it doubles the steady-state
+// signal and leaves the first two or three years thin. If an early signal is
+// wanted, the lever is the SHAPE of the unwind (front-loading it rather than
+// spreading b/H evenly), not this number.
+//
+// STARTING VALUE still, measured but not fitted.
+//
+// ⚠ INERT AT DEFAULTS. defaultLineDecisionSet sets fundingAtExpected, pinning
+// CLF to 1.000, so squeeze is 0 and no bias applies on a default run. That keeps
+// default-run gates and the CLF derivation (which runs at defaults) clean of it.
+//
+// ⚠ THIS REPLACES fundingImpactOnDevelopment, WHICH NEVER APPLIED AT ALL. That
+// term read priorFundingAdequacyRatio, which reads fundingAdequacyRatio, which
+// is assigned from premiumFundingRatio — a hardcoded 1. Measured across 40
+// games x 10 years x 3 lines at funding levels 0.30/0.60/0.95, that ratio took
+// exactly one distinct value: 1. So the old bias was identically zero on every
+// path, not merely weak. premiumFundingRatio is a separate defect and is
+// deliberately NOT fixed here.
+export const IBNER_BOOKING_BIAS_COEFF = 0.80;
+
+// ⚠ THE UNWIND IS FRONT-LOADED, NOT SPREAD EVENLY, and the shape is the point.
+// A flat b/H left years 2-3 of a squeezed game at 0.03-0.04 sigma of the line's
+// own calendar noise — invisible during exactly the window when the player could
+// still change course, because the early signal is gated by how many biased
+// cohorts EXIST (one in year 2, two in year 3) rather than by how big the bias
+// is. Doubling the coefficient scales every year equally and cannot fix that.
+//
+// Front-loading is also the more realistic shape. Friedland's age-to-age factors
+// are largest at the earliest ages: a deficient case reserve gets corrected as
+// soon as information arrives, not evenly across the runoff.
+//
+// The step weights are geometric with this ratio — half the remaining unwind at
+// each step. On a WC cohort at maximum squeeze that is roughly 9.4% / 4.7% /
+// 2.3% against the flat schedule's 2.2% every year.
+// Typed `number` rather than left to narrow to the literal 0.5, so
+// ibnerUnwindStep's rho === 1 guard (the degenerate flat-weights case) stays a
+// legitimate branch instead of a compile error the day someone tries it.
+export const IBNER_UNWIND_DECAY: number = 0.5;
+
+// ===========================================================================
 // PROPERTY loss model — FITTED, and it replaces a design that was never fitted.
 //
 // ⚠ WHAT WAS WRONG, IN BOTH DIRECTIONS AT ONCE. The retired design drew ~112

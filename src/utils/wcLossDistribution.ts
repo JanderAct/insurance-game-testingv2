@@ -87,6 +87,18 @@ const ALPHA = M.memberFrequencyNoise.shape;
 // sharing one normal CDF makes their agreement exact rather than approximate to
 // two different ~1.5e-7 approximations.
 function lognormalRawMoment(mu: number, sigma: number, k: number, limit: number): number {
+  // ⚠ THIS BRANCH IS CURRENTLY UNREACHABLE, and is kept deliberately rather than
+  // being live code. The function is module-private with exactly ONE caller,
+  // which always passes wcSeverityCap(year) — a finite number. So no path
+  // reaches it today, and it must not be read as handling a case that occurs.
+  //
+  // It is not deleted because removing it does not merely drop a dead line, it
+  // changes the failure MODE for a future caller: with limit = Infinity the
+  // expression below evaluates Math.pow(Infinity, k) * (1 - normalCdf(Infinity))
+  // = Infinity * 0 = NaN, which would propagate silently into the CLF grid's
+  // cumulants. One unreachable line buys the correct uncapped moment instead of
+  // a NaN. That is the whole argument for it; if the caller set ever changes so
+  // that this fires, this comment is the thing that is now wrong.
   if (!Number.isFinite(limit)) return Math.exp(k * mu + (k * k * sigma * sigma) / 2);
   const d = (Math.log(limit) - mu) / sigma;
   return Math.exp(k * mu + (k * k * sigma * sigma) / 2) * normalCdf(d - k * sigma)

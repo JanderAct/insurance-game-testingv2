@@ -16,7 +16,7 @@
 //   3. Every confidence level the UI can request falls INSIDE the supplied
 //      curve's 25-95 range, so no reachable slider position is answered by a
 //      clamp.
-//   4. WC's table still crosses where its own derivation puts it (50.4%),
+//   4. WC's table still crosses where its own derivation puts it (54.7%),
 //      i.e. the GL swap did not reach it.
 //
 // WHAT IS MEASURED AND REPORTED (not gated — it is a property of a placeholder,
@@ -86,8 +86,14 @@ check(wc.source === 'derived', 'WC table is still tagged `derived`');
   // books that were not the market, and pricing each rating group at its own
   // rate raised the median enrolled book's premium 2.3%. This check found it on
   // the first run after the change, which is the grep working.
-  check(Math.abs(crossingOf(wc) - 0.504) < 0.002,
-    'WC still crosses where its own derivation puts it (50.4%) — the GL swap did not reach it',
+  //
+  // Fourth, 50.4% -> 54.7%, when WC's table was re-derived with IBNER live. The
+  // table this branch carried had been derived on claims-distribution, where
+  // development is the retired wobble rather than IBNER; re-deriving on the
+  // branch's own distribution is what moved it. Not a pricing change — WC's
+  // premium is untouched — a table catching up with the engine it prices for.
+  check(Math.abs(crossingOf(wc) - 0.547) < 0.002,
+    'WC still crosses where its own derivation puts it (54.7%) — the GL swap did not reach it',
     `${(crossingOf(wc) * 100).toFixed(2)}%`);
 }
 

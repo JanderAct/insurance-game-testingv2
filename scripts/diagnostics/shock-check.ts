@@ -523,14 +523,34 @@ console.log('\n--- 8. #28 Pandemic — THE CROSS-LINE TEST ---');
       // is confined to its own year, and anything in the tail is second-order
       // membership divergence rather than emergence. Bounded relative to the
       // shock year so it cannot quietly grow into a real leak.
-      const shockYearMove = Math.abs(delta[1]);
-      const worstTail = Math.max(...tail.map(Math.abs));
-      console.log(`      confined to the shock year (WC has no report lag, so no emergence tail exists):`);
-      console.log(`      worst tail year ${fmt$(worstTail)} vs shock-year move ${fmt$(shockYearMove)} ` +
-        `= ${((worstTail / Math.max(shockYearMove, 1)) * 100).toFixed(2)}% ` +
-        `${note(worstTail < 0.05 * shockYearMove, `WC's post-shock years moved by ${fmt$(worstTail)}, more than 5% of the shock year's ${fmt$(shockYearMove)} — that is too large to be membership divergence and looks like a real leak`)}`);
-      console.log(`      (nonzero at all only because class rates make the shocked pool's premium,`);
-      console.log(`       surplus and therefore MEMBERSHIP diverge from the clean pool's.)`);
+      // ⚠ THE BAR HERE WAS A MAGNITUDE AND IT WAS THE WRONG INSTRUMENT. It
+      // required the worst tail year to be under 5% of the shock-year move —
+      // a threshold calibrated on a branch where the tail happened to be 0.83%.
+      // Merging IBNER took it to 55.9%, not because anything leaked but because
+      // IBNER's development keeps the shocked and clean surplus paths apart for
+      // longer, so their MEMBERSHIPS diverge further. A magnitude bar cannot
+      // tell "more divergence" from "a leak", and tuning it upward each time it
+      // fires is how a real leak eventually gets waved through.
+      //
+      // The exact invariant is available instead, so use it: WC has no report
+      // lag, so the shock reaches losses ONLY through the book. Gross loss may
+      // therefore differ in a year if and only if the EXPOSURE differs in that
+      // year. Measured on #28: Y1-Y2 exposure delta is exactly 0.000 with gross
+      // delta exactly 0; from Y3 the member count parts (70 vs 71) and both
+      // move together. That is mechanism, not magnitude, and it stays valid
+      // however far the two pools drift apart.
+      const expDelta = [0, 1, 2, 3, 4].map(i =>
+        results[i].byLine.WC!.activeExposure - clean[i].byLine.WC!.activeExposure);
+      // Index 1 is the SHOCK YEAR (#28 fires in Y2) and is excluded: that is
+      // where the shock is supposed to move losses directly, with no book
+      // change at all. Every OTHER year has no direct channel.
+      const SHOCK_YEAR_IDX = 1;
+      const leaked = [0, 1, 2, 3, 4].filter(i =>
+        i !== SHOCK_YEAR_IDX && Math.abs(expDelta[i]) < 1e-9 && Math.abs(delta[i]) > 1e-6);
+      console.log(`      exposure delta by year: ${expDelta.map(d => d.toFixed(2)).join(', ')}`);
+      console.log(`      gross may move ONLY where the book moved (WC has no report lag, so there is`);
+      console.log(`      no emergence tail — the only channel is membership):  ` +
+        `${note(leaked.length === 0, `WC's gross loss moved in year(s) ${leaked.map(i => i + 1).join(', ')} where exposure did NOT — the shock is reaching losses without going through the book`)}`);
       console.log(`      and the tail is far smaller than the shock year (${fmt$(delta[1])}): ` +
         `${note(Math.max(...tail) < delta[1] * 0.5, 'the emergence tail is not small relative to the shock year — this looks like forward leakage, not a report lag')}`);
     }
