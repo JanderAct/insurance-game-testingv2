@@ -1438,7 +1438,10 @@ export function buildSupportingRows(
   const exposureRows: AuditRow[] = [
     {
       metric: 'Active Members',
-      value: String(result.activeMembers),
+      // ⚠ memberList.length, NOT result.activeMembers — see toHistoricalYear.
+      // At pool scope activeMembers sums per-line enrolments and double-counts
+      // anyone carrying more than one line; memberList is deduplicated by id.
+      value: String(result.memberList.length),
       formula: { kind: 'text', text: 'A headcount, not a calculation — no simpler components are shown on this page.' },
     },
     {

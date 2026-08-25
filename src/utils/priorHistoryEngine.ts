@@ -337,7 +337,13 @@ export function toHistoricalYear(r: LineResultSet): HistoricalYear {
   return {
     historyYearNumber: r.yearNumber,
     calendarYear: r.calendarYear,
-    activeMembers: r.activeMembers,
+    // ⚠ memberList.length, NOT r.activeMembers. At POOL scope the latter is a
+    // sum of per-line enrolments, so a member carrying WC and GL counts twice —
+    // it read 205 against a 139-member roster. memberList is deduplicated by id
+    // in aggregateLineResults, so it is the distinct roster. Identical to
+    // r.activeMembers at LINE scope, where there is nothing to double-count, so
+    // this is a no-op for the single-line views.
+    activeMembers: r.memberList.length,
     activeExposure: r.activeExposure,
     totalMarketExposure: r.totalMarketExposure,
     marketShare: r.marketShare,

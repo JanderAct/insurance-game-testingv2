@@ -2157,7 +2157,29 @@ export function aggregateLineResults(
   const sum = (key: keyof LineResultSet): number =>
     results.reduce((total, r) => total + (r[key] as unknown as number), 0);
 
-  const activeMembersSum = sum('activeMembers');
+  // ⚠ ENROLMENTS, NOT MEMBERS, AND THE TWO DIVERGE BY ~47% ON A THREE-LINE POOL.
+  // This is a plain sum of each line's active count, so a member carrying WC and
+  // GL contributes 2. Measured 205 enrolments against a 139-member roster.
+  //
+  // IT HAS TWO JOBS AND ONLY ONE OF THEM WANTS A HEADCOUNT:
+  //
+  //   AS A WEIGHT (memberSatisfaction, averageRiskQuality below) it is CORRECT
+  //   and must not be deduplicated. Those two average a per-line figure weighted
+  //   by r.activeMembers, and a member carrying two lines genuinely has two
+  //   enrolment experiences to average. Dividing by a distinct headcount there
+  //   would inflate both.
+  //
+  //   AS THE EXPORTED `activeMembers` FIELD it is what it has always been — the
+  //   enrolment sum — and RESULT_METRICS ships it under the label "Active
+  //   Members". DISPLAY CODE MUST NOT READ IT AS A HEADCOUNT. Use
+  //   `memberList.length`, which is deduplicated by id a few lines below and is
+  //   the distinct roster at both pool and line scope. HistoryPage (via
+  //   toHistoricalYear) and CalculationAuditPage's member-count row read it that
+  //   way; MembershipPage always did.
+  //
+  // Renamed from `activeMembersSum` because that name invited exactly the wrong
+  // one of the two jobs, and three display sites took the invitation.
+  const enrolmentCount = sum('activeMembers');
   // ⚠ DIMENSIONALLY MEANINGLESS AT POOL SCOPE. WC/GL exposure is $M of payroll;
   // Property's is $M of insured value (TIV). Summing across lines adds two
   // different units together — these two sums (and any ratio built from them,
@@ -2183,11 +2205,11 @@ export function aggregateLineResults(
     ? parseFloat((retainedSum / priorActiveSum).toFixed(3))
     : 1;
 
-  const memberSatisfaction = activeMembersSum > 0
-    ? results.reduce((s, r) => s + r.memberSatisfaction * r.activeMembers, 0) / activeMembersSum
+  const memberSatisfaction = enrolmentCount > 0
+    ? results.reduce((s, r) => s + r.memberSatisfaction * r.activeMembers, 0) / enrolmentCount
     : first.memberSatisfaction;
-  const averageRiskQuality = activeMembersSum > 0
-    ? results.reduce((s, r) => s + r.averageRiskQuality * r.activeMembers, 0) / activeMembersSum
+  const averageRiskQuality = enrolmentCount > 0
+    ? results.reduce((s, r) => s + r.averageRiskQuality * r.activeMembers, 0) / enrolmentCount
     : first.averageRiskQuality;
 
   const seenMemberIds = new Set<string>();
@@ -2275,7 +2297,7 @@ export function aggregateLineResults(
     decisions: first.decisions,
     assetAllocation: first.assetAllocation,
 
-    activeMembers: activeMembersSum,
+    activeMembers: enrolmentCount,
     newMembers: sum('newMembers'),
     withdrawnMembers: sum('withdrawnMembers'),
     activeExposure: activeExposureSum,
