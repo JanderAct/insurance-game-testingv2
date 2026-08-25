@@ -84,9 +84,29 @@
 //
 //   - the severity trend scales every raw moment by s^k, so kappa_1 -> s x
 //     kappa_1 and kappa_2 -> s^2 x kappa_2, leaving CV = sqrt(kappa_2)/kappa_1
-//     exactly unchanged;
+//     NEARLY unchanged — see the correction immediately below, which weakens
+//     this bullet from "exactly" without disturbing the conclusion;
 //   - claim COUNTS do not move at all, because frequency reads REAL (frozen)
 //     payroll while only the rating side sees the wage factor.
+//
+// ⚠ THE FIRST BULLET SAID "EXACTLY UNCHANGED" AND WC_SEVERITY_CAP MADE THAT
+// FALSE. s^k factors out of an UNBOUNDED lognormal; it does not factor out of
+// one truncated at a fixed dollar ceiling, because inflating severity against a
+// stationary $85M cap genuinely shortens the relative tail. Measured on a fixed
+// 61-member book, aggregate CV drifts Y1 -> Y10 by +6.99% uncapped and +3.15%
+// capped — so the severity trend's own contribution went from 0 to about
+// -3.8pp. (The residual +3.15% is the FREQUENCY trend and was always there;
+// this bullet never claimed year-invariance, only invariance to the severity
+// scale.)
+//
+// ⚠ THE CONCLUSION BELOW STILL HOLDS, AND FOR AN UNCHANGED REASON. The
+// argument for CV over 1/sqrt(exposure) is that a NOMINAL quantity must not
+// slide the book along the curve. The residual drift is not nominal: it is a
+// true consequence of a real ceiling being approached, and it is an order of
+// magnitude smaller than the exposure-indexed alternative, where a 10-year wage
+// inflation would move 1/sqrt(exposure) directly. CV remains the right axis;
+// it is now approximately rather than exactly invariant, and a future decision
+// to TREND the cap would restore the exact form.
 //
 // So a book whose payroll inflates does NOT slide along this curve and does NOT
 // get cheaper margin — which is correct: a pool whose members' wages rose has
@@ -119,6 +139,36 @@
 // CLAMPED to the nearest endpoint rather than extrapolated — the grid spans
 // the enrollable range, and extrapolating a linear trend past measured bounds
 // risks producing something worse than clamping.
+//
+// ============================================================================
+// ⚠ OPEN ITEM: THIS GRID WAS DERIVED BEFORE WC_SEVERITY_CAP AND HAS NOT BEEN
+// RE-DERIVED AGAINST IT. Recorded rather than fixed, deliberately — read this
+// before trusting a number that came out of interpolateGridRatio.
+//
+// The ratios below are Monte Carlo percentiles of an UNCAPPED WC aggregate.
+// wcAggregateCumulants now reports a CAPPED CV. So a lookup feeds a capped
+// input into an uncapped curve, and the cap does not only move the CV — at a
+// GIVEN CV it also lightens skewness and kurtosis, which is what sets the ratio
+// at the far stops. The bias therefore runs one way and is largest where it is
+// least visible: the grid should now read slightly HIGH at 95/97.5/99.
+//
+// WHY THIS DOES NOT AFFECT A SHIPPED NUMBER. The engine does not price off this
+// grid. fundingConsequence reads staticClfCrossing -> STATIC_CLF_TABLE.WC
+// (clfTables.ts), which WAS re-derived under the cap in the same commit that
+// introduced it. computeWcClf has no caller in src/ outside this module's own
+// crossing helper; its live consumers are diagnostics. Verified by search, not
+// assumed — and it is the reason this is an open item rather than a defect.
+//
+// WHY IT IS NOT RE-DERIVED HERE. Re-deriving is a multi-hour Monte Carlo across
+// eight book sizes, and folding it into a calibration commit would put two
+// re-derivations in one diff with no way to attribute a later movement to
+// either. The same reasoning kept IBNER off this commit.
+//
+// WHAT WOULD CLOSE IT: re-run scripts/diagnostics/wc-clf-grid-derive.ts under
+// the cap and replace the entries below. Until then, treat a grid ratio as a
+// reference figure on the pre-cap basis, and settle any question that matters
+// with the static table instead.
+// ============================================================================
 export interface WcClfGridEntry {
   size: number;
   exposure: number;

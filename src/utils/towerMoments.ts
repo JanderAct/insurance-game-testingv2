@@ -77,6 +77,7 @@ import {
   PROPERTY_LOSS_MODEL,
   WC_LOSS_MODEL,
   WC_RATING_GROUPS,
+  WC_SEVERITY_CAP,
   WC_SEVERITY_COMPONENTS,
   type WcRatingGroup,
 } from '../data/defaultAssumptions';
@@ -514,7 +515,7 @@ export function retainedOccurrenceMoments(
   // coincidence), so the two are already the same edge; guard against pushing
   // it twice, which the GL/WC cases never needed since GL_SEVERITY_CAP (100M)
   // and TOWER_TOP.GL (25M) differ and WC's ceiling is infinite.
-  const ceiling = line === 'GL' ? GL_SEVERITY_CAP : line === 'Property' ? PM.severityCap : Number.POSITIVE_INFINITY;
+  const ceiling = line === 'GL' ? GL_SEVERITY_CAP : line === 'Property' ? PM.severityCap : WC_SEVERITY_CAP;
   if (!edges.includes(ceiling)) edges.push(ceiling);
 
   // Which layer, if any, covers the band starting at `from`?
@@ -556,9 +557,16 @@ export function retainedOccurrenceMoments(
       cm2 += s * s * M2 + 2 * s * beta * M1 + beta * beta * M0;
       c += s * (Number.isFinite(hi) ? hi - lo : 0);
     }
-    // Mass at or above the ceiling: for GL every claim there is exactly the cap,
-    // retained down to whatever the tower does not cover. For WC the ceiling is
-    // infinite and the loop above already integrated to it.
+    // Mass at or above the ceiling: every claim there is exactly the cap,
+    // retained down to whatever the tower does not cover.
+    //
+    // ⚠ WC USED TO BE THE EXCEPTION HERE — its ceiling was
+    // Number.POSITIVE_INFINITY and this note read "for WC the ceiling is
+    // infinite and the loop above already integrated to it". That was the
+    // analytic face of the unbounded band: the aggregate stop-loss's retained
+    // second moment integrated over a tail with no end, so the band above the
+    // tower had no finite worst case to price against. All three lines carry a
+    // finite ceiling now.
     if (Number.isFinite(ceiling)) {
       const tail = 1 - partialMoment(comp.mu, comp.sigma, 0, ceiling);
       cm1 += c * tail;

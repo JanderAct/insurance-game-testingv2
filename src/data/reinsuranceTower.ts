@@ -176,8 +176,10 @@ export const REINSURANCE_TOWER: Record<TowerLine, TowerLayer[]> = {
     // 1-per-26-years of the `$25M xs $25M` layer it swallowed, which is what
     // makes it a real purchase decision rather than a line item.
     //
-    // Above it the pool retains, unreinsurable and UNBOUNDED (WC has no severity
-    // cap): one occurrence over $50M per ~109 years.
+    // Above it the pool retains, unreinsurable but now BOUNDED: one occurrence
+    // over $50M per ~109 years, and WC_SEVERITY_CAP ends the band at $85M, so
+    // the exposure above this layer is at most $35M per occurrence. It read
+    // "UNBOUNDED (WC has no severity cap)" until that cap was imposed.
     { name: '$40M xs $10M', attachment: 10e6, limit: 40e6, purchasable: true },
   ],
   // GL KEEPS THREE LAYERS — re-confirmed at the runtime-pricing change against

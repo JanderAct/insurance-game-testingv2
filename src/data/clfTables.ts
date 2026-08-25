@@ -121,7 +121,20 @@
 // i.e. what "Expected" (CLF exactly 1.000) delivers against each line's own
 // distribution:
 //
-//     WC 47.2%  (95% CI 46.6-47.8)      GL 68.6%  (95% CI 68.1-69.1)
+//     WC 44.1%  (95% CI 43.4-45.0)      GL 68.6%  (95% CI 68.1-69.1)
+//
+// ⚠ WC's CROSSING MOVED 47.2% -> 44.1% WITH WC_SEVERITY_CAP, outside its own
+// old CI, and the direction is the informative part. The cap lowers EXPECTED
+// gross loss by 0.32%, but per-layer expected CEDED loss is BIT-IDENTICAL
+// (every WC layer bound tops at $50M, below the $85M ceiling — measured, not
+// assumed). So E[retained] = E[gross] - E[ceded] falls by MORE than 0.32% in
+// relative terms, the pool premium falls with it, and typical realised losses
+// fall only on the rare years the cap binds. The ratio therefore rises on an
+// ordinary year and "Expected" reaches break-even at a LOWER percentile.
+//
+// The 3.1pp size is amplified by something already recorded below: WC's
+// crossing sits where the ratio density is highest, so a small distributional
+// shift moves it a lot.
 //
 // ⚠ GL's SHIPPED crossing is 57.7%, not 68.6%, because the supplied curve is in
 // force. 68.6% remains the truth about GL's distribution; 57.7% is what the
@@ -218,8 +231,8 @@ const WC_DERIVED: ClfTable = {
   source: 'derived',
   stops: [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 97.5, 99],
   clf: [
-    0.7661, 0.8134, 0.8539, 0.8877, 0.9211, 0.9521, 0.9800, 1.0083, 1.0384, 1.0674,
-    1.0974, 1.1289, 1.1650, 1.2056, 1.2496, 1.3014, 1.3709, 1.4783, 1.5750, 1.7154,
+    0.7653, 0.8137, 0.8541, 0.8865, 0.9195, 0.9485, 0.9770, 1.0041, 1.0334, 1.0635,
+    1.0933, 1.1237, 1.1598, 1.1992, 1.2418, 1.2969, 1.3677, 1.4731, 1.5749, 1.7015,
   ],
 };
 

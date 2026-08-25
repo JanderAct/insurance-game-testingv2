@@ -194,15 +194,63 @@ export const WC_SEVERITY_COMPONENTS = {
   // WHAT WOULD DISPLACE IT: the same EM fit run on large claims developed to
   // ultimate, or a separate tail fitted to the known catastrophic claims.
   //
-  // THE TAIL HAS NO CEILING. The 1-in-250-year claim is $71.2M. If $50M is a
-  // hard maximum rather than a high observation, that needs an explicit cap —
-  // recorded as an open item, deliberately not imposed here.
+  // ⚠ THE TAIL NOW HAS A CEILING — WC_SEVERITY_CAP, below. This note used to
+  // read "THE TAIL HAS NO CEILING... recorded as an open item, deliberately not
+  // imposed here." That open item is closed; the cap is $85M and its basis is
+  // written at the constant.
   large: { mu: 9.4776, sigma: 2.00 },
   // ASSERTED. Schools' second component. Median $5,363, mean $27,100, CV 3.51.
   // Schools has TWO components by design — a school district does not generate
   // the catastrophic-injury tail that a public-works or safety group does.
   schoolsMedium: { mu: 8.5873, sigma: 1.80 },
 } as const satisfies Record<string, WcSeverityComponent>;
+
+// ============================================================================
+// WC SEVERITY CAP — the ceiling on a single claim.
+//
+// ⚠ THE ANCHOR IS THE POOL'S OWN OBSERVED MAXIMUM, which is why this is the
+// best-evidenced of the three caps rather than the loosest. WC_SEVERITY_COMPONENTS
+// .large records that THE POOL HAS OBSERVED CLAIMS IN THE $45-50M RANGE — that
+// observation is the entire reason that component was ASSERTED rather than
+// fitted, since the EM fit topped out near $9.8M once per 431 years and could
+// not produce what the pool had actually seen. So the cap is set against a real
+// maximum, not against a modelled one.
+//
+// $85M is 1.8x that observed $47M, THE SAME MULTIPLE PROPERTY USED against its
+// scaled $42M. GL's $100M is deliberately NOT the reference: it has no stated
+// multiple behind it (its own note says "a public-entity liability claim
+// distribution with observed maxima" would displace it), so copying its number
+// onto a line that HAS a real anchor would discard the better evidence.
+//
+// WHAT IT FIXES — three symptoms of one fact, that the mixture was unbounded:
+//
+//   THE DRAW. The model produced a $248.84M claim. At 1-in-5,228 full-market
+//   years that is EXPECTED rather than anomalous — it is what an unbounded
+//   lognormal with sigma 2.00 does — but it is 5x anything the pool has seen.
+//
+//   THE AGGREGATE STOP-LOSS HAD NOTHING ABOVE IT. With all layers declined WC's
+//   aggregate tops out at $36.59M against unbounded severity; even fully
+//   purchased the tower reaches $50M and the pool retains above that without
+//   limit. retainedOccurrenceMoments carried `Number.POSITIVE_INFINITY` as WC's
+//   ceiling for exactly this reason.
+//
+//   THE CALENDAR CV WAS UNMEASURABLE. It rose 28% between 50 and 120 games on
+//   UNCHANGED code (0.2502 -> 0.3211), because a block bootstrap cannot
+//   resample a tail event the sample never contained. That is not a noisy
+//   measurement, it is an unusable one, and it is why WC's CLF re-derivation
+//   question could not be settled by a CV comparison.
+//
+// ⚠ IT IS A CEILING, NOT A LOSS LIMIT, and it does NOT inflate with the
+// severity trend — same convention as GL's. A fixed ceiling binds harder in
+// later years, which is what a practical maximum does.
+//
+// WHAT WOULD DISPLACE IT: the pool's large-claim history developed to ultimate
+// (which is the same open item that would displace component `large` itself),
+// or a statutory/structural argument for a different maximum — a state fund's
+// per-claim ceiling, or an excess carrier's stated capacity. A different number
+// is a one-line change here: every consumer routes through the capped analytic
+// in wcClaimEngine and the single draw site in generateWcClaims.
+export const WC_SEVERITY_CAP = 85_000_000;
 
 export type WcComponentKey = keyof typeof WC_SEVERITY_COMPONENTS;
 
