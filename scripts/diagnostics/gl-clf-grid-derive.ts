@@ -15,14 +15,25 @@
 // DEPARTURE 1 FROM WC's RECIPE: INDEXED ON LAMBDA (expected annual claim
 // count), NOT CV.
 //
-// WC's grid is CV-indexed because CV is trend-invariant there (wcClfGrid.ts's
-// load-bearing axis argument). That argument does NOT survive GL's severity
-// cap: GL_SEVERITY_CAP is FIXED while severity inflates, so a fixed ceiling is
-// a SHRINKING share of an inflating distribution and the CAPPED per-claim CV
-// moves with the year (see gl-claim-check.ts section 2c(iv), which measures
-// and reports the drift rather than asserting invariance). Indexing a grid on
-// a quantity that itself slides with trend is exactly the failure CV-indexing
-// was chosen to prevent for WC — so it disqualifies CV for GL.
+// ⚠ THE ORIGINAL REASON FOR THIS DEPARTURE IS GONE. IT READ:
+//
+//   "WC's grid is CV-indexed because CV is trend-invariant there. That argument
+//    does NOT survive GL's severity cap: GL_SEVERITY_CAP is FIXED while
+//    severity inflates, so a fixed ceiling is a SHRINKING share of an inflating
+//    distribution and the CAPPED per-claim CV moves with the year... Indexing a
+//    grid on a quantity that itself slides with trend is exactly the failure
+//    CV-indexing was chosen to prevent for WC — so it disqualifies CV for GL."
+//
+// The ceiling trends now (glSeverityCap), so the capped per-claim CV is
+// trend-invariant to 2e-16 and gl-claim-check.ts section 2c(iv) ASSERTS that
+// where it used to report a 3.31% drift. CV is no longer disqualified.
+//
+// THE DEPARTURE STANDS ANYWAY, on the second argument below, which never
+// depended on the cap. That distinction is the whole reason this is rewritten
+// rather than deleted: a conclusion propped up by two arguments does not become
+// wrong when one of them dies, but it does become wrong to keep citing the dead
+// one. Nothing here is evidence FOR re-indexing on CV — only that one objection
+// to it has lapsed.
 //
 // LAMBDA is what CV is a function of anyway (annual CV falls roughly as
 // 1/sqrt(lambda) at fixed severity CV), and it is trend-invariant by

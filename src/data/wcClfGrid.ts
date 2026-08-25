@@ -88,6 +88,28 @@
 //   - claim COUNTS do not move at all, because frequency reads REAL (frozen)
 //     payroll while only the rating side sees the wage factor.
 //
+// ⚠ THE FIRST BULLET HOLDS ONLY BECAUSE THE CEILING TRENDS, and it was briefly
+// FALSE. s^k factors out of an unbounded lognormal, and it factors out of one
+// truncated at a ceiling that moves with it — but NOT out of one truncated at a
+// FIXED dollar amount, because inflating severity against a stationary $85M cap
+// genuinely shortens the relative tail. While the cap was nominal, aggregate CV
+// on a fixed 61-member book drifted Y1 -> Y10 by +3.15% against +6.99%
+// uncapped: the severity trend's own contribution was about -3.8pp instead of
+// zero, and the bullet had to be withdrawn.
+//
+// wcSeverityCap restores it. Re-measured on the same book, the drift is now
+// +6.97% — the severity trend contributes ZERO again, and the residual is the
+// FREQUENCY trend, which was always there and which this bullet never claimed
+// anything about. (+6.97% vs the uncapped +6.99% is not leftover tightening:
+// the frequency-driven drift acts on a capped severity shape, whose m2/m1^2
+// differs slightly from the uncapped one, so the same mechanism lands 0.02pp
+// apart.)
+//
+// So the axis argument below is back on its original footing rather than a
+// weakened one. If the ceiling is ever re-pinned to a constant, this bullet
+// must be withdrawn again — wc-cap-check.ts section 3 asserts the scaling and
+// will fail first.
+//
 // So a book whose payroll inflates does NOT slide along this curve and does NOT
 // get cheaper margin — which is correct: a pool whose members' wages rose has
 // the same workers and the same injuries and has not become more credible.
@@ -119,6 +141,38 @@
 // CLAMPED to the nearest endpoint rather than extrapolated — the grid spans
 // the enrollable range, and extrapolating a linear trend past measured bounds
 // risks producing something worse than clamping.
+//
+// ============================================================================
+// ⚠ OPEN ITEM: THIS GRID WAS DERIVED BEFORE WC_SEVERITY_CAP AND HAS NOT BEEN
+// RE-DERIVED AGAINST IT. Recorded rather than fixed, deliberately — read this
+// before trusting a number that came out of interpolateGridRatio.
+//
+// The ratios below are Monte Carlo percentiles of an UNCAPPED WC aggregate —
+// and the ceiling has since gained a trend as well, so the gap is now two
+// changes wide rather than one.
+// wcAggregateCumulants now reports a CAPPED CV. So a lookup feeds a capped
+// input into an uncapped curve, and the cap does not only move the CV — at a
+// GIVEN CV it also lightens skewness and kurtosis, which is what sets the ratio
+// at the far stops. The bias therefore runs one way and is largest where it is
+// least visible: the grid should now read slightly HIGH at 95/97.5/99.
+//
+// WHY THIS DOES NOT AFFECT A SHIPPED NUMBER. The engine does not price off this
+// grid. fundingConsequence reads staticClfCrossing -> STATIC_CLF_TABLE.WC
+// (clfTables.ts), which WAS re-derived under the cap in the same commit that
+// introduced it. computeWcClf has no caller in src/ outside this module's own
+// crossing helper; its live consumers are diagnostics. Verified by search, not
+// assumed — and it is the reason this is an open item rather than a defect.
+//
+// WHY IT IS NOT RE-DERIVED HERE. Re-deriving is a multi-hour Monte Carlo across
+// eight book sizes, and folding it into a calibration commit would put two
+// re-derivations in one diff with no way to attribute a later movement to
+// either. The same reasoning kept IBNER off this commit.
+//
+// WHAT WOULD CLOSE IT: re-run scripts/diagnostics/wc-clf-grid-derive.ts under
+// the cap and replace the entries below. Until then, treat a grid ratio as a
+// reference figure on the pre-cap basis, and settle any question that matters
+// with the static table instead.
+// ============================================================================
 export interface WcClfGridEntry {
   size: number;
   exposure: number;

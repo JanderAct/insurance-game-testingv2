@@ -3,21 +3,39 @@
 //
 //   GAMES=200 YEARS=8 npx tsx scripts/diagnostics/wc-above-tower-report.ts
 //
-// WHY THIS EXISTS. Gating the aggregate on the occurrence layer closes the
-// all-declined case: you can no longer buy a stop-loss over an uncapped
-// per-occurrence retention. It does NOT close the top of WC's own tower. With
-// EVERYTHING purchased the tower reaches $50M, and above that the pool retains
-// without limit, because WC severity has no cap. GL is capped at $100M and
-// Property at $75M — WC is the only uncapped line, so it is the only line where
-// "retained above tower" is an unbounded quantity rather than a band with a
-// known ceiling.
+// ⚠ THE SEVERITY-CAP DECISION THIS REPORT EXISTED TO INFORM HAS BEEN TAKEN, and
+// its answer changes how the report reads. WC's ceiling is $85M in YEAR-1
+// dollars and TRENDS with severity thereafter, so the band above the tower is
+// bounded but WIDENS: $85M - $50M = $35M per occurrence in year 1, and
+// $117.6M - $50M = $67.6M by year 10. Every line has a finite ceiling now.
 //
-// That is a severity-cap decision, not a reinsurance decision, and it should be
-// made against numbers rather than against the observation that the band is
-// unbounded in principle. So this measures what it actually costs: the expected
+// ⚠ THE WIDENING IS THE TOWER ERODING, NOT THE CEILING MISBEHAVING. The $50M
+// tower top is a nominal contract; severity inflates past it. A ceiling pinned
+// to a constant used to hide half of that by shrinking the modelled tail at the
+// same time, which made this band look stable when the pool's real exposure
+// above its tower was growing. If this report is used to size a retention, read
+// the band per YEAR and not as one number.
+//
+// This header used to say "WC is the only uncapped line, so it is the only line
+// where retained above tower is an unbounded quantity rather than a band with a
+// known ceiling", and closed with "REPORT ONLY — nothing above is asserted and
+// no cap was changed". Both were true when written and neither is now.
+//
+// ⚠ SECTION 2's SAMPLE MAXIMUM IS THE FIGURE MOST CHANGED BY THAT, and it is
+// the one to be careful about. It used to be unbounded above — "a longer run
+// finds a larger worst year indefinitely" — and it no longer is: no occurrence
+// can exceed THAT YEAR'S ceiling, so the largest possible above-tower band is
+// that ceiling minus $50M (year 1 $35M, year 10 $67.6M) and a year's total is
+// bounded only by how many such occurrences it contains.
+// The EXPECTED cost and the return period remain the two figures worth reading.
+//
+// WHAT IT STILL MEASURES, and why it is still worth running: the expected
 // annual retained-above-tower loss on the DEFAULT decision set (full tower
 // placed, which is the arm where the band is the pool's only remaining
 // exposure), how often it is non-zero at all, and the worst single year seen.
+// A bounded band is not a free one — $35M per occurrence against a pool
+// carrying ~$20M of surplus is still the largest single retained exposure WC
+// has, and the cap changed its ceiling rather than its importance.
 //
 // ⚠ MEASURED WITH THE FULL TOWER PLACED, deliberately. Declining layers puts
 // loss back BELOW the tower top, not above it, so retainedAboveTower is
@@ -200,10 +218,10 @@ console.log('\n=== 2. THE TAIL, SAMPLED FROM THE GENERATOR ===');
   console.log(`  worst year in the sample             ${fmt$(worstYear)}`);
   console.log(`  largest single occurrence         ${fmt$(worstClaim)}`);
   console.log(`  all-years percentiles  p99 ${fmt$(q(0.99))}  p99.9 ${fmt$(q(0.999))}`);
-  console.log(`\n  ⚠ THE MAXIMUM IS STILL A SAMPLE MAXIMUM. WC severity is uncapped, so`);
+  console.log(`\n  ⚠ THE MAXIMUM IS A SAMPLE MAXIMUM OF A NOW-BOUNDED QUANTITY. It used to`);
   console.log(`  there is no value this converges to — a longer run finds a larger worst`);
   console.log(`  year indefinitely. The EXPECTED cost and the return period are the two`);
   console.log(`  figures here that are estimates of something finite.`);
 }
 
-console.log('\nREPORT ONLY — nothing above is asserted and no cap was changed.');
+console.log('\nREPORT ONLY — nothing above is asserted. The cap this informed is now in force.');

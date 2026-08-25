@@ -342,9 +342,17 @@ export function normalizeLayersPlaced(line: TowerLine, placed: boolean[] | undef
 // WC IS THE WORSE CASE OF THE TWO, and it was gated one commit after Property
 // so that commit's line control stayed clean. Measured: with all three layers
 // declined WC's aggregate attaches at $19.17M with a $17.42M limit, so it tops
-// out at $36.59M — and WC severity is UNBOUNDED. Property tops out at $28.75M
-// against a $75M cap, so Property's ungated worst case is at least FINITE;
-// WC's is not. WC's measured tail carries a 1-in-250-year claim at $71.2M and
+// out at $36.59M, against a WC ceiling of $85M in year 1. This read "and WC
+// severity is UNBOUNDED... Property's ungated worst case is at least FINITE;
+// WC's is not" before that cap existed. Both worst cases are finite now — WC's
+// year-1 gap above its ungated aggregate is $85M - $36.59M = $48.4M against
+// Property's $75M - $28.75M = $46.3M — so the gate's justification is now a
+// comparison of two bounded exposures rather than bounded against unbounded. It
+// is the same gate for the same reason; only the sharpness of the contrast
+// changed. ⚠ THE WC FIGURE IS YEAR-1: wcSeverityCap trends and the aggregate's
+// attachment does not, so WC's gap widens to $117.6M - $36.59M = $81.0M by year
+// 10 while Property's holds at $46.3M. The contrast sharpens again with time,
+// which strengthens this gate rather than weakening it. WC's measured tail carries a 1-in-250-year claim at $71.2M and
 // a $248.84M claim observed in 1,000 game-years. Ungated, that $248M claim
 // leaves the pool retaining $231M against an opening surplus near $11M — the
 // aggregate's limit is consumed by a fraction of one claim and there is no

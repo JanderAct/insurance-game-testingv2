@@ -50,10 +50,11 @@ import type {
   Region,
 } from '../types/simulation';
 import { deriveSubRng } from './random';
-import { memoizeByYear } from './claimMath';
+import { limitedExpectedValue, memoizeByYear } from './claimMath';
 import {
   WC_LOSS_MODEL,
   WC_RATING_GROUPS,
+  WC_SEVERITY_CAP,
   WC_SEVERITY_COMPONENTS,
   type WcComponentKey,
   type WcRatingGroup,
@@ -161,10 +162,58 @@ export function trendedMu(mu: number, yearNumber: number): number {
   return mu + Math.log(wcSeverityTrend(yearNumber));
 }
 
-// Mean of one mixture component. exp(mu + sigma^2 / 2).
-export function componentMean(key: WcComponentKey, yearNumber = 1): number {
+// THE CEILING IN THAT YEAR'S DOLLARS. WC_SEVERITY_CAP is the YEAR-1 ceiling and
+// this trends it at the same rate the severity itself trends.
+//
+// ⚠ THIS IS WHAT MAKES THE SEVERITY-SCALE INVARIANCE TRUE. A ceiling fixed in
+// nominal dollars while mu walks up is a ceiling that tightens in real terms —
+// $85M was 28% smaller by year 10 in year-1 terms. That is not a neutral
+// choice: it silently changes the SHAPE of the modelled distribution over a
+// game, which is why the aggregate CV drifted and why both this file's and
+// wcClfGrid's severity-scale invariance had to be written down as FALSE.
+//
+// With the ceiling trending alongside the distribution the algebra closes:
+//
+//   min(s X, s L) = s min(X, L)   =>   E[min(s X, s L)] = s E[min(X, L)]
+//
+// so every capped moment scales by exactly s^k again, the CV is genuinely
+// trend-invariant, and a held year-1 pure premium times the raw trend is once
+// more the right price. Verified to 2.7e-15 relative, not assumed.
+//
+// FLOORED AT YEAR 1 and memoized on that floor, matching wcSeverityTrend
+// exactly — the cap must floor with the trend it rides on, or the pre-game
+// years would draw against a ceiling their severities never see.
+export const wcSeverityCap = memoizeByYear(
+  (yearNumber: number) => WC_SEVERITY_CAP * wcSeverityTrend(yearNumber),
+  yearNumber => Math.max(1, yearNumber),
+);
+
+// Mean of one mixture component, CAPPED at that year's ceiling.
+//
+// ⚠ THE CAP IS SCALED BY THE REGION MULTIPLIER, NOT APPLIED FLAT, and getting
+// that wrong would break the matched pair in a way no total would reveal. The
+// draw is `min(lognormal(mu, sigma) x regionMult, CAP_t)`, i.e. the region
+// factor multiplies the claim BEFORE the ceiling bites. So the matching
+// analytic is
+//
+//   E[min(regionMult x X, CAP_t)] = regionMult x E[min(X, CAP_t / regionMult)]
+//
+// and the per-component limit is CAP_t/regionMult rather than CAP_t. Passing
+// the cap directly would price a High-region claim as if its ceiling were
+// 1/mult times too high — finding 37's failure class again: a factor reaching
+// one side of a matched pair only.
+//
+// ⚠ `limit` NOW DEFAULTS TO THE YEAR'S CAP, NOT THE YEAR-1 CONSTANT. It used to
+// read `limit = WC_SEVERITY_CAP`, which was correct only while the ceiling was
+// nominal; leaving it would have left every default-limit caller pricing year 10
+// against a year-1 ceiling — the same matched-pair break this comment warns
+// about, arriving through a default argument instead of a forgotten factor.
+// Callers that scale by a region must still pass the scaled limit;
+// expectedClaimSeverity below does.
+export function componentMean(key: WcComponentKey, yearNumber = 1, limit?: number): number {
   const c = WC_SEVERITY_COMPONENTS[key];
-  return Math.exp(trendedMu(c.mu, yearNumber) + (c.sigma * c.sigma) / 2);
+  return limitedExpectedValue(
+    trendedMu(c.mu, yearNumber), c.sigma, limit ?? wcSeverityCap(yearNumber));
 }
 
 // THE RISK-QUALITY SEVERITY TILT. Multiplies the HEAVY component's weight and
@@ -210,8 +259,11 @@ export function expectedClaimSeverity(
   params = M,
 ): number {
   const mix = params.ratingGroups[group].mix;
+  // See componentMean: the ceiling applies to the REGION-SCALED claim, so the
+  // per-component limit is THAT YEAR'S cap divided through by that scale.
+  const limit = wcSeverityCap(yearNumber) / Math.max(regionMult, 1e-12);
   let total = 0;
-  for (let i = 0; i < mix.length; i++) total += weights[i] * componentMean(mix[i].component, yearNumber);
+  for (let i = 0; i < mix.length; i++) total += weights[i] * componentMean(mix[i].component, yearNumber, limit);
   return total * regionMult;
 }
 
@@ -269,7 +321,10 @@ function expectedWcGrossLossCore(
       if (options.componentFreqMultipliers) {
         componentLambda *= shockFactorFor(options.componentFreqMultipliers, g.mix[i].component);
       }
-      total += componentLambda * componentMean(g.mix[i].component, options.yearNumber ?? 1) * regionMult;
+      const yr = options.yearNumber ?? 1;
+      total += componentLambda
+        * componentMean(g.mix[i].component, yr, wcSeverityCap(yr) / Math.max(regionMult, 1e-12))
+        * regionMult;
     }
   }
   return total;
@@ -483,7 +538,17 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
           // The trend-free-lag warning that stood here is retired with the lag
           // itself: there is no longer a gap between accident and report year for
           // a trend to be applied over, so E[(1+r)^lag] cannot arise.
-          const amount = sevRng.lognormal(trendedMu(spec.mu, yearNumber), spec.sigma) * regionMult;
+          // ⚠ CAPPED AFTER THE REGION MULTIPLIER, matching componentMean's
+          // scaled limit exactly. Capping before it would let a High-region
+          // claim exceed the ceiling by the region factor.
+          //
+          // ⚠ AND AT THIS YEAR'S CEILING, not the year-1 constant. trendedMu
+          // above already moved the distribution; the ceiling moves with it, so
+          // the draw and expectedClaimSeverity stay the same truncated
+          // distribution in every year rather than only in year 1.
+          const amount = Math.min(
+            sevRng.lognormal(trendedMu(spec.mu, yearNumber), spec.sigma) * regionMult,
+            wcSeverityCap(yearNumber));
           const id = `wc-${yearNumber}-${member.id}-${componentKey}-${n}`;
           emit(id, member.id, member.region, group, componentKey, amount, yearNumber, yearNumber);
         }
@@ -559,11 +624,25 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
         // see the note on WcGenerationInputs.injections.
         injSeq += 1;
         const id = `wc-inject-${yearNumber}-${injSeq}`;
-        emit(id, pick.member.id, pick.member.region, pick.group, 'injected', injection.amount, yearNumber, yearNumber);
+        // ⚠ AN INJECTED CLAIM IS CAPPED TOO, AT THIS YEAR'S CEILING. The cap is
+        // a statement about what a WC claim can cost, so an instructor-triggered
+        // event cannot exceed it either — otherwise "WC severity is bounded"
+        // would be false on exactly the path most likely to be pointed at in a
+        // classroom. Inert against the current catalog (its two WC injections
+        // are $900k and $9M), so this changes no shipped scenario; it is here
+        // so a future $200M event is clamped rather than silently reopening
+        // the unbounded band.
+        //
+        // The injected amount is a NOMINAL instruction — the instructor names a
+        // dollar figure — so it is not trended, but the ceiling it is clamped
+        // against is. A $200M event injected in year 10 therefore lands at that
+        // year's higher ceiling, not year 1's.
+        const injectedAmount = Math.min(injection.amount, wcSeverityCap(yearNumber));
+        emit(id, pick.member.id, pick.member.region, pick.group, 'injected', injectedAmount, yearNumber, yearNumber);
         claimCountsByGroup[pick.group] += 1;
-        injectedByMember.set(pick.member.id, (injectedByMember.get(pick.member.id) ?? 0) + injection.amount);
+        injectedByMember.set(pick.member.id, (injectedByMember.get(pick.member.id) ?? 0) + injectedAmount);
         count += 1;
-        gross += injection.amount;
+        gross += injectedAmount;
       }
       injectionResults.push({ count, gross });
     }

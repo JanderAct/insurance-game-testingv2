@@ -50,6 +50,7 @@
 import type { Member } from '../types/simulation';
 import { WC_LOSS_MODEL, WC_SEVERITY_COMPONENTS } from '../data/defaultAssumptions';
 import { WC_CLF_GRID, WC_CLF_PERCENTILE_STOPS } from '../data/wcClfGrid';
+import { normalCdf } from './claimMath';
 import {
   ratingGroupOf,
   regionMultiplier,
@@ -57,6 +58,7 @@ import {
   tiltedWeights,
   trendedMu,
   wcFrequencyTrend,
+  wcSeverityCap,
 } from './wcClaimEngine';
 
 const M = WC_LOSS_MODEL;
@@ -65,9 +67,36 @@ const M = WC_LOSS_MODEL;
 // the noise's dispersion is picked up here automatically.
 const ALPHA = M.memberFrequencyNoise.shape;
 
-// k-th raw moment of a lognormal(mu, sigma) draw: E[X^k] = exp(k*mu + k^2 sigma^2/2).
-function lognormalRawMoment(mu: number, sigma: number, k: number): number {
-  return Math.exp(k * mu + (k * k * sigma * sigma) / 2);
+// k-th raw moment of a lognormal(mu, sigma) draw TRUNCATED AT `limit`:
+//
+//   E[min(X, L)^k] = exp(k mu + k^2 sigma^2 / 2) x Phi(d - k sigma) + L^k (1 - Phi(d))
+//   where d = (ln L - mu) / sigma
+//
+// ⚠ THE UNCAPPED FORM WAS exp(k mu + k^2 sigma^2 / 2) AND IT WAS WRONG THE
+// MOMENT WC GAINED A CEILING. These moments feed the compound-Poisson cumulants
+// the CLF grid is built from, and the HIGHER the order the more of the moment
+// sits in the tail the cap removes — on component `large` (sigma 2.00) the
+// uncapped 4th raw moment is dominated by mass above the year's ceiling that
+// the draw can no longer produce. Leaving it uncapped would have described a distribution with
+// a heavier tail than the generator has, which is the same matched-pair failure
+// the draw/analytic check guards, one level up.
+//
+// ⚠ THE REGION SCALE MUST BE INSIDE THE LIMIT, not applied to the result. The
+// caller passes limit = CAP_t / regionMult and multiplies by regionMult^k
+// afterwards, which is E[min(regionMult X, CAP_t)^k] — see the same reasoning
+// at wcClaimEngine's componentMean. CAP_t is that YEAR'S ceiling.
+//
+// Phi is claimMath's normalCdf rather than a local erfc, deliberately: at k = 1
+// this expression then reduces TERM BY TERM to limitedExpectedValue, which is
+// what componentMean calls. The matched-pair check compares a draw against
+// componentMean and the CLF grid is built from these moments, so the two sides
+// sharing one normal CDF makes their agreement exact rather than approximate to
+// two different ~1.5e-7 approximations.
+function lognormalRawMoment(mu: number, sigma: number, k: number, limit: number): number {
+  if (!Number.isFinite(limit)) return Math.exp(k * mu + (k * k * sigma * sigma) / 2);
+  const d = (Math.log(limit) - mu) / sigma;
+  return Math.exp(k * mu + (k * k * sigma * sigma) / 2) * normalCdf(d - k * sigma)
+    + Math.pow(limit, k) * (1 - normalCdf(d));
 }
 
 // One member's c_1..c_4 — Lambda_i x (raw moment) summed over that member's
@@ -93,10 +122,41 @@ function memberRawCumulantSeeds(member: Member, kLine: number, yearNumber: numbe
     const comp = WC_SEVERITY_COMPONENTS[spec.mix[i].component];
     for (let k = 1; k <= 4; k++) {
       // TRENDED, so the cumulants describe the same distribution the draw
-      // produces. The k-th raw moment scales as s^k, so kappa_1 -> s x kappa_1
-      // and kappa_2 -> s^2 x kappa_2 — and CV = sqrt(kappa_2)/kappa_1 is
-      // therefore UNCHANGED. See the note on the CLF grid's interpolation axis.
-      c[k - 1] += lambdaI * Math.pow(regionMult, k) * lognormalRawMoment(trendedMu(comp.mu, yearNumber), comp.sigma, k);
+      // produces.
+      //
+      // THE SEVERITY TREND SCALES EVERY RAW MOMENT BY s^k, so kappa_1 -> s x
+      // kappa_1 and kappa_2 -> s^2 x kappa_2, leaving CV = sqrt(kappa_2)/kappa_1
+      // exactly unchanged.
+      //
+      // ⚠ THAT HOLDS ONLY BECAUSE THE CEILING TRENDS WITH THE DISTRIBUTION, and
+      // it is worth knowing it was briefly false. While WC_SEVERITY_CAP was a
+      // FIXED number of dollars this claim had to be withdrawn: scaling severity
+      // by s moved the distribution TOWARD a stationary ceiling instead of
+      // sliding it along a line with no end, so the capped moments did not
+      // scale. Measured then, on a fixed 61-member book, the aggregate CV
+      // drifted Y1 -> Y10 by +3.15% capped against +6.99% uncapped — the fixed
+      // cap contributing -3.84pp, enough to move CLF@0.80 from 1.23392 to
+      // 1.23808.
+      //
+      // wcSeverityCap(yearNumber) restores it. min(s X, s L) = s min(X, L), so
+      // E[min(s X, s L)^k] = s^k E[min(X, L)^k] EXACTLY — verified to 2.7e-15
+      // relative in wc-cap-check.ts rather than taken on the algebra. Do not
+      // pin the limit below back to a constant without also withdrawing this
+      // paragraph and wcClfGrid's matching one.
+      //
+      // ⚠ THE REGION SCALE IS A DIFFERENT MATTER AND STILL DOES NOT FACTOR OUT.
+      // regionMult varies BETWEEN members within one year while the ceiling
+      // does not follow it — a $85M cap is $85M whether the claimant is North
+      // or South, because it is a fact about claims and not about geography. So
+      // the limit below is CAP_t/regionMult and a South member sits marginally
+      // nearer its effective ceiling: on the heavy `large` component the
+      // severity CV runs 6.2997 / 6.2655 / 6.2324 across the three regions,
+      // about +-0.5%. That asymmetry is intended. The TREND is a restatement of
+      // the same distribution in later dollars; the REGION is a genuinely
+      // different risk meeting the same ceiling.
+      c[k - 1] += lambdaI * Math.pow(regionMult, k)
+        * lognormalRawMoment(trendedMu(comp.mu, yearNumber), comp.sigma, k,
+                             wcSeverityCap(yearNumber) / Math.max(regionMult, 1e-12));
     }
   }
   return c;

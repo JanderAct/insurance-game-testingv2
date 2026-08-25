@@ -60,7 +60,8 @@
 // says so): it carries prior-year emergence and excludes this year's delayed
 // claims. The two bases give crossings 4.6pp apart on WC (47.2% incurred vs
 // 51.8% ultimate) and 1.9pp apart on GL (68.6% vs 70.5%, the gap being reserve
-// paydown timing since GL has no IBNR). Choosing the ultimate basis would have
+// paydown timing since GL has no IBNR; both are pre-trending-ceiling figures,
+// the GL incurred crossing now being 70.9%). Choosing the ultimate basis would have
 // made every stop label overstate what the player's surplus does, which is the
 // same class of defect the net-funding change removed.
 //
@@ -121,11 +122,45 @@
 // i.e. what "Expected" (CLF exactly 1.000) delivers against each line's own
 // distribution:
 //
-//     WC 47.2%  (95% CI 46.6-47.8)      GL 68.6%  (95% CI 68.1-69.1)
+//     WC 44.1%  (95% CI 43.4-45.0)      GL 70.9%  (95% CI 70.2-71.5)
 //
-// ⚠ GL's SHIPPED crossing is 57.7%, not 68.6%, because the supplied curve is in
-// force. 68.6% remains the truth about GL's distribution; 57.7% is what the
-// supplied curve reports. See GL_SUPPLIED.
+// ⚠ WC's CROSSING MOVED 47.2% -> 44.1% WITH WC_SEVERITY_CAP, outside its own
+// old CI, and the direction is the informative part. The cap lowers EXPECTED
+// gross loss by 0.32%, but per-layer expected CEDED loss is BIT-IDENTICAL
+// (every WC layer bound tops at $50M, below the $85M ceiling — measured, not
+// assumed). So E[retained] = E[gross] - E[ceded] falls by MORE than 0.32% in
+// relative terms, the pool premium falls with it, and typical realised losses
+// fall only on the rare years the cap binds. The ratio therefore rises on an
+// ordinary year and "Expected" reaches break-even at a LOWER percentile.
+//
+// The 3.1pp size is amplified by something already recorded below: WC's
+// crossing sits where the ratio density is highest, so a small distributional
+// shift moves it a lot.
+//
+// ⚠ GL's CROSSING THEN MOVED 68.6% -> 70.9% WHEN THE CEILINGS STARTED TRENDING,
+// outside its own old CI, and WC's did NOT move at all (44.1% both times, and
+// its table shifted only in the 4th decimal). The asymmetry is the diagnostic
+// part, so do not read the two as one effect:
+//
+//   - GL's severity trend is 5.7026% against WC's 3.67%, and its old ceiling
+//     was proportionally tighter, so a stationary $100M was truncating far
+//     more of GL's later-year tail than $85M was of WC's.
+//   - GL's PRICE moved and WC's did not. GL prices at glCappedSeverityTrend,
+//     which was BELOW the raw trend and is now equal to it (+2.24% at year 10).
+//     WC already priced at its raw trend, so only WC's DRAW moved.
+//
+// The mechanism behind the 2.3pp: mean and price still match, but the shape
+// changed. GL's 99th stop rose 5.6018 -> 6.5251 while its median FELL
+// 0.8509 -> 0.8307 — mass moved out of the middle and into the extreme tail,
+// because the trending ceiling stops truncating exactly the largest later-year
+// claims. A more right-skewed ratio distribution crosses 1.000 at a HIGHER
+// percentile. That skew is not a side effect to be tidied away: a fixed ceiling
+// lightening a line's tail a little more every year was the defect.
+//
+// ⚠ GL's SHIPPED crossing is 57.7%, not 70.9%, because the supplied curve is in
+// force — and the supplied curve did NOT move, so GL's shipped pricing is
+// unchanged by the trending ceiling. 70.9% is the truth about GL's
+// distribution; 57.7% is what the supplied curve reports. See GL_SUPPLIED.
 //
 // THE SANITY CHECK AGAINST REAL EXPERIENCE, and it needs the right basis to
 // read. Real public-entity pools put the mean year near the 55th percentile.
@@ -138,7 +173,7 @@
 // they are compared on the same one.
 //
 // GL is expected NOT to match the 55th-percentile benchmark and does not,
-// landing at 68.6%. That is structural rather than an error: GL retains 8.0% of
+// landing at 70.9%. That is structural rather than an error: GL retains 8.0% of
 // ground-up loss ABOVE the tower, unhedgeable, against WC's 0.7%. A retained
 // distribution carrying a large untransferable spike has a median well below its
 // mean, so funding at the mean covers the median year comfortably.
@@ -180,6 +215,21 @@
 //   pass 3 (with pass 2 installed)             WC 43.5%   converged
 // Pass 3 reproduces pass 2 to three decimals at every stop (p50 1.0384 vs
 // 1.0385, p90 1.3709 vs 1.3714).
+//
+// AND AGAIN at the WC severity cap, and AGAIN at the trending ceilings. Both of
+// those converged in ONE pass rather than three, and both were CONFIRMED by a
+// second run rather than assumed from the note above:
+//
+//   WC severity cap        pass 1 and pass 2 BIT-IDENTICAL at all 20 stops
+//   trending ceilings      pass 1 and pass 2 BIT-IDENTICAL at all 20 stops,
+//                          BOTH LINES, crossings 44.1% (WC) and 70.9% (GL)
+//                          identical across the two passes
+//
+// One pass is now the expected outcome, not a lucky one — a3d7760 cut the link
+// that made installing a table move the opening book. The second run is still
+// worth its two minutes: it is what distinguishes "converged" from "happened to
+// land on the same numbers", and it is cheap against re-deriving a table that
+// silently did not.
 // GL's derived curve re-measured at 68.7% across that change, unmoved — WC's
 // report lag never touched it, which is the same thing the GL-solo leak check
 // says byte-for-byte.
@@ -218,8 +268,8 @@ const WC_DERIVED: ClfTable = {
   source: 'derived',
   stops: [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 97.5, 99],
   clf: [
-    0.7661, 0.8134, 0.8539, 0.8877, 0.9211, 0.9521, 0.9800, 1.0083, 1.0384, 1.0674,
-    1.0974, 1.1289, 1.1650, 1.2056, 1.2496, 1.3014, 1.3709, 1.4783, 1.5750, 1.7154,
+    0.7652, 0.8138, 0.8541, 0.8865, 0.9195, 0.9485, 0.9771, 1.0042, 1.0334, 1.0635,
+    1.0933, 1.1237, 1.1598, 1.1992, 1.2419, 1.2969, 1.3677, 1.4731, 1.5749, 1.7015,
   ],
 };
 
@@ -245,15 +295,19 @@ const WC_DERIVED: ClfTable = {
 //
 // Peak over-delivery is +10.5pp at the 60% stop. It converges at the top and
 // slightly UNDER-delivers at 95%. And its top stop of 1.701 covers only 94.0% of
-// GL line-years against GL's own 99th percentile of 5.60, so on this curve
+// GL line-years against GL's own 99th percentile of 6.53, so on this curve
 // NEAR-CERTAINTY IS NOT PURCHASABLE at any slider position — the most a player
 // can buy is about the 94th percentile of the real retained distribution.
 //
-// THE CROSSING MOVES 68.6% -> 57.7% AS DISPLAYED, and the difference is BOOK
+// THE CROSSING MOVES 70.9% -> 57.7% AS DISPLAYED, and the difference is BOOK
 // SIZE. Note what does NOT move: "Expected" still covers 68.1% of GL line-years
-// in measurement, because it bypasses the table entirely. So the displayed
+// in measurement, because it bypasses the table entirely. (That 68.1% is a
+// BACKTEST COVERAGE figure, not the crossing, and it has not been re-measured
+// since the ceilings started trending — the 10.4pp below is therefore on the
+// pre-trending basis. The crossing it is often confused with moved 68.6% ->
+// 70.9%; these are two different quantities and only one was re-derived.) So the displayed
 // figure now UNDERSTATES GL's real coverage at Expected by 10.4pp. GL's
-// derived curve crosses at 68.6% because a 62-member pool's retained loss is
+// derived curve crosses at 70.9% because a 62-member pool's retained loss is
 // genuinely more volatile and more skewed than the pool this curve came from;
 // a skewed distribution has its median well below its mean, so funding at the
 // mean covers more than half the years. The supplied curve, from a larger and
@@ -286,10 +340,15 @@ const GL_SUPPLIED: ClfTable = {
 // anyone revisiting the supplied curve needs both to compare. Derived by the
 // same backtest and the same iteration-to-fixed-point as WC's — see the header.
 //
-// Crosses at 68.6%. Its 97.5 and 99 stops (3.5440, 5.6018) are imprecise and
+// Crosses at 70.9%. Its 97.5 and 99 stops (3.3484, 6.5251) are imprecise and
 // that is the distribution rather than the sample: GL's retained tail carries
 // the unhedgeable above-tower band, so its upper percentiles are genuinely
-// unstable (95% CI half-width +/-0.19 at the 97.5th against WC's +/-0.011).
+// unstable (95% CI half-width +/-0.28 at the 97.5th against WC's +/-0.012).
+//
+// ⚠ THOSE TWO STOPS MOVED MOST WHEN THE CEILING STARTED TRENDING — the 99th
+// from 5.6018 to 6.5251 — because they are exactly the region a fixed ceiling
+// was truncating. Their imprecision means the MOVE is less well resolved than
+// the bulk of the curve; the direction is not in doubt, the third decimal is.
 //
 // EXPORTED, and it has a real consumer: gl-supplied-clf-check.ts measures the
 // supplied curve against it. That keeps it type-checked and honest rather than
@@ -298,8 +357,8 @@ export const GL_DERIVED: ClfTable = {
   source: 'derived',
   stops: [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 97.5, 99],
   clf: [
-    0.5397, 0.5924, 0.6385, 0.6778, 0.7139, 0.7492, 0.7812, 0.8161, 0.8509, 0.8874,
-    0.9264, 0.9672, 1.0136, 1.0667, 1.1331, 1.2222, 1.3642, 1.8897, 3.5440, 5.6018,
+    0.5306, 0.5822, 0.6230, 0.6622, 0.6982, 0.7316, 0.7646, 0.7963, 0.8307, 0.8662,
+    0.9046, 0.9469, 0.9918, 1.0443, 1.1080, 1.1954, 1.3407, 1.8318, 3.3484, 6.5251,
   ],
 };
 
@@ -392,13 +451,13 @@ export function staticClf(line: StaticClfLine, confidenceLevel: number): number 
 // The percentile at which a table crosses 1.000 — what "Expected" delivers.
 //
 // DERIVED FROM THE TABLE, never stored alongside it, so the two cannot drift.
-// WC 47.2% (its own measured crossing, since its table is derived from that same
-// sample); GL 57.7% on the supplied curve, against 68.6% on its derived one.
+// WC 44.1% (its own measured crossing, since its table is derived from that same
+// sample); GL 57.7% on the supplied curve, against 70.9% on its derived one.
 //
 // ⚠ ON GL THIS IS NOW A DISPLAY FIGURE FOR A CURVE THAT IS NOT THE MODEL'S OWN.
 // It correctly reports where the SUPPLIED table crosses, which is what the pool
 // is actually being charged against; it is NOT where GL's real retained
-// distribution crosses. Those differ by 10.9pp and the gap is recorded above.
+// distribution crosses. Those differ by 13.2pp and the gap is recorded above.
 //
 // Returns a 0-1 fraction, clamped to the table's stop range.
 export function crossingOf(table: ClfTable): number {

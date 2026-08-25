@@ -44,6 +44,7 @@ import {
   expectedGlGrossLossForPricing,
   generateGlClaims,
   glCappedSeverityTrend,
+  glSeverityCap,
   glInternals,
   glSeverityTrend,
   GL_SEVERITY_TREND_PER_YEAR,
@@ -257,30 +258,45 @@ console.log('\n--- 2c. THE TREND PAIR: severity and payroll growth, and the four
     worstFactor = Math.max(worstFactor, Math.abs(measured / glCappedSeverityTrend(y) - 1));
   }
   console.log(`  [ANALYTIC] priced expectation grows as glCappedSeverityTrend, years 1-20: worst |rel diff| ${worstFactor.toExponential(2)}  ${note(worstFactor < 1e-12, 'the priced expectation does not grow at glCappedSeverityTrend — the pricing year factor and the capped analytic disagree')}`);
-  console.log('  raw vs capped year factor (the over-charge the raw trend would cause):');
+  // ⚠ THIS ASSERTION WAS REVERSED WHEN THE CEILING STARTED TRENDING. It used to
+  // require capped < raw ("the cap bites harder as severity inflates past a
+  // FIXED ceiling") and it printed the over-charge the raw trend would cause:
+  //   year  2 +0.21%   year  5 +0.90%   year 10 +2.24%   year 20 +5.82%
+  // With glSeverityCap trending, min(s X, s L) = s min(X, L), so the capped
+  // year factor IS the raw trend and every one of those gaps is zero. Keeping
+  // the old inequality would now fail on correct code; keeping no assertion at
+  // all would let the ceiling be re-pinned silently. So it is asserted as an
+  // EQUALITY, which is the strong form: it fails if the ceiling stops trending
+  // AND it fails if the ratio ever stops being computed from the analytic.
+  console.log('  raw vs capped year factor (must now agree exactly — the ceiling trends):');
+  let worstTrendGap = 0;
   for (const y of [2, 5, 10, 20]) {
     const raw = glSeverityTrend(y), cap = glCappedSeverityTrend(y);
-    console.log(`    year ${String(y).padStart(2)}: raw ${raw.toFixed(6)}  capped ${cap.toFixed(6)}  raw would over-charge +${((raw / cap - 1) * 100).toFixed(2)}%`);
+    worstTrendGap = Math.max(worstTrendGap, Math.abs(cap / raw - 1));
+    console.log(`    year ${String(y).padStart(2)}: raw ${raw.toFixed(10)}  capped ${cap.toFixed(10)}  rel diff ${Math.abs(cap / raw - 1).toExponential(2)}`);
   }
   console.log(`    ${note(glCappedSeverityTrend(1) === 1, 'glCappedSeverityTrend does not equal exactly 1 at year 1')} year 1 is exactly 1.0`);
-  console.log(`    ${note(glCappedSeverityTrend(10) < glSeverityTrend(10), 'the capped trend is not below the raw trend — the cap is not biting')} capped < raw at year 10 (the cap bites harder as severity inflates past a FIXED ceiling)`);
+  console.log(`    ${note(worstTrendGap < 1e-12, `the capped year factor differs from the raw trend by ${worstTrendGap.toExponential(2)} — the ceiling is not trending with the distribution`)} capped === raw to ${worstTrendGap.toExponential(2)} (the ceiling trends WITH the severity, so it never bites harder)`);
 
-  // (iii) k_GL IS TREND-INVARIANT — TO A TOLERANCE NOW, NOT EXACTLY.
+  // (iii) k_GL IS TREND-INVARIANT, AND EXACTLY SO AGAIN.
   //
-  // ⚠ THIS ASSERTION WAS EXACT (1e-12) BEFORE THE SEVERITY CAP AND IS NOW A
-  // TOLERANCE, DELIBERATELY. Uncapped, glSeverityTrend was a pure scalar on both
-  // the numerator and the denominator of k_GL and cancelled identically. Under a
-  // fixed cap the two sides carry DIFFERENT weight vectors (neutral vs the
-  // book's tilted mix), the cap bites hardest on component 1, and the tilt moves
-  // component 1's weight — so the cap interacts slightly differently with each
-  // side and the cancellation is no longer algebraically exact. The residual is
-  // ~1e-5 over a 20-year span, which is immaterial against k_GL's own job (a
-  // roster-mix correction of order 3%), but it is REAL and must not be papered
-  // over as float noise. 1e-4 is still ~300x tighter than anything that matters.
+  // ⚠ THIS ASSERTION HAS BEEN EXACT, THEN A TOLERANCE, AND IS NOW EXACT AGAIN.
+  // The history is the point. Uncapped, glSeverityTrend was a pure scalar on
+  // both the numerator and denominator of k_GL and cancelled identically (1e-12).
+  // Under a FIXED cap it stopped cancelling: the two sides carry DIFFERENT
+  // weight vectors (neutral vs the book's tilted mix), the cap bit hardest on
+  // component 1, and the tilt moves component 1's weight — so the ceiling
+  // interacted differently with each side and a ~1e-5 residual appeared over a
+  // 20-year span. The bar was loosened to 1e-4 to accommodate it.
+  //
+  // A TRENDING ceiling restores the exact cancellation, because now BOTH sides
+  // scale by the same s and the truncation point moves with them. The bar goes
+  // back to 1e-12 rather than being left at the loose value: a tolerance that
+  // outlives the reason for it is how a real drift gets waved through later.
   const kAt1 = computeKGl(roster, 1), kAt10 = computeKGl(roster, 10), kAt20 = computeKGl(roster, 20);
   const kDrift = Math.max(Math.abs(kAt10 / kAt1 - 1), Math.abs(kAt20 / kAt1 - 1));
   console.log(`  [ANALYTIC] k_GL year 1 ${kAt1.toFixed(10)} / year 10 ${kAt10.toFixed(10)} / year 20 ${kAt20.toFixed(10)}`);
-  console.log(`    drift ${kDrift.toExponential(2)} relative — a tolerance, not exact, and the cap is why  ${note(kDrift < 1e-4, `k_GL drifted ${kDrift.toExponential(2)} with the year — more than the fixed cap's weight-vector interaction explains`)}`);
+  console.log(`    drift ${kDrift.toExponential(2)} relative — EXACT again now the ceiling trends  ${note(kDrift < 1e-12, `k_GL drifted ${kDrift.toExponential(2)} with the year — the trend is no longer cancelling out of the ratio`)}`);
 
   // (iv) THE UNCAPPED CV IS TREND-INVARIANT; THE CAPPED CV IS NOT.
   //
@@ -306,20 +322,30 @@ console.log('\n--- 2c. THE TREND PAIR: severity and payroll growth, and the four
   };
   console.log(`  [ANALYTIC] UNCAPPED per-claim CV year 1 ${cvAt(1).toFixed(6)} vs year 10 ${cvAt(10).toFixed(6)}  ${note(Math.abs(cvAt(1) - cvAt(10)) < 1e-9, 'uncapped CV moved with the trend — the log-location shift is not a clean scale')}`);
 
-  // ⚠ REPORTED, NOT ASSERTED, AND IT IS A LIVE CONSEQUENCE FOR THE GL CLF GRID.
-  // The CAPPED per-claim CV DOES move with the year, because a FIXED ceiling is a
-  // shrinking share of an inflating distribution. WC's CLF grid is indexed on CV
-  // precisely BECAUSE CV was trend-invariant there (see wcClfGrid.ts — the axis
-  // choice is called load-bearing for exactly this reason). That argument does NOT
-  // carry over to capped GL unchanged: a CV-indexed GL grid WOULD slide as the
-  // book inflates, handing an inflating pool a margin discount for nothing. Any
-  // GL CLF grid must either index on something trend-invariant (expected claim
-  // COUNT is the obvious candidate — GL frequency reads REAL payroll and is flat)
-  // or carry the year explicitly. Not resolved here; recorded where the next
-  // person to build that grid will read it.
-  const capCv1 = cvAt(1, GL_SEVERITY_CAP), capCv10 = cvAt(10, GL_SEVERITY_CAP), capCv20 = cvAt(20, GL_SEVERITY_CAP);
-  console.log(`  [REPORTED] CAPPED per-claim CV year 1 ${capCv1.toFixed(4)} / year 10 ${capCv10.toFixed(4)} / year 20 ${capCv20.toFixed(4)}`);
-  console.log(`    drifts ${((capCv10 / capCv1 - 1) * 100).toFixed(2)}% by year 10 — a CV-indexed GL CLF grid would SLIDE. See the note above.`);
+  // ⚠ NOW ASSERTED, AND IT CLOSES AN OPEN CONCERN ABOUT THE GL CLF GRID.
+  //
+  // This block used to be REPORTED, NOT ASSERTED, and said: "The CAPPED
+  // per-claim CV DOES move with the year, because a FIXED ceiling is a
+  // shrinking share of an inflating distribution... a CV-indexed GL grid WOULD
+  // slide as the book inflates, handing an inflating pool a margin discount for
+  // nothing. Any GL CLF grid must either index on something trend-invariant...
+  // or carry the year explicitly. Not resolved here."
+  //
+  // It is resolved. With the ceiling trending, the capped CV is trend-invariant
+  // for the same reason the uncapped one is — every moment scales by s^k — so
+  // the objection to a CV-indexed GL grid is GONE. That does NOT retroactively
+  // make CV the right axis for GL: glClfGrid indexes on expected claim COUNT
+  // for its own reasons (see its header), and this only removes one argument
+  // against CV, it does not supply an argument for it. Do not re-index the grid
+  // on the strength of this line alone.
+  //
+  // Asserted rather than reported because it is now an invariant with a
+  // mechanism, and because the drift returning would mean the ceiling had been
+  // re-pinned — which is precisely the regression worth failing on.
+  const capCv1 = cvAt(1, glSeverityCap(1)), capCv10 = cvAt(10, glSeverityCap(10)), capCv20 = cvAt(20, glSeverityCap(20));
+  const capCvDrift = Math.max(Math.abs(capCv10 / capCv1 - 1), Math.abs(capCv20 / capCv1 - 1));
+  console.log(`  [ANALYTIC] CAPPED per-claim CV year 1 ${capCv1.toFixed(6)} / year 10 ${capCv10.toFixed(6)} / year 20 ${capCv20.toFixed(6)}`);
+  console.log(`    drift ${capCvDrift.toExponential(2)}  ${note(capCvDrift < 1e-9, `the capped per-claim CV drifted ${capCvDrift.toExponential(2)} with the year — the ceiling is not trending with the distribution`)} (was 3.31% by year 10 under a fixed ceiling)`);
 
   // (v) FREQUENCY READS REAL PAYROLL: the wage switch must not move claim COUNTS.
   //

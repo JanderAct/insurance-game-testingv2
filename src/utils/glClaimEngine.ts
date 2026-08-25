@@ -15,11 +15,14 @@
 //    from WC's, recomputed annually against the enrolled book. It neutralises
 //    BOTH risk-quality channels, so the drawn expected loss equals the held
 //    priced expectation whatever the book's RQ mix.
-// 3b. SEVERITY IS CAPPED AT GL_SEVERITY_CAP ($100M) ON BOTH SIDES OF THE PAIR.
+// 3b. SEVERITY IS CAPPED ON BOTH SIDES OF THE PAIR, AND THE CEILING TRENDS.
+//    glSeverityCap(year) = GL_SEVERITY_CAP ($100M, year-1) x glSeverityTrend.
 //    The draw clamps every claim; expectedClaimSeverity has NO uncapped code
-//    path left. Because the ceiling is FIXED while severity inflates, the capped
-//    expectation grows slower than glSeverityTrend — so PRICING uses
-//    glCappedSeverityTrend, not the raw trend. See that function's header.
+//    path left. Because the ceiling now moves WITH the distribution, the capped
+//    expectation grows at exactly glSeverityTrend again — glCappedSeverityTrend
+//    still exists and is still what pricing calls, but it now returns the raw
+//    trend. It is kept as a live cross-check rather than collapsed; see its
+//    header for why that is the safer shape.
 // 4. DOLLAR VINTAGE IS THE ACCIDENT YEAR, ONCE. Severity is trended to the
 //    accident year at the draw (glSeverityTrend) and frozen onto the claim.
 //    GL has NO REPORT LAG — every claim reports in its own accident year — so
@@ -106,6 +109,22 @@ export const glSeverityTrend = memoizeByYear(
   yearNumber => Math.max(1, yearNumber),
 );
 
+// THE CEILING IN THAT YEAR'S DOLLARS. GL_SEVERITY_CAP is the YEAR-1 ceiling;
+// this trends it at GL's own severity trend, exactly as wcSeverityCap does for
+// WC. See that function for the algebra.
+//
+// GL IS THE LARGEST CASE OF THE DEFECT THIS FIXES. At a 5.7026% severity trend
+// a stationary $100M ceiling was worth $60.7M in year-1 terms by year 10 — a
+// 39% real-terms tightening, against WC's 28%. That is what glCappedSeverityTrend
+// below was built to compensate for, and with the ceiling trending there is
+// nothing left to compensate.
+//
+// FLOORED AT YEAR 1 and memoized on that floor, matching glSeverityTrend.
+export const glSeverityCap = memoizeByYear(
+  (yearNumber: number) => GL_SEVERITY_CAP * glSeverityTrend(yearNumber),
+  yearNumber => Math.max(1, yearNumber),
+);
+
 // A component's log-location shifted to a given year, and optionally by a
 // severity SHOCK factor on top.
 //
@@ -120,28 +139,44 @@ export function trendedMuGl(mu: number, yearNumber: number, severityShock = 1): 
   return mu + Math.log(glSeverityTrend(yearNumber) * severityShock);
 }
 
-// HOW FAST THE CAPPED EXPECTED CLAIM ACTUALLY GROWS — which is NOT
-// glSeverityTrend, and this is the subtle half of the severity cap.
+// HOW FAST THE CAPPED EXPECTED CLAIM ACTUALLY GROWS. Since the ceiling started
+// trending this is glSeverityTrend — but it is still COMPUTED rather than
+// returned, and the distinction is the point of the function.
 //
-// glSeverityTrend is a pure multiplicative scale on the UNCAPPED draw. Under a
-// FIXED ceiling it stops being a scale on the EXPECTATION, because
-// E[min(s x X, cap)] = s x E[min(X, cap/s)] < s x E[min(X, cap)]. The cap does
-// not inflate, so it bites harder every year and the capped mean grows STRICTLY
-// SLOWER than the raw trend:
+// ⚠ THIS USED TO DIFFER FROM THE RAW TREND AND THE HISTORY IS WHY IT SURVIVES.
+// Under a FIXED ceiling glSeverityTrend stopped being a scale on the
+// EXPECTATION, because E[min(s X, cap)] = s E[min(X, cap/s)] < s E[min(X, cap)].
+// The cap did not inflate, so it bit harder every year and the capped mean grew
+// STRICTLY SLOWER than the raw trend:
 //
-//   year   glSeverityTrend   this   raw/capped
-//      2          1.057026   1.054798   +0.21%
-//      5          1.248368   1.237251   +0.90%
-//     10          1.647294   1.611191   +2.24%
-//     20          2.868321   2.710606   +5.82%
+//   year   glSeverityTrend   capped-then   raw/capped
+//      2          1.057026      1.054798       +0.21%
+//      5          1.248368      1.237251       +0.90%
+//     10          1.647294      1.611191       +2.24%
+//     20          2.868321      2.710606       +5.82%
+//
+// With glSeverityCap trending alongside the distribution, min(s X, s L) =
+// s min(X, L) and the ratio collapses to s exactly. Every row above is now
+// equal to its raw trend to float precision, which gl-claim-check.ts ASSERTS
+// rather than assumes.
+//
+// ⚠ IT IS DELIBERATELY NOT COLLAPSED TO `return glSeverityTrend(y)`. Pricing
+// needs the year factor that matches the GENERATOR, and this function derives
+// that factor from the same expectedClaimSeverity the generator is matched
+// against. Written as a ratio it stays correct automatically if the ceiling is
+// ever re-pinned, a second ceiling is introduced, or the mixture gains a
+// component that hits the cap differently. Written as the raw trend it would be
+// correct only by coincidence, and would silently become the over-charge it was
+// built to prevent. The cost is two normalCdf calls per year, memoized.
 //
 // ⚠ PRICING MUST USE THIS ONE. The engine prices GL as (held year-1 pure
-// premium) x (year factor), and if that year factor is the RAW trend the pool
-// charges for dollars the capped generator cannot produce — over-charging 2.2%
-// by year 10 and 5.8% by year 20. That is finding 37's failure class with the
-// sign reversed (price moving without the draw), and capping the within-year
-// moments alone does NOT catch it: k_GL is a ratio of two same-year quantities,
-// so the drift is invisible there (it shows up as a ~1e-5 wobble, no more).
+// premium) x (year factor), and if that year factor were the RAW trend while
+// the generator was capped nominally, the pool would charge for dollars the
+// generator cannot produce — over-charging 2.2% by year 10 and 5.8% by year 20.
+// That is finding 37's failure class with the sign reversed (price moving
+// without the draw), and capping the within-year moments alone does NOT catch
+// it: k_GL is a ratio of two same-year quantities, so the drift is invisible
+// there (it shows up as a ~1e-5 wobble, no more).
 //
 // SAFE UNDER THE HELD-PURE-PREMIUM RULE. This is a deterministic, ROSTER-BLIND
 // function of the year alone — it reads the untilted mixture weights and the
@@ -261,7 +296,7 @@ export function untiltedGlWeights(): number[] {
 // would be a trap-door: a future harness could build an uncapped expectation
 // off it and the mismatch would look like a generator defect.
 function componentMean(c: GlSeverityComponent, yearNumber: number): number {
-  return limitedExpectedValue(trendedMuGl(c.mu, yearNumber), c.sigma, GL_SEVERITY_CAP);
+  return limitedExpectedValue(trendedMuGl(c.mu, yearNumber), c.sigma, glSeverityCap(yearNumber));
 }
 
 // Expected severity of one claim under a given weight vector, IN THAT YEAR'S
@@ -277,15 +312,33 @@ function componentMean(c: GlSeverityComponent, yearNumber: number): number {
 // other: the caller's $1M bounded-variance limit and the model's $100M ceiling
 // are both real, and min() is exactly E[min(min(X, cap), limit)].
 //
-// ⚠ THE LIMIT IS A FIXED DOLLAR AMOUNT AND THE SEVERITY INFLATES PAST IT. That
-// is deliberate and is the whole point of the capped basis: a $1M cap in year 10
-// is a smaller share of the distribution than in year 1, exactly as a fixed
-// reinsurance attachment is. The capped ANALYTIC here trends the same way the
-// capped DRAW does, so the two stay matched. THE $100M CEILING IS FIXED IN THE
-// SAME SENSE — it does NOT inflate with the severity trend, so it binds harder
-// in later years, which is what a legal/practical ceiling does.
+// ⚠ THE CALLER'S `limit` IS A FIXED DOLLAR AMOUNT AND THE SEVERITY INFLATES
+// PAST IT. That is deliberate and is the whole point of the capped basis: a $1M
+// bounded-variance limit in year 10 is a smaller share of the distribution than
+// in year 1, exactly as a fixed reinsurance attachment is. The capped ANALYTIC
+// here trends the same way the capped DRAW does, so the two stay matched.
+//
+// ⚠ THE MODEL CEILING IS THE OPPOSITE CASE AND THIS COMMENT USED TO CONFLATE
+// THEM. It read: "THE $100M CEILING IS FIXED IN THE SAME SENSE — it does NOT
+// inflate with the severity trend, so it binds harder in later years, which is
+// what a legal/practical ceiling does." That was a considered position and it
+// has been REVERSED, deliberately, not overlooked:
+//
+//   - A fixed reinsurance attachment is a CONTRACT the pool actually signed at
+//     a nominal number, so its erosion is a real economic fact the game should
+//     show. That is the caller's `limit`, and it stays fixed.
+//   - The model ceiling is not a contract. It is this file's statement about
+//     how large a GL claim can physically be, expressed in year-1 dollars
+//     because that is the only vintage the fit had. Freezing it nominally does
+//     not model a hard legal cap; it silently shrinks the modelled tail by 39%
+//     in real terms over ten years, which changed the distribution's SHAPE and
+//     broke the severity-scale invariance that glClfGrid depends on.
+//
+// So the ceiling now rides glSeverityCap and the two limits still COMPOSE by
+// min(), which is exactly E[min(min(X, cap_t), limit)]. A caller passing $1M
+// gets $1M in every year; a caller passing nothing gets that year's ceiling.
 export function expectedClaimSeverity(weights: number[], yearNumber: number, limit?: number): number {
-  const effectiveLimit = Math.min(limit ?? Number.POSITIVE_INFINITY, GL_SEVERITY_CAP);
+  const effectiveLimit = Math.min(limit ?? Number.POSITIVE_INFINITY, glSeverityCap(yearNumber));
   let total = 0;
   for (let i = 0; i < GL_SEVERITY_COMPONENTS.length; i++) {
     const c = GL_SEVERITY_COMPONENTS[i];
@@ -526,7 +579,7 @@ export function generateGlClaims(inputs: GlGenerationInputs): GlGenerationResult
             // this is the only vintage the claim ever has. The shock rides the
             // same log-location shift.
             //
-            // ⚠ CLAMPED TO GL_SEVERITY_CAP, AND THE CLAMP IS AFTER THE SHOCK, not
+            // ⚠ CLAMPED TO THAT YEAR'S CEILING, AND THE CLAMP IS AFTER THE SHOCK, not
             // before. The cap is a ceiling on what a real claim can cost, so a
             // severity shock inflates the draw INTO the ceiling rather than
             // carrying it upward with them — which does mean a shock's realized
@@ -535,14 +588,14 @@ export function generateGlClaims(inputs: GlGenerationInputs): GlGenerationResult
             // behaviour for a hard ceiling and is reported, not corrected.
             //
             // The matched analytic is expectedClaimSeverity, capped at the same
-            // constant. It does NOT see severityShock, because severity shocks are
+            // year's ceiling. It does NOT see severityShock, because severity shocks are
             // deliberately draw-only (a realized event must move the loss ratio
             // rather than cancel out of it) — so the matched-pair assertion in
             // gl-claim-check.ts holds at severityShock = 1, which is the basis it
             // is stated on.
             const grossUltimate = Math.min(
               sevRng.lognormal(trendedMuGl(component.mu, yearNumber, severityShock), component.sigma),
-              GL_SEVERITY_CAP);
+              glSeverityCap(yearNumber));
 
             const occurrenceId = `gl-${yearNumber}-${member.id}-${sequence}`;
             const claimId = `${occurrenceId}-c1`;
