@@ -221,6 +221,154 @@ console.log('  E[estimate(H)] = registerSum is the whole reason the unwind exist
 }
 
 for (const l of LINES) (IBNER_TOTAL_SD as Record<string, number>)[l] = SAVED[l];
+
+// ============================================================================
+// SECTIONS 5-7 RUN WITH THE SCALES LIVE, which is what distinguishes them from
+// everything above. Sections 1-4 prove the plumbing is inert when switched off;
+// these prove the mechanism is UNBIASED when switched on, and that is a
+// different claim requiring a different arm.
+//
+// They exist because of a real defect. processIbner used to walk the ULTIMATE
+// and recover the reserve as max(0, ultimate - paid). Paid is history, so an
+// estimate revised below paid-to-date was clipped: favourable development
+// truncated, adverse recognised in full. One-sided, so E[incurred] > E[ultimate]
+// and the martingale broke. It was not a tail event — 9.04% of WC cohorts sat
+// below their own paid-to-date, because by age 5 WC has paid ~87% and the
+// estimate only had to fall 13% to cross. Measured cost: WC's calendar incurred
+// ran 2.5% of pool premium above its own ultimate, and WC's CLF crossing read
+// 43.7% against 48.1% with IBNER inert.
+//
+// The walk now develops the RESERVE and the ultimate follows as paid + unpaid.
+// ============================================================================
+{
+  console.log('\n=== 5. SCALES LIVE: NO COHORT MAY EVER SIT BELOW ITS OWN PAID-TO-DATE ===');
+  console.log('  netUltimate >= netPaid, every cohort, every year. This is the defect\'s own gate.');
+  console.log('  It read 9.04% of WC cohorts before the reserve walk; it must be exactly 0.\n');
+  const seen: Record<string, { n: number; bad: number; worst: number }> = {};
+  for (const l of LINES) seen[l] = { n: 0, bad: 0, worst: 0 };
+  // Cohorts are read off the pool state the engine hands back, not reconstructed.
+  for (let g = 0; g < 40; g++) {
+    const id = `FLOOR${g}`;
+    const inst = generateGameInstance(id, 3_300_000 + g * 7919);
+    const setup = { poolName: 'F', gameLength: YEARS, startingYear: 2026, instanceId: id, activeLines: LINES };
+    const { poolState, priorHistory } = runPriorHistory(inst, setup as never);
+    let gs: GameState = {
+      setup: setup as never, instance: inst, currentYearNumber: 1, isStarted: true, isComplete: false,
+      poolState, lockedResults: [], currentDecisions: defaultDecisionSet(1), priorHistory,
+    };
+    for (let y = 1; y <= YEARS; y++) {
+      const p = processYear(gs, defaultDecisionSet(y));
+      const ps = p.updatedPoolState as never as {
+        lines: Record<string, { reserveCohorts: { netUltimate: number; netPaid: number; netUnpaid: number }[] }>
+      };
+      for (const l of LINES) {
+        for (const c of ps.lines[l]?.reserveCohorts ?? []) {
+          seen[l].n++;
+          // A floored cohort is one whose estimate has fallen below what it has
+          // already paid. Under the reserve walk this cannot happen: paid is
+          // never revisited and a lognormal factor on a positive balance stays
+          // positive, so unpaid >= 0 and ultimate = paid + unpaid >= paid.
+          if (c.netUltimate < c.netPaid - 1e-6) {
+            seen[l].bad++;
+            seen[l].worst = Math.max(seen[l].worst, c.netPaid - c.netUltimate);
+          }
+        }
+      }
+      gs = { ...gs, currentYearNumber: y + 1, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result] };
+    }
+  }
+  for (const l of LINES) {
+    const v = seen[l];
+    console.log(`  ${l.padEnd(9)} ${String(v.bad).padStart(5)} / ${String(v.n).padStart(6)} cohort-years below paid-to-date  ` +
+      `${note(v.bad === 0, `${l}: ${v.bad} cohort-years sat below paid-to-date (worst $${(v.worst / 1e6).toFixed(2)}M) — the reserve walk is not keeping the estimate above paid`)}`);
+  }
+}
+
+{
+  console.log('\n=== 6. SCALES LIVE: THE WALK IS A MARTINGALE ===');
+  console.log('  E[netUltimate / registerSum] = 1 over MATURED cohorts, at default funding');
+  console.log('  (bias 0, so the unwind is absent and this isolates the stochastic term).\n');
+  const acc: Record<string, number[]> = {};
+  for (const l of LINES) acc[l] = [];
+  for (let g = 0; g < 120; g++) {
+    const id = `MART${g}`;
+    const inst = generateGameInstance(id, 5_500_000 + g * 6133);
+    const setup = { poolName: 'M', gameLength: YEARS, startingYear: 2026, instanceId: id, activeLines: LINES };
+    const { poolState, priorHistory } = runPriorHistory(inst, setup as never);
+    let gs: GameState = {
+      setup: setup as never, instance: inst, currentYearNumber: 1, isStarted: true, isComplete: false,
+      poolState, lockedResults: [], currentDecisions: defaultDecisionSet(1), priorHistory,
+    };
+    for (let y = 1; y <= YEARS; y++) {
+      const p = processYear(gs, defaultDecisionSet(y));
+      gs = { ...gs, currentYearNumber: y + 1, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result] };
+    }
+    const ps = gs.poolState as never as {
+      lines: Record<string, { reserveCohorts: { netUltimate: number; registerSum: number; age: number; horizon: number; bookingBias: number }[] }>
+    };
+    for (const l of LINES) {
+      for (const c of ps.lines[l]?.reserveCohorts ?? []) {
+        if (c.age >= c.horizon && c.registerSum > 0 && c.bookingBias === 0) acc[l].push(c.netUltimate / c.registerSum);
+      }
+    }
+  }
+  // ⚠ THE BAR IS A CONFIDENCE INTERVAL, NOT A FIXED PERCENTAGE, because the
+  // quantity is a mean of a heavy-tailed ratio and a fixed bar would either pass
+  // vacuously at small n or fail on noise at large n. 3 standard errors.
+  for (const l of LINES) {
+    const x = acc[l];
+    if (x.length < 30) { console.log(`  ${l.padEnd(9)} only ${x.length} matured unbiased cohorts — too few to test`); continue; }
+    const m = x.reduce((a, b) => a + b, 0) / x.length;
+    const sd = Math.sqrt(x.reduce((a, b) => a + (b - m) ** 2, 0) / (x.length - 1));
+    const se = sd / Math.sqrt(x.length);
+    console.log(`  ${l.padEnd(9)} n=${String(x.length).padStart(5)}  mean ${m.toFixed(5)}  (SD ${sd.toFixed(4)}, 3 SE = ${(3 * se).toFixed(5)})  ` +
+      `${note(Math.abs(m - 1) <= 3 * se, `${l}: matured cohorts average ${m.toFixed(5)} of registerSum, outside 3 SE — the walk carries a mean`)}`);
+  }
+}
+
+{
+  console.log('\n=== 7. SCALES LIVE: A DEVELOPED RESERVE PAYS OUT MORE ===');
+  console.log('  Payments come off the reserve AFTER it develops, so adverse development must');
+  console.log('  raise lifetime paid. Confirmed rather than assumed — it is the reason the fix');
+  console.log('  needed no separate change to the payout side.\n');
+  const pts: Record<string, { d: number; paid: number }[]> = {};
+  for (const l of LINES) pts[l] = [];
+  for (let g = 0; g < 80; g++) {
+    const id = `PAYS${g}`;
+    const inst = generateGameInstance(id, 7_700_000 + g * 5311);
+    const setup = { poolName: 'P', gameLength: YEARS, startingYear: 2026, instanceId: id, activeLines: LINES };
+    const { poolState, priorHistory } = runPriorHistory(inst, setup as never);
+    let gs: GameState = {
+      setup: setup as never, instance: inst, currentYearNumber: 1, isStarted: true, isComplete: false,
+      poolState, lockedResults: [], currentDecisions: defaultDecisionSet(1), priorHistory,
+    };
+    for (let y = 1; y <= YEARS; y++) {
+      const p = processYear(gs, defaultDecisionSet(y));
+      gs = { ...gs, currentYearNumber: y + 1, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result] };
+    }
+    const ps = gs.poolState as never as {
+      lines: Record<string, { reserveCohorts: { netUltimate: number; netPaid: number; registerSum: number; age: number; horizon: number }[] }>
+    };
+    for (const l of LINES) {
+      for (const c of ps.lines[l]?.reserveCohorts ?? []) {
+        if (c.age >= c.horizon && c.registerSum > 0) {
+          pts[l].push({ d: c.netUltimate / c.registerSum - 1, paid: c.netPaid / c.registerSum });
+        }
+      }
+    }
+  }
+  for (const l of LINES) {
+    const v = pts[l];
+    if (v.length < 30) { console.log(`  ${l.padEnd(9)} only ${v.length} matured cohorts — too few to test`); continue; }
+    const adverse = v.filter(x => x.d > 0.02), favorable = v.filter(x => x.d < -0.02);
+    const avg = (xs: { paid: number }[]) => xs.reduce((a, b) => a + b.paid, 0) / Math.max(1, xs.length);
+    const pa = avg(adverse), pf = avg(favorable);
+    console.log(`  ${l.padEnd(9)} adverse n=${String(adverse.length).padStart(4)} paid ${pa.toFixed(4)} x registerSum   ` +
+      `favorable n=${String(favorable.length).padStart(4)} paid ${pf.toFixed(4)} x registerSum   ` +
+      `${note(adverse.length > 10 && favorable.length > 10 && pa > pf, `${l}: adverse cohorts did not pay more than favorable ones — development is not reaching the payout side`)}`);
+  }
+}
+
 console.log(`\n  constants restored: ${LINES.map(l => `${l} ${IBNER_TOTAL_SD[l]}`).join(', ')}  ` +
   `${note(LINES.every(l => IBNER_TOTAL_SD[l] === SAVED[l]), 'the harness failed to restore IBNER_TOTAL_SD')}`);
 

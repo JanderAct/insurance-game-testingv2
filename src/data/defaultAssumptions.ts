@@ -1328,6 +1328,18 @@ export const IBNER_TOTAL_SD: Record<string, number> = {
 
 // Runoff horizon in years, drawn PER COHORT (inclusive), so the player cannot
 // tell how much development a given accident year has left.
+// THE SHARE OF A FRESH ACCIDENT YEAR'S BOOKED ULTIMATE THAT IS STILL UNPAID at
+// the end of its own year — the other 40% is paid within it.
+//
+// ⚠ IT SETS HOW MUCH LEVERAGE DEVELOPMENT HAS, which is why it is a named
+// constant rather than a literal at the booking site. Development applies to the
+// UNPAID balance, so a cohort can only ever move the fraction of its ultimate it
+// has not yet settled. simulationEngine reads this twice — once to book the
+// cohort, once inside reserveStepSigma to derive the per-step scale that hits
+// IBNER_TOTAL_SD — and the two must be the same number or a line develops at the
+// wrong scale with no other symptom.
+export const IBNER_OPEN_FRACTION = 0.60;
+
 export const IBNER_HORIZON: Record<string, { min: number; max: number }> = {
   WC: { min: 5, max: 12 },
   GL: { min: 3, max: 8 },
