@@ -16,7 +16,7 @@
 //   3. Every confidence level the UI can request falls INSIDE the supplied
 //      curve's 25-95 range, so no reachable slider position is answered by a
 //      clamp.
-//   4. WC's table still crosses where its own derivation puts it (44.2%),
+//   4. WC's table still crosses where its own derivation puts it (50.4%),
 //      i.e. the GL swap did not reach it.
 //
 // WHAT IS MEASURED AND REPORTED (not gated — it is a property of a placeholder,
@@ -80,8 +80,14 @@ check(wc.source === 'derived', 'WC table is still tagged `derived`');
   // The lesson is not "loosen the constant". It is that a re-derivation has more
   // consumers than the file it edits: anything holding a crossing as a literal
   // has to be re-run, and grepping the OLD VALUE is what finds them.
-  check(Math.abs(crossingOf(wc) - 0.442) < 0.002,
-    'WC still crosses where its own derivation puts it (44.2%) — the GL swap did not reach it',
+  //
+  // Third move, 44.2% -> 50.4%, when WC went to four held class rates. That one
+  // is not a re-measurement: WC had been charging the market's average rate to
+  // books that were not the market, and pricing each rating group at its own
+  // rate raised the median enrolled book's premium 2.3%. This check found it on
+  // the first run after the change, which is the grep working.
+  check(Math.abs(crossingOf(wc) - 0.504) < 0.002,
+    'WC still crosses where its own derivation puts it (50.4%) — the GL swap did not reach it',
     `${(crossingOf(wc) * 100).toFixed(2)}%`);
 }
 

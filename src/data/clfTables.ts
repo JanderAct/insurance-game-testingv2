@@ -122,14 +122,29 @@
 // i.e. what "Expected" (CLF exactly 1.000) delivers against each line's own
 // distribution:
 //
-//     WC 43.2%  (95% CI 42.4-44.1)      GL 70.9%  (95% CI 70.2-71.5)
+//     WC 50.4%  (95% CI 49.7-51.1)      GL 70.9%  (95% CI 70.2-71.5)
 //
-// ⚠ WC's 44.1% -> 43.2% IS NOT A MOVE, it is the same number re-measured. The
-// intervals overlap across most of their width, and the change that prompted the
-// re-derivation (region leaving chronic severity) raised LOSSES and PREMIUM by
-// the same 0.30%, so the ratio this crossing is a percentile of barely shifted.
-// Re-derived anyway rather than assumed unchanged, which is the only way to know
-// that.
+// ⚠ WC REACHED 50% WHEN IT STOPPED UNDERCHARGING, and that is the headline for
+// every WC figure measured before it. The sequence, all re-derived rather than
+// inferred:
+//
+//   44.1%   with region in severity and one blended pure premium
+//   43.2%   region out of severity — NOT a move, the same number re-measured
+//           (intervals [43.4, 45.0] and [42.4, 44.1] overlap across most of
+//           their width; losses and premium both rose 0.30%, so the ratio this
+//           is a percentile of barely shifted)
+//   50.4%   four held class rates
+//
+// The +7.2pp is one thing: WC was charging the market's average rate to books
+// that were not the market. The median line-year's drawn/funded ratio is now
+// 0.9979 — a hair under break-even, where it should sit — against 1.0402 before.
+//
+// ⚠ THIS IS AN ACROSS-THE-BOARD INCREASE, NOT A REDISTRIBUTION. The median
+// enrolled book's blended rate lands 2.3% ABOVE the old single rate, not around
+// it, because the books that actually enrol are worse than the full-market
+// average. Every WC measurement taken before this — loss ratios, surplus paths,
+// crossing percentiles, anything calibrated for playability — was taken against
+// a line that undercharged, and none of them transfer.
 //
 // ⚠ WC's CROSSING MOVED 47.2% -> 44.1% WITH WC_SEVERITY_CAP, outside its own
 // old CI, and the direction is the informative part. The cap lowers EXPECTED
@@ -275,8 +290,8 @@ const WC_DERIVED: ClfTable = {
   source: 'derived',
   stops: [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 97.5, 99],
   clf: [
-    0.7677, 0.8161, 0.8563, 0.8904, 0.9237, 0.9531, 0.9822, 1.0111, 1.0402, 1.0697,
-    1.0983, 1.1301, 1.1663, 1.2061, 1.2479, 1.3025, 1.3711, 1.4812, 1.5778, 1.7125,
+    0.7479, 0.7938, 0.8302, 0.8609, 0.8905, 0.9188, 0.9457, 0.9709, 0.9979, 1.0238,
+    1.0510, 1.0799, 1.1106, 1.1470, 1.1864, 1.2329, 1.2967, 1.3923, 1.4764, 1.5958,
   ],
 };
 

@@ -379,6 +379,43 @@ export function computeKLine(members: Member[]): number {
 // WC's purePremiumPer100, derived ONCE from the full canonical roster at neutral
 // risk quality and then HELD. Expressed per $100 of payroll, matching the
 // engine's expectedLoss = exposure x PP x 10,000.
+// THE FOUR HELD CLASS RATES — one per WC rating group, each derived over that
+// group's own payroll on exactly the basis deriveNeutralPurePremiumPer100 uses
+// for the single blended rate.
+//
+// ⚠ THIS IS NOT A SECOND WAY TO PRICE, IT IS THE SAME PRICE STOPPED ONE STEP
+// EARLIER. The blended rate IS the payroll-weighted average of these four over
+// the full roster — reproduced to 1.3e-15 — so nothing has been re-fitted or
+// re-calibrated. What changes is that the blend is taken over the ENROLLED book
+// rather than over the roster, so a pool that is unusually schools-heavy pays a
+// schools-heavy price instead of the market's average price.
+//
+// ⚠ FOUR RATES ARE EXACT ONLY BECAUSE REGION LEFT SEVERITY, and that ordering is
+// why this was worth two commits. While region multiplied severity, two members
+// of the same rating group in different regions had different loss costs, so a
+// group's expectation was not proportional to its payroll and four rates left a
+// -0.34% composition residual. With region gone a rating group is genuinely
+// homogeneous: measured over 4,000 random subsets of the roster, the worst
+// residual is 2.1e-15. Twelve group-by-region cells would have been needed
+// otherwise.
+//
+// DERIVED, NOT STORED, for the same reason the single rate is: a literal would
+// go stale the first time a group's mixture, rate or roster membership moved,
+// and the symptom would be a line priced slightly wrong with nothing pointing
+// at the cause.
+export function deriveNeutralClassRatesPer100(fullRoster: Member[]): Record<WcRatingGroup, number> {
+  const out = {} as Record<WcRatingGroup, number>;
+  for (const group of WC_RATING_GROUPS) {
+    const members = fullRoster.filter(m => ratingGroupOf(m) === group);
+    const payrollUnits = members.reduce((s, m) => s + (m.exposureByLine.WC ?? 0), 0) * 10_000;
+    out[group] = payrollUnits > 0
+      ? expectedWcGrossLossForPricing(members, { riskQualityOverride: NEUTRAL_RQ, kLine: 1, yearNumber: 1 })
+        / payrollUnits
+      : 0;
+  }
+  return out;
+}
+
 export function deriveNeutralPurePremiumPer100(fullRoster: Member[]): number {
   const expected = expectedWcGrossLossForPricing(fullRoster, {
     riskQualityOverride: NEUTRAL_RQ,

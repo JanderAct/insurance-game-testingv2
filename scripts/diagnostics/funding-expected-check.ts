@@ -22,7 +22,7 @@
 // since this only needs a SPREAD of CV/lambda values, not specific ones.
 
 import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
-import { computeKLine } from '../../src/utils/wcClaimEngine';
+import { computeKLine, deriveNeutralClassRatesPer100, deriveNeutralPurePremiumPer100, expectedWcGrossLossForPricing, ratingGroupOf } from '../../src/utils/wcClaimEngine';
 import { computeWcClf, wcClfCrossingPercentile, wcAggregateCumulants } from '../../src/utils/wcLossDistribution';
 import { WC_CLF_PERCENTILE_STOPS } from '../../src/data/wcClfGrid';
 import { computeKGl } from '../../src/utils/glClaimEngine';
@@ -136,6 +136,48 @@ console.log('\n--- 3. Percentile stops unchanged (computeWcClf/computeGlClf bodi
   console.log('  (full regression evidence: the diagnostic harness re-run — gl-claim-check, gl-cutover-check,');
   console.log('   wc-cutover-check, wc-severity-rebuild-check, marketplace-generation-check, etc. — all still PASS,');
   console.log('   and none of them exercise the new fundingAtExpected/crossing-percentile code paths.)');
+}
+
+console.log('\n--- 4. WC CLASS RATES PRICE EVERY BOOK AT ITS OWN NEUTRAL EXPECTATION ---');
+{
+  // ⚠ THIS IS THE ASSERTION THE TWO-COMMIT ORDERING EXISTS FOR. WC holds FOUR
+  // rates, one per rating group, and charges sum(exposure_i x rate_g(i)). The
+  // blend that emerges is therefore the book's own expectation per $100 —
+  // EXACTLY, for any subset of the roster, with nothing left over.
+  //
+  // It is exact only because region left chronic severity first. While region
+  // multiplied severity, two members of one rating group in different regions
+  // had different loss costs, a group's expectation was not proportional to its
+  // payroll, and four rates left a -0.34% residual with a -4.7%/+11.9% spread
+  // across books. Twelve group-by-region cells would have been needed instead.
+  //
+  // Asserted at 1e-12 rather than "small": the whole claim is exactness, and a
+  // tolerance would let the region-shaped residual creep back unnoticed.
+  const rates = deriveNeutralClassRatesPer100(roster);
+  let worst = 0, worstN = 0;
+  let st = 987654321;
+  const rnd = () => { st = (Math.imul(1664525, st) + 1013904223) >>> 0; return st / 4294967296; };
+  for (let t = 0; t < 2000; t++) {
+    const sub = roster.filter(() => rnd() < 0.35);
+    const exposure = sub.reduce((s, m) => s + (m.exposureByLine.WC ?? 0), 0);
+    if (!(exposure > 0)) continue;
+    const premium = sub.reduce((s, m) => s + (m.exposureByLine.WC ?? 0) * rates[ratingGroupOf(m)], 0) * 10_000;
+    const neutral = expectedWcGrossLossForPricing(sub, { riskQualityOverride: 5, kLine: 1, yearNumber: 1 });
+    const dev = Math.abs(neutral / premium - 1);
+    if (dev > worst) { worst = dev; worstN = sub.length; }
+  }
+  assert(worst < 1e-12,
+    `class-rate premium === the book's own neutral expectation over 2000 random subsets ` +
+    `(worst ${worst.toExponential(2)} at n=${worstN})`);
+  // And the four rates must still blend BACK to the single held rate on the full
+  // roster — if they do not, they are not the same price stopped one step
+  // earlier, they are a recalibration.
+  const totalPay = roster.reduce((s, m) => s + (m.exposureByLine.WC ?? 0), 0);
+  const blend = roster.reduce((s, m) => s + (m.exposureByLine.WC ?? 0) * rates[ratingGroupOf(m)], 0) / totalPay;
+  const held = deriveNeutralPurePremiumPer100(roster);
+  assert(Math.abs(blend / held - 1) < 1e-12,
+    `the four rates blend back to the held single rate on the full roster ` +
+    `(${blend.toFixed(8)} vs ${held.toFixed(8)})`);
 }
 
 console.log(failures === 0 ? '\nALL "EXPECTED" FUNDING CHECKS PASS.' : `\n${failures} CHECK(S) FAILED.`);
