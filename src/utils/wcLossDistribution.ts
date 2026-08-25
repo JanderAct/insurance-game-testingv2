@@ -53,7 +53,6 @@ import { WC_CLF_GRID, WC_CLF_PERCENTILE_STOPS } from '../data/wcClfGrid';
 import { normalCdf } from './claimMath';
 import {
   ratingGroupOf,
-  regionMultiplier,
   thetaWc,
   tiltedWeights,
   trendedMu,
@@ -81,11 +80,6 @@ const ALPHA = M.memberFrequencyNoise.shape;
 // a heavier tail than the generator has, which is the same matched-pair failure
 // the draw/analytic check guards, one level up.
 //
-// ⚠ THE REGION SCALE MUST BE INSIDE THE LIMIT, not applied to the result. The
-// caller passes limit = CAP_t / regionMult and multiplies by regionMult^k
-// afterwards, which is E[min(regionMult X, CAP_t)^k] — see the same reasoning
-// at wcClaimEngine's componentMean. CAP_t is that YEAR'S ceiling.
-//
 // Phi is claimMath's normalCdf rather than a local erfc, deliberately: at k = 1
 // this expression then reduces TERM BY TERM to limitedExpectedValue, which is
 // what componentMean calls. The matched-pair check compares a draw against
@@ -111,7 +105,6 @@ function memberRawCumulantSeeds(member: Member, kLine: number, yearNumber: numbe
   const rq = member.riskQuality;
   const group = ratingGroupOf(member);
   const spec = M.ratingGroups[group];
-  const regionMult = regionMultiplier(member.region);
   const theta = thetaWc(rq);
   const trend = wcFrequencyTrend(yearNumber);
   const weights = tiltedWeights(group, rq);
@@ -144,19 +137,18 @@ function memberRawCumulantSeeds(member: Member, kLine: number, yearNumber: numbe
       // pin the limit below back to a constant without also withdrawing this
       // paragraph and wcClfGrid's matching one.
       //
-      // ⚠ THE REGION SCALE IS A DIFFERENT MATTER AND STILL DOES NOT FACTOR OUT.
-      // regionMult varies BETWEEN members within one year while the ceiling
-      // does not follow it — a $85M cap is $85M whether the claimant is North
-      // or South, because it is a fact about claims and not about geography. So
-      // the limit below is CAP_t/regionMult and a South member sits marginally
-      // nearer its effective ceiling: on the heavy `large` component the
-      // severity CV runs 6.2997 / 6.2655 / 6.2324 across the three regions,
-      // about +-0.5%. That asymmetry is intended. The TREND is a restatement of
-      // the same distribution in later dollars; the REGION is a genuinely
-      // different risk meeting the same ceiling.
-      c[k - 1] += lambdaI * Math.pow(regionMult, k)
-        * lognormalRawMoment(trendedMu(comp.mu, yearNumber), comp.sigma, k,
-                             wcSeverityCap(yearNumber) / Math.max(regionMult, 1e-12));
+      // ⚠ THE REGION SCALE IS GONE, and the asymmetry this paragraph described
+      // with it. It read: "regionMult varies BETWEEN members within one year
+      // while the ceiling does not follow it... the limit below is
+      // CAP_t/regionMult and a South member sits marginally nearer its
+      // effective ceiling: on the heavy `large` component the severity CV runs
+      // 6.2997 / 6.2655 / 6.2324 across the three regions, about +-0.5%."
+      // Region no longer scales chronic severity, so every member of a rating
+      // group now meets the same ceiling with the same distribution and the
+      // per-member CV spread is exactly zero. If a shock ever scales severity
+      // regionally, that paragraph is the one to restore.
+      c[k - 1] += lambdaI
+        * lognormalRawMoment(trendedMu(comp.mu, yearNumber), comp.sigma, k, wcSeverityCap(yearNumber));
     }
   }
   return c;

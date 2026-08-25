@@ -122,7 +122,14 @@
 // i.e. what "Expected" (CLF exactly 1.000) delivers against each line's own
 // distribution:
 //
-//     WC 44.1%  (95% CI 43.4-45.0)      GL 70.9%  (95% CI 70.2-71.5)
+//     WC 43.2%  (95% CI 42.4-44.1)      GL 70.9%  (95% CI 70.2-71.5)
+//
+// ⚠ WC's 44.1% -> 43.2% IS NOT A MOVE, it is the same number re-measured. The
+// intervals overlap across most of their width, and the change that prompted the
+// re-derivation (region leaving chronic severity) raised LOSSES and PREMIUM by
+// the same 0.30%, so the ratio this crossing is a percentile of barely shifted.
+// Re-derived anyway rather than assumed unchanged, which is the only way to know
+// that.
 //
 // ⚠ WC's CROSSING MOVED 47.2% -> 44.1% WITH WC_SEVERITY_CAP, outside its own
 // old CI, and the direction is the informative part. The cap lowers EXPECTED
@@ -268,8 +275,8 @@ const WC_DERIVED: ClfTable = {
   source: 'derived',
   stops: [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 97.5, 99],
   clf: [
-    0.7652, 0.8138, 0.8541, 0.8865, 0.9195, 0.9485, 0.9771, 1.0042, 1.0334, 1.0635,
-    1.0933, 1.1237, 1.1598, 1.1992, 1.2419, 1.2969, 1.3677, 1.4731, 1.5749, 1.7015,
+    0.7677, 0.8161, 0.8563, 0.8904, 0.9237, 0.9531, 0.9822, 1.0111, 1.0402, 1.0697,
+    1.0983, 1.1301, 1.1663, 1.2061, 1.2479, 1.3025, 1.3711, 1.4812, 1.5778, 1.7125,
   ],
 };
 

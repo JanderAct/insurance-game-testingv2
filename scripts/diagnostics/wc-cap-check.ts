@@ -67,20 +67,19 @@ console.log(`  the ceiling TRENDS: ${YEARS.map(y => `yr ${y} ${fmt$(wcSeverityCa
 // --- 1. THE MATCHED PAIR, PER GROUP AND PER REGION --------------------------
 console.log('=== 1. DRAW MEAN === ANALYTIC MEAN, per rating group x region x year ===');
 console.log('    the draw is Monte Carlo, so the bar is its own standard error, not a fixed %.\n');
-console.log('group      | region  | yr |    analytic |    drawn MC |   diff | vs 3 SE');
+console.log('group      | yr |    analytic |    drawn MC |   diff | vs 3 SE');
 {
   const rng = new SeededRandom(20260825);
   let worstRatio = 0;
   for (const group of WC_RATING_GROUPS) {
     const spec = WC_LOSS_MODEL.ratingGroups[group];
     const weights = spec.mix.map(m => m.weight);
-    for (const region of REGIONS) {
-      const mult = regionMultiplier(region);
+    {
       for (const yearNumber of YEARS) {
-        const analytic = expectedClaimSeverity(group, weights, mult, yearNumber);
+        const analytic = expectedClaimSeverity(group, weights, yearNumber);
         // The draw, reproduced EXACTLY as generateWcClaims does it: pick a
-        // component by weight, draw lognormal at the trended mu, scale by
-        // region, then clamp.
+        // component by weight, draw lognormal at the trended mu, then clamp.
+        // No region scale — see section 2.
         let sum = 0, sumSq = 0;
         for (let t = 0; t < TRIALS; t++) {
           let u = rng.next(), idx = spec.mix.length - 1;
@@ -89,49 +88,75 @@ console.log('group      | region  | yr |    analytic |    drawn MC |   diff | vs
           // THAT YEAR'S ceiling — reproducing generateWcClaims exactly. Using
           // the year-1 constant here would make this check agree with a
           // generator that no longer exists.
-          const x = Math.min(
-            rng.lognormal(trendedMu(c.mu, yearNumber), c.sigma) * mult, wcSeverityCap(yearNumber));
+          const x = Math.min(rng.lognormal(trendedMu(c.mu, yearNumber), c.sigma), wcSeverityCap(yearNumber));
           sum += x; sumSq += x * x;
         }
         const drawn = sum / TRIALS;
         const se = Math.sqrt(Math.max(0, sumSq / TRIALS - drawn * drawn) / TRIALS);
         const ratio = se > 0 ? Math.abs(drawn - analytic) / se : 0;
         worstRatio = Math.max(worstRatio, ratio);
-        console.log(`${group.padEnd(10)} | ${region.padEnd(7)} | ${String(yearNumber).padStart(2)} | ` +
+        console.log(`${group.padEnd(10)} | ${String(yearNumber).padStart(2)} | ` +
           `${fmt$(analytic).padStart(11)} | ${fmt$(drawn).padStart(11)} | ` +
           `${((drawn / analytic - 1) * 100).toFixed(2).padStart(6)}% | ${ratio.toFixed(2)} SE`);
       }
     }
   }
   console.log(`\n  worst deviation ${worstRatio.toFixed(2)} SE  ` +
-    `${note(worstRatio < 3, `a group/region/year cell missed its analytic by ${worstRatio.toFixed(2)} SE — the cap is not applied identically on both sides`)}`);
+    `${note(worstRatio < 3, `a group/year cell missed its analytic by ${worstRatio.toFixed(2)} SE — the cap is not applied identically on both sides`)}`);
 }
 
-// --- 2. THE REGION TRAP, STATED AS ITS OWN CHECK ----------------------------
-// If the analytic capped at CAP instead of CAP/regionMult, this is the cell
-// that would show it: the highest region multiplier on the heaviest component.
-console.log('\n=== 2. THE REGION-SCALED LIMIT IS THE ONE IN FORCE ===');
-console.log('    componentMean(key, yr, CAP/mult) x mult must differ from componentMean(key, yr, CAP) x mult');
-console.log('    wherever mult != 1 — if they agree, the limit is not being scaled.\n');
+// --- 2. REGION DOES NOT TOUCH CHRONIC SEVERITY ------------------------------
+//
+// ⚠ THIS SECTION IS THE INVERSE OF THE ONE IT REPLACES, and the inversion is the
+// point. It used to be "THE REGION-SCALED LIMIT IS THE ONE IN FORCE", asserting
+// that componentMean(key, yr, CAP/mult) x mult DIFFERED from the flat-limit form
+// wherever mult != 1 — because the draw was min(lognormal x regionMult, CAP) and
+// the analytic had to divide the ceiling through by the same factor to match.
+//
+// Region no longer scales chronic severity. A standing +/-5% on every claim in
+// one region was asserted with nothing behind it; region is retained as data for
+// SHOCK events, where a regional catastrophe is a real thing to scale. So the
+// old assertion would now fail on correct code, and the useful thing to test is
+// the opposite: that no region reaches severity at all.
+//
+// Kept as an assertion rather than deleted because the trap it guarded is real
+// and will return the moment a shock scales severity per-region — whatever
+// multiplies the DRAW must divide the analytic's ceiling.
+console.log('\n=== 2. REGION DOES NOT TOUCH CHRONIC SEVERITY ===');
+console.log('    expectedClaimSeverity takes no region argument, and the drawn severity');
+console.log('    distribution must be identical across regions. Both are checked.\n');
 {
-  let anyScaled = false;
-  // Run at year 10 as well as year 1: the limit must be scaled by the region
-  // AND stated in that year's dollars, and only exercising year 1 would leave
-  // a year-1-pinned limit looking correct.
-  for (const yr of [1, 10]) {
-    for (const region of REGIONS) {
-      const mult = regionMultiplier(region);
-      const cap = wcSeverityCap(yr);
-      const scaled = componentMean('large', yr, cap / mult) * mult;
-      const flat = componentMean('large', yr, cap) * mult;
-      const differs = Math.abs(scaled - flat) > 1e-9;
-      if (mult !== 1) anyScaled = anyScaled || differs;
-      console.log(`  yr ${String(yr).padStart(2)}  ${region.padEnd(7)} mult ${mult.toFixed(4)}  cap ${fmt$(cap).padStart(10)}  ` +
-        `scaled ${fmt$(scaled).padStart(10)}  flat ${fmt$(flat).padStart(10)}  ` +
-        `${mult === 1 ? '(mult 1 — must agree)' : differs ? 'differ, as they must' : '⚠ IDENTICAL'}`);
+  // (a) The analytic is region-blind by SIGNATURE — there is nothing to pass.
+  //     What can still be checked is that the data is intact for shocks.
+  const mults = REGIONS.map(r => regionMultiplier(r));
+  console.log(`  regionMultiplier data retained for shocks: ${REGIONS.map((r, i) => `${r} ${mults[i]}`).join('  ')}`);
+  console.log(`  ${note(mults.some(m => m !== 1), 'every region multiplier is 1 — the data a regional shock needs has been flattened, not just unwired')}`);
+
+  // (b) The DRAW must be identical across regions. Same stream, same member
+  //     shape, only the region differs: any difference means region is still
+  //     reaching the generator somewhere.
+  let worstSpread = 0;
+  for (const group of WC_RATING_GROUPS) {
+    const spec = WC_LOSS_MODEL.ratingGroups[group];
+    const weights = spec.mix.map(m => m.weight);
+    const means: number[] = [];
+    for (let ri = 0; ri < REGIONS.length; ri++) {
+      const rng = new SeededRandom(90210);      // SAME seed for every region
+      let sum = 0;
+      const T = 200_000;
+      for (let t = 0; t < T; t++) {
+        let u = rng.next(), idx = spec.mix.length - 1;
+        for (let i = 0; i < spec.mix.length; i++) { u -= weights[i]; if (u <= 0) { idx = i; break; } }
+        const c = WC_SEVERITY_COMPONENTS[spec.mix[idx].component];
+        sum += Math.min(rng.lognormal(trendedMu(c.mu, 1), c.sigma), wcSeverityCap(1));
+      }
+      means.push(sum / T);
     }
+    const spread = Math.max(...means) / Math.min(...means) - 1;
+    worstSpread = Math.max(worstSpread, spread);
+    console.log(`  ${group.padEnd(10)} drawn mean by region: ${means.map(m => fmt$(m)).join('  ')}  spread ${spread.toExponential(2)}`);
   }
-  console.log(`\n  ${note(anyScaled, 'no region showed a difference between the scaled and flat limit — the analytic is not scaling the cap')}`);
+  console.log(`\n  ${note(worstSpread === 0, `the drawn severity differs across regions by ${worstSpread.toExponential(2)} — region is still reaching the draw`)}`);
 }
 
 // --- 3. THE CEILING TRENDS, AND IT TRENDS ON BOTH SIDES ----------------------
@@ -156,27 +181,26 @@ console.log('\n=== 3. THE CEILING TRENDS ON BOTH SIDES ===\n');
   // (a) THE ANALYTIC SCALES BY EXACTLY THE TREND. If the cap were pinned this
   //     ratio would fall BELOW the trend and drift further every year.
   console.log('  (a) analytic capped severity must scale by exactly wcSeverityTrend');
-  console.log('      group      | region  | yr | severity ratio |  wcSeverityTrend | rel err');
+  console.log('      group      | yr | severity ratio |  wcSeverityTrend | rel err');
   let worstRel = 0;
   for (const group of WC_RATING_GROUPS) {
     const spec = WC_LOSS_MODEL.ratingGroups[group];
     const weights = spec.mix.map(m => m.weight);
-    for (const region of REGIONS) {
-      const mult = regionMultiplier(region);
-      const base = expectedClaimSeverity(group, weights, mult, 1);
+    {
+      const base = expectedClaimSeverity(group, weights, 1);
       for (const yr of [5, 10, 20]) {
-        const ratio = expectedClaimSeverity(group, weights, mult, yr) / base;
+        const ratio = expectedClaimSeverity(group, weights, yr) / base;
         const trend = wcSeverityTrend(yr);
         const rel = Math.abs(ratio / trend - 1);
         worstRel = Math.max(worstRel, rel);
         if (group === WC_RATING_GROUPS[0]) {
-          console.log(`      ${group.padEnd(10)} | ${region.padEnd(7)} | ${String(yr).padStart(2)} | ` +
+          console.log(`      ${group.padEnd(10)} | ${String(yr).padStart(2)} | ` +
             `${ratio.toFixed(10).padStart(14)} | ${trend.toFixed(10).padStart(16)} | ${rel.toExponential(2)}`);
         }
       }
     }
   }
-  console.log(`      (all ${WC_RATING_GROUPS.length} groups x ${REGIONS.length} regions x 3 years measured; one group printed)`);
+  console.log(`      (all ${WC_RATING_GROUPS.length} groups x 3 years measured; one group printed)`);
   console.log(`\n      worst relative error ${worstRel.toExponential(3)}  ` +
     `${note(worstRel < 1e-12, `capped severity does not scale by the trend (worst ${worstRel.toExponential(3)}) — the ceiling is not trending with the distribution`)}`);
 

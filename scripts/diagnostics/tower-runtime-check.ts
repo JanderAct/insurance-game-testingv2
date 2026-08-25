@@ -96,21 +96,30 @@ console.log('--- 1. THE MEMO KEY (the dangerous one) ---');
   check(allMatch, 'cold-cache === warm-cache, 15 years x 3 layers x 2 lines, evaluated out of order');
   check(allDistinct, 'every year gives a DISTINCT expected ceded (no key collapsing years together)');
 
-  // 1b. The key must separate rating group AND region on WC. If either were
-  // dropped, two different (group, region) pairs would return one another's
-  // moments — a much quieter failure than a year collision.
+  // 1b. The key must separate RATING GROUP on WC. If it were dropped, two
+  // different groups would return one another's moments — a much quieter
+  // failure than a year collision.
+  //
+  // ⚠ THIS USED TO ASSERT TWELVE DISTINCT (group, region) PAIRS AND NOW ASSERTS
+  // FOUR, because region left chronic severity. The old form would fail on
+  // correct code: the three regional cells of a group are now identical by
+  // construction, which is the whole point of the change. Inverting it rather
+  // than deleting it keeps the stronger statement — region must NOT reach these
+  // moments — under test, so a shock that scales severity regionally cannot
+  // quietly leak into the tower's rate card without this failing first.
   resetTowerMomentCache();
   const seen = new Map<string, string>();
-  let groupRegionDistinct = true;
-  for (const g of ['county', 'schools', 'highSafety', 'lowSafety'] as const) {
-    for (const r of ['North', 'Central', 'South'] as const) {
-      const v = wcBandMoments(0, 3, g, r);
-      const sig = `${v.m1.toFixed(6)}|${v.m2.toFixed(2)}`;
-      if (seen.has(sig)) groupRegionDistinct = false;
-      seen.set(sig, `${g}/${r}`);
-    }
+  let groupDistinct = true;
+  const GROUPS = ['county', 'schools', 'highSafety', 'lowSafety'] as const;
+  for (const g of GROUPS) {
+    const v = wcBandMoments(0, 3, g);
+    const sig = `${v.m1.toFixed(6)}|${v.m2.toFixed(2)}`;
+    if (seen.has(sig)) groupDistinct = false;
+    seen.set(sig, g);
   }
-  check(groupRegionDistinct, 'all 12 WC (ratingGroup, region) pairs return distinct band moments');
+  check(groupDistinct, 'all 4 WC rating groups return distinct band moments');
+  check(seen.size === GROUPS.length,
+    'the WC band cache keys on rating group (4 distinct entries, not 12)');
 
   // 1c. The year is FLOORED in the key because both severity trends floor at
   // year 1. Pre-game years must therefore return year-1 moments EXACTLY, not
@@ -125,12 +134,30 @@ console.log('--- 1. THE MEMO KEY (the dangerous one) ---');
 console.log('\n--- 2. YEAR-1 FULL-MARKET REPRODUCES THE CLOSED-FORM REFERENCE ---');
 {
   // These literals were derived independently at the planning stage, and WC's
-  // three reproduce the values the RETIRED frozen constants held (0.6620 /
+  // three reproduced the values the RETIRED frozen constants held (0.6620 /
   // 0.1474 / 0.1383 and SD/E 0.54 / 1.44 / 3.38) — i.e. the runtime path
-  // independently rederives a Monte-Carlo-measured constant to four decimals.
-  // That is the strongest single piece of evidence that this module is right.
+  // independently rederived a Monte-Carlo-measured constant to four decimals.
+  // That was the strongest single piece of evidence that this module is right.
+  //
+  // ⚠ WC's THREE MOVED WHEN REGION LEFT CHRONIC SEVERITY, and the SHAPE of the
+  // move is the interesting part rather than the fact of it:
+  //
+  //   layer            was      now      move
+  //   $4M xs $1M     0.6620   0.6647   +0.41%
+  //   $5M xs $5M     0.1474   0.1481   +0.47%
+  //   $40M xs $10M   0.1383   0.1390   +0.51%
+  //
+  // The held pure premium moved only +0.30% on the same change, so the layers
+  // moved MORE, and progressively more with attachment depth. That is excess-
+  // layer elasticity, not an error: E[ceded to a layer] responds to a severity
+  // scale with elasticity above 1, and further above it the deeper the
+  // attachment sits in the tail. A mean shift of +0.30% therefore lands as
+  // +0.41% at $1M and +0.51% at $10M. If these ever move by the SAME percentage
+  // as the pure premium, that is the thing to be suspicious of.
+  //
+  // GL's are untouched — region never entered GL's severity.
   const REF: Record<string, { per100: number[]; sdOverE: number[] }> = {
-    WC: { per100: [0.6620, 0.1474, 0.1383], sdOverE: [0.542, 1.449, 3.374] },
+    WC: { per100: [0.6647, 0.1481, 0.1390], sdOverE: [0.541, 1.446, 3.366] },
     GL: { per100: [1.3621, 0.4889, 0.5015], sdOverE: [0.452, 0.846, 1.366] },
   };
   resetTowerMomentCache();

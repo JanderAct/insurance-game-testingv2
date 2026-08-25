@@ -10,7 +10,8 @@
 // 1. ONE BASIS FOR LOSSES AND PRICING (finding 6). generateWcClaims (the draw)
 //    and the expectation below are written as a matched pair over the same
 //    factors — same group rates, same theta, same mixture weights, same
-//    component means, same region multipliers. The expectation differs from the
+//    component means. (Region multipliers were on that list until region left
+//    chronic severity; they are shock-only now.) The expectation differs from the
 //    draw ONLY by taking E[member noise] = 1 and using analytic component
 //    means. WC's purePremiumPer100 is derived from the expectation, so premium
 //    and losses cannot drift onto different bases. Change a factor in one and
@@ -83,9 +84,26 @@ export function ratingGroupOf(member: Member): WcRatingGroup {
   return g;
 }
 
-// Keyed lookup over the roster's authored Region. Mean-neutral by construction,
-// so region shifts the distribution of severity across members without moving
-// the book's expected loss.
+// Keyed lookup over the roster's authored Region.
+//
+// ⚠ NO LONGER IN THE SEVERITY PATH. Region used to multiply every WC claim's
+// severity, chronically and permanently. It is retained as DATA because shock
+// events need it — a regional catastrophe is a real thing for region to scale —
+// but a standing +/-5% on every claim in the south was asserted with nothing
+// behind it, and it is gone from both the draw and the analytic.
+//
+// ⚠ AND THE CLAIM IT USED TO CARRY WAS FALSE. This said "Mean-neutral by
+// construction, so region shifts the DISTRIBUTION of severity across members
+// without moving the book's expected loss." The MULTIPLIERS are mean-neutral
+// (0.95/1.00/1.05 average to exactly 1.00); the ROSTER is not. Payroll shares
+// run North 35.2% / Central 34.4% / South 30.4%, so the payroll-weighted mean
+// is 0.99759 and the book's expected loss WAS moved, by -0.24%.
+//
+// That 0.24% is not a curiosity. It is exactly why four rating-group class
+// rates left a -0.34% composition residual: within a rating group, members
+// still differed by region, so a group's expectation was not proportional to
+// its payroll. With region out of severity, a rating group is genuinely
+// homogeneous and four rates become exact.
 export function regionMultiplier(region: Region): number {
   return M.regionMultiplier[region] ?? 1;
 }
@@ -156,8 +174,8 @@ export const wcSeverityTrend = memoizeByYear(
 );
 
 // A component's log-location shifted to a given year. exp(mu + ln(s)) = s x
-// exp(mu), so a location shift in log space IS a multiplicative scale — the same
-// trick regionMult uses, and it keeps sigma untouched.
+// exp(mu), so a location shift in log space IS a multiplicative scale, and it
+// keeps sigma untouched.
 export function trendedMu(mu: number, yearNumber: number): number {
   return mu + Math.log(wcSeverityTrend(yearNumber));
 }
@@ -190,18 +208,14 @@ export const wcSeverityCap = memoizeByYear(
 
 // Mean of one mixture component, CAPPED at that year's ceiling.
 //
-// ⚠ THE CAP IS SCALED BY THE REGION MULTIPLIER, NOT APPLIED FLAT, and getting
-// that wrong would break the matched pair in a way no total would reveal. The
-// draw is `min(lognormal(mu, sigma) x regionMult, CAP_t)`, i.e. the region
-// factor multiplies the claim BEFORE the ceiling bites. So the matching
-// analytic is
-//
-//   E[min(regionMult x X, CAP_t)] = regionMult x E[min(X, CAP_t / regionMult)]
-//
-// and the per-component limit is CAP_t/regionMult rather than CAP_t. Passing
-// the cap directly would price a High-region claim as if its ceiling were
-// 1/mult times too high — finding 37's failure class again: a factor reaching
-// one side of a matched pair only.
+// ⚠ THERE IS NO REGION SCALING LEFT TO MATCH. This carried a long warning that
+// the cap had to be divided by the region multiplier, because the draw was
+// `min(lognormal(mu, sigma) x regionMult, CAP_t)` and the matching analytic was
+// therefore `regionMult x E[min(X, CAP_t / regionMult)]`. Region is out of
+// chronic severity, so both sides see the same unscaled distribution against
+// the same ceiling. The warning is recorded rather than deleted because it
+// describes a real trap that will return the moment a shock scales severity
+// per-region: whatever scales the DRAW must divide the analytic's limit.
 //
 // ⚠ `limit` NOW DEFAULTS TO THE YEAR'S CAP, NOT THE YEAR-1 CONSTANT. It used to
 // read `limit = WC_SEVERITY_CAP`, which was correct only while the ceiling was
@@ -254,17 +268,19 @@ function groupWeights(group: WcRatingGroup, params = M): number[] {
 export function expectedClaimSeverity(
   group: WcRatingGroup,
   weights: number[],
-  regionMult: number,
   yearNumber: number,
   params = M,
 ): number {
   const mix = params.ratingGroups[group].mix;
-  // See componentMean: the ceiling applies to the REGION-SCALED claim, so the
-  // per-component limit is THAT YEAR'S cap divided through by that scale.
-  const limit = wcSeverityCap(yearNumber) / Math.max(regionMult, 1e-12);
+  // ⚠ THE regionMult PARAMETER IS GONE, and with it the CAP/regionMult limit
+  // this function used to compute. Region no longer scales severity, so the
+  // ceiling applies to the unscaled claim and the limit is simply that year's
+  // cap. The scaled-limit reasoning that stood here was correct while region
+  // was in the draw; it has nothing left to correct for.
+  const limit = wcSeverityCap(yearNumber);
   let total = 0;
   for (let i = 0; i < mix.length; i++) total += weights[i] * componentMean(mix[i].component, yearNumber, limit);
-  return total * regionMult;
+  return total;
 }
 
 // --- exported: analytic expectation ------------------------------------------
@@ -312,7 +328,6 @@ function expectedWcGrossLossCore(
     const rq = rqOverride ?? member.riskQuality;
     const group = ratingGroupOf(member);
     const g = params.ratingGroups[group];
-    const regionMult = regionMultiplier(member.region);
     const lambda = payroll * g.ratePer1M * thetaWc(rq) * kLine * trend;
     const weights = basis === 'kLine' ? tiltedWeights(group, rq, params) : groupWeights(group, params);
 
@@ -322,9 +337,7 @@ function expectedWcGrossLossCore(
         componentLambda *= shockFactorFor(options.componentFreqMultipliers, g.mix[i].component);
       }
       const yr = options.yearNumber ?? 1;
-      total += componentLambda
-        * componentMean(g.mix[i].component, yr, wcSeverityCap(yr) / Math.max(regionMult, 1e-12))
-        * regionMult;
+      total += componentLambda * componentMean(g.mix[i].component, yr, wcSeverityCap(yr));
     }
   }
   return total;
@@ -498,7 +511,7 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
     const rq = member.riskQuality;
     const group = ratingGroupOf(member);
     const g = params.ratingGroups[group];
-    const regionMult = regionMultiplier(member.region);
+
     const before = claims.length;
 
     if (payroll > 0) {
@@ -538,16 +551,18 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
           // The trend-free-lag warning that stood here is retired with the lag
           // itself: there is no longer a gap between accident and report year for
           // a trend to be applied over, so E[(1+r)^lag] cannot arise.
-          // ⚠ CAPPED AFTER THE REGION MULTIPLIER, matching componentMean's
-          // scaled limit exactly. Capping before it would let a High-region
-          // claim exceed the ceiling by the region factor.
+          // ⚠ NO REGION MULTIPLIER. It used to scale this draw and the
+          // matching analytic together; region no longer touches chronic
+          // severity at all (see regionMultiplier). The scaled-ceiling
+          // reasoning that stood here went with it — there is one ceiling now
+          // and it applies to the unscaled claim.
           //
-          // ⚠ AND AT THIS YEAR'S CEILING, not the year-1 constant. trendedMu
-          // above already moved the distribution; the ceiling moves with it, so
-          // the draw and expectedClaimSeverity stay the same truncated
-          // distribution in every year rather than only in year 1.
+          // ⚠ AT THIS YEAR'S CEILING, not the year-1 constant. trendedMu above
+          // already moved the distribution; the ceiling moves with it, so the
+          // draw and expectedClaimSeverity stay the same truncated distribution
+          // in every year rather than only in year 1.
           const amount = Math.min(
-            sevRng.lognormal(trendedMu(spec.mu, yearNumber), spec.sigma) * regionMult,
+            sevRng.lognormal(trendedMu(spec.mu, yearNumber), spec.sigma),
             wcSeverityCap(yearNumber));
           const id = `wc-${yearNumber}-${member.id}-${componentKey}-${n}`;
           emit(id, member.id, member.region, group, componentKey, amount, yearNumber, yearNumber);

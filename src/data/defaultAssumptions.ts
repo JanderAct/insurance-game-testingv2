@@ -410,9 +410,24 @@ export const WC_LOSS_MODEL = {
   // simulationEngine where the IBNR provision used to be computed.
 
 
-  // Region severity multiplier. Mean-neutral by construction, so region shifts
-  // the DISTRIBUTION of severity across members without moving the book's
-  // expected loss. Unchanged.
+  // ⚠ SHOCK-ONLY NOW. This no longer scales chronic severity — it is retained
+  // as data because a regional catastrophe is a real thing for region to scale,
+  // and a standing +/-5% on every claim in one region was not. Nothing in the
+  // WC draw or analytic reads it; wcClaimEngine's accessor is the single door
+  // a future shock should come back through.
+  //
+  // ⚠ AND IT WAS NEVER "MEAN-NEUTRAL BY CONSTRUCTION", which is what this said.
+  // The three multipliers average to exactly 1.00; the BOOK does not. Weighted
+  // by expected loss the roster's mean is 0.996983, so region was quietly
+  // holding WC's expected loss 0.30% BELOW where the mixture put it.
+  //
+  // ⚠ AND THE PAYROLL-WEIGHTED FIGURE (0.997587, i.e. 0.24%) IS THE WRONG ONE,
+  // which is worth stating because it is the intuitive one to reach for. WC's
+  // loss cost is not proportional to payroll: schools carry 7.5% of payroll but
+  // 2.7% of expected loss, highSafety 12.1% against 19.0%. The region mixes
+  // differ across those groups — schools is 45.7% South, lowSafety 45.4% North
+  // — so weighting by payroll and weighting by loss give different answers, and
+  // only the loss-weighted one predicts what removing the multiplier did.
   regionMultiplier: { North: 0.95, Central: 1.00, South: 1.05 } as Record<Region, number>,
 };
 
