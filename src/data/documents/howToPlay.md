@@ -10,10 +10,25 @@ CHANGES FROM THE PDF, all corrections to describe what is actually built:
     on top, conditional on having placed an occurrence layer; GL has none.
   - Risk control ADDED. It is a live pool-wide decision, 0-8% of premium, and the PDF omits it.
   - Dividends and assessments ADDED. Also live, also omitted.
-  - Enrollment standard MARKED not yet active. The controls render but are inert pending the
-    experience modifier.
+  - Underwriting strictness DESCRIBED AS LIVE, and an earlier revision of this document was WRONG
+    to mark it "not yet active pending the experience modifier". The field is underwritingStrictness
+    (0-10, default 5) and it has THREE live channels in membershipEngine.ts: the join-count
+    adjustment (+0.8 at <=2, +0.3 at <=4, -0.4 at >=8), the candidate screen (>6 sorts the available
+    field by risk quality and keeps the top 60%; otherwise it shuffles), and updateRiskQuality's
+    direct (strictness - 5) * 0.04 nudge. It changes both HOW MANY join and WHO.
+  - Inter-line loan ADDED. loanRepaymentAggressiveness is a live per-line decision and neither it
+    nor the loan itself appeared in any earlier revision.
+  - IBNR PARAGRAPH REMOVED. It described claims reported years after they occur; IBNR went with WC's
+    report lag at the IBNER cutover and nothing defers reporting now. Replaced with what actually
+    happens — claims are known immediately, their COST estimate develops.
+  - Reserving moved OUT of "coming later". IBNER is live and the funding slider IS the reserving
+    posture (ibnerBookingBias = 0.80 * max(0, 1 - selectedFundingCLF)).
   - Funding rate reworded to name the confidence level explicitly, since the slider now has an
     Expected setting and per-line derived curves.
+  - Departments list aligned to DepartmentsPage: Actuarial, Claims, Underwriting, INVESTMENT — not
+    Finance, which is not a department the page ships.
+  - Liquidity reference qualified. The Investment Memorandum marks its liquidity sections as planned
+    and not built, and this document pointed at them as though they were live.
 
 Narrative framing (the yearly cycle, the departments) is deliberately light here — the Welcome
 Memorandum carries it. This document is the mechanical reference.
@@ -89,10 +104,29 @@ You may return surplus to members as a **dividend**, or collect an additional **
 A dividend lowers what members pay this year at the cost of the Pool's cushion. An assessment raises funds
 but asks members for money beyond their contributions, which is rarely welcome.
 
+### Loan repayment, by line
+
+If a coverage line ends a year with negative surplus, the Pool's other lines may offer to cover the
+shortfall. This is a real transfer of invested assets from the lending lines, not an accounting entry —
+and the offer only exists if the other lines can fund the whole deficit without going negative themselves.
+If they cannot, no offer is made and the line simply carries its deficit. An assessment is the other way
+out.
+
+Once a line carries a loan, you set how aggressively it repays: the share of that line's positive net
+income diverted to debt service each year. A line with no net income repays nothing regardless of the
+setting, and no repayment can exceed what the line actually holds in cash and investments.
+
+The balance accrues interest at the Pool's own blended investment return, floored at zero — the lending
+lines are made whole for the return they gave up, and never less than whole. Repaying fast clears the
+interest but starves the borrowing line's own surplus; repaying slowly leaves the debt compounding against
+it.
+
 ### Investment allocation — Pool-wide
 
 How the Pool's assets are divided among cash, bonds, and equities. A single policy applied across every
-line. See the Investment Memorandum for the assumptions, the liquidity requirement, and the tradeoffs.
+line. See the Investment Memorandum for the assumptions and the tradeoffs. Note that the liquidity
+requirement it describes is planned rather than in effect — no liquidity constraint or early-sale cost is
+currently applied to your allocation.
 
 ### Risk control — Pool-wide
 
@@ -100,13 +134,23 @@ You may spend a share of premium on risk control: safety programs, training, los
 the losses members actually suffer, but the benefit builds over time rather than arriving immediately, and
 the money is spent whether or not it works.
 
-### Enrollment standard — *not yet active*
+### Underwriting strictness, by line
 
-How selective to be about which applicants and renewals you accept. Tighter standards can improve the
-quality of the book but reduce volume — and because Pool membership is drawn from a fixed marketplace,
-volume lost is not quickly regained.
+How selective to be about which applicants you accept, on a scale of 0 to 10. This is a real trade of
+volume against quality, and it works on both sides at once.
 
-*The controls appear but do not yet affect results.*
+**Fewer join when you are strict.** A loose standard attracts entities that a stricter Pool would turn
+away; a tight one turns them away. The effect is not symmetric — loosening buys more volume than
+tightening costs.
+
+**But the ones who do join are better.** Above a strictness of 6 the Pool stops taking applicants as they
+come and screens them, considering only the better half of the available field. Below that it accepts from
+the whole field without sorting. Strictness also nudges the book's average risk quality directly, up or
+down from the neutral setting of 5.
+
+Because Pool membership is drawn from a fixed marketplace, volume lost is not quickly regained — an entity
+that goes elsewhere is not available again immediately. A tight standard compounds slowly in your favour
+through quality and slowly against you through size.
 
 ### Reserving — you have already set it
 
@@ -139,8 +183,10 @@ line, watch for one running hot while another runs cold — the pool-wide number
 **Claims exhibits** show recent large losses and how reserves on older claims are developing. Development
 that consistently runs adverse is an early sign that a line is priced or reserved too thin.
 
-Some claims are not reported in the year they occur. An injury can happen in one year and surface several
-years later, so the Pool sets aside money for claims it knows must exist but has not yet seen.
+The Pool knows about its claims as they happen — what it does not know is what they will finally cost. A
+serious injury or a liability suit is reported immediately and then takes years to resolve, and the
+reserve carried against it is an estimate that gets revised as it does. That revision is what the
+development columns show.
 
 **Two leverage ratios** are worth tracking every year: contribution to surplus, and reserves to surplus.
 Both measure how much the Pool has committed relative to its cushion. A ratio that climbs steadily over
@@ -148,7 +194,7 @@ several years is a warning sign even if any single year looked fine.
 
 ## A Note on Your Departments
 
-Actuarial, Claims, Underwriting, and Finance will each report their honest best assessment every year.
+Actuarial, Claims, Underwriting, and Investment will each report their honest best assessment every year.
 None of them has complete information, and none of their estimates are certain — reserve estimates move,
 trend assumptions get revised, and investment returns can surprise you in either direction.
 

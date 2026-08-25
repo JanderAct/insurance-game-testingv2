@@ -26,11 +26,33 @@ function formatConjunctionList(items: string[]): string {
 // player has actually reached. priorHistory's last entry (year 0's ending
 // state) IS that opening position (see Stage 2.10 in App.tsx), so this reads
 // from priorHistory rather than lockedResults regardless of current year.
+//
+// ⚠ THE ROSTER FIELDS READ `opening.memberList`, NOT `poolState`, AND THAT IS
+// THE WHOLE POINT OF THIS FUNCTION. They used to come from
+// poolState.allMarketMembers — LIVE state — so the three of them tracked
+// attrition and joining while the six around them stayed pinned. A memo dated
+// Year 1 then told an incoming team the Pool "currently serves 133 of 200" when
+// 141 were enrolled at the opening: measured at 141 -> 133 members,
+// $849.87M -> $813.58M payroll and $39.91B -> $36.88B TIV over eight years.
+// priorHistory is frozen once written, so reading the roster from it makes the
+// memo read identically in year 9 as in year 1.
+//
+// ⚠ NOT `opening.activeMembers`, which is a DIFFERENT QUANTITY. That field sums
+// per-line enrolments, so a member carrying two lines counts twice — it read 191
+// against a 131-member roster on the seed this was checked on. `memberList` is
+// the distinct roster and is what the live computation it replaces agreed with.
+//
+// `totalMemberCount` stays on poolState because the marketplace is a fixed
+// 200-member roster whose length never changes — members change STATUS, none are
+// added or removed (verified constant at 200 across 12 years and three seeds).
+// There is no equivalent field on ResultSet to move it to.
 function buildWelcomeMemoValues(gameState: GameState): Record<string, string> {
   const { setup, poolState, priorHistory } = gameState;
   const opening = priorHistory[priorHistory.length - 1];
 
-  const enrolledMembers = poolState.allMarketMembers.filter(m => m.status === 'active');
+  // Filtered rather than taken wholesale: memberList is all-active as written
+  // today, and this keeps the semantics correct if that ever stops being true.
+  const enrolledMembers = opening.memberList.filter(m => m.status === 'active');
   const enrolledPayrollM = enrolledMembers.reduce((sum, m) => sum + getMemberExposure(m, 'WC', 1), 0);
   const enrolledTIVM = enrolledMembers.reduce((sum, m) => sum + getMemberExposure(m, 'Property', 1), 0);
 
