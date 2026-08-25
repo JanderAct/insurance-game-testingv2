@@ -65,8 +65,8 @@ function clfFor(line: CoverageLine, confidenceLevel: number, atExpected: boolean
 // so even though computeFundingConsequence's no longer can. The retired grids
 // computed a per-book crossing because they interpolated on the book's own
 // CV/lambda; the static tables are one curve per line, so the crossing is one
-// number per line — WC 43.5%, GL 57.7% as currently measured (GL reads its
-// SUPPLIED curve; its own derived one crosses at 68.6%).
+// number per line — WC 44.2%, GL 57.7% as currently measured (GL reads its
+// SUPPLIED curve; its own derived one crosses at 70.8%).
 //
 // computeFundingConsequence DOES take members and yearNumber again, for the
 // tower — which genuinely prices off the book. This helper deliberately does

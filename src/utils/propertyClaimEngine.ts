@@ -110,15 +110,78 @@ function cappedComponentMoment(mu: number, sigma: number, k: number, cap: number
   return below + atCap;
 }
 
+// PROPERTY'S SEVERITY TREND IS EXACTLY 1, AND THAT IS A REAL STATEMENT, not a
+// placeholder. Property's severity does not trend at the DRAW: the construction-
+// cost inflation in PROPERTY_LOSS_MODEL.severityTrendPerYear is consumed by the
+// accident-year -> settlement dollar-vintage convention (PAYOUT_TREND_FACTOR),
+// not by shifting mu each year. The fit found no second trending convention and
+// adding one here would double-count it — the finding-37 trap the pure-premium
+// comment in simulationEngine warns about.
+//
+// ⚠ THE RATE IS A NAMED CONSTANT AT ZERO, AND THE FUNCTION HAS THE SAME SHAPE
+// AS wcSeverityTrend AND glSeverityTrend — including the year-1 floor — rather
+// than being a stub that returns 1. That is the difference between "Property is
+// special-cased" and "Property's rate happens to be zero": giving Property a
+// draw-side severity trend is a one-constant edit here, and everything
+// downstream (the ceiling, the capped moments, the draw) already routes through
+// it. Read propertySeverityCap's header FIRST if you are about to make that
+// edit — the tower is welded to Property's ceiling in three places.
+//
+// ⚠ NOT PROPERTY_LOSS_MODEL.severityTrendPerYear (0.04). That one is live and
+// means something different: construction-cost inflation consumed by the
+// accident-year -> settlement dollar-vintage convention. Setting THIS to 0.04
+// would apply the same inflation twice — the finding-37 trap PAYOUT_TREND_FACTOR
+// already documents. The two names are deliberately distinct.
+export const PROPERTY_DRAW_SEVERITY_TREND_PER_YEAR = 0;
+
+export function propertySeverityTrend(yearNumber: number): number {
+  return Math.pow(1 + PROPERTY_DRAW_SEVERITY_TREND_PER_YEAR, Math.max(1, yearNumber) - 1);
+}
+
+// THE CEILING IN THAT YEAR'S DOLLARS — the Property member of the same family as
+// wcSeverityCap and glSeverityCap. INERT TODAY because the trend above is 1.
+//
+// ⚠ IT CANNOT SIMPLY BE SWITCHED ON, AND THIS IS THE PART TO READ BEFORE GIVING
+// PROPERTY A SEVERITY TREND. Property's ceiling is not only a severity
+// statement — it is STRUCTURALLY WELDED TO THE REINSURANCE TOWER in three
+// places that WC's and GL's are not:
+//
+//   reinsuranceTower.ts   TOWER_TOP.Property IS severityCap
+//   reinsuranceTower.ts   the top layer's limit is severityCap - perRiskRetention
+//   propertyAggregate.ts  the aggregate threshold falls back to severityCap
+//
+// So a trending Property ceiling would silently grow the purchased tower and
+// move an aggregate threshold, which is a reinsurance change wearing a severity
+// change's clothes. Three further things assume year-invariance and would need
+// a year threaded or a key added: PROPERTY_MEAN_SEVERITY (a module-level
+// const), expectedPropertyGrossLoss (ExpectedPropertyLossOptions carries no
+// yearNumber at all, deliberately — Property's expectation is year-blind
+// today), and towerMoments' propertyBandCache (a single slot with no year
+// key). property-claim-check.ts
+// ASSERTS the invariance rather than trusting this comment, so switching the
+// trend on fails loudly at exactly these seams instead of drifting.
+export function propertySeverityCap(yearNumber: number): number {
+  return M.severityCap * propertySeverityTrend(yearNumber);
+}
+
 // The capped mixture's k-th moment at a given severity scale factor. The
 // factor enters as a shift of mu by log(factor), so it multiplies the k-th
 // moment by factor^k only when the cap is absent — with the cap present the
 // integral must be re-evaluated, which is why the factor is applied to mu here
 // rather than to the result.
-export function propertySeverityMoment(k: number, severityScale = 1): number {
+//
+// ⚠ severityScale IS RISK QUALITY, NOT A YEAR, and the two are deliberately
+// different in how they meet the ceiling. A high-RQ member genuinely draws
+// larger claims against the SAME physical ceiling, so the cap does not scale
+// with it — exactly as WC's cap does not scale with regionMult. `yearNumber`
+// restates the whole distribution in later dollars, so the ceiling DOES move
+// with it. Today that distinction costs nothing because Property's trend is 1;
+// it is wired so it stays correct if that changes.
+export function propertySeverityMoment(k: number, severityScale = 1, yearNumber = 1): number {
   const shift = Math.log(Math.max(severityScale, 1e-9));
   return M.severityMixture.reduce(
-    (a, c) => a + c.weight * cappedComponentMoment(c.mu + shift, c.sigma, k, M.severityCap),
+    (a, c) => a + c.weight * cappedComponentMoment(
+      c.mu + shift, c.sigma, k, propertySeverityCap(yearNumber)),
     0,
   );
 }
@@ -272,8 +335,11 @@ export function generatePropertyClaims(inputs: PropertyGenerationInputs): Proper
         const comp = M.severityMixture[idx];
         const raw = sevRng.lognormal(comp.mu + Math.log(sevScale), comp.sigma);
         // Already settlement dollars — see PAYOUT_TREND_FACTOR above.
-        const gross = Math.min(raw, M.severityCap);
-        if (raw > M.severityCap) capBindings++;
+        // THAT YEAR'S ceiling, wired like WC's and GL's; inert while
+        // propertySeverityTrend is 1. See propertySeverityCap.
+        const cap = propertySeverityCap(yearNumber);
+        const gross = Math.min(raw, cap);
+        if (raw > cap) capBindings++;
 
         const occurrenceId = `PR-${yearNumber}-${member.id}-${i}`;
         const claimId = `${occurrenceId}-c1`;

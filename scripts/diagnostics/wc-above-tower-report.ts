@@ -4,9 +4,17 @@
 //   GAMES=200 YEARS=8 npx tsx scripts/diagnostics/wc-above-tower-report.ts
 //
 // ⚠ THE SEVERITY-CAP DECISION THIS REPORT EXISTED TO INFORM HAS BEEN TAKEN, and
-// its answer changes how the report reads. WC_SEVERITY_CAP is now $85M, so the
-// band above the tower is BOUNDED at $85M - $50M = $35M per occurrence. Every
-// line has a finite ceiling now.
+// its answer changes how the report reads. WC's ceiling is $85M in YEAR-1
+// dollars and TRENDS with severity thereafter, so the band above the tower is
+// bounded but WIDENS: $85M - $50M = $35M per occurrence in year 1, and
+// $117.6M - $50M = $67.6M by year 10. Every line has a finite ceiling now.
+//
+// ⚠ THE WIDENING IS THE TOWER ERODING, NOT THE CEILING MISBEHAVING. The $50M
+// tower top is a nominal contract; severity inflates past it. A ceiling pinned
+// to a constant used to hide half of that by shrinking the modelled tail at the
+// same time, which made this band look stable when the pool's real exposure
+// above its tower was growing. If this report is used to size a retention, read
+// the band per YEAR and not as one number.
 //
 // This header used to say "WC is the only uncapped line, so it is the only line
 // where retained above tower is an unbounded quantity rather than a band with a
@@ -16,8 +24,9 @@
 // ⚠ SECTION 2's SAMPLE MAXIMUM IS THE FIGURE MOST CHANGED BY THAT, and it is
 // the one to be careful about. It used to be unbounded above — "a longer run
 // finds a larger worst year indefinitely" — and it no longer is: no occurrence
-// can exceed $85M, so the largest possible above-tower band is exactly $35M and
-// a year's total is bounded only by how many such occurrences it contains.
+// can exceed THAT YEAR'S ceiling, so the largest possible above-tower band is
+// that ceiling minus $50M (year 1 $35M, year 10 $67.6M) and a year's total is
+// bounded only by how many such occurrences it contains.
 // The EXPECTED cost and the return period remain the two figures worth reading.
 //
 // WHAT IT STILL MEASURES, and why it is still worth running: the expected

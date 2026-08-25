@@ -177,9 +177,18 @@ export const REINSURANCE_TOWER: Record<TowerLine, TowerLayer[]> = {
     // makes it a real purchase decision rather than a line item.
     //
     // Above it the pool retains, unreinsurable but now BOUNDED: one occurrence
-    // over $50M per ~109 years, and WC_SEVERITY_CAP ends the band at $85M, so
-    // the exposure above this layer is at most $35M per occurrence. It read
+    // over $50M per ~109 years, and the WC ceiling ends the band. It read
     // "UNBOUNDED (WC has no severity cap)" until that cap was imposed.
+    //
+    // ⚠ THE BAND WIDTH IS YEAR-DEPENDENT AND IT GROWS. This said "at most $35M
+    // per occurrence", which is the YEAR-1 figure only. wcSeverityCap trends
+    // while these attachment points do not, so the retained band above the
+    // tower runs $85M - $50M = $35M in year 1 and $117.6M - $50M = $67.6M by
+    // year 10. That is not a new exposure the trending ceiling created — it is
+    // the tower ERODING in real terms, which is what a nominal contract does
+    // against an inflating distribution. The fixed ceiling was concealing half
+    // of it by shrinking the modelled tail at the same rate the tower lost
+    // ground. Do not restate this as a single number.
     { name: '$40M xs $10M', attachment: 10e6, limit: 40e6, purchasable: true },
   ],
   // GL KEEPS THREE LAYERS — re-confirmed at the runtime-pricing change against
@@ -197,9 +206,11 @@ export const REINSURANCE_TOWER: Record<TowerLine, TowerLayer[]> = {
     // ⚠ THE REASON NARROWED WHEN THE SEVERITY CAP LANDED, and the header above
     // still needs reading with that in mind. It used to be capacity AND
     // pricing-honesty: an unbounded band cannot be priced with a straight face.
-    // GL_SEVERITY_CAP bounds this band at $75M per occurrence, so it is now
-    // priceable — the remaining objection is capacity alone, which has not
+    // The GL ceiling bounds this band at $75M per occurrence IN YEAR 1, so it is
+    // now priceable — the remaining objection is capacity alone, which has not
     // changed. Adding the layer would still assert a market exists to write it.
+    // As with WC, the band widens after year 1 because glSeverityCap trends and
+    // the $25M tower top does not: $164.7M - $25M = $139.7M by year 10.
   ],
   // ONE LAYER. See the header note above for why this is the whole structure
   // rather than a starting point: occurrence == claim for the fitted

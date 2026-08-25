@@ -72,9 +72,9 @@
 // ============================================================================
 
 import type { Member } from '../types/simulation';
-import { GL_LOSS_MODEL, GL_SEVERITY_CAP, GL_SEVERITY_COMPONENTS, WC_LOSS_MODEL } from '../data/defaultAssumptions';
+import { GL_LOSS_MODEL, GL_SEVERITY_COMPONENTS, WC_LOSS_MODEL } from '../data/defaultAssumptions';
 import { limitedExpectedValue, normalCdf } from './claimMath';
-import { thetaGl, tiltedGlWeights, trendedMuGl } from './glClaimEngine';
+import { glSeverityCap, thetaGl, tiltedGlWeights, trendedMuGl } from './glClaimEngine';
 import { GL_CLF_GRID, GL_CLF_PERCENTILE_STOPS } from '../data/glClfGrid';
 
 const M = GL_LOSS_MODEL;
@@ -91,15 +91,19 @@ const ALPHA_FREQ = M.memberFrequencyNoise.shape;
 // severity-cap verification: exp(2mu+2sigma^2) x Phi(...) + cap^2 x (1-Phi(...))).
 function cappedRawMoments(weights: number[], yearNumber: number): [number, number] {
   let m1 = 0, m2 = 0;
-  const lnCap = Math.log(GL_SEVERITY_CAP);
+  // THAT YEAR'S ceiling, not the year-1 constant — it trends with the mixture
+  // this function is integrating, so both moments scale by s^k exactly and the
+  // CV this feeds stays trend-invariant. See glSeverityCap.
+  const cap = glSeverityCap(yearNumber);
+  const lnCap = Math.log(cap);
   for (let i = 0; i < GL_SEVERITY_COMPONENTS.length; i++) {
     const c = GL_SEVERITY_COMPONENTS[i];
     const mu = trendedMuGl(c.mu, yearNumber);
     const s2 = c.sigma * c.sigma;
-    m1 += weights[i] * limitedExpectedValue(mu, c.sigma, GL_SEVERITY_CAP);
+    m1 += weights[i] * limitedExpectedValue(mu, c.sigma, cap);
     m2 += weights[i] * (
       Math.exp(2 * mu + 2 * s2) * normalCdf((lnCap - mu - 2 * s2) / c.sigma)
-      + GL_SEVERITY_CAP * GL_SEVERITY_CAP * (1 - normalCdf((lnCap - mu) / c.sigma))
+      + cap * cap * (1 - normalCdf((lnCap - mu) / c.sigma))
     );
   }
   return [m1, m2];

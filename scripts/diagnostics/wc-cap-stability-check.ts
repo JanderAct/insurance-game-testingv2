@@ -23,6 +23,13 @@
 // interval, the quantity is estimable.
 //
 // ============================================================================
+// ⚠ THE FIGURES BELOW WERE MEASURED UNDER A FIXED $85M CEILING. The ceiling
+// trends now, which RAISES it in later years and so makes the tail slightly
+// heavier, not lighter — the direction that would worsen this instability
+// rather than relieve it. The conclusion is therefore unaffected in sign, and
+// the table is left on its measured basis rather than silently restated. Re-run
+// this script for figures on the trending basis.
+//
 // ⚠ THE ANSWER IS NO. THE CAP IMPROVED THIS AND DID NOT FIX IT.
 //
 //              50 games   120 games   move    each inside the other's CI?
@@ -60,7 +67,7 @@ import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
-import { WC_SEVERITY_CAP } from '../../src/data/defaultAssumptions';
+import { wcSeverityCap } from '../../src/utils/wcClaimEngine';
 import type { CoverageLine, GameState, LineResultSet } from '../../src/types/simulation';
 
 const LINES: CoverageLine[] = ['WC', 'GL', 'Property'];
@@ -123,7 +130,13 @@ function collect(games: number): Record<string, number[][]> {
   return per;
 }
 
-console.log(`WC CALENDAR-CV STABILITY — WC_SEVERITY_CAP = $${(WC_SEVERITY_CAP / 1e6).toFixed(0)}M\n`);
+// The ceiling TRENDS, so the binding level differs by year. A 10-year game's
+// largest possible claim is the YEAR-10 ceiling, which is what the max below
+// has to be judged against — comparing it to the year-1 cap would report the
+// ceiling as "not binding" on a run where it bound every year.
+const CAP_AT_HORIZON = wcSeverityCap(YEARS);
+console.log(`WC CALENDAR-CV STABILITY — ceiling $${(wcSeverityCap(1) / 1e6).toFixed(1)}M in year 1, ` +
+  `$${(CAP_AT_HORIZON / 1e6).toFixed(1)}M by year ${YEARS} (it trends)\n`);
 console.log('Same seed family, same protocol, two sample sizes. The question is whether');
 console.log('they agree — not whether either is small.\n');
 
@@ -153,7 +166,7 @@ for (const l of LINES) {
 }
 
 console.log(`\nlargest single WC claim drawn anywhere in these runs: $${(biggestClaim / 1e6).toFixed(2)}M`);
-console.log(`  ${biggestClaim >= WC_SEVERITY_CAP * 0.999
+console.log(`  ${biggestClaim >= CAP_AT_HORIZON * 0.999
   ? 'AT the cap — the ceiling is binding in this sample, so the stability above is being tested against it.'
   : 'below the cap — the ceiling did not bind here, so this sample does not by itself demonstrate the cap working.'}`);
 

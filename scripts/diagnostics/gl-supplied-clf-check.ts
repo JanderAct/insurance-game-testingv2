@@ -16,7 +16,7 @@
 //   3. Every confidence level the UI can request falls INSIDE the supplied
 //      curve's 25-95 range, so no reachable slider position is answered by a
 //      clamp.
-//   4. WC's table still crosses where its own derivation puts it (43.5%),
+//   4. WC's table still crosses where its own derivation puts it (44.2%),
 //      i.e. the GL swap did not reach it.
 //
 // WHAT IS MEASURED AND REPORTED (not gated — it is a property of a placeholder,
@@ -57,22 +57,37 @@ check(wc.source === 'derived', 'WC table is still tagged `derived`');
   check(mono, 'supplied curve is strictly monotonic');
   const c = crossingOf(supplied);
   check(Math.abs(c - 0.577) < 0.0005, 'supplied curve crosses 1.000 at 57.7%', `${(c * 100).toFixed(2)}%`);
-  check(Math.abs(crossingOf(GL_DERIVED) - 0.686) < 0.002,
-    'GL_DERIVED is retained beside it and still crosses at 68.6%', `${(crossingOf(GL_DERIVED) * 100).toFixed(2)}%`);
+  // GL_DERIVED's crossing moved 68.6% -> 70.8% when the severity ceilings
+  // started trending: the trending ceiling stops truncating GL's later-year
+  // tail, mass moves from the middle of the ratio distribution into the extreme
+  // tail (the 99th stop went 5.6018 -> 6.5251 while the median FELL), and a more
+  // right-skewed distribution crosses 1.000 at a higher percentile. Re-derived
+  // and confirmed over two passes. See clfTables.ts's crossing block.
+  check(Math.abs(crossingOf(GL_DERIVED) - 0.708) < 0.002,
+    'GL_DERIVED is retained beside it and still crosses at 70.8%', `${(crossingOf(GL_DERIVED) * 100).toFixed(2)}%`);
   // GUARDS AGAINST THE GL SWAP LEAKING INTO WC, not against WC ever changing.
-  // WC's own crossing legitimately moved 47.2% -> 43.5% when its report lag and
-  // IBNR were removed and its table re-derived; this constant tracks WC's
-  // current derived value and must be updated whenever WC is deliberately
-  // re-derived. It failed exactly once, on that re-derivation, which is the
-  // check working rather than the check being wrong.
-  check(Math.abs(crossingOf(wc) - 0.435) < 0.002,
-    'WC still crosses where its own derivation puts it (43.5%) — the GL swap did not reach it',
+  // This constant tracks WC's current derived value and must be updated whenever
+  // WC is deliberately re-derived.
+  //
+  // ⚠ IT HAS NOW FAILED TWICE, AND THE SECOND TIME WENT UNNOTICED FOR A COMMIT.
+  // The first was the report-lag/IBNR removal (47.2% -> 43.5%), recorded here as
+  // "the check working rather than the check being wrong". The second was
+  // WC_SEVERITY_CAP, which moved WC's crossing to 44.2% and left this assertion
+  // red at the commit that caused it — the cap commit re-derived WC's table and
+  // updated clfTables.ts's own crossing prose, but did not run this script, so
+  // the one place that would have objected was never asked.
+  //
+  // The lesson is not "loosen the constant". It is that a re-derivation has more
+  // consumers than the file it edits: anything holding a crossing as a literal
+  // has to be re-run, and grepping the OLD VALUE is what finds them.
+  check(Math.abs(crossingOf(wc) - 0.442) < 0.002,
+    'WC still crosses where its own derivation puts it (44.2%) — the GL swap did not reach it',
     `${(crossingOf(wc) * 100).toFixed(2)}%`);
 }
 
 console.log('\n--- 2. "EXPECTED" IS STILL EXACTLY 1.000 ---');
 console.log('  fundingAtExpected bypasses the table entirely. Only the DISPLAYED crossing');
-console.log('  percentile moves (68.6% -> 57.7%); the multiplier charged must not.\n');
+console.log('  percentile moves (70.8% -> 57.7%); the multiplier charged must not.\n');
 {
   // The engine's own dispatch is `fundingAtExpected ? 1.0 : staticClf(...)`, so
   // the assertion that matters is that the literal survives — checked here by

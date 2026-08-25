@@ -240,9 +240,16 @@ export const WC_SEVERITY_COMPONENTS = {
 //   measurement, it is an unusable one, and it is why WC's CLF re-derivation
 //   question could not be settled by a CV comparison.
 //
-// ⚠ IT IS A CEILING, NOT A LOSS LIMIT, and it does NOT inflate with the
-// severity trend — same convention as GL's. A fixed ceiling binds harder in
-// later years, which is what a practical maximum does.
+// ⚠ IT IS A CEILING, NOT A LOSS LIMIT, and it DOES inflate with the severity
+// trend — same convention as GL's. This note used to say the opposite ("it does
+// NOT inflate... a fixed ceiling binds harder in later years, which is what a
+// practical maximum does"). That reading was reversed: a ceiling held at a
+// nominal number while the distribution inflates does not model a practical
+// maximum, it quietly shrinks the modelled tail by 28% over a ten-year game and
+// breaks the severity-scale invariance the CLF grid's axis rests on. The
+// distinction that matters is CONTRACT vs MODEL — a reinsurance attachment is a
+// nominal figure the pool actually signed and must erode; a statement about how
+// large a claim can be is a real-terms one. See wcSeverityCap.
 //
 // WHAT WOULD DISPLACE IT: the pool's large-claim history developed to ultimate
 // (which is the same open item that would displace component `large` itself),
@@ -250,6 +257,17 @@ export const WC_SEVERITY_COMPONENTS = {
 // per-claim ceiling, or an excess carrier's stated capacity. A different number
 // is a one-line change here: every consumer routes through the capped analytic
 // in wcClaimEngine and the single draw site in generateWcClaims.
+// ⚠ THIS IS THE YEAR-1 CEILING, NOT A FIXED ONE. wcSeverityCap(year) trends it
+// at wcSeverityTrend, so the ceiling is restated in each year's dollars rather
+// than eroding against a rising distribution. Read this number as "$85M in
+// year-1 dollars"; by year 10 the live ceiling is $117.6M.
+//
+// It was briefly nominal, and the reason it is not is worth keeping: a
+// stationary ceiling under a 3.67% severity trend was worth $61.5M in year-1
+// terms by year 10, a 28% real-terms tightening that changed the modelled
+// distribution's SHAPE over a game — it broke the severity-scale invariance
+// wcClfGrid's interpolation axis depends on, and it made the pricing year
+// factor (the raw trend) disagree with the generator. See wcSeverityCap.
 export const WC_SEVERITY_CAP = 85_000_000;
 
 export type WcComponentKey = keyof typeof WC_SEVERITY_COMPONENTS;
@@ -515,14 +533,18 @@ export const GL_HEAVY_COMPONENT_INDEX = 0;
 // reinsuranceTower.ts:145 and CALIBRATION_FINDINGS "the mixture has no
 // ceiling"); the CURRENT WC mixture is explicitly UNCAPPED, with its 1-in-250
 // -year claim at $71.2M and the absence of a cap recorded as an open item at
-// WC_SEVERITY_COMPONENTS.large. This is therefore the FIRST severity cap in
-// the live model, and it leaves WC and GL on different footings. Bounding WC
-// is a separate decision that has NOT been taken.
+// WC_SEVERITY_COMPONENTS.large. This was the FIRST severity cap in the live
+// model and for a while left WC and GL on different footings; WC is bounded
+// too now, and both ceilings trend.
 //
 // WHAT WOULD DISPLACE IT: a public-entity liability claim distribution with
 // observed maxima, or a verdict study establishing a realistic ceiling. A
 // different number is a one-line change here — every consumer routes through
 // expectedClaimSeverity (analytic) and the single draw site in glClaimEngine.
+// ⚠ THIS IS THE YEAR-1 CEILING, NOT A FIXED ONE — glSeverityCap(year) trends it
+// at GL's own severity trend. GL is the largest case of the erosion that change
+// fixes: at 5.7026%/yr a stationary $100M was worth $60.7M in year-1 terms by
+// year 10, a 39% real-terms tightening. By year 10 the live ceiling is $164.7M.
 export const GL_SEVERITY_CAP = 100_000_000;
 
 export const GL_LOSS_MODEL = {

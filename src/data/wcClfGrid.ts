@@ -84,29 +84,31 @@
 //
 //   - the severity trend scales every raw moment by s^k, so kappa_1 -> s x
 //     kappa_1 and kappa_2 -> s^2 x kappa_2, leaving CV = sqrt(kappa_2)/kappa_1
-//     NEARLY unchanged — see the correction immediately below, which weakens
-//     this bullet from "exactly" without disturbing the conclusion;
+//     exactly unchanged;
 //   - claim COUNTS do not move at all, because frequency reads REAL (frozen)
 //     payroll while only the rating side sees the wage factor.
 //
-// ⚠ THE FIRST BULLET SAID "EXACTLY UNCHANGED" AND WC_SEVERITY_CAP MADE THAT
-// FALSE. s^k factors out of an UNBOUNDED lognormal; it does not factor out of
-// one truncated at a fixed dollar ceiling, because inflating severity against a
-// stationary $85M cap genuinely shortens the relative tail. Measured on a fixed
-// 61-member book, aggregate CV drifts Y1 -> Y10 by +6.99% uncapped and +3.15%
-// capped — so the severity trend's own contribution went from 0 to about
-// -3.8pp. (The residual +3.15% is the FREQUENCY trend and was always there;
-// this bullet never claimed year-invariance, only invariance to the severity
-// scale.)
+// ⚠ THE FIRST BULLET HOLDS ONLY BECAUSE THE CEILING TRENDS, and it was briefly
+// FALSE. s^k factors out of an unbounded lognormal, and it factors out of one
+// truncated at a ceiling that moves with it — but NOT out of one truncated at a
+// FIXED dollar amount, because inflating severity against a stationary $85M cap
+// genuinely shortens the relative tail. While the cap was nominal, aggregate CV
+// on a fixed 61-member book drifted Y1 -> Y10 by +3.15% against +6.99%
+// uncapped: the severity trend's own contribution was about -3.8pp instead of
+// zero, and the bullet had to be withdrawn.
 //
-// ⚠ THE CONCLUSION BELOW STILL HOLDS, AND FOR AN UNCHANGED REASON. The
-// argument for CV over 1/sqrt(exposure) is that a NOMINAL quantity must not
-// slide the book along the curve. The residual drift is not nominal: it is a
-// true consequence of a real ceiling being approached, and it is an order of
-// magnitude smaller than the exposure-indexed alternative, where a 10-year wage
-// inflation would move 1/sqrt(exposure) directly. CV remains the right axis;
-// it is now approximately rather than exactly invariant, and a future decision
-// to TREND the cap would restore the exact form.
+// wcSeverityCap restores it. Re-measured on the same book, the drift is now
+// +6.97% — the severity trend contributes ZERO again, and the residual is the
+// FREQUENCY trend, which was always there and which this bullet never claimed
+// anything about. (+6.97% vs the uncapped +6.99% is not leftover tightening:
+// the frequency-driven drift acts on a capped severity shape, whose m2/m1^2
+// differs slightly from the uncapped one, so the same mechanism lands 0.02pp
+// apart.)
+//
+// So the axis argument below is back on its original footing rather than a
+// weakened one. If the ceiling is ever re-pinned to a constant, this bullet
+// must be withdrawn again — wc-cap-check.ts section 3 asserts the scaling and
+// will fail first.
 //
 // So a book whose payroll inflates does NOT slide along this curve and does NOT
 // get cheaper margin — which is correct: a pool whose members' wages rose has
@@ -145,7 +147,9 @@
 // RE-DERIVED AGAINST IT. Recorded rather than fixed, deliberately — read this
 // before trusting a number that came out of interpolateGridRatio.
 //
-// The ratios below are Monte Carlo percentiles of an UNCAPPED WC aggregate.
+// The ratios below are Monte Carlo percentiles of an UNCAPPED WC aggregate —
+// and the ceiling has since gained a trend as well, so the gap is now two
+// changes wide rather than one.
 // wcAggregateCumulants now reports a CAPPED CV. So a lookup feeds a capped
 // input into an uncapped curve, and the cap does not only move the CV — at a
 // GIVEN CV it also lightens skewness and kurtosis, which is what sets the ratio

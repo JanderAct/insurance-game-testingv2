@@ -72,20 +72,18 @@
 
 import {
   GL_LOSS_MODEL,
-  GL_SEVERITY_CAP,
   GL_SEVERITY_COMPONENTS,
   PROPERTY_LOSS_MODEL,
   WC_LOSS_MODEL,
   WC_RATING_GROUPS,
-  WC_SEVERITY_CAP,
   WC_SEVERITY_COMPONENTS,
   type WcRatingGroup,
 } from '../data/defaultAssumptions';
 import { REINSURANCE_TOWER, TOWER_TOP, type TowerLine } from '../data/reinsuranceTower';
 import { normalCdf } from './claimMath';
-import { glSeverityTrend, thetaGl, untiltedGlWeights } from './glClaimEngine';
+import { glSeverityCap, glSeverityTrend, thetaGl, untiltedGlWeights } from './glClaimEngine';
 import { propertyInternals } from './propertyClaimEngine';
-import { ratingGroupOf, regionMultiplier, thetaWc, trendedMu, wcFrequencyTrend } from './wcClaimEngine';
+import { ratingGroupOf, regionMultiplier, thetaWc, trendedMu, wcFrequencyTrend, wcSeverityCap } from './wcClaimEngine';
 import type { Member, Region } from '../types/simulation';
 
 const GM = GL_LOSS_MODEL;
@@ -163,11 +161,15 @@ const severityYearKey = (yearNumber: number) => Math.max(1, Math.floor(yearNumbe
 //
 // ⚠ THE CAP IS EXACTLY IRRELEVANT TO EVERY BAND INSIDE THE TOWER, and that is
 // worth stating because it looks like it should matter. Every GL layer bound is
-// <= $25M, the cap is $100M, and min(X, 100M) > 25M exactly when X > 25M — so a
-// cession inside the tower is bit-identical capped or uncapped (verified: 0.0e+0
-// relative difference). The cap reaches only the retained band ABOVE the tower,
-// which it bounds at $75M per occurrence. GL_SEVERITY_CAP is therefore NOT in
-// the tower's invalidation list.
+// <= $25M, the cap is $100M in year 1 and only rises from there, and
+// min(X, cap) > 25M exactly when X > 25M — so a cession inside the tower is
+// bit-identical capped or uncapped (verified: 0.0e+0 relative difference). The
+// clamp below is kept anyway because it costs nothing and stops the bounds
+// going nonsensical if a future layer is written above the ceiling. The cap
+// reaches only the retained band ABOVE the tower, which it bounds at $75M per
+// occurrence in year 1 and MORE thereafter — the ceiling trends, the $25M
+// tower top does not. GL_SEVERITY_CAP is therefore NOT in the tower's
+// invalidation list, but the YEAR is, and glBandCache is keyed on it.
 // One component's M0/M1/M2 at every tower edge. THIS is the unit that repeats:
 // WC's four rating groups draw from only FOUR distinct severity components
 // between them (small, medium, large, schoolsMedium) across 11 group-component
@@ -235,11 +237,15 @@ function bandMomentsForEdges(
 //
 // ⚠ THE CAP IS EXACTLY IRRELEVANT TO EVERY BAND INSIDE THE TOWER, and that is
 // worth stating because it looks like it should matter. Every GL layer bound is
-// <= $25M, the cap is $100M, and min(X, 100M) > 25M exactly when X > 25M — so a
-// cession inside the tower is bit-identical capped or uncapped (verified: 0.0e+0
-// relative difference). The cap reaches only the retained band ABOVE the tower,
-// which it bounds at $75M per occurrence. GL_SEVERITY_CAP is therefore NOT in
-// the tower's invalidation list.
+// <= $25M, the cap is $100M in year 1 and only rises from there, and
+// min(X, cap) > 25M exactly when X > 25M — so a cession inside the tower is
+// bit-identical capped or uncapped (verified: 0.0e+0 relative difference). The
+// clamp below is kept anyway because it costs nothing and stops the bounds
+// going nonsensical if a future layer is written above the ceiling. The cap
+// reaches only the retained band ABOVE the tower, which it bounds at $75M per
+// occurrence in year 1 and MORE thereafter — the ceiling trends, the $25M
+// tower top does not. GL_SEVERITY_CAP is therefore NOT in the tower's
+// invalidation list, but the YEAR is, and glBandCache is keyed on it.
 function glBandMomentsAll(yearNumber: number): BandMoments[] {
   const yk = severityYearKey(yearNumber);
   const hit = glBandCache.get(yk);
@@ -249,9 +255,10 @@ function glBandMomentsAll(yearNumber: number): BandMoments[] {
   const comps = GL_SEVERITY_COMPONENTS.map((c, j) => ({
     mu: c.mu + shift, sigma: c.sigma, weight: weights[j], cacheKey: `gl|${c.key}|${yk}`,
   }));
+  const cap = glSeverityCap(yk);
   const bounds = REINSURANCE_TOWER.GL.map(l => ({
-    lo: Math.min(l.attachment, GL_SEVERITY_CAP),
-    hi: Math.min(l.attachment + l.limit, GL_SEVERITY_CAP),
+    lo: Math.min(l.attachment, cap),
+    hi: Math.min(l.attachment + l.limit, cap),
   }));
   const out = bandMomentsForEdges(comps, bounds);
   glBandCache.set(yk, out);
@@ -489,8 +496,9 @@ export function layerRiskMoments(
 // alpha = s_k and beta = c_k - s_k b_k:
 //   E[retained^2 1{band k}] = alpha^2 M2 + 2 alpha beta M1 + beta^2 M0
 // over that band's partial moments. Everything above the tower top is always
-// retained (there is no layer to cede it to), and for GL that final band is
-// BOUNDED by GL_SEVERITY_CAP rather than running to infinity.
+// retained (there is no layer to cede it to), and that final band is BOUNDED by
+// the line's ceiling rather than running to infinity — for WC and GL a ceiling
+// that TRENDS, so the retained band above the tower widens each year.
 export function retainedOccurrenceMoments(
   line: TowerLine,
   placed: boolean[],
@@ -513,9 +521,20 @@ export function retainedOccurrenceMoments(
   // Property's ceiling EQUALS TOWER_TOP.Property (both are the severity cap,
   // $75M — see reinsuranceTower.ts's header on why that is structural, not a
   // coincidence), so the two are already the same edge; guard against pushing
-  // it twice, which the GL/WC cases never needed since GL_SEVERITY_CAP (100M)
-  // and TOWER_TOP.GL (25M) differ and WC's ceiling is infinite.
-  const ceiling = line === 'GL' ? GL_SEVERITY_CAP : line === 'Property' ? PM.severityCap : WC_SEVERITY_CAP;
+  // it twice. The WC/GL cases never needed that guard, and now cannot collide
+  // by construction: their ceilings trend away from their fixed tower tops.
+  //
+  // ⚠ THE WC AND GL CEILINGS ARE YEAR-DEPENDENT AND THE TOWER TOPS ARE NOT.
+  // That asymmetry is the honest one and it widens the band above the tower
+  // every year: WC's retained band runs $85M - $50M = $35M in year 1 and
+  // $117.6M - $50M = $67.6M by year 10. The tower is a CONTRACT struck at
+  // nominal attachment points, so it erodes in real terms while the modelled
+  // ceiling does not. The fixed cap used to hide half of that erosion by
+  // shrinking the ceiling alongside it; it is now visible, which is the point.
+  // Property's ceiling does not move because Property has no severity trend.
+  const ceiling = line === 'GL' ? glSeverityCap(yk)
+    : line === 'Property' ? PM.severityCap
+    : wcSeverityCap(yk);
   if (!edges.includes(ceiling)) edges.push(ceiling);
 
   // Which layer, if any, covers the band starting at `from`?

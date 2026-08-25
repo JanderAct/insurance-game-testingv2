@@ -26,7 +26,7 @@ import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
 import { PROPERTY_LOSS_MODEL, PROPERTY_HELD_PURE_PREMIUM_PER_100, PROPERTY_PURE_PREMIUM_SPLIT } from '../../src/data/defaultAssumptions';
 import {
   computeKPr, deriveNeutralPropertyPurePremiumPer100, expectedPropertyGrossLoss,
-  generatePropertyClaims, propertySeverityMoment, PROPERTY_MEAN_SEVERITY,
+  generatePropertyClaims, propertySeverityMoment, propertySeverityCap, PROPERTY_MEAN_SEVERITY,
 } from '../../src/utils/propertyClaimEngine';
 
 const M = PROPERTY_LOSS_MODEL;
@@ -54,6 +54,34 @@ check(Math.abs(PROPERTY_MEAN_SEVERITY - 435_254) < 500,
   check(Math.abs(cv - 4.78) < 0.02, 'capped severity CV is 4.78', cv.toFixed(3));
   const w = M.severityMixture.reduce((a, c) => a + c.weight, 0);
   check(Math.abs(w - 1) < 1e-9, 'mixture weights sum to 1', w.toFixed(6));
+}
+
+// ⚠ PROPERTY'S CEILING IS WIRED LIKE WC's AND GL's BUT IS INERT, AND THIS
+// ASSERTS THE INERTNESS RATHER THAN TRUSTING THE COMMENT THAT CLAIMS IT.
+//
+// WC and GL trend their ceilings at their own severity trends. Property's
+// propertySeverityTrend is exactly 1 — its severity does not trend at the DRAW,
+// because the construction-cost inflation is consumed by the accident-year ->
+// settlement convention instead. So propertySeverityCap must return the same
+// number in every year.
+//
+// This matters more than an inert check usually would, because three things
+// silently assume it: PROPERTY_MEAN_SEVERITY is a module-level const,
+// expectedPropertyGrossLoss takes no yearNumber at all, and towerMoments'
+// propertyBandCache is a single slot with no year key. Worse, Property's
+// ceiling IS TOWER_TOP.Property and sets the top layer's limit — so switching
+// the trend on would silently grow the purchased reinsurance tower. If someone
+// gives Property a severity trend, this check is the tripwire that should fire
+// first and send them to propertySeverityCap's header.
+{
+  const caps = [1, 2, 5, 10, 20].map(y => propertySeverityCap(y));
+  const allSame = caps.every(c => c === caps[0]);
+  check(allSame, 'Property ceiling is year-invariant (its severity trend is exactly 1)',
+    `${caps.map(c => `$${(c / 1e6).toFixed(1)}M`).join(' ')}`);
+  check(caps[0] === M.severityCap, 'and equals PROPERTY_LOSS_MODEL.severityCap, which TOWER_TOP.Property depends on',
+    `$${(caps[0] / 1e6).toFixed(1)}M`);
+  const momentSame = propertySeverityMoment(1, 1, 1) === propertySeverityMoment(1, 1, 20);
+  check(momentSame, 'and the capped mixture moment is therefore year-invariant too');
 }
 
 console.log('\n--- 2. THE HELD PURE PREMIUM RECONCILES FROM ITS PARTS ---');

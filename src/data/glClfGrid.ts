@@ -195,6 +195,33 @@
 // endpoint rather than extrapolated — same reasoning as WC's grid: the grid
 // spans the enrollable range, and extrapolating a linear trend past measured
 // bounds risks doing worse than clamping.
+// ============================================================================
+// ⚠ OPEN ITEM: THIS GRID WAS DERIVED UNDER A FIXED $100M CEILING AND HAS NOT
+// BEEN RE-DERIVED AGAINST THE TRENDING ONE. Recorded rather than fixed, exactly
+// as wcClfGrid.ts records the same class of staleness for WC.
+//
+// The ratios below are Monte Carlo percentiles of an aggregate whose severity
+// was clamped at a stationary $100M. glSeverityCap now trends that ceiling, so
+// a lookup feeds cumulants computed on one basis into a curve measured on
+// another. The bias is small and one-directional: the trending ceiling truncates
+// LESS in later years, so the true tail is slightly heavier than these ratios
+// describe, and the understatement grows with the year.
+//
+// ONE THING THE CHANGE IMPROVED RATHER THAN BROKE. This grid is indexed on
+// LAMBDA, and under the fixed ceiling the aggregate SHAPE at a given lambda
+// itself drifted with the year (the capped per-claim CV moved 3.31% by year 10),
+// so a lambda-indexed grid was silently year-sensitive. With the ceiling
+// trending the capped CV is trend-invariant to 2e-16, so shape-at-a-given-lambda
+// is now genuinely year-invariant and the axis does what it was chosen to do.
+//
+// WHY THIS DOES NOT AFFECT A SHIPPED NUMBER. The engine does not price GL off
+// this grid: STATIC_CLF_TABLE.GL is GL_SUPPLIED (clfTables.ts), and computeGlClf
+// has no caller in src/ outside this module's own crossing helper — verified by
+// search, not assumed. Its live consumers are diagnostics.
+//
+// WHAT WOULD CLOSE IT: re-run scripts/diagnostics/gl-clf-grid-derive.ts under
+// the trending ceiling and replace the entries below.
+// ============================================================================
 export interface GlClfGridEntry {
   size: number;
   exposure: number;

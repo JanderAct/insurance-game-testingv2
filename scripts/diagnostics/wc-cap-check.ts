@@ -28,7 +28,9 @@
 import {
   WC_LOSS_MODEL, WC_RATING_GROUPS, WC_SEVERITY_CAP, WC_SEVERITY_COMPONENTS,
 } from '../../src/data/defaultAssumptions';
-import { componentMean, expectedClaimSeverity, regionMultiplier, trendedMu } from '../../src/utils/wcClaimEngine';
+import {
+  componentMean, expectedClaimSeverity, regionMultiplier, trendedMu, wcSeverityCap, wcSeverityTrend,
+} from '../../src/utils/wcClaimEngine';
 import { SeededRandom } from '../../src/utils/random';
 import type { Region } from '../../src/types/simulation';
 
@@ -38,9 +40,29 @@ const YEARS = [1, 5, 10];
 
 const problems: string[] = [];
 const note = (ok: boolean, msg: string) => { if (!ok) problems.push(msg); return ok ? 'OK' : 'FAIL'; };
+// E[min(X,L)^k] in closed form — the same identity wcLossDistribution uses.
+// Local so this check does not depend on the module it is checking.
+function rawMomentCapped(mu: number, sigma: number, k: number, L: number): number {
+  const d = (Math.log(L) - mu) / sigma;
+  const Phi0 = (z: number) => 0.5 * (1 + Math.sign(z) * Math.sqrt(1 - Math.exp(-2 * z * z / Math.PI)));
+  void Phi0;
+  return Math.exp(k * mu + (k * k * sigma * sigma) / 2) * stdNormCdf(d - k * sigma)
+    + Math.pow(L, k) * (1 - stdNormCdf(d));
+}
+function stdNormCdf(z: number): number {
+  // Abramowitz & Stegun 7.1.26, ample for a ratio test at 1e-12 tolerance
+  // because the SAME function is used in numerator and denominator.
+  const s0 = z < 0 ? -1 : 1, x = Math.abs(z) / Math.SQRT2;
+  const t = 1 / (1 + 0.3275911 * x);
+  const y = 1 - (((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t)
+    * Math.exp(-x * x);
+  return 0.5 * (1 + s0 * y);
+}
+
 const fmt$ = (x: number) => x >= 1e6 ? `$${(x / 1e6).toFixed(3)}M` : `$${Math.round(x).toLocaleString()}`;
 
-console.log(`WC SEVERITY CAP = ${fmt$(WC_SEVERITY_CAP)}   (${TRIALS.toLocaleString()} trials per cell)\n`);
+console.log(`WC SEVERITY CAP (year 1) = ${fmt$(WC_SEVERITY_CAP)}   (${TRIALS.toLocaleString()} trials per cell)`);
+console.log(`  the ceiling TRENDS: ${YEARS.map(y => `yr ${y} ${fmt$(wcSeverityCap(y))}`).join('   ')}\n`);
 
 // --- 1. THE MATCHED PAIR, PER GROUP AND PER REGION --------------------------
 console.log('=== 1. DRAW MEAN === ANALYTIC MEAN, per rating group x region x year ===');
@@ -64,7 +86,11 @@ console.log('group      | region  | yr |    analytic |    drawn MC |   diff | vs
           let u = rng.next(), idx = spec.mix.length - 1;
           for (let i = 0; i < spec.mix.length; i++) { u -= weights[i]; if (u <= 0) { idx = i; break; } }
           const c = WC_SEVERITY_COMPONENTS[spec.mix[idx].component];
-          const x = Math.min(rng.lognormal(trendedMu(c.mu, yearNumber), c.sigma) * mult, WC_SEVERITY_CAP);
+          // THAT YEAR'S ceiling — reproducing generateWcClaims exactly. Using
+          // the year-1 constant here would make this check agree with a
+          // generator that no longer exists.
+          const x = Math.min(
+            rng.lognormal(trendedMu(c.mu, yearNumber), c.sigma) * mult, wcSeverityCap(yearNumber));
           sum += x; sumSq += x * x;
         }
         const drawn = sum / TRIALS;
@@ -89,19 +115,117 @@ console.log('    componentMean(key, yr, CAP/mult) x mult must differ from compon
 console.log('    wherever mult != 1 — if they agree, the limit is not being scaled.\n');
 {
   let anyScaled = false;
-  for (const region of REGIONS) {
-    const mult = regionMultiplier(region);
-    const scaled = componentMean('large', 1, WC_SEVERITY_CAP / mult) * mult;
-    const flat = componentMean('large', 1, WC_SEVERITY_CAP) * mult;
-    const differs = Math.abs(scaled - flat) > 1e-9;
-    if (mult !== 1) anyScaled = anyScaled || differs;
-    console.log(`  ${region.padEnd(7)} mult ${mult.toFixed(4)}  scaled-limit ${fmt$(scaled).padStart(10)}  ` +
-      `flat-limit ${fmt$(flat).padStart(10)}  ${mult === 1 ? '(mult 1 — must agree)' : differs ? 'differ, as they must' : '⚠ IDENTICAL'}`);
+  // Run at year 10 as well as year 1: the limit must be scaled by the region
+  // AND stated in that year's dollars, and only exercising year 1 would leave
+  // a year-1-pinned limit looking correct.
+  for (const yr of [1, 10]) {
+    for (const region of REGIONS) {
+      const mult = regionMultiplier(region);
+      const cap = wcSeverityCap(yr);
+      const scaled = componentMean('large', yr, cap / mult) * mult;
+      const flat = componentMean('large', yr, cap) * mult;
+      const differs = Math.abs(scaled - flat) > 1e-9;
+      if (mult !== 1) anyScaled = anyScaled || differs;
+      console.log(`  yr ${String(yr).padStart(2)}  ${region.padEnd(7)} mult ${mult.toFixed(4)}  cap ${fmt$(cap).padStart(10)}  ` +
+        `scaled ${fmt$(scaled).padStart(10)}  flat ${fmt$(flat).padStart(10)}  ` +
+        `${mult === 1 ? '(mult 1 — must agree)' : differs ? 'differ, as they must' : '⚠ IDENTICAL'}`);
+    }
   }
   console.log(`\n  ${note(anyScaled, 'no region showed a difference between the scaled and flat limit — the analytic is not scaling the cap')}`);
 }
 
-// --- 3. WHAT THE CAP COSTS, ANALYTICALLY --------------------------------------
+// --- 3. THE CEILING TRENDS, AND IT TRENDS ON BOTH SIDES ----------------------
+//
+// ⚠ THIS IS THE SECTION THAT WOULD HAVE CAUGHT THE ORIGINAL DEFECT, and it is
+// an extension of the matched pair above rather than a new check, deliberately:
+// the failure mode is the SAME one (a factor on one side only), just along the
+// year axis instead of the region axis.
+//
+// While the ceiling was a fixed number of dollars, three things were true and
+// all three were wrong:
+//   - the modelled tail shrank 28% in real terms across a ten-year game;
+//   - the capped mean grew SLOWER than wcSeverityTrend, so pricing at the raw
+//     trend over-charged by 0.19% at year 10 and 0.52% at year 20;
+//   - the severity-scale invariance CV = sqrt(k2)/k1 broke, which is what
+//     wcClfGrid's interpolation axis rests on.
+//
+// With CAP_t = CAP_1 x s_t the algebra closes: min(s X, s L) = s min(X, L), so
+// E[min(s X, s L)^k] = s^k E[min(X, L)^k] EXACTLY. Asserted, not argued.
+console.log('\n=== 3. THE CEILING TRENDS ON BOTH SIDES ===\n');
+{
+  // (a) THE ANALYTIC SCALES BY EXACTLY THE TREND. If the cap were pinned this
+  //     ratio would fall BELOW the trend and drift further every year.
+  console.log('  (a) analytic capped severity must scale by exactly wcSeverityTrend');
+  console.log('      group      | region  | yr | severity ratio |  wcSeverityTrend | rel err');
+  let worstRel = 0;
+  for (const group of WC_RATING_GROUPS) {
+    const spec = WC_LOSS_MODEL.ratingGroups[group];
+    const weights = spec.mix.map(m => m.weight);
+    for (const region of REGIONS) {
+      const mult = regionMultiplier(region);
+      const base = expectedClaimSeverity(group, weights, mult, 1);
+      for (const yr of [5, 10, 20]) {
+        const ratio = expectedClaimSeverity(group, weights, mult, yr) / base;
+        const trend = wcSeverityTrend(yr);
+        const rel = Math.abs(ratio / trend - 1);
+        worstRel = Math.max(worstRel, rel);
+        if (group === WC_RATING_GROUPS[0]) {
+          console.log(`      ${group.padEnd(10)} | ${region.padEnd(7)} | ${String(yr).padStart(2)} | ` +
+            `${ratio.toFixed(10).padStart(14)} | ${trend.toFixed(10).padStart(16)} | ${rel.toExponential(2)}`);
+        }
+      }
+    }
+  }
+  console.log(`      (all ${WC_RATING_GROUPS.length} groups x ${REGIONS.length} regions x 3 years measured; one group printed)`);
+  console.log(`\n      worst relative error ${worstRel.toExponential(3)}  ` +
+    `${note(worstRel < 1e-12, `capped severity does not scale by the trend (worst ${worstRel.toExponential(3)}) — the ceiling is not trending with the distribution`)}`);
+
+  // (b) EVERY MOMENT, NOT ONLY THE MEAN. The CV is what wcClfGrid indexes on,
+  //     so k = 2 mattering is the whole reason the invariance is load-bearing.
+  console.log('\n  (b) the k-th capped moment must scale by exactly s^k (k = 1..4)');
+  let worstMoment = 0;
+  for (const key of Object.keys(WC_SEVERITY_COMPONENTS) as (keyof typeof WC_SEVERITY_COMPONENTS)[]) {
+    const c = WC_SEVERITY_COMPONENTS[key];
+    for (const yr of [5, 10, 20]) {
+      const s_t = wcSeverityTrend(yr);
+      for (let k = 1; k <= 4; k++) {
+        const m1 = rawMomentCapped(trendedMu(c.mu, 1), c.sigma, k, wcSeverityCap(1));
+        const mt = rawMomentCapped(trendedMu(c.mu, yr), c.sigma, k, wcSeverityCap(yr));
+        const rel = Math.abs(mt / (m1 * Math.pow(s_t, k)) - 1);
+        worstMoment = Math.max(worstMoment, rel);
+      }
+    }
+  }
+  console.log(`      worst relative error across ${Object.keys(WC_SEVERITY_COMPONENTS).length} components x 3 years x 4 orders: ` +
+    `${worstMoment.toExponential(3)}`);
+  console.log(`      ${note(worstMoment < 1e-12, `a capped moment did not scale by s^k (worst ${worstMoment.toExponential(3)}) — the CV is not trend-invariant`)}`);
+
+  // (c) THE DRAW'S CEILING MOVED TOO. (a) and (b) are both analytic; if the
+  //     generator were still clamping at the year-1 cap they would pass while
+  //     the pair was broken. So: sample the heavy component in year 10 and
+  //     require draws ABOVE the year-1 ceiling.
+  console.log('\n  (c) the DRAW must be able to exceed the year-1 ceiling in a later year');
+  {
+    const rng = new SeededRandom(77002);
+    const c = WC_SEVERITY_COMPONENTS.large;
+    const yr = 10, cap1 = wcSeverityCap(1), cap10 = wcSeverityCap(yr);
+    let aboveOldCap = 0, atNewCap = 0, maxSeen = 0;
+    const N = 2_000_000;
+    for (let t = 0; t < N; t++) {
+      const x = Math.min(rng.lognormal(trendedMu(c.mu, yr), c.sigma), cap10);
+      if (x > cap1) aboveOldCap++;
+      if (x >= cap10 * 0.999999) atNewCap++;
+      maxSeen = Math.max(maxSeen, x);
+    }
+    console.log(`      ${N.toLocaleString()} year-10 draws of \`large\`: ${aboveOldCap} above the year-1 ceiling ` +
+      `(${fmt$(cap1)}), ${atNewCap} at the year-10 ceiling (${fmt$(cap10)})`);
+    console.log(`      largest drawn ${fmt$(maxSeen)}`);
+    console.log(`      ${note(aboveOldCap > 0, 'no year-10 draw exceeded the year-1 ceiling — the DRAW is still clamping at the old cap')}`);
+    console.log(`      ${note(maxSeen <= cap10 * 1.000001, 'a draw exceeded the year-10 ceiling — the clamp is not being applied')}`);
+  }
+}
+
+// --- 4. WHAT THE CAP COSTS, ANALYTICALLY --------------------------------------
 // ⚠ COMPUTED IN CLOSED FORM, NOT SAMPLED, AND THAT IS NOT A STYLE CHOICE. An
 // earlier cut of this section Monte-Carlo'd the uncapped mean and CV. That is
 // self-defeating: the reason the cap exists is that WC's uncapped moments
@@ -115,7 +239,7 @@ console.log('    wherever mult != 1 — if they agree, the limit is not being sc
 //   uncapped E[X^2] exp(2mu + 2 sigma^2)
 //   capped   E[X^2] exp(2mu + 2 sigma^2) Phi((ln C - mu)/sigma - 2 sigma)
 //                     + C^2 (1 - Phi((ln C - mu)/sigma))
-console.log('\n=== 3. WHAT THE CAP COSTS AND BUYS (closed form, per component) ===\n');
+console.log('\n=== 4. WHAT THE CAP COSTS AND BUYS (closed form, per component, YEAR 1) ===\n');
 {
   const Phi = (z: number) => 0.5 * (1 + erf(z / Math.SQRT2));
   function erf(x: number): number {

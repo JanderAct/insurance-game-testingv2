@@ -70,7 +70,7 @@
 //
 // So: derive, install, DERIVE AGAIN, and only ship once two consecutive passes
 // agree. Anything else ships a table calibrated to an engine that no longer
-// exists. GL barely moves between passes (68.8% -> 68.6%); WC does, because its
+// exists. GL barely moves between passes (68.8% -> 68.6% at the time); WC does, because its
 // crossing sits where the density is highest and small shifts in the ratio
 // distribution move it further.
 
