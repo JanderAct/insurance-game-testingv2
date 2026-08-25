@@ -1438,10 +1438,7 @@ export function buildSupportingRows(
   const exposureRows: AuditRow[] = [
     {
       metric: 'Active Members',
-      // ⚠ memberList.length, NOT result.activeMembers — see toHistoricalYear.
-      // At pool scope activeMembers sums per-line enrolments and double-counts
-      // anyone carrying more than one line; memberList is deduplicated by id.
-      value: String(result.memberList.length),
+      value: String(result.activeMembers),
       formula: { kind: 'text', text: 'A headcount, not a calculation — no simpler components are shown on this page.' },
     },
     {
@@ -1455,13 +1452,20 @@ export function buildSupportingRows(
       formula: { kind: 'text', text: 'A headcount, not a calculation — no simpler components are shown on this page.' },
     },
     {
-      metric: 'Written Payroll Exposure',
+      // ⚠ THE POOL ROW IS NOT PAYROLL. WC and GL contribute $M of payroll and
+      // Property contributes $M of insured value, so the pooled figure adds two
+      // different units and is ~96% TIV by magnitude. Labelling it "Payroll" at
+      // pool scope asserted a unit it does not have; the label now names both.
+      // Each line's own row is a single clean unit and is the one to read.
+      metric: isPoolView ? 'Written Exposure (payroll + TIV)' : 'Written Payroll Exposure',
       value: `${result.writtenExposure.toFixed(2)}M`,
       numericValue: result.writtenExposure,
-      formula: { kind: 'echo', value: result.writtenExposure, text: 'active payroll exposure after member movement — the same figure' },
+      formula: { kind: 'echo', value: result.writtenExposure, text: isPoolView
+        ? 'active exposure after member movement — WC/GL payroll and Property TIV added together, so read the per-line rows for a figure in one unit'
+        : 'active payroll exposure after member movement — the same figure' },
     },
     {
-      metric: 'Total Market Payroll Exposure',
+      metric: isPoolView ? 'Total Market Exposure (payroll + TIV)' : 'Total Market Payroll Exposure',
       value: `${result.totalMarketExposure.toFixed(2)}M`,
       formula: { kind: 'text', text: 'The full simulated market total — no on-page breakdown by member exists.' },
     },

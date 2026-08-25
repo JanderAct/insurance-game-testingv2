@@ -735,6 +735,129 @@ before `aef0bbe` was taken against a mechanism that no longer exists — includi
 
 ---
 
+## v20 — one commit: every pool-scope aggregation audited, six defects fixed
+
+**Trigger:** seven pool-scope aggregation defects had been found one at a time, each by tripping over it,
+and three of them had been *added underneath a comment warning about that exact class*. Finding the eighth
+the same way was the expected outcome of continuing, so the whole of `aggregateLineResults` was enumerated
+and classified instead.
+
+**⚠ BOTH GATES MOVED, AND THE BRIEF EXPECTED ONLY ONE TO.** The change is display-and-export only in the
+sense that matters — the engine did not move — but `value-identity-check` captures the POOLED row
+alongside each line, and the pooled row is exactly what was being corrected. The decomposition is the
+proof, and it is exact:
+
+| | changed | added |
+|---|---|---|
+| **total** | 37 | 150 (`enrolmentCount`) |
+| by config | `tri` 37 — **WC-solo, GL-solo, PR-solo all 0** | |
+| by scope | `pool` 37 — **every line scope 0** | |
+| by field | `activeMembers` 15, `memberRetentionRate` 15, `withdrawnMembers` 4, `newMembers` 3 | |
+
+Zero line-scope movement is the statement that no aggregation feeds the engine. Zero solo-config movement
+is the second half of it: with one active line every aggregation is the identity, so a solo pool cannot
+change unless the aggregation itself is broken. All 12 export hashes moved, on the new `Enrolments` column
+and the `Active Members` → `Members` relabel, which reach every config including the solos.
+
+### The classification
+
+Every field summed or averaged across lines, and what each turned out to be:
+
+- **LEGITIMATE (58 fields)** — extensive money, plus ratios recomputed from summed components. `marketShare`
+  and `investmentReturnRate` were already recomputed rather than summed; every income-statement and
+  balance-sheet figure genuinely adds.
+- **WRONG MULTIPLICITY (4)** — `activeMembers`, `newMembers`, `withdrawnMembers`, `memberRetentionRate`.
+- **MIXED UNITS (3)** — `activeExposure`, `totalMarketExposure`, `writtenExposure`.
+- **NO POOL MEANING (3)** — `aggregateAttachment`, `cededByLayer`, `commonLossFactor`.
+- **FIRST-LINE PLACEHOLDER (18)** — rate/CLF/decision echoes, already documented as such.
+
+### What was wrong, and what it now reads
+
+**`activeMembers`** summed per-line enrolments: 205 against a 139-member roster, ~47% over. Now the
+deduplicated roster. The enrolment sum survives as its own field because it is the legitimate WEIGHT behind
+`memberSatisfaction` and `averageRiskQuality` — those average a per-line figure weighted by that line's
+enrolments, and a member with two lines genuinely has two experiences to average.
+
+**`newMembers` / `withdrawnMembers`** summed per-line joining and leaving EVENTS. Now the union of the
+per-line id sets, which required carrying `newMemberIds` / `withdrawnMemberIds` on `LineResultSet` — there
+was no existing distinct quantity to read, unlike the roster.
+
+**⚠ AND THE OBVIOUS-LOOKING VERSION OF THAT IS WRONG.** The first cut read joiners off the roster as
+`memberList.filter(m => m.yearJoined === yearNumber)`. Every opening member carries `yearJoined` 1 — the
+field's own comment says so and says not to answer per-year enrolment questions with it — so year 1
+reported the entire book as joiners: **140 against a true 41.** `pool-aggregation-check`'s union-vs-sum
+assertion caught it on its first run, which is the case for the check existing.
+
+**`memberRetentionRate`** divided summed enrolment counts, making it an enrolment retention rate wearing a
+member label: a member who dropped one of two lines counted as a whole withdrawal against a doubled base.
+Both readings are defensible quantities; only one matches the name, the "Member Retention Rate" row that
+displays it, and the per-line field it aggregates — which is itself a distinct-member rate. Now on a
+distinct-member basis, so the pooled row measures what its own line rows measure.
+
+**`writtenExposure`** adds WC/GL payroll to Property TIV and is ~96% TIV by magnitude. It sat three lines
+below a comment warning about exactly this for its two neighbours and was not named by it. The sum is
+retained (display reads it) but no longer labelled with a unit it does not have: pool scope now reads
+"Written Exposure (payroll + TIV)" on both the audit page and the results table.
+
+**`cededByLayer`** — NOT ON THE ORIGINAL LIST, and the clearest instance of the pattern. It sums
+ELEMENTWISE, justified by a comment reading "only meaningful because WC and GL share identical attachments
+and limits on their first three layers". True when written. Property then got a tower of its own — a single
+`$70M xs $5M` layer — and it landed in index 0 beside two `$4M xs $1M` layers. Measured: 31.49 = 0.30 (WC)
++ 17.11 (GL) + 14.08 (Property), three different treaties in one cell. Property is now excluded rather than
+the sum widened, because no index means anything across all three. **The comment was not wrong when
+written; a LINE was added and nobody re-read it.**
+
+**`aggregateAttachment`** summed two treaties' attachment points. `aggregateRecovery` and `aggregatePremium`
+are realised dollars and do add; an attachment is a THRESHOLD and does not — no single retained-loss total
+triggers it, because there are two treaties triggering on two different totals. Now 0 with the reason
+recorded; nothing reads it at pool scope.
+
+**`commonLossFactor`** — also not on the list. An unweighted mean of a factor only GL uses: WC and Property
+are pinned at exactly 1, so GL's 1.1759 is reported as 1.0586 at pool scope, and the dilution changes with
+the NUMBER of active lines rather than with anything economic. Left as the mean (legacy field, no engine
+consumer) but recorded as not meaning what it appears to.
+
+**One stale comment, no code change:** `netPaidLosses` carried "Non-WC lines contribute 0, so the pool total
+IS WC's — correct, since only WC has a report lag." WC's report lag went at the IBNER cutover; measured
+WC $8.04M + GL $11.67M + Property $8.87M, with WC the smallest. The sum was always right; the reasoning
+under it had been inverted by a change elsewhere.
+
+### The structural fix, which matters more than the six
+
+`aggregateLineResults` no longer has a generic `sum`. Four named helpers replace it — `addDollars`,
+`addEnrolments`, `addMixedUnitExposure`, `noPoolMeaning(placeholder, why)` — so every one of the 60-odd call
+sites states its own class, and `noPoolMeaning` will not compile without a written reason. A new field
+cannot be added without choosing.
+
+`scripts/diagnostics/pool-aggregation-check.ts` closes it: it enumerates every numeric field on the pooled
+row and fails if any is unclassified, so adding a field to `ResultSet` without deciding what it is turns the
+check red. It also asserts the roster is distinct, that the enrolment sum still EXCEEDS it (a deduplicated
+weight would silently break satisfaction and quality), that joiner and leaver counts are unions rather than
+sums, that `cededByLayer` is the WC+GL elementwise sum, and that **a solo pool equals its one line exactly**.
+
+**⚠ IT CHECKS BOOKKEEPING, NOT TRUTH.** It cannot say a field is in the wrong class — only that somebody
+chose and wrote it down. That is the honest limit, and it is still the difference between a decision and an
+omission: three of the seven defects were omissions committed inches from a warning.
+
+### The export divergence, closed
+
+The page read 141 where the export read 205, both labelled "Active Members" — the Pool Loss Ratio defect
+recreated. The export now carries **both** columns: `Members` (distinct) and `Enrolments` (the sum). Both
+are needed and neither is a duplicate — Members is what the pages show and what the word means; Enrolments
+is the divisor anyone reconstructing Member Satisfaction or Average Risk Quality from the export requires.
+Shipping only Members would make both unreconstructable; shipping only Enrolments is what caused the
+divergence.
+
+**Guards at the endpoint:** `pool-aggregation-check` green on all five sections. `ibner-null-check`,
+`wc-cap-check`, `gl-claim-check`, `property-claim-check`, `tower-runtime-check`, `shock-check` all pass.
+No broken identities. Typecheck and build clean; lint unchanged at 14 errors.
+
+**What a reader should carry forward:** the pooled row is not the sum of the line rows, and never was — it
+is a mixture of sums, unions, weighted means and placeholders. The four helpers are how you tell which,
+and `pool-aggregation-check` is what stops the next field from skipping the question.
+
+---
+
 ## ⚠️ The v4–v9 artifacts described above are HISTORY-ONLY as of 2026-08-19
 
 The workbooks, CSVs and per-version `.md` summaries this document narrates —
@@ -758,6 +881,6 @@ git log --all --diff-filter=D -- 'baselines/*'     # find the removing commit
 
 **This document is why the removal was safe** — it records what each retired
 version represented and what moved between them, which is the part worth
-keeping. What remains in `baselines/` is the current gate pair (v19), its
-immediate predecessor (v18, the one to reach for if a v19 capture ever needs
+keeping. What remains in `baselines/` is the current gate pair (v20), its
+immediate predecessor (v19, the one to reach for if a v20 capture ever needs
 checking), and the v11 workbook set.

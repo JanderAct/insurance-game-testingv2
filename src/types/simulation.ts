@@ -459,9 +459,40 @@ export interface ResultSet {
                                     // (pool-level aggregate shows the first line's as a placeholder)
 
   // Membership
+  //
+  // ⚠ MEMBERS AND ENROLMENTS ARE DIFFERENT NUMBERS AT POOL SCOPE, and conflating
+  // them is the defect class this block exists to prevent. A member carrying WC
+  // and GL is ONE member and TWO enrolments. At LINE scope the two coincide, so
+  // every field below is a plain headcount there and the distinction only bites
+  // on the pooled row.
+  //
+  // These three are DISTINCT MEMBER counts at both scopes. They are what a
+  // player means by "how many members do we have".
   activeMembers: number;
   newMembers: number;
   withdrawnMembers: number;
+  // The enrolment sum — activeMembers summed across lines without deduplication.
+  // Equal to activeMembers at line scope; ~47% higher at pool scope on a
+  // three-line book. It is NOT a headcount and must never be displayed as one.
+  //
+  // It is carried because it is the legitimate WEIGHT behind memberSatisfaction
+  // and averageRiskQuality: those average a per-line figure weighted by that
+  // line's enrolments, and a member with two lines genuinely has two enrolment
+  // experiences to average. Anyone reconstructing either figure from the export
+  // needs this column; dividing by activeMembers instead would inflate both.
+  enrolmentCount: number;
+  // Ids of the members who joined / left this line this year. Carried so the
+  // pooled row can count DISTINCT joiners and leavers rather than summing
+  // per-line events — a member taking WC and GL in the same year is one joiner,
+  // not two. Line scope: exactly `newMembers` / `withdrawnMembers` entries.
+  //
+  // ⚠ THESE EXIST BECAUSE `Member.yearJoined` CANNOT ANSWER THE QUESTION, and
+  // its own comment says so: every opening member carries yearJoined 1, so
+  // filtering the roster on it reports the entire year-1 book as joiners (140
+  // against a true 41 when this was tried). The per-line sets are the only
+  // record of who actually entered or left in a given year.
+  newMemberIds: string[];
+  withdrawnMemberIds: string[];
   activeExposure: number;
   totalMarketExposure: number;
   marketShare: number;          // exposure-based

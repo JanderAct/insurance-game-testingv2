@@ -236,7 +236,20 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // RESULT_METRICS, so this guard is blind to it by construction — fifth time that
 // has mattered. "Shape identity" here means the shape of the EXPORT, not of the
 // model behind it.
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v19.json');
+// v20: retired v19 at the pool-scope aggregation audit. ALL 12 HASHES MOVED and
+// PR-solo moving is NOT a leak here — the export gained an `Enrolments` column
+// and renamed `Active Members` to `Members`, and a new row plus a relabel reach
+// every configuration by construction. The solo hashes moved on SHAPE alone:
+// value-identity reads 0 changed in all three solo configs and 0 at every line
+// scope, with movement confined to 37 pool-scope membership fields in `tri`.
+//
+// The two columns are deliberate and are not duplicates. Members is the distinct
+// roster; Enrolments is that roster summed per line (141 against 205 on a
+// three-line book). Enrolments ships because it is the DIVISOR behind Member
+// Satisfaction and Average Risk Quality — drop it and neither is
+// reconstructable from the export; drop Members and the export reads 205 where
+// every page reads 141, which is the divergence this closed.
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v20.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

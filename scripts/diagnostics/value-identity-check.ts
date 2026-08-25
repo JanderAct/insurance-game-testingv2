@@ -260,7 +260,25 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // ibner-null-check sections 3 and 4 squeeze funding to each line's reachable
 // minimum stop and prove them there. Do not read a green gate as evidence a
 // mechanism is inert when the gate cannot reach it.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v19.json');
+// v20: retired v19 at the pool-scope aggregation audit.
+//
+// ⚠ THIS ONE MOVED THIS GATE WHILE BEING DISPLAY-ONLY, AND THAT IS NOT A
+// CONTRADICTION — it is what this script captures. It records the POOLED row
+// alongside each line, and the pooled row is precisely what was corrected. The
+// decomposition is the whole proof:
+//
+//   37 changed, ALL in `tri`, ALL at `pool` scope, across four field names
+//     (activeMembers 15, memberRetentionRate 15, withdrawnMembers 4, newMembers 3)
+//   0 at ANY line scope        -> no aggregation feeds the engine
+//   0 in WC-solo/GL-solo/PR-solo -> with one active line every aggregation is the
+//                                   identity, so a solo pool cannot move unless
+//                                   the aggregation itself is broken
+//   150 added: enrolmentCount
+//
+// So "did a VALUE move" needs the scope partition to answer here. A red line
+// scope would have meant the engine moved; a red solo config would have meant
+// the aggregation broke. Both were green.
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v20.json');
 
 function seedOf(id: string) {
   let h = 5381;

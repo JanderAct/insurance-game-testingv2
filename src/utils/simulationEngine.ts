@@ -1465,6 +1465,12 @@ export function processLineYear(
     activeMembers: memberResult.activeMembers.length,
     newMembers: memberResult.newMembers.length,
     withdrawnMembers: memberResult.withdrawnMembers.length,
+    // At line scope one member is one enrolment, so these two agree with the
+    // counts above by construction. Both exist so the POOLED row can tell
+    // members from enrolments — see the block on ResultSet.
+    enrolmentCount: memberResult.activeMembers.length,
+    newMemberIds: memberResult.newMembers.map(m => m.id),
+    withdrawnMemberIds: memberResult.withdrawnMembers.map(m => m.id),
     activeExposure: parseFloat(activeExposure.toFixed(2)),
     totalMarketExposure: parseFloat(totalMarketExposure.toFixed(2)),
     marketShare: parseFloat(marketShare.toFixed(4)),
@@ -2154,8 +2160,51 @@ export function aggregateLineResults(
   const results = lineResults.map(r => r.result);
   const first = results[0];
 
-  const sum = (key: keyof LineResultSet): number =>
+  // ==========================================================================
+  // HOW TO ADD A FIELD TO THIS FUNCTION — read before writing `+`.
+  //
+  // ⚠ THERE IS DELIBERATELY NO GENERIC `sum` HELPER ANY MORE. There was one, and
+  // every field went through it, and SEVEN pool-scope defects reached players
+  // that way. THREE of them landed directly beside a comment warning about this
+  // exact class, which is the evidence that a comment cannot fix it: a warning
+  // naming three fields did not stop the fourth being added underneath it.
+  //
+  // Adding across lines is only valid for some KINDS of quantity. Pick the
+  // helper that says which kind you have. The name is the argument — a call site
+  // reading `addDollars('netIncome')` states its own justification, and
+  // `noPoolMeaning` forces you to write down why there isn't one.
+  //
+  //   addDollars              extensive money. Two lines' dollars are the same
+  //                           unit and genuinely add. The large majority.
+  //   addEnrolments           per-line enrolment counts. A member with two lines
+  //                           counts twice. LEGITIMATE AS A WEIGHT, never as a
+  //                           headcount — see distinctMembers below for that.
+  //   addMixedUnitExposure    WC/GL payroll ($M) plus Property TIV ($M). Adding
+  //                           them is a category error; the result is retained
+  //                           only because display code still reads it, and it
+  //                           must never be labelled with a unit at pool scope.
+  //   noPoolMeaning           the quantity has no pool-level referent at all.
+  //                           Returns the stated placeholder and records why.
+  //
+  // Ratios are NOT in this list on purpose: never add a ratio across lines.
+  // Recompute it from its own summed components, as every ratio below does.
+  // ==========================================================================
+  const reduceKey = (key: keyof LineResultSet): number =>
     results.reduce((total, r) => total + (r[key] as unknown as number), 0);
+
+  /** Extensive money. Same unit on every line, so addition is meaningful. */
+  const addDollars = reduceKey;
+  /** Per-line enrolment counts. A weight, never a headcount. */
+  const addEnrolments = reduceKey;
+  /** WC/GL payroll + Property TIV. A category error, retained for display only. */
+  const addMixedUnitExposure = reduceKey;
+  /**
+   * No pool-level referent exists. `why` is REQUIRED and is the point of the
+   * helper: it forces the author to write down what the reader should do
+   * instead, at the call site, rather than leaving a bare value that looks
+   * aggregated. Discarded at runtime — the record is the source line.
+   */
+  const noPoolMeaning = <T>(placeholder: T, why: string): T => { void why; return placeholder; };
 
   // ⚠ ENROLMENTS, NOT MEMBERS, AND THE TWO DIVERGE BY ~47% ON A THREE-LINE POOL.
   // This is a plain sum of each line's active count, so a member carrying WC and
@@ -2179,7 +2228,7 @@ export function aggregateLineResults(
   //
   // Renamed from `activeMembersSum` because that name invited exactly the wrong
   // one of the two jobs, and three display sites took the invitation.
-  const enrolmentCount = sum('activeMembers');
+  const enrolmentCount = addEnrolments('activeMembers');
   // ⚠ DIMENSIONALLY MEANINGLESS AT POOL SCOPE. WC/GL exposure is $M of payroll;
   // Property's is $M of insured value (TIV). Summing across lines adds two
   // different units together — these two sums (and any ratio built from them,
@@ -2189,21 +2238,8 @@ export function aggregateLineResults(
   // table, and the pool-scope Calculation Audit rows for Payroll Units / Pool
   // Premium Rate at Selected CLF) — see marketShare below for the fix applied
   // to the one field this bug actually corrupted at pool scope.
-  const totalMarketExposureSum = sum('totalMarketExposure');
-  const activeExposureSum = sum('activeExposure');
-
-  // Recompute pool-wide retention from each line's implied prior-active count
-  // rather than averaging the per-line ratios.
-  let retainedSum = 0;
-  let priorActiveSum = 0;
-  for (const r of results) {
-    const retained = r.activeMembers - r.newMembers;
-    retainedSum += retained;
-    priorActiveSum += retained + r.withdrawnMembers;
-  }
-  const memberRetentionRate = priorActiveSum > 0
-    ? parseFloat((retainedSum / priorActiveSum).toFixed(3))
-    : 1;
+  const totalMarketExposureSum = addMixedUnitExposure('totalMarketExposure');
+  const activeExposureSum = addMixedUnitExposure('activeExposure');
 
   const memberSatisfaction = enrolmentCount > 0
     ? results.reduce((s, r) => s + r.memberSatisfaction * r.activeMembers, 0) / enrolmentCount
@@ -2224,9 +2260,55 @@ export function aggregateLineResults(
   }
   const memberLossResults = results.flatMap(r => r.memberLossResults);
 
-  const poolPremiumAndAdminExpenseSum = sum('poolPremiumAndAdminExpense');
-  const expectedLossSum = sum('expectedLoss');
-  const totalMemberChargeSum = sum('totalMemberCharge');
+  // ==========================================================================
+  // DISTINCT MEMBERS, not enrolments. All three counts below dedupe by member
+  // id, because a member carrying WC and GL is one member however many lines
+  // they hold. `memberList` above is already deduplicated; these apply the same
+  // treatment to the joiner and leaver counts, which previously summed per-line
+  // enrolment EVENTS. That overstated the roster by ~47% and joiners by up to 2
+  // in a pool-year.
+  //
+  // In a SOLO configuration every one of these equals the single line's own
+  // count, so nothing about a one-line pool changes.
+  // ==========================================================================
+  const distinctMembers = memberList.length;
+
+  // A joiner is a member who entered AT LEAST ONE line this year — the union of
+  // the per-line joiner sets, so simultaneous WC+GL entry is one joiner.
+  //
+  // ⚠ NOT `memberList.filter(m => m.yearJoined === yearNumber)`, which is the
+  // obvious-looking version and is wrong. Every opening member carries
+  // yearJoined 1 (see the field's own comment), so in year 1 that filter counts
+  // the whole book: 140 joiners against a true 41. pool-aggregation-check's
+  // union-vs-sum assertion caught it.
+  const distinctNewIds = new Set<string>();
+  for (const r of results) for (const id of r.newMemberIds) distinctNewIds.add(id);
+  const distinctNewMembers = distinctNewIds.size;
+
+  // A leaver is a member who left AT LEAST ONE line this year — the union of the
+  // per-line withdrawal sets. Counting the union rather than the sum is why
+  // LineResultSet carries withdrawnMemberIds at all.
+  const distinctWithdrawnIds = new Set<string>();
+  for (const r of results) for (const id of r.withdrawnMemberIds) distinctWithdrawnIds.add(id);
+  const distinctWithdrawnMembers = distinctWithdrawnIds.size;
+
+  // ⚠ ON A DISTINCT-MEMBER BASIS, matching the numerator and denominator to the
+  // counts above. It previously divided summed per-line enrolment counts, which
+  // silently made it an ENROLMENT retention rate wearing a member label: a
+  // member who dropped one of two lines counted as a whole withdrawal against a
+  // doubled base. Both readings are defensible quantities; only one matches the
+  // name and the "Member Retention Rate" row that displays it, and the per-line
+  // field it aggregates is itself a distinct-member rate — so the pooled row now
+  // measures the same thing its own line rows do.
+  const distinctRetained = distinctMembers - distinctNewMembers;
+  const distinctPriorActive = distinctRetained + distinctWithdrawnMembers;
+  const memberRetentionRate = distinctPriorActive > 0
+    ? parseFloat((distinctRetained / distinctPriorActive).toFixed(3))
+    : 1;
+
+  const poolPremiumAndAdminExpenseSum = addDollars('poolPremiumAndAdminExpense');
+  const expectedLossSum = addDollars('expectedLoss');
+  const totalMemberChargeSum = addDollars('totalMemberCharge');
 
   // Pool market share as the PREMIUM-WEIGHTED AVERAGE of each line's own
   // (dimensionless) market share, not activeExposureSum / totalMarketExposureSum.
@@ -2247,11 +2329,11 @@ export function aggregateLineResults(
     // bootstrap state). Falls back to a simple average of the per-line shares
     // rather than the exposure sum, since every per-line share is still valid.
     : results.reduce((s, r) => s + r.marketShare, 0) / results.length;
-  const netIncurredLossSum = sum('netIncurredLoss');
-  const adminExpenseSum = sum('adminExpense');
-  const reinsuranceCostSum = sum('reinsuranceCost');
-  const reserveRiskMarginNeededSum = sum('reserveRiskMarginNeeded');
-  const excessAvailableSurplusSum = sum('excessAvailableSurplus');
+  const netIncurredLossSum = addDollars('netIncurredLoss');
+  const adminExpenseSum = addDollars('adminExpense');
+  const reinsuranceCostSum = addDollars('reinsuranceCost');
+  const reserveRiskMarginNeededSum = addDollars('reserveRiskMarginNeeded');
+  const excessAvailableSurplusSum = addDollars('excessAvailableSurplus');
 
   // Same two-denominator AND same net-numerator discipline as the line level
   // (see the block there, and fundedNetExpectedLoss's header).
@@ -2297,9 +2379,12 @@ export function aggregateLineResults(
     decisions: first.decisions,
     assetAllocation: first.assetAllocation,
 
-    activeMembers: enrolmentCount,
-    newMembers: sum('newMembers'),
-    withdrawnMembers: sum('withdrawnMembers'),
+    activeMembers: distinctMembers,
+    newMembers: distinctNewMembers,
+    withdrawnMembers: distinctWithdrawnMembers,
+    enrolmentCount,
+    newMemberIds: [...distinctNewIds],
+    withdrawnMemberIds: [...distinctWithdrawnIds],
     activeExposure: activeExposureSum,
     totalMarketExposure: totalMarketExposureSum,
     marketShare,
@@ -2319,82 +2404,127 @@ export function aggregateLineResults(
     // fundedNetExpectedLoss's header is asserted against.
     expectedCededPer100: first.expectedCededPer100,
     netPurePremiumPer100: first.netPurePremiumPer100,
-    writtenExposure: sum('writtenExposure'),
+    writtenExposure: addMixedUnitExposure('writtenExposure'),
 
-    poolPremium: sum('poolPremium'),
+    poolPremium: addDollars('poolPremium'),
     adminExpense: adminExpenseSum,
     poolPremiumAndAdminExpense: poolPremiumAndAdminExpenseSum,
     totalMemberCharge: totalMemberChargeSum,
-    grossPremium: sum('grossPremium'),
-    assessments: sum('assessments'),
-    dividends: sum('dividends'),
+    grossPremium: addDollars('grossPremium'),
+    assessments: addDollars('assessments'),
+    dividends: addDollars('dividends'),
 
     memberLossResults,
-    aggregateMemberLoss: sum('aggregateMemberLoss'),
-    commonLossFactor: results.reduce((s, r) => s + r.commonLossFactor, 0) / results.length,
+    aggregateMemberLoss: addDollars('aggregateMemberLoss'),
+    // ⚠ AN UNWEIGHTED MEAN OF A FACTOR ONLY ONE LINE USES, and that is why it is
+    // not a pool figure. WC and Property are pinned at exactly 1 (neither reads
+    // the legacy aggregate path); only GL carries a live value. Averaging the
+    // three therefore drags GL's factor a fixed two-thirds of the way toward 1 —
+    // a measured 1.1759 on GL reported as 1.0586 at pool scope — and the
+    // dilution changes with the NUMBER of active lines rather than with anything
+    // economic. Left as the mean rather than repaired because the field is
+    // legacy and has no engine consumer; the pool value is documented here as
+    // not meaning what it appears to, and GL's own row is the one to read.
+    commonLossFactor: noPoolMeaning(
+      results.reduce((s, r) => s + r.commonLossFactor, 0) / results.length,
+      'legacy aggregate-path factor; only GL carries a live value — read the GL row',
+    ),
     catastropheFactor: first.catastropheFactor,
-    shockLossAmount: sum('shockLossAmount'),
-    grossUltimateLoss: sum('grossUltimateLoss'),
+    shockLossAmount: addDollars('shockLossAmount'),
+    grossUltimateLoss: addDollars('grossUltimateLoss'),
     shockLossIncurred: results.some(r => r.shockLossIncurred),
     // ONE ROW PER EVENT, costs summed across the lines it hit — not one row per
     // line. A cross-line event like #28 is a single cause, and showing it twice
     // would read as two events.
     shockEvents: mergeShockRecords(results),
     reinsuranceCost: reinsuranceCostSum,
-    // Tower outputs pooled across lines. cededByLayer is summed ELEMENTWISE and
-    // is only meaningful because WC and GL share identical attachments and limits
-    // on their first three layers; WC's fourth has no GL counterpart and simply
-    // carries WC's own figure. At pool scope this is a display convenience — the
-    // per-line arrays are the authoritative ones.
+    // ⚠ WC AND GL ONLY. PROPERTY IS EXCLUDED AND ITS ABSENCE IS THE FIX.
+    //
+    // This sums ELEMENTWISE, so index 0 means "the first layer of every line
+    // added together". That was defensible when only WC and GL had towers: they
+    // share identical attachments and limits on their first three layers, so
+    // index 0 really was $4M xs $1M everywhere. WC's fourth has no GL
+    // counterpart and simply carries WC's own figure.
+    //
+    // Property then got a tower of its own — a SINGLE layer, $70M xs $5M — and
+    // it landed in index 0 alongside those two $4M xs $1M layers. The pooled
+    // cell became three different treaties added together: measured 31.49 =
+    // 0.30 (WC $4M xs $1M) + 17.11 (GL $4M xs $1M) + 14.08 (Property $70M xs
+    // $5M). The comment that justified the elementwise sum was written before
+    // Property had a tower and was never revisited when it got one — the same
+    // way the exposure warning above failed to cover writtenExposure.
+    //
+    // Excluded rather than widened: there is no index that means anything
+    // across all three, because Property's tower does not share a single
+    // attachment with the other two. Property's own array is the authoritative
+    // one and CalculationAuditPage's per-line view already shows it. Anything
+    // reading this at pool scope is reading a WC+GL figure and should say so.
     cededByLayer: (() => {
-      const width = Math.max(0, ...lineResults.map(r => r.result.cededByLayer.length));
+      const aligned = lineResults.filter(r => r.line !== 'Property').map(r => r.result);
+      const width = Math.max(0, ...aligned.map(r => r.cededByLayer.length));
       const out = new Array(width).fill(0);
-      for (const { result } of lineResults)
-        result.cededByLayer.forEach((v, i) => { out[i] += v; });
+      for (const r of aligned) r.cededByLayer.forEach((v, i) => { out[i] += v; });
       return out;
     })(),
-    retainedAboveTower: sum('retainedAboveTower'),
-    aggregateRecovery: sum('aggregateRecovery'),
-    aggregatePremium: sum('aggregatePremium'),
-    aggregateAttachment: sum('aggregateAttachment'),
-    reinsuranceRecovery: sum('reinsuranceRecovery'),
-    netUltimateLoss: sum('netUltimateLoss'),
+    retainedAboveTower: addDollars('retainedAboveTower'),
+    aggregateRecovery: addDollars('aggregateRecovery'),
+    aggregatePremium: addDollars('aggregatePremium'),
+    // ⚠ 0, NOT A SUM, BECAUSE NO POOL AGGREGATE TREATY EXISTS TO HAVE AN
+    // ATTACHMENT. WC and Property each buy their own aggregate stop-loss; GL is
+    // offered none. Adding two attachment points produces a dollar figure that
+    // is the attachment of nothing — no single retained-loss total triggers it,
+    // because there are two separate treaties triggering on two separate
+    // retained-loss totals. aggregateRecovery and aggregatePremium above ARE
+    // summable: those are realised dollars, and dollars from two treaties add.
+    // An attachment is a THRESHOLD, and thresholds do not.
+    //
+    // Nothing reads this at pool scope today (checked across pages and
+    // RESULT_METRICS), so 0 costs nothing and is the honest reading: there is no
+    // pool attachment. Read byLine.WC / byLine.Property for the real ones.
+    aggregateAttachment: noPoolMeaning(0, 'two separate treaties; a threshold is not additive — read byLine'),
+    reinsuranceRecovery: addDollars('reinsuranceRecovery'),
+    netUltimateLoss: addDollars('netUltimateLoss'),
     netIncurredLoss: netIncurredLossSum,
 
-    operatingExpense: sum('operatingExpense'),
-    riskControlInvestment: sum('riskControlInvestment'),
-    priorYearDevelopment: sum('priorYearDevelopment'),
+    operatingExpense: addDollars('operatingExpense'),
+    riskControlInvestment: addDollars('riskControlInvestment'),
+    priorYearDevelopment: addDollars('priorYearDevelopment'),
 
-    beginningNetReserve: sum('beginningNetReserve'),
-    currentYearNetReserve: sum('currentYearNetReserve'),
-    // Pooled elementwise like every other reserve figure. Non-WC lines
-    // contribute 0, so the pool total IS WC's — correct, since only WC has a
-    // report lag.
-    netPaidLosses: sum('netPaidLosses'),
-    endingNetReserve: sum('endingNetReserve'),
+    beginningNetReserve: addDollars('beginningNetReserve'),
+    currentYearNetReserve: addDollars('currentYearNetReserve'),
+    // ⚠ THE COMMENT THAT STOOD HERE WAS FALSE AND IS WORTH RECORDING AS SUCH.
+    // It read "Non-WC lines contribute 0, so the pool total IS WC's — correct,
+    // since only WC has a report lag." WC's report lag was removed at the IBNER
+    // cutover and all three lines pay from their own reserves now: measured WC
+    // $8.04M + GL $11.67M + Property $8.87M, with WC the SMALLEST of the three.
+    // The sum itself was always right — these are dollars — but the reasoning
+    // under it had been inverted by a change elsewhere, which is how a reader
+    // checking this line would have been misled about which lines contribute.
+    netPaidLosses: addDollars('netPaidLosses'),
+    endingNetReserve: addDollars('endingNetReserve'),
 
     // Stage 2.9: per-line portfolios make the pool return an asset-weighted
     // blend of each line's own realized return, not any single line's rate.
-    investmentReturnRate: sum('investedAssets') > 0
-      ? sum('investmentIncome') / sum('investedAssets')
+    investmentReturnRate: addDollars('investedAssets') > 0
+      ? addDollars('investmentIncome') / addDollars('investedAssets')
       : first.investmentReturnRate,
-    investedAssets: sum('investedAssets'),
-    investmentIncome: sum('investmentIncome'),
+    investedAssets: addDollars('investedAssets'),
+    investmentIncome: addDollars('investmentIncome'),
 
-    outstandingLoanBalance: sum('outstandingLoanBalance'),
-    loanRepaymentApplied: sum('loanRepaymentApplied'),
-    loanInterestAccrued: sum('loanInterestAccrued'),
-    loanOriginatedThisYear: sum('loanOriginatedThisYear'),
+    outstandingLoanBalance: addDollars('outstandingLoanBalance'),
+    loanRepaymentApplied: addDollars('loanRepaymentApplied'),
+    loanInterestAccrued: addDollars('loanInterestAccrued'),
+    loanOriginatedThisYear: addDollars('loanOriginatedThisYear'),
     dividendBlocked: results.some(r => r.dividendBlocked),
 
     selectedFundingConfidenceLevel: first.selectedFundingConfidenceLevel,
     selectedFundingCLF: first.selectedFundingCLF,
 
     expectedLoss: expectedLossSum,
-    clfAdjustedExpectedLoss: sum('clfAdjustedExpectedLoss'),
-    requiredFundingPremium: sum('requiredFundingPremium'),
-    actualPremium: sum('actualPremium'),
-    premiumFundingGap: sum('premiumFundingGap'),
+    clfAdjustedExpectedLoss: addDollars('clfAdjustedExpectedLoss'),
+    requiredFundingPremium: addDollars('requiredFundingPremium'),
+    actualPremium: addDollars('actualPremium'),
+    premiumFundingGap: addDollars('premiumFundingGap'),
     premiumFundingRatio: first.premiumFundingRatio,
     premiumFundingAdequacyStatus: first.premiumFundingAdequacyStatus,
 
@@ -2403,16 +2533,16 @@ export function aggregateLineResults(
     rateFundingGapPer100: first.rateFundingGapPer100,
     rateAdequacyRatio: first.rateAdequacyRatio,
 
-    expectedNetUnpaidLoss: sum('expectedNetUnpaidLoss'),
-    netFundingTarget: sum('netFundingTarget'),
-    indicatedNetReserveAtConfidenceLevel: sum('indicatedNetReserveAtConfidenceLevel'),
+    expectedNetUnpaidLoss: addDollars('expectedNetUnpaidLoss'),
+    netFundingTarget: addDollars('netFundingTarget'),
+    indicatedNetReserveAtConfidenceLevel: addDollars('indicatedNetReserveAtConfidenceLevel'),
     reserveRiskMarginNeeded: reserveRiskMarginNeededSum,
-    fundingMarginNeeded: sum('fundingMarginNeeded'),
+    fundingMarginNeeded: addDollars('fundingMarginNeeded'),
 
-    availableFunding: sum('availableFunding'),
-    availableSurplus: sum('availableSurplus'),
-    fundingGap: sum('fundingGap'),
-    capitalFundingGap: sum('capitalFundingGap'),
+    availableFunding: addDollars('availableFunding'),
+    availableSurplus: addDollars('availableSurplus'),
+    fundingGap: addDollars('fundingGap'),
+    capitalFundingGap: addDollars('capitalFundingGap'),
     excessAvailableSurplus: excessAvailableSurplusSum,
     excessCapitalRatio,
     capitalAdequacyRatio: excessCapitalRatio,
@@ -2424,20 +2554,20 @@ export function aggregateLineResults(
     fundingCLF: first.fundingCLF,
     fundingAdequacyIndicator: first.fundingAdequacyIndicator,
 
-    underwritingIncome: sum('underwritingIncome'),
-    netIncome: sum('netIncome'),
-    beginningCash: sum('beginningCash'),
-    endingCash: sum('endingCash'),
-    beginningInvestments: sum('beginningInvestments'),
-    endingInvestments: sum('endingInvestments'),
-    totalAssets: sum('totalAssets'),
-    unearnedPremium: sum('unearnedPremium'),
-    totalLiabilities: sum('totalLiabilities'),
-    beginingSurplus: sum('beginingSurplus'),
-    endingSurplus: sum('endingSurplus'),
+    underwritingIncome: addDollars('underwritingIncome'),
+    netIncome: addDollars('netIncome'),
+    beginningCash: addDollars('beginningCash'),
+    endingCash: addDollars('endingCash'),
+    beginningInvestments: addDollars('beginningInvestments'),
+    endingInvestments: addDollars('endingInvestments'),
+    totalAssets: addDollars('totalAssets'),
+    unearnedPremium: addDollars('unearnedPremium'),
+    totalLiabilities: addDollars('totalLiabilities'),
+    beginingSurplus: addDollars('beginingSurplus'),
+    endingSurplus: addDollars('endingSurplus'),
 
-    surplusFromIncome: sum('surplusFromIncome'),
-    surplusTieOutDifference: sum('surplusTieOutDifference'),
+    surplusFromIncome: addDollars('surplusFromIncome'),
+    surplusTieOutDifference: addDollars('surplusTieOutDifference'),
 
     expectedLossRatio,
     expectedLossRatioMemberBasis,

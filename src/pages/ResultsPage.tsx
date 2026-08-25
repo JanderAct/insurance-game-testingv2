@@ -282,7 +282,14 @@ export default function ResultsPage({ lockedResults, lineView }: ResultsPageProp
                 label={`Pool Premium Rate at ${(result.selectedFundingConfidenceLevel * 100).toFixed(0)}% CLF`}
                 value={`$${(result.poolPremium / Math.max(result.activeExposure * 10_000, 1)).toFixed(2)}`}
               />
-              <Row label={lineView === 'Property' ? 'Written TIV' : 'Written Payroll ($M)'} value={formatMillions(result.writtenExposure)} />
+              {/* Pool scope adds WC/GL payroll to Property TIV, so it carries no single
+                  unit and must not claim one. Naming both is the honest label. */}
+              <Row
+                label={lineView === 'Property' ? 'Written TIV'
+                  : lineView === 'pool' ? 'Written Exposure (payroll + TIV, $M)'
+                  : 'Written Payroll ($M)'}
+                value={formatMillions(result.writtenExposure)}
+              />
               <Row label="Pool Premium" value={formatCurrency(result.poolPremium)} />
               <Row label="Admin Expense" value={formatCurrency(result.adminExpense)} />
               <Row label="Pool Premium & Admin Expense" value={formatCurrency(result.poolPremiumAndAdminExpense)} />

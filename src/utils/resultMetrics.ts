@@ -134,11 +134,31 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
     },
 
     // Membership
+    //
+    // ⚠ TWO COLUMNS ON PURPOSE, AND THE SECOND IS NOT A DUPLICATE. At line scope
+    // they are equal. At pool scope Members is the distinct roster and
+    // Enrolments is that roster summed per line, so a member carrying WC and GL
+    // appears once in the first and twice in the second — measured 141 against
+    // 205 on a three-line book.
+    //
+    // Both ship because BOTH are needed. Members is what the pages show and what
+    // a player means by the word. Enrolments is the weight behind Member
+    // Satisfaction and Average Risk Quality below: those average each line's
+    // figure weighted by that line's enrolments, so anyone reconstructing either
+    // from this export divides by Enrolments, not Members. Shipping only Members
+    // would make both unreconstructable; shipping only Enrolments is what made
+    // the export read 205 where the page read 141.
     {
       key: 'activeMembers',
       category: 'Membership',
-      label: 'Active Members',
+      label: 'Members',
       value: r => r.activeMembers,
+    },
+    {
+      key: 'enrolmentCount',
+      category: 'Membership',
+      label: 'Enrolments',
+      value: r => r.enrolmentCount,
     },
     {
       key: 'newMembers',
