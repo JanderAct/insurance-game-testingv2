@@ -2,6 +2,8 @@ import React from 'react';
 
 export type TabId =
   | 'setup'
+  | 'introduction'
+  | 'departments'
   | 'history'
   | 'dashboard'
   | 'decisions'
