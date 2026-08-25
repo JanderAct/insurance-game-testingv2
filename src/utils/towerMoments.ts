@@ -42,8 +42,10 @@
 // which invariant 2 forbids (tilt is draw-and-k_line only, never pricing), and
 // would confound three changes where the plan approved two.
 //
-// THE BOOK'S RATING-GROUP AND REGION MIX *is* now reflected, for WC, because the
-// computation walks the actual enrolled members. wc-tower-rederive recorded
+// THE BOOK'S RATING-GROUP MIX *is* now reflected, for WC, because the
+// computation walks the actual enrolled members. (It reflected the REGION mix
+// too until region left chronic severity; there is no regional dimension to
+// reflect any more.) wc-tower-rederive recorded
 // that the frozen constant "does not correct for a book that is unusually
 // safety-heavy" as a known limitation; walking the book removes it for free.
 // GL has no such dimension — its rate and mixture are flat across member types
@@ -56,7 +58,7 @@
 // capture EXACTLY what the cached value depends on, no more and no less:
 //
 //   band moments depend on: line, layer bounds, SEVERITY-trended year,
-//                           and (WC only) rating group + region
+//                           and (WC only) rating group
 //   they do NOT depend on:  the book, exposure, frequency trend, RQ
 //
 // The frequency trend is applied OUTSIDE the cache, in the accumulation, which
@@ -83,8 +85,8 @@ import { REINSURANCE_TOWER, TOWER_TOP, type TowerLine } from '../data/reinsuranc
 import { normalCdf } from './claimMath';
 import { glSeverityCap, glSeverityTrend, thetaGl, untiltedGlWeights } from './glClaimEngine';
 import { propertyInternals } from './propertyClaimEngine';
-import { ratingGroupOf, regionMultiplier, thetaWc, trendedMu, wcFrequencyTrend, wcSeverityCap } from './wcClaimEngine';
-import type { Member, Region } from '../types/simulation';
+import { ratingGroupOf, thetaWc, trendedMu, wcFrequencyTrend, wcSeverityCap } from './wcClaimEngine';
+import type { Member } from '../types/simulation';
 
 const GM = GL_LOSS_MODEL;
 const WM = WC_LOSS_MODEL;
@@ -105,8 +107,6 @@ const PR_ALPHA_FREQ = PM.memberFrequencyNoise.shape;
 // Index lookups as RECORDS, not Array.indexOf. These run once per member per
 // layer on the pricing path; an indexOf is a linear scan with string compares
 // and it showed up as a measurable share of the cold-key cost.
-const REGIONS: Region[] = ['North', 'Central', 'South'];
-const REGION_INDEX: Record<Region, number> = { North: 0, Central: 1, South: 2 };
 const GROUP_INDEX: Record<WcRatingGroup, number> =
   WC_RATING_GROUPS.reduce((acc, g, i) => { acc[g] = i; return acc; }, {} as Record<WcRatingGroup, number>);
 const NEUTRAL_RQ = 5;
@@ -134,7 +134,7 @@ export interface BandMoments {
 // this was prototyped (1,164 us naive -> 288 us with a per-call string-keyed
 // Map -> under budget only once the cache persisted across calls with an integer
 // key), and module level because a per-call cache only ever saves work WITHIN one
-// call and rebuilds the same 12 entries on the next.
+// call and rebuilds the same entries on the next.
 const glBandCache = new Map<number, BandMoments[]>();
 const wcBandCache = new Map<number, BandMoments[]>();
 // Property has exactly one slot, not a Map: nothing it depends on varies by
@@ -265,23 +265,30 @@ function glBandMomentsAll(yearNumber: number): BandMoments[] {
   return out;
 }
 
-// WC: per rating group AND region (region enters as a multiplicative severity
-// scale, i.e. a log-location shift, so it changes the band moments). 4 groups x
-// 3 regions = 12 distinct entries per year.
-function wcBandMomentsAll(yearNumber: number, group: WcRatingGroup, region: Region): BandMoments[] {
+// WC: PER RATING GROUP ONLY. 4 distinct entries per year.
+//
+// ⚠ IT WAS 4 GROUPS x 3 REGIONS = 12, and the collapse is exactly value-neutral
+// rather than an approximation. Region used to enter as a multiplicative
+// severity scale (a log-location shift), so it genuinely changed the band
+// moments and each of the twelve cells held a different answer. With region out
+// of chronic severity the three regional cells of a group are identical, so
+// merging them changes no value — and the accumulation below sums lambda and
+// lambda-SQUARED per cell, both of which are partition-independent (the sum of
+// individual squares does not care how members are bucketed), so the coarser
+// partition reproduces A1, A2 and B2 term for term.
+function wcBandMomentsAll(yearNumber: number, group: WcRatingGroup): BandMoments[] {
   const yk = severityYearKey(yearNumber);
-  const key = (GROUP_INDEX[group] * 3 + REGION_INDEX[region]) + 16 * yk;
+  const key = GROUP_INDEX[group] + 16 * yk;
   const hit = wcBandCache.get(key);
   if (hit) return hit;
   const spec = WM.ratingGroups[group];
-  const shift = Math.log(regionMultiplier(region));
   // UNTILTED group weights — the pricing basis (invariant 2). tiltedWeights is
   // the draw/k_line basis and must not reach a price.
   const comps = spec.mix.map(({ component, weight }) => {
     const c = WC_SEVERITY_COMPONENTS[component];
-    // Keyed by COMPONENT and region, not by rating group — four groups share
-    // four components across eleven pairs, so this is where the reuse is.
-    return { mu: trendedMu(c.mu, yk) + shift, sigma: c.sigma, weight, cacheKey: `wc|${component}|${region}|${yk}` };
+    // Keyed by COMPONENT, not by rating group — four groups share four
+    // components across eleven pairs, so this is where the reuse is.
+    return { mu: trendedMu(c.mu, yk), sigma: c.sigma, weight, cacheKey: `wc|${component}|${yk}` };
   });
   const bounds = REINSURANCE_TOWER.WC.map(l => ({ lo: l.attachment, hi: l.attachment + l.limit }));
   const out = bandMomentsForEdges(comps, bounds);
@@ -317,8 +324,8 @@ function propertyBandMomentsAll(): BandMoments[] {
 export function glBandMoments(layerIndex: number, yearNumber: number): BandMoments {
   return glBandMomentsAll(yearNumber)[layerIndex];
 }
-export function wcBandMoments(layerIndex: number, yearNumber: number, group: WcRatingGroup, region: Region): BandMoments {
-  return wcBandMomentsAll(yearNumber, group, region)[layerIndex];
+export function wcBandMoments(layerIndex: number, yearNumber: number, group: WcRatingGroup): BandMoments {
+  return wcBandMomentsAll(yearNumber, group)[layerIndex];
 }
 export function propertyBandMoments(layerIndex: number): BandMoments {
   return propertyBandMomentsAll()[layerIndex];
@@ -407,7 +414,7 @@ export function allLayerRiskMoments(
   // do. With that, a 200-member book costs 200 cheap accumulations plus at most
   // 12 x 3 cached band lookups, instead of 200 x 3 lookups. GL and Property have
   // exactly one cell each (flat mixture, no group or region dimension).
-  const CELLS = line === 'GL' || line === 'Property' ? 1 : WC_RATING_GROUPS.length * 3;
+  const CELLS = line === 'GL' || line === 'Property' ? 1 : WC_RATING_GROUPS.length;
   const sumLam = new Float64Array(CELLS);
   const sumLamSq = new Float64Array(CELLS);
   let lambda = 0;
@@ -442,7 +449,7 @@ export function allLayerRiskMoments(
       if (payroll <= 0) continue;
       const group = ratingGroupOf(member);
       lam = payroll * WM.ratingGroups[group].ratePer1M * wcTheta * wcTrend;
-      cell = GROUP_INDEX[group] * 3 + REGION_INDEX[member.region];
+      cell = GROUP_INDEX[group];
     }
     if (lam <= 0) continue;
     lambda += lam;
@@ -457,7 +464,7 @@ export function allLayerRiskMoments(
       ? glBandMomentsAll(yearNumber)
       : line === 'Property'
         ? propertyBandMomentsAll()
-        : wcBandMomentsAll(yearNumber, WC_RATING_GROUPS[Math.floor(cell / 3)], REGIONS[cell % 3]);
+        : wcBandMomentsAll(yearNumber, WC_RATING_GROUPS[cell]);
     for (let i = 0; i < n; i++) {
       const { m1, m2 } = bands[i];
       A1[i] += sumLam[cell] * m1;
@@ -504,7 +511,6 @@ export function retainedOccurrenceMoments(
   placed: boolean[],
   yearNumber: number,
   group?: WcRatingGroup,
-  region?: Region,
 ): BandMoments {
   const layers = REINSURANCE_TOWER[line];
   const yk = severityYearKey(yearNumber);
@@ -552,11 +558,17 @@ export function retainedOccurrenceMoments(
   } else if (line === 'Property') {
     PM.severityMixture.forEach(c => comps.push({ mu: c.mu, sigma: c.sigma, weight: c.weight }));
   } else {
+    // ⚠ NO REGION, AND THE PARAMETER IS GONE FROM THE SIGNATURE. This used to
+    // take a member's region and shift every component's mu by
+    // log(regionMultiplier). Region left chronic severity, so the shift went
+    // with it, and a parameter that is accepted and ignored is worse than one
+    // that is absent — it reads as though region still matters here. A regional
+    // SHOCK will need to re-add it; the multiplier data is retained for exactly
+    // that (see wcClaimEngine's regionMultiplier).
     const spec = WM.ratingGroups[group ?? 'county'];
-    const shift = Math.log(regionMultiplier(region ?? 'Central'));
     spec.mix.forEach(({ component, weight }) => {
       const c = WC_SEVERITY_COMPONENTS[component];
-      comps.push({ mu: trendedMu(c.mu, yk) + shift, sigma: c.sigma, weight });
+      comps.push({ mu: trendedMu(c.mu, yk), sigma: c.sigma, weight });
     });
   }
 
@@ -618,7 +630,7 @@ export function retainedRiskMoments(
   for (const member of members) {
     const lam = memberLambda(line, member, yearNumber);
     if (lam <= 0) continue;
-    const { m1, m2 } = flat ?? retainedOccurrenceMoments('WC', placed, yearNumber, ratingGroupOf(member), member.region);
+    const { m1, m2 } = flat ?? retainedOccurrenceMoments('WC', placed, yearNumber, ratingGroupOf(member));
     lambda += lam;
     const a1 = lam * m1;
     A1 += a1; A2 += lam * m2; B2 += (a1 * a1) / alphaFreq;

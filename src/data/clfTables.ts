@@ -129,7 +129,29 @@
 // i.e. what "Expected" (CLF exactly 1.000) delivers against each line's own
 // distribution:
 //
-//     WC 44.1%  (95% CI 43.4-45.0)      GL 70.9%  (95% CI 70.2-71.5)
+//     WC 50.4%  (95% CI 49.7-51.1)      GL 70.9%  (95% CI 70.2-71.5)
+//
+// ⚠ WC REACHED 50% WHEN IT STOPPED UNDERCHARGING, and that is the headline for
+// every WC figure measured before it. The sequence, all re-derived rather than
+// inferred:
+//
+//   44.1%   with region in severity and one blended pure premium
+//   43.2%   region out of severity — NOT a move, the same number re-measured
+//           (intervals [43.4, 45.0] and [42.4, 44.1] overlap across most of
+//           their width; losses and premium both rose 0.30%, so the ratio this
+//           is a percentile of barely shifted)
+//   50.4%   four held class rates
+//
+// The +7.2pp is one thing: WC was charging the market's average rate to books
+// that were not the market. The median line-year's drawn/funded ratio is now
+// 0.9979 — a hair under break-even, where it should sit — against 1.0402 before.
+//
+// ⚠ THIS IS AN ACROSS-THE-BOARD INCREASE, NOT A REDISTRIBUTION. The median
+// enrolled book's blended rate lands 2.3% ABOVE the old single rate, not around
+// it, because the books that actually enrol are worse than the full-market
+// average. Every WC measurement taken before this — loss ratios, surplus paths,
+// crossing percentiles, anything calibrated for playability — was taken against
+// a line that undercharged, and none of them transfer.
 //
 // ⚠ WC's CROSSING MOVED 47.2% -> 44.1% WITH WC_SEVERITY_CAP, outside its own
 // old CI, and the direction is the informative part. The cap lowers EXPECTED
@@ -275,8 +297,8 @@ const WC_DERIVED: ClfTable = {
   source: 'derived',
   stops: [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 97.5, 99],
   clf: [
-    0.7652, 0.8138, 0.8541, 0.8865, 0.9195, 0.9485, 0.9771, 1.0042, 1.0334, 1.0635,
-    1.0933, 1.1237, 1.1598, 1.1992, 1.2419, 1.2969, 1.3677, 1.4731, 1.5749, 1.7015,
+    0.7479, 0.7938, 0.8302, 0.8609, 0.8905, 0.9188, 0.9457, 0.9709, 0.9979, 1.0238,
+    1.0510, 1.0799, 1.1106, 1.1470, 1.1864, 1.2329, 1.2967, 1.3923, 1.4764, 1.5958,
   ],
 };
 

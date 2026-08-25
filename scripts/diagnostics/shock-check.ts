@@ -395,10 +395,37 @@ console.log('\n--- 7. #10 WC Presumption Expansion — componentFreqMultiplier a
   // the field rather than kept testing a constant against itself.
   const clean = play('MAMC6EA4', 5, []);
   const wcShock = results[4].byLine.WC!, wcClean = clean[4].byLine.WC!;
-  console.log(`  Y5 premium unchanged by the shock: pure premium ${wcShock.purePremiumPer100.toFixed(6)} vs ${wcClean.purePremiumPer100.toFixed(6)}  ${note(wcShock.purePremiumPer100 === wcClean.purePremiumPer100, 'the shock moved the pure premium — it must not')}`);
-  console.log(`  Y5 expectedLoss unchanged: ${fmt$(wcShock.expectedLoss)} vs ${fmt$(wcClean.expectedLoss)}  ${note(wcShock.expectedLoss === wcClean.expectedLoss, 'the shock moved the priced expected loss')}`);
-  console.log(`    RULED AND INTENDED: a law that makes claims more expensive does not politely raise your`);
-  console.log(`    rates for you. Do not "fix" this.`);
+
+  // ⚠ THE YEAR THIS IS ASSERTED IN MOVED FROM 5 TO 2, AND THE REASON IS WC'S
+  // CLASS RATES. It used to compare Y5 and require the pure premium to be
+  // IDENTICAL. That held while WC charged one blended rate: the rate was
+  // roster-blind, so nothing a shock did could reach it.
+  //
+  // WC now holds four rates and charges the exposure-weighted blend over the
+  // ENROLLED book. The shock fires in Y3, drives losses, moves surplus, and
+  // therefore moves who is still enrolled by Y5 — a different class mix, so a
+  // different blend. Measured: 3.897800 against 3.821000, a 2.0% gap, entirely
+  // through membership.
+  //
+  // That is the mechanism working, not the shock reaching the price. But the old
+  // assertion cannot tell those two apart, so it is replaced by one that can:
+  // the pre-shock years, where the books are still identical and any difference
+  // WOULD be the shock leaking into pricing.
+  const preShock = [0, 1];
+  let preIdentical = true;
+  for (const i of preShock) {
+    const a = results[i].byLine.WC!, b = clean[i].byLine.WC!;
+    if (a.purePremiumPer100 !== b.purePremiumPer100 || a.expectedLoss !== b.expectedLoss) preIdentical = false;
+  }
+  console.log(`  Y1-Y2 (pre-shock, identical books): pure premium and expectedLoss bit-identical  ` +
+    `${note(preIdentical, 'the shock moved WC pricing BEFORE it fired — it is reaching the price directly, not through membership')}`);
+  console.log(`  Y5 (post-shock, books have diverged): pure premium ${wcShock.purePremiumPer100.toFixed(6)} vs ${wcClean.purePremiumPer100.toFixed(6)}, ` +
+    `expectedLoss ${fmt$(wcShock.expectedLoss)} vs ${fmt$(wcClean.expectedLoss)}`);
+  console.log(`    REPORTED, NOT ASSERTED. WC's four class rates are held constants and the shock`);
+  console.log(`    cannot touch them; the blend over them follows the book, and the book changed.`);
+  console.log(`    RULED AND INTENDED, AND STILL IS: a law that makes claims more expensive does not`);
+  console.log(`    politely raise your rates for you. What CAN move the rate is members leaving, and`);
+  console.log(`    that is the class-rate mechanism doing its job. Do not "fix" either.`);
 }
 
 console.log('\n--- 8. #28 Pandemic — THE CROSS-LINE TEST ---');
@@ -477,8 +504,53 @@ console.log('\n--- 8. #28 Pandemic — THE CROSS-LINE TEST ---');
       console.log(`    Y3-Y5 untouched (GL has no report lag): ${note(!moved[2] && !moved[3] && !moved[4], 'GL moved after its current-horizon shock year')}`);
     } else {
       const tail = [delta[2], delta[3], delta[4]];
-      console.log(`    Y3-Y5 emergence tail: ${tail.map(d => fmt$(d)).join(', ')}`);
-      console.log(`      every tail year is an ADDITION, never a subtraction: ${note(tail.every(d => d >= 0), `WC's post-shock years moved DOWN (${tail.map(d => fmt$(d)).join(', ')}) — emergence can only add`)}`);
+      console.log(`    Y3-Y5 tail: ${tail.map(d => fmt$(d)).join(', ')}`);
+      // ⚠ THIS ASSERTED "every tail year is an ADDITION, never a subtraction",
+      // on the premise that WC's REPORT LAG spread a shock's claims into later
+      // years and emergence can only add. WC HAS NO REPORT LAG — it was removed
+      // along with IBNR, and backdating went with it. So there is no emergence
+      // tail, the three deltas were all exactly zero, and `every(d => d >= 0)`
+      // was satisfied by all-zeros: a check passing while unable to fail, which
+      // is the pattern WORKING_PRACTICES records.
+      //
+      // It surfaced when WC went to class rates, because the shocked pool now
+      // charges a different premium from the clean one, so their surpluses and
+      // therefore their MEMBERSHIPS diverge — and a different book draws
+      // different claims. Measured tail: $0.00M, -$0.02M, -$0.00M against a
+      // shock-year movement of $2.80M, so the residual is 0.7% of the signal.
+      //
+      // The honest assertion is the one GL already gets: with no lag, the shock
+      // is confined to its own year, and anything in the tail is second-order
+      // membership divergence rather than emergence. Bounded relative to the
+      // shock year so it cannot quietly grow into a real leak.
+      // ⚠ THE BAR HERE WAS A MAGNITUDE AND IT WAS THE WRONG INSTRUMENT. It
+      // required the worst tail year to be under 5% of the shock-year move —
+      // a threshold calibrated on a branch where the tail happened to be 0.83%.
+      // Merging IBNER took it to 55.9%, not because anything leaked but because
+      // IBNER's development keeps the shocked and clean surplus paths apart for
+      // longer, so their MEMBERSHIPS diverge further. A magnitude bar cannot
+      // tell "more divergence" from "a leak", and tuning it upward each time it
+      // fires is how a real leak eventually gets waved through.
+      //
+      // The exact invariant is available instead, so use it: WC has no report
+      // lag, so the shock reaches losses ONLY through the book. Gross loss may
+      // therefore differ in a year if and only if the EXPOSURE differs in that
+      // year. Measured on #28: Y1-Y2 exposure delta is exactly 0.000 with gross
+      // delta exactly 0; from Y3 the member count parts (70 vs 71) and both
+      // move together. That is mechanism, not magnitude, and it stays valid
+      // however far the two pools drift apart.
+      const expDelta = [0, 1, 2, 3, 4].map(i =>
+        results[i].byLine.WC!.activeExposure - clean[i].byLine.WC!.activeExposure);
+      // Index 1 is the SHOCK YEAR (#28 fires in Y2) and is excluded: that is
+      // where the shock is supposed to move losses directly, with no book
+      // change at all. Every OTHER year has no direct channel.
+      const SHOCK_YEAR_IDX = 1;
+      const leaked = [0, 1, 2, 3, 4].filter(i =>
+        i !== SHOCK_YEAR_IDX && Math.abs(expDelta[i]) < 1e-9 && Math.abs(delta[i]) > 1e-6);
+      console.log(`      exposure delta by year: ${expDelta.map(d => d.toFixed(2)).join(', ')}`);
+      console.log(`      gross may move ONLY where the book moved (WC has no report lag, so there is`);
+      console.log(`      no emergence tail — the only channel is membership):  ` +
+        `${note(leaked.length === 0, `WC's gross loss moved in year(s) ${leaked.map(i => i + 1).join(', ')} where exposure did NOT — the shock is reaching losses without going through the book`)}`);
       console.log(`      and the tail is far smaller than the shock year (${fmt$(delta[1])}): ` +
         `${note(Math.max(...tail) < delta[1] * 0.5, 'the emergence tail is not small relative to the shock year — this looks like forward leakage, not a report lag')}`);
     }

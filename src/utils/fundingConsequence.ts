@@ -65,7 +65,7 @@ function clfFor(line: CoverageLine, confidenceLevel: number, atExpected: boolean
 // so even though computeFundingConsequence's no longer can. The retired grids
 // computed a per-book crossing because they interpolated on the book's own
 // CV/lambda; the static tables are one curve per line, so the crossing is one
-// number per line — WC 44.2%, GL 57.7% as currently measured (GL reads its
+// number per line — WC 50.4%, GL 57.7% as currently measured (GL reads its
 // SUPPLIED curve; its own derived one crosses at 70.8%).
 //
 // computeFundingConsequence DOES take members and yearNumber again, for the
@@ -156,7 +156,13 @@ function ratesAt(
   // pure function of the line and the year, so the panel cannot diverge from
   // the engine by carrying a stale prior — one fewer way for the parity this
   // file asserts to break.
-  const purePremiumPer100 = currentPurePremiumPer100(line, book.yearNumber);
+  // ⚠ THE BOOK IS PASSED NOW, and on WC it changes the answer. WC's pure
+  // premium is the exposure-weighted blend of four held class rates over the
+  // ENROLLED book, so the panel cannot reach the engine's number without the
+  // same members the engine priced on. Omitting it would put the panel back on
+  // the full-market blend and reopen exactly the parity gap this file exists to
+  // assert against. GL and Property ignore the argument.
+  const purePremiumPer100 = currentPurePremiumPer100(line, book.yearNumber, book.members);
   const clf = clfFor(line, confidenceLevel, atExpected);
   const q = quoteLineRates({
     line,

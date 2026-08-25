@@ -38,7 +38,7 @@ import { simulateMarketReturns, blendInvestmentReturn } from './investmentEngine
 import { simulateMemberMovement } from './membershipEngine';
 import { cloneMembershipHistory, openInterval, closeInterval } from './membershipHistory';
 import { cloneMemberLossHistory, recordMemberLossYear } from './memberLossHistory';
-import { computeKLine, deriveNeutralPurePremiumPer100, expectedWcGrossLossForPricing, generateWcClaims, wcFrequencyTrend, wcSeverityTrend } from './wcClaimEngine';
+import { computeKLine, deriveNeutralClassRatesPer100, deriveNeutralPurePremiumPer100, expectedWcGrossLossForPricing, generateWcClaims, ratingGroupOf, wcFrequencyTrend, wcSeverityTrend } from './wcClaimEngine';
 import { hasStaticClf, staticClf } from '../data/clfTables';
 import { computeKGl, deriveNeutralGlPurePremiumPer100, expectedGlGrossLossForPricing, generateGlClaims, glCappedSeverityTrend } from './glClaimEngine';
 import { computeKPr, generatePropertyClaims } from './propertyClaimEngine';
@@ -161,12 +161,47 @@ const GL_HELD_PURE_PREMIUM_PER_100 = deriveNeutralGlPurePremiumPer100(getPredefi
 // ignoring them is what stops a future reader believing the pure premium can
 // still be moved by a decision — it cannot, and risk control now acts on the
 // DRAW ONLY, in all three generators (finding 17).
+// WC'S FOUR HELD CLASS RATES, derived once at module load exactly as the single
+// blended rate above is. See deriveNeutralClassRatesPer100.
+const WC_HELD_CLASS_RATES_PER_100 = deriveNeutralClassRatesPer100(getPredefinedMarketMembers());
+
+// THE BOOK'S OWN BLENDED WC RATE — the exposure-weighted average of the four
+// held class rates over whoever is actually enrolled.
+//
+// ⚠ THIS IS WHY THE SCALAR DOWNSTREAM STAYS A SCALAR. The vector lives here and
+// collapses before it leaves: every consumer of purePremiumPer100 sees one
+// number, and `activeExposure x blend = sum(exposure_i x rate_i)` holds exactly,
+// so expectedLoss, the admin base, the net-of-ceded step and the display all
+// stay correct without knowing a vector exists.
+//
+// ⚠ WEIGHTED BY THE SAME EXPOSURE THE PREMIUM IS CHARGED ON, not by raw stored
+// payroll. Wage inflation is uniform across members so the two give the same
+// blend today, but tying the weights to the charged basis is what keeps the
+// identity above exact if that ever stops being true.
+//
+// An empty book falls back to the blended rate: with no members there is no mix
+// to reflect, and returning 0 would price the first enrolment off a zero base.
+function wcBlendedRatePer100(members: Member[], yearNumber: number): number {
+  let exposure = 0, weighted = 0;
+  for (const m of members) {
+    const e = getMemberExposure(m, 'WC', yearNumber);
+    if (!(e > 0)) continue;
+    exposure += e;
+    weighted += e * WC_HELD_CLASS_RATES_PER_100[ratingGroupOf(m)];
+  }
+  return exposure > 0 ? weighted / exposure : WC_HELD_PURE_PREMIUM_PER_100;
+}
+
 export function currentPurePremiumPer100(
   line: CoverageLine,
   yearNumber: number,
+  // WC ONLY. The book whose class mix sets the blend. GL and Property ignore it
+  // — both are flat across member types, so a vector-of-one would be a scalar
+  // wearing a costume and would invite a reader to think it meant something.
+  members: Member[] = [],
 ): number {
   return line === 'WC'
-    ? WC_HELD_PURE_PREMIUM_PER_100
+    ? wcBlendedRatePer100(members, yearNumber)
       * wcFrequencyTrend(yearNumber)
       * wcSeverityTrend(yearNumber)
       / wageFactor('WC', yearNumber)
@@ -407,7 +442,7 @@ export function processLineYear(
   // full-roster expectation. All three factors are pure functions of the year and
   // cannot see the roster, so k_line keeps sole responsibility for the
   // roster/risk-quality-mix correction.
-  const newPurePremiumPer100 = currentPurePremiumPer100(line, yearNumber);
+  const newPurePremiumPer100 = currentPurePremiumPer100(line, yearNumber, currentActiveMembers);
 
   // Preliminary contribution estimate used only for member movement.
   // Final premium is recalculated after member movement because exposure changes.
@@ -546,6 +581,24 @@ export function processLineYear(
   });
 
   const activeExposure = memberResult.activeExposure;
+
+  // ⚠ THE RATE IS RECOMPUTED ON THE POST-MOVEMENT BOOK, and with class rates it
+  // genuinely differs from the quoted one. `newPurePremiumPer100` above is the
+  // rate members were QUOTED — computed on the book as it stood before anyone
+  // joined or left, which is the right basis for a price signal they respond
+  // to. Everything from here on prices what the pool ACTUALLY carries, and
+  // `activeExposure` is the post-movement exposure, so the rate multiplying it
+  // has to be the post-movement blend or the two describe different books.
+  //
+  // This distinction did not exist before class rates: the held rate was
+  // roster-blind, so quoted and charged were the same number and one binding
+  // served both. The first cut of this commit kept one binding and left
+  // expectedLoss mixing a post-movement exposure with a pre-movement blend —
+  // measured worst error 10.8% on a single line-year, mean 0.18%. Caught by
+  // asserting the composition residual is exactly zero, which is the check that
+  // only becomes possible once four rates are exact.
+  const pricedPurePremiumPer100 = currentPurePremiumPer100(line, yearNumber, memberResult.activeMembers);
+
   const totalMarketExposure = memberResult.totalMarketExposure;
   const marketShare = activeExposure / Math.max(totalMarketExposure, 0.01);
 
@@ -567,7 +620,7 @@ export function processLineYear(
   // stop-loss's attachment basis, the reserve basis, and the finding-6 pricing
   // denominator. The net-funding change moves the PREMIUM basis only — it must
   // not move the loss quantities.
-  const expectedLoss = activeExposure * newPurePremiumPer100 * 10_000;
+  const expectedLoss = activeExposure * pricedPurePremiumPer100 * 10_000;
 
   // The WC/Property aggregate, priced on the REAL post-movement expectedLoss.
   // Its expected ceded is netted out of the pool premium below alongside the
@@ -595,7 +648,7 @@ export function processLineYear(
   const expectedCededDollars =
     (towerQuote?.expectedCeded ?? 0) + (aggregateQuote?.expectedCeded ?? 0);
   const expectedCededPer100 = expectedCededDollars / Math.max(activeExposure * 10_000, 1);
-  const netPurePremiumPer100 = Math.max(0, newPurePremiumPer100 - expectedCededPer100);
+  const netPurePremiumPer100 = Math.max(0, pricedPurePremiumPer100 - expectedCededPer100);
 
   const rateAtConfidenceLevelPer100 =
     netPurePremiumPer100 * selectedFundingCLF * pricingAdjustment;
@@ -614,7 +667,7 @@ export function processLineYear(
   // $400M book is about $0.5M/yr of expense the pool would stop collecting for
   // work it still has to do.
   const adminExpense = expectedLoss * ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM;
-  const adminRatePer100 = newPurePremiumPer100 * ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM;
+  const adminRatePer100 = pricedPurePremiumPer100 * ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM;
   const poolPremiumAndAdminExpense = poolPremium + adminExpense;
 
   // isWcClaimLine / isGlClaimLine / isClaimLine are now declared further up,
@@ -963,7 +1016,7 @@ export function processLineYear(
     shockOccurred = commonLossFactor > catastropheThreshold;
     memberLossResults = memberResult.activeMembers.map(member => {
       const memberExposureAmount = getMemberExposure(member, line, yearNumber);
-      const memberExpectedLoss = memberExposureAmount * newPurePremiumPer100 * 10_000;
+      const memberExpectedLoss = memberExposureAmount * pricedPurePremiumPer100 * 10_000;
       const riskQuality = Math.max(1, Math.min(10, member.riskQuality));
       const coefficientOfVariation = MEMBER_LOSS_VOLATILITY.worstRiskCV
         + ((riskQuality - 1) / 9)
@@ -1422,8 +1475,8 @@ export function processLineYear(
 
     rateLevel: parseFloat(newRateLevel.toFixed(2)),
     ratePer100: parseFloat(totalMemberRatePer100.toFixed(4)),
-    purePremiumPer100: parseFloat(newPurePremiumPer100.toFixed(4)),
-    purePremium: parseFloat(newPurePremiumPer100.toFixed(4)),
+    purePremiumPer100: parseFloat(pricedPurePremiumPer100.toFixed(4)),
+    purePremium: parseFloat(pricedPurePremiumPer100.toFixed(4)),
     // Unrounded — see the type's comment for why these two skip the toFixed(4)
     // every sibling per-$100 field above gets.
     expectedCededPer100,
@@ -1566,8 +1619,8 @@ export function processLineYear(
   const updatedLineState: LinePoolState = {
     rateLevel: newRateLevel,
     ratePer100: totalMemberRatePer100,
-    purePremiumPer100: newPurePremiumPer100,
-    purePremium: newPurePremiumPer100,
+    purePremiumPer100: pricedPurePremiumPer100,
+    purePremium: pricedPurePremiumPer100,
 
     memberSatisfaction: memberResult.memberSatisfaction,
     averageRiskQuality: memberResult.averageRiskQuality,

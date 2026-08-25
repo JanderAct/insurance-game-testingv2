@@ -41,7 +41,6 @@ import {
   expectedWcGrossLossForPricing,
   generateWcClaims,
   ratingGroupOf,
-  regionMultiplier,
   tiltedWeights,
 } from '../../src/utils/wcClaimEngine';
 import { limitedExpectedValue, normalCdf } from '../../src/utils/claimMath';
@@ -342,12 +341,13 @@ const YEARS = 300;
   for (const m of roster) {
     const group = ratingGroupOf(m);
     const spec = M.ratingGroups[group];
-    const regionMult = regionMultiplier(m.region);
     const lambda = (m.exposureByLine.WC ?? 0) * spec.ratePer1M * Math.exp(-M.rqFrequencyBeta * (m.riskQuality - NEUTRAL_RQ)) * kFull;
     const w = tiltedWeights(group, m.riskQuality);
     spec.mix.forEach(({ component }, i) => {
       const c = WC_SEVERITY_COMPONENTS[component];
-      analyticCapped += lambda * w[i] * limitedExpectedValue(c.mu + Math.log(regionMult), c.sigma, 1e6);
+      // NO REGION SHIFT — region left chronic severity; this reconstruction
+      // must track the engine or it stops being an independent check of it.
+      analyticCapped += lambda * w[i] * limitedExpectedValue(c.mu, c.sigma, 1e6);
     });
   }
   const drawnCapped = mean(runs.map(r =>
@@ -423,12 +423,11 @@ console.log('\n--- 8. WAGE INFLATION: the trend-free lag, and what fixed attachm
       for (const m of roster) {
         const group = ratingGroupOf(m);
         const spec = M.ratingGroups[group];
-        const rm = regionMultiplier(m.region);
         const w = tiltedWeights(group, m.riskQuality);
         const lambda = (m.exposureByLine.WC ?? 0) * spec.ratePer1M * Math.exp(-M.rqFrequencyBeta * (m.riskQuality - 5));
         spec.mix.forEach(({ component }, i) => {
           const c = WC_SEVERITY_COMPONENTS[component];
-          const mu = trendedMu(c.mu, yearNumber) + Math.log(rm);
+          const mu = trendedMu(c.mu, yearNumber);
           total += lambda * w[i] * (limitedExpectedValue(mu, c.sigma, l.attachment + l.limit) - limitedExpectedValue(mu, c.sigma, l.attachment));
         });
       }
