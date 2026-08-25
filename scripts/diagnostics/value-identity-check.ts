@@ -235,7 +235,32 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // separate their contribution from fdc747c/bdc98ec/a3d7760's inside one
 // cumulative diff, which is why the hash guard's per-commit run is the
 // isolation tool here, not this one.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v18.json');
+//
+// v19: retired v18 at the feature/ibner merge. Friedland IBNER replaces reserve
+// development on ALL THREE LINES, so 9,120 of 15,300 fields moved and there is
+// NO LINE CONTROL in this range for the first time — every previous recapture
+// had a line that could not move and served as the leak test. The isolation was
+// the MECHANISM NULL TEST instead: make both mechanisms inert and ask whether
+// the trees agree. They do, once two non-mechanism channels are removed, and
+// the ladder is in the lineage doc.
+//
+// ⚠ TWO THINGS A READER WILL GET WRONG FROM THE NUMBERS ABOVE THE LINE.
+//
+// FIRST, "0 added, 0 removed" DOES NOT MEAN THE DATA MODEL HELD. ReserveCohort
+// gained five fields and lost `developmentFactor` in this range, and
+// ReserveDevelopmentState was deleted outright. Cohorts live on poolState; this
+// script walks ResultSet and LineResultSet, and the hash guard is scoped to
+// RESULT_METRICS. Neither gate can see a cohort. The shape columns answer a
+// narrower question than they look like they answer — fifth occurrence.
+//
+// SECOND, TWO COMMITS IN THE RANGE READ 0 OF 15,300 AND ARE STILL CORRECT.
+// 4fbbb5a raised the booking-bias coefficient 1.6x and a84d854 rewrote the
+// unwind schedule; both are invisible here because premiumFundingRatio is a
+// hardcoded 1, so bookingBias is 0 on every cohort this gate ever constructs.
+// ibner-null-check sections 3 and 4 squeeze funding to each line's reachable
+// minimum stop and prove them there. Do not read a green gate as evidence a
+// mechanism is inert when the gate cannot reach it.
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v19.json');
 
 function seedOf(id: string) {
   let h = 5381;

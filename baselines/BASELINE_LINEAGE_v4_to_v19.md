@@ -629,6 +629,112 @@ measured before `0a465df` was taken against a line that undercharged.
 
 ---
 
+## v19 — one merge: Friedland IBNER replaces reserve development on all three lines
+
+**Trigger:** `feature/ibner` merged into `claims-distribution` at `bd76f42`, with `--no-ff` against the
+project's squash convention so its four investigations survive as separate commits. The merge itself was
+conflict-free — the two sides touch disjoint files, `claims-distribution` having contributed only the v18
+recapture.
+
+**⚠ NO LINE IS A CONTROL IN THIS RANGE.** Every previous recapture had at least one line that could not
+move and served as the leak test. IBNER replaces reserve development entirely, so `priorYearDevelopment`
+goes from a random wobble to a real quantity on WC, GL and Property alike. The isolation tool here is the
+MECHANISM NULL TEST, not a line control — see below.
+
+**The seven engine commits, measured per commit against the immediately preceding tree.** History is
+preserved, so each was checked out and captured with one fixed instrument (the v19 capture code, copied
+into each worktree) — only the engine differs between rows. Two merge rows are included for completeness;
+they re-import `claims-distribution` work already measured in v17→v18 and are not new movement.
+
+| commit | WC-solo | GL-solo | PR-solo | tri | fields | values |
+|---|---|---|---|---|---|---|
+| `aef0bbe` IBNER replaces reserve development | **MOVE** | **MOVE** | **MOVE** | **MOVE** | 15300 | 9343 |
+| `4fbbb5a` booking-bias coefficient → 0.80 | . | . | . | . | 15300 | **0** |
+| `a84d854` unwind front-loaded, exactness fixed | . | . | . | . | 15300 | **0** |
+| `a45a818` Property total SD 8% → 15% | . | . | **MOVE** | **MOVE** | 15300 | 1979 |
+| `8cf3129` *(merge: the severity-cap work)* | MOVE | MOVE | . | MOVE | 15300 | 4978 |
+| `3b2db4f` dead code retired | . | . | . | . | 15300 | 0 |
+| `8351395` develop the RESERVE, not the ultimate | **MOVE** | **MOVE** | **MOVE** | **MOVE** | 15300 | 6421 |
+| `a88454d` *(merge: region removal + class rates)* | MOVE | . | . | MOVE | 15300 | 4348 |
+| `e2a7b23` WC CLF re-derived with IBNER live | **MOVE** | . | . | **MOVE** | 15300 | 420 |
+| **`bd76f42` endpoint vs v18** | **MOVE** | **MOVE** | **MOVE** | **MOVE** | 15300 | **9120** |
+
+The merge commit is bit-identical to `e2a7b23` on all 15,300 fields, which is the check that a zero-conflict
+merge actually resolved to the branch tip rather than to something in between.
+
+**⚠ TWO COMMITS MOVED NOTHING AND THAT IS THE FINDING, NOT AN OMISSION.** `4fbbb5a` raised the booking-bias
+coefficient by a factor of 1.6 and `a84d854` rewrote the unwind schedule, and both read 0 of 15,300. The
+reason is `aef0bbe`'s own finding: `premiumFundingRatio` is a hardcoded 1, so the funding channel the bias
+rides never engages in a default game and `bookingBias` is 0 on every cohort the gate ever sees. Their
+correctness is proved by `ibner-null-check` sections 3 and 4, which squeeze funding to each line's own
+reachable minimum stop and then read a worst residual of 0.0000% on all three lines. A gate that cannot
+reach a mechanism is not evidence the mechanism is inert — this is the "passes while unable to fail"
+pattern in its benign direction, and it is why the null check exists alongside the gates.
+
+### The mechanism null test — the isolation used in place of a line control
+
+With no line able to serve as a control, attribution was established by making BOTH mechanisms inert and
+asking whether the trees agree. The pre-merge arm forces the old `devFactor` to 1 while still spending its
+draw; the post-merge arm zeroes `IBNER_TOTAL_SD` at runtime, exactly as `ibner-null-check` does. Residuals
+below $1e-6 absolute or 1e-9 relative are float noise and excluded.
+
+| arm | residual fields | WC-solo | GL-solo | PR-solo |
+|---|---|---|---|---|
+| scales and bias at zero | 6,680 | 210 | 2,012 | 1,604 |
+| + the shared-stream draw restored | 1,590 | 210 | **0** | 628 |
+| + WC's pre-IBNER CLF table restored | 1,256 | **0** | **0** | 628 |
+
+Read down the table: each row removes one channel that is not the mechanism, and what is left is what
+IBNER genuinely changed.
+
+**⚠ IBNER SILENTLY RE-ROLLED INSTANCE GENERATION, AND THE COMMIT COMMENT SAYS THE OPPOSITE.** The largest
+term is not the mechanism at all. The old pre-game cohort computed
+`devFactor = 1 + rng.range(-0.03, 0.05) / age` from the SHARED instance stream and then stored the result
+in a field that `processReserveDevelopment` never read — dead data that still cost a draw. IBNER deleted
+it. `aef0bbe`'s comment states that the IBNER draws use their own sub-stream specifically so that later
+instance-generation draws are not re-rolled, and that is true of the draws it ADDED; it does not hold for
+the draw it REMOVED. Deleting one draw shifts everything downstream of it, which is why GL-solo — a line
+IBNER's mechanism reaches only through development — showed 2,012 moved fields at the null and exactly 0
+once the draw is put back. **This is a keep-the-draw violation that the gates cannot distinguish from
+intended movement, because at this endpoint everything moves anyway.** It is recorded, not reverted: the
+values are captured at v19 and reverting now would move every line again for no gain.
+
+**What survives as the mechanism's own footprint:** Property alone, and it is one quantity. The old form
+marked a cohort `closed` at `newUnpaid < 1000` and dropped it from the array the next year, so up to $1,000
+of booked liability vanished from the balance sheet. IBNER pays the residual out instead. The whole
+Property residual is that transfer — worst $1,583, median $1,026, moving dollar-for-dollar from
+`endingNetReserve` to `netPaidLosses` with `netIncurredLoss` following. Property is the only line that
+shows it because its horizon is 2–4 and its paydown 65%, so it is the only line whose cohorts mature and
+close inside a five-year gate. WC and GL are exactly 0.
+
+**Shape movement:** 15,300 → 15,300 fields, **0 added, 0 removed**, and `RESULT_METRICS` is untouched
+across the whole range, so all 12 export hashes are pure value movement with no reordering.
+
+**⚠ BOTH GATES ARE BLIND TO THIS RANGE'S REAL SHAPE CHANGE, and that is the fifth time.** `ReserveCohort`
+gained five fields (`registerSum`, `horizon`, `age`, `stepMultiplier`, `bookingBias`), lost
+`developmentFactor`, and `ReserveDevelopmentState` was deleted outright. None of it appears above, because
+cohorts live on `poolState` and neither gate looks there: value-identity walks `ResultSet` and
+`LineResultSet` only, and the hash guard is scoped to `RESULT_METRICS`. A reader who takes "0 added, 0
+removed" as "the data model did not change" will be wrong. The added/removed columns answer a narrower
+question than they appear to.
+
+**Guards at the endpoint:** no broken identities. `ibner-null-check` green on all seven sections — the
+below-paid-to-date count that read 9.04% of WC cohorts before `8351395` is now exactly 0 on all three
+lines, matured cohorts land on `registerSum` to 0.0000%, and the martingale means sit inside 3 SE
+(WC 1.01277 ± 0.01910, GL 1.00553 ± 0.01219, Property 1.01147 ± 0.01662). `wc-cap-check`,
+`wc-cap-stability-check`, `wc-severity-rebuild-check`, `gl-claim-check`, `property-claim-check`,
+`tower-runtime-check` and `shock-check` all pass. Typecheck and build clean; lint unchanged at 14 errors,
+every one of them present at the merge base `0a465df`.
+
+**What a reader should carry forward:** reserve development is now a real quantity on every line rather
+than a random walk with nothing behind it, and WC's CLF crossing has moved 44.1% → 50.4% → **54.7%**
+(mean ratio 1.0003), landing on the real-pool 55th-percentile benchmark. Any development figure measured
+before `aef0bbe` was taken against a mechanism that no longer exists — including, specifically, Property's
+15% total SD, which was set at `a45a818` against the old walk and whose exhibit has not been re-tuned since
+`8351395` rewrote it.
+
+---
+
 ## ⚠️ The v4–v9 artifacts described above are HISTORY-ONLY as of 2026-08-19
 
 The workbooks, CSVs and per-version `.md` summaries this document narrates —
@@ -652,6 +758,6 @@ git log --all --diff-filter=D -- 'baselines/*'     # find the removing commit
 
 **This document is why the removal was safe** — it records what each retired
 version represented and what moved between them, which is the part worth
-keeping. What remains in `baselines/` is the current gate pair (v18), its
-immediate predecessor (v17, the one to reach for if a v18 capture ever needs
+keeping. What remains in `baselines/` is the current gate pair (v19), its
+immediate predecessor (v18, the one to reach for if a v19 capture ever needs
 checking), and the v11 workbook set.

@@ -226,7 +226,17 @@ import { RESULT_METRICS } from '../../src/utils/resultMetrics';
 import type { GameState, CoverageLine, ResultSet } from '../../src/types/simulation';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v18.json');
+// v19: retired v18 at the feature/ibner merge. All 12 hashes moved, and they are
+// PURE VALUE MOVEMENT — RESULT_METRICS is byte-for-byte unchanged across the
+// whole range, so nothing was added, dropped or reordered in the export.
+//
+// ⚠ THIS GUARD SAW NOTHING OF THE RANGE'S ACTUAL SHAPE CHANGE. ReserveCohort
+// gained registerSum/horizon/age/stepMultiplier/bookingBias and lost
+// developmentFactor; ReserveDevelopmentState was deleted. All of it is outside
+// RESULT_METRICS, so this guard is blind to it by construction — fifth time that
+// has mattered. "Shape identity" here means the shape of the EXPORT, not of the
+// model behind it.
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v19.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

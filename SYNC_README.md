@@ -18,7 +18,7 @@ repo root. Then commit everything.
   2026-07-22 sync, not current state): it named BASELINE_v5_* and BASELINE_v6_* as the "current
   references", but the live gate baselines are now v12 (`VALUE_IDENTITY_v12.json`,
   `SOLO_EXPORT_GUARD_v12.json`), and the v4–v9 artifacts were removed from the working tree on
-  2026-08-19 — recoverable from git history, see baselines/BASELINE_LINEAGE_v4_to_v18.md.
+  2026-08-19 — recoverable from git history, see baselines/BASELINE_LINEAGE_v4_to_v19.md.
 - **decisions/** — decision-design docs: DECISIONS.md (source of truth), the per-line investments
   change, the editing-UX brainstorm, the decisions-chat START_HERE, and the interactive
   decision_tree.html.
