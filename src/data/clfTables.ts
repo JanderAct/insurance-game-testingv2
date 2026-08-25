@@ -129,7 +129,36 @@
 // i.e. what "Expected" (CLF exactly 1.000) delivers against each line's own
 // distribution:
 //
-//     WC 50.4%  (95% CI 49.7-51.1)      GL 70.9%  (95% CI 70.2-71.5)
+//     WC 54.7%  (95% CI 54.0-55.3)      GL 70.9%  (95% CI 70.2-71.5)
+//
+// ⚠ GL AND PROPERTY WERE MEASURED ON THIS BRANCH TOO AND ARE NOT RE-DERIVED.
+// IBNER changes every line's development, so "WC needs re-deriving" is not by
+// itself a reason to leave the other two alone — they were measured rather than
+// assumed:
+//
+//   line       table crosses at   measured with IBNER live   inside the table's CI?
+//   WC              50.4%            54.7% [54.0, 55.3]        NO — re-derived here
+//   GL_DERIVED      70.9%            70.6% [69.9, 71.3]        yes — left alone
+//   Property        54.05%           55.0% [54.3, 55.7]        MARGINAL — see below
+//
+// GL is clear: 70.6% sits inside [70.2, 71.5] and the two intervals overlap
+// almost entirely. GL's SHIPPED table is GL_SUPPLIED in any case, which no
+// derivation touches.
+//
+// ⚠ PROPERTY IS THE MARGINAL CALL AND IT IS DELIBERATELY LEFT FOR ITS OWN
+// COMMIT. Its point estimate 55.0% sits 0.2pp above the upper bound of its
+// table's recorded CI (53.4-54.8), which is the stated trigger for
+// re-deriving — but the two intervals OVERLAP across [54.3, 54.8], so the
+// evidence that anything really moved is weak. Property has the smallest IBNER
+// scale (0.15) and the shortest horizon (2-4), so it is the line IBNER should
+// move least, and a 0.95pp shift is consistent with that. Re-deriving it here
+// would put two calibrations in one commit and make a later movement
+// unattributable to either. If it is re-derived, the literal measured on this
+// branch is:
+//
+//   Property: [0.4590, 0.5384, 0.6053, 0.6686, 0.7276, 0.7826, 0.8372, 0.8901,
+//              0.9460, 1.0003, 1.0631, 1.1252, 1.1934, 1.2690, 1.3557, 1.4648,
+//              1.6068, 1.8285, 2.0322, 2.3091]
 //
 // ⚠ WC REACHED 50% WHEN IT STOPPED UNDERCHARGING, and that is the headline for
 // every WC figure measured before it. The sequence, all re-derived rather than
@@ -141,6 +170,27 @@
 //           their width; losses and premium both rose 0.30%, so the ratio this
 //           is a percentile of barely shifted)
 //   50.4%   four held class rates
+//   54.7%   re-derived with IBNER live (this table)
+//
+// ⚠ THE LAST STEP IS NOT A PRICING CHANGE. WC's premium is identical either
+// side of it. The table this branch carried had been derived on
+// claims-distribution, where reserve development is the retired uniform wobble;
+// IBNER is a different distribution, and a table measured against one engine was
+// pricing for another. Re-deriving on the branch's own distribution is the table
+// catching up, not the line being re-rated.
+//
+// ⚠ AND THE MEAN RATIO IS 1.0003. WC is funded at its own expectation to three
+// decimal places, and the crossing sits above 50% because the ratio distribution
+// is RIGHT-SKEWED — which a compound-Poisson line must be. A right-skewed
+// variable with mean 1 has its median below 1 (0.9709 here), so more than half
+// of line-years come in under the funded amount. That is the correct shape, and
+// WC has not had it before: the sub-50% readings that prompted the whole
+// investigation were a funding gap, not a distributional artefact.
+//
+// ⚠ IT ALSO LANDS ON THE REAL-POOL BENCHMARK recorded below — real public-entity
+// pools put the mean year near the 55th percentile, and WC was "about 3pp under
+// that". 54.7% incurred, 53.7% ultimate. Not aimed at, and worth not disturbing
+// casually.
 //
 // The +7.2pp is one thing: WC was charging the market's average rate to books
 // that were not the market. The median line-year's drawn/funded ratio is now
@@ -297,8 +347,8 @@ const WC_DERIVED: ClfTable = {
   source: 'derived',
   stops: [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 97.5, 99],
   clf: [
-    0.7479, 0.7938, 0.8302, 0.8609, 0.8905, 0.9188, 0.9457, 0.9709, 0.9979, 1.0238,
-    1.0510, 1.0799, 1.1106, 1.1470, 1.1864, 1.2329, 1.2967, 1.3923, 1.4764, 1.5958,
+    0.6698, 0.7242, 0.7700, 0.8090, 0.8433, 0.8765, 0.9073, 0.9401, 0.9709, 1.0022,
+    1.0349, 1.0695, 1.1069, 1.1487, 1.1962, 1.2535, 1.3294, 1.4562, 1.6017, 1.9329,
   ],
 };
 
