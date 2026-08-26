@@ -278,7 +278,31 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // So "did a VALUE move" needs the scope partition to answer here. A red line
 // scope would have meant the engine moved; a red solo config would have meant
 // the aggregation broke. Both were green.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v20.json');
+// v21: retired v20 across SEVEN commits, and it is the most boring range in this
+// file's history — ZERO values moved at any of them. Every commit was diagnostic
+// or display: the Calculation Audit page audited row by row, three new checks
+// built over it, and every disagreement they found repaired.
+//
+// The whole range produced ONE shape change, at ebdb147: 300 removed
+// (fundingAdequacyRatio and premiumFundingRatio, 150 instances each). FIVE fields
+// were deleted there — the other three are STRINGS and this gate captures numbers
+// only, so a five-field deletion reads as two here. That asymmetry is a property
+// of the instrument, not of the change.
+//
+// ⚠ AND CLEARING THE PHANTOM IS PART OF THE POINT. That shape change sat in the
+// v20 baseline for seven commits, so every run printed a standing "removed 300"
+// line while still declaring HOLDS. A permanent informational line is not free:
+// it is exactly what trains a reader to skim, and skimming is how the Market
+// Share defect survived a release with a guard on it — its failure was sitting in
+// a list of legitimately-moving fields. This capture reads 0 added, 0 removed.
+//
+// ⚠ MEASURED PER COMMIT EVEN THOUGH SIX ROWS WERE PREDICTED TO BE NOTHING, which
+// is the case for doing it: a range where every row is expected to be zero is the
+// one nobody verifies. All seven were run against the fixed v20 reference (valid
+// because nothing in baselines/ and neither guard script changed in range), and
+// solo-export-guard was run at every intermediate commit too — 84 hashes, all
+// matching.
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v21.json');
 
 function seedOf(id: string) {
   let h = 5381;

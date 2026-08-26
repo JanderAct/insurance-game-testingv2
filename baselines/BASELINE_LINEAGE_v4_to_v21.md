@@ -858,6 +858,106 @@ and `pool-aggregation-check` is what stops the next field from skipping the ques
 
 ---
 
+## v21 — seven commits: the Calculation Audit page audited, guarded and repaired
+
+**Trigger:** the audit page was found explaining a value with a formula that evaluated to something else
+(Market Share, pool scope: stating 30.1% while deriving 21.0%). One instance meant the class was present, so
+the page was audited row by row, the harness that guards it was extended three ways, and every disagreement
+it then found was fixed. Nothing here is a calibration change.
+
+**⚠ THE MOST BORING RECAPTURE IN THIS DOCUMENT, AND THAT IS THE RESULT.** Every one of the seven commits is
+diagnostic or display. **Zero values moved at any commit.** The whole range produced ONE shape change — two
+numeric fields deleted at `ebdb147` — and nothing else.
+
+| commit | fields | added | removed | **values** | 12 export hashes |
+|---|---|---|---|---|---|
+| `ebdb147` five dead funding-adequacy fields deleted | 15150 | 0 | **300** | **0** | 12 MATCH |
+| `118b1fb` squeezed arm + hand-multiplication check | 15150 | 0 | 300 | **0** | 12 MATCH |
+| `9f63680` decisions + self-insured arms, prose claims | 15150 | 0 | 300 | **0** | 12 MATCH |
+| `ac98bd5` reserve rows booked on the right base | 15150 | 0 | 300 | **0** | 12 MATCH |
+| `d5ba156` pool-scope rows derived per line | 15150 | 0 | 300 | **0** | 12 MATCH |
+| `ae7b5ac` the unit suffix | 15150 | 0 | 300 | **0** | 12 MATCH |
+| `6f84b72` layer counts + the vacuous check | 15150 | 0 | 300 | **0** | 12 MATCH |
+
+Measured per commit against the FIXED v20 reference — valid because nothing in `baselines/` and neither
+guard script changed anywhere in the range. **84 export hashes checked (7 commits x 12) and all 84 match.**
+
+**⚠ SIX EXPECTED-ZERO ROWS IS EXACTLY WHERE NOBODY CHECKS, which is why they were checked.** A range where
+every row is predicted to be nothing is the one a reader skims and a recapture launders. The per-config hash
+was run at every intermediate commit regardless, not only at the endpoint.
+
+**The one shape change:** `fundingAdequacyRatio` and `premiumFundingRatio`, 150 instances each. Five fields
+were deleted at `ebdb147`; the other three (`premiumFundingAdequacyStatus`, `fundingAdequacyStatus`,
+`fundingAdequacyIndicator`) are STRINGS, and this gate captures numbers only — so a five-field deletion
+reads as a two-field one here, and that asymmetry is a property of the instrument rather than of the change.
+
+### The phantom, and why clearing it is part of the point
+
+The v20 baseline carried those 300 removed fields for **seven commits**. The gate still declared HOLDS, so
+every run printed a standing `removed 300` line that meant nothing. That is precisely the noise that trains
+a reader to skim — and skimming is how Market Share survived a release with a guard on it, its failure sitting
+in a list of legitimately-moving fields. The v21 capture reads `added 0, removed 0` and the verdict line is
+back to the plain `VALUE IDENTITY HOLDS.` A standing informational line is not free; it costs attention.
+
+### What the range actually did
+
+**The page was audited (97 distinct rows) and the harness extended three ways:**
+
+- `118b1fb` — a **SQUEEZED ARM**. The check ran only at defaults and reported ONE defect; the identical
+  evaluation under squeezed funding reported ELEVEN. `defaultLineDecisionSet` sets `fundingAtExpected` on
+  every line, pinning `selectedFundingCLF` to exactly 1.000 EVERYWHERE, so four pool-scope rows reading a
+  one-line placeholder were right only because all three lines agreed, and two reserve rows omitting the
+  `(1 - bias)` term were right only because the bias was zero. Same commit dropped a **$10,000 tolerance
+  sitting on an identity that is now exact** ($0.0000 across 1,920 scope-years, because IBNER pays the
+  closed-cohort residual out instead of dropping it) — the fourth such tolerance found in this project.
+  Same commit added the **HAND-MULTIPLICATION CHECK**, which parses the printed operands back as a reader
+  would.
+- `9f63680` — **DECISIONS and SELF-INSURED arms**, plus **PROSE CLAIMS**. The two arms are mutually
+  exclusive by construction (the aggregate stop-loss is conditional on a placed occurrence layer), so two is
+  the minimum rather than a choice. The three rows the decisions arm uniquely reaches — Member dividends,
+  Member assessments, Loss prevention expenses — were identically $0 in every prior run: passing while
+  unable to fail.
+
+**Then every disagreement was fixed:** `ac98bd5` (the reserve rows, which failed at LINE scope in every solo
+config and by the largest margin on the page), `d5ba156` (four pool-scope rows derived per line, plus Market
+Share), `ae7b5ac` (the 10^6 unit suffix — six rows, one line at the cause), `6f84b72` (two prose layer counts,
+and a check that could not fail).
+
+### ⚠ THREE FINDINGS FROM THIS RANGE WORTH CARRYING FORWARD
+
+**A DEFAULT CAN MAKE A WRONG ROW LOOK RIGHT.** Six of the seven formula defects were invisible at default
+decisions. Not by luck: the default pins every line to the same CLF and switches the booking bias off, so
+placeholders and missing terms both cancel. **A row correct only because three lines happen to be identical
+is not a correct row; it is an untested one.**
+
+**A GREEN CHECK CAN BE A TAUTOLOGY, AND THE BIT PATTERN TELLS YOU.** `Expense Ratio Check Difference` read
+the engine's own expression verbatim on the same inputs and subtracted it from the stored value. It measured
+**exactly 0.0 on 480 of 480 scope-years — not 1e-17, exactly zero** — while the loss-ratio check beside it,
+whose numerator is back-solved from the income statement, showed real float noise on 289 of the same 480.
+Bit-exact zero across the board is the signature of a self-subtraction, and from outside it is
+indistinguishable from a held identity. It now rebuilds its denominator from components, and was **forced red
+once** (perturbing `poolPremium` by 1% turned it to `fail` at 0.2%) to prove it can fire.
+
+**A NUMBER CAN BE RIGHT AND THE SENTENCE BESIDE IT WRONG.** Reinsurance Recovery's layer count passed the
+formula check, the hand check, and all four arms — because the *number* was correct and only its prose was
+not. That needed a third KIND of check, not a fourth arm. Two claims are registered now; the second
+(Reinsurance Cost, counting tower WIDTH instead of layers PLACED, wrong at line scope as well as pool) was
+found by hand while fixing the first, which is the argument for registering claims eagerly.
+
+**Guards at the endpoint:** `audit-formula-check` **EXIT 0** — no formula defect in any of four arms, every
+hand-checkable row reproducing from its printed operands, every registered prose claim true. Recorded here so
+a future red is unambiguous. `pool-aggregation-check` green (introduced at `9ace082`; this is its first
+recapture). `roster-catalog-check` and `marketplace-generation-check` green — no roster change in range.
+`ibner-null-check` green on all seven sections. No broken identities: `expectedCombinedRatio` sits within
+2.220e-16 of exactly 1 on all 150 instances, and with 0 values changed the identity guard could not have
+fired anyway — so it was verified directly rather than inferred from silence.
+
+**What a reader should carry forward:** the audit page now has three independent checks over it — arithmetic,
+printing, and prose — run across four decision arms, and it is green on all three. Every figure it explains
+is a figure it can be held to. The engine did not move in this range at all.
+
+---
+
 ## ⚠️ The v4–v9 artifacts described above are HISTORY-ONLY as of 2026-08-19
 
 The workbooks, CSVs and per-version `.md` summaries this document narrates —
@@ -881,6 +981,6 @@ git log --all --diff-filter=D -- 'baselines/*'     # find the removing commit
 
 **This document is why the removal was safe** — it records what each retired
 version represented and what moved between them, which is the part worth
-keeping. What remains in `baselines/` is the current gate pair (v20), its
-immediate predecessor (v19, the one to reach for if a v20 capture ever needs
+keeping. What remains in `baselines/` is the current gate pair (v21), its
+immediate predecessor (v20, the one to reach for if a v21 capture ever needs
 checking), and the v11 workbook set.

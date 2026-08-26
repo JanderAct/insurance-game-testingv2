@@ -249,7 +249,21 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Satisfaction and Average Risk Quality — drop it and neither is
 // reconstructable from the export; drop Members and the export reads 205 where
 // every page reads 141, which is the divergence this closed.
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v20.json');
+// v21: retired v20 across seven commits, and ALL 12 HASHES WERE ALREADY MATCHING
+// AT EVERY ONE OF THEM. This recapture changes no hash — it exists only so the
+// version pair stays aligned with value-identity, which had a stale shape line to
+// clear.
+//
+// ⚠ THE HASHES WERE CHECKED PER COMMIT ANYWAY, 84 in total (7 x 12), because the
+// range is entirely display and diagnostic work on the Calculation Audit page —
+// and a page that renders exported figures is exactly where a display fix could
+// reach the export without anyone expecting it. It did not: every configuration
+// at every commit is byte-identical.
+//
+// That is a stronger statement than "the endpoint is clean". A display change
+// that broke and then repaired an export would show as clean at the endpoint and
+// red in the middle; nothing here was red in the middle.
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v21.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');
