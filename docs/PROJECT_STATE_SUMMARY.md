@@ -102,9 +102,12 @@ real-pool chart applied to a net-funded line: its 60% stop delivered 54.3%, with
 out of sample.
 
 Conventions established by this work and binding on all future lines:
-- **Accident-year dollars + explicit settlement trend.** Severities are drawn and stored in
-  accident-year dollars; trendToSettlement (src/utils/claimMath.ts) is the ONLY vintage-conversion
-  point. No ambiguous-vintage values enter the model.
+- **Accident-year dollars, and NO settlement trend.** ⚠ CORRECTED — this bullet used to name
+  trendToSettlement (src/utils/claimMath.ts) as the ONLY vintage-conversion point. That function and its
+  sole caller patternTrendFactor were dead from 3181b18 and are now deleted. Severities are drawn and
+  stored in accident-year dollars and are never re-vintaged; every live trend in the generators is a
+  LEVEL trend that establishes a vintage rather than converting between two. Retroactive repricing runs
+  through the IBNER development step, which moves the estimate, not the claim. See WORKING_PRACTICES.md.
 - **Every trend-compounded lag MUST be truncated and renormalized.** E[(1+r)^lag] over an unbounded
   lognormal lag is mathematically DIVERGENT, not merely large. Bounds: WC presumption 40y; GL
   general 10y, EPL/LE 12y, abuse 50y. The analytic expectation must integrate the identical

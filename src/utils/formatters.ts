@@ -40,17 +40,6 @@ export function formatPct(value: number, decimals = 1): string {
   return `${(value * 100).toFixed(decimals)}%`;
 }
 
-export function formatNumber(value: number, decimals = 1): string {
-  return value.toLocaleString('en-US', {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  });
-}
-
-export function formatRatio(value: number): string {
-  return value.toFixed(3);
-}
-
 // ONE set of loss-ratio bands, two palettes. The header sits on a dark slate
 // bar and needs -400 shades for contrast while the pages use -600 on white, so
 // the two cannot share a class string — but they MUST share the cutoffs. The
@@ -83,14 +72,3 @@ export function colorForNetIncome(income: number): string {
   return 'text-red-600';
 }
 
-export function colorForFunding(indicator: string): string {
-  if (indicator === 'Adequate') return 'text-emerald-600';
-  if (indicator === 'Marginal') return 'text-amber-600';
-  return 'text-red-600';
-}
-
-export function badgeForFunding(indicator: string): string {
-  if (indicator === 'Adequate') return 'bg-emerald-100 text-emerald-700 border border-emerald-200';
-  if (indicator === 'Marginal') return 'bg-amber-100 text-amber-700 border border-amber-200';
-  return 'bg-red-100 text-red-700 border border-red-200';
-}

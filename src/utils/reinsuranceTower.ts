@@ -26,10 +26,7 @@ import {
 import { lognormalPartialMoment } from './claimMath';
 import { quotePropertyAggregate } from './propertyAggregate';
 import { allLayerRiskMoments, layerRiskMoments, retainedRiskMoments } from './towerMoments';
-import type { Claim, CoverageLine, Member, Occurrence } from '../types/simulation';
-
-export const isTowerLine = (line: CoverageLine): line is TowerLine =>
-  line === 'WC' || line === 'GL' || line === 'Property';
+import type { Claim, Member, Occurrence } from '../types/simulation';
 
 // --- the waterfall (J14) ----------------------------------------------------
 

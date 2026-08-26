@@ -73,13 +73,6 @@ export function drawLognormal(rng: SeededRandom, mean: number, cv: number): numb
   return rng.lognormal(mu, sigma);
 }
 
-// Inverse lognormal CDF at quantile u — the gate's severity mapping
-// (bigger latent merit -> bigger loss).
-export function lognormalInvCdf(mean: number, cv: number, u: number): number {
-  const { mu, sigma } = lognormalParams(mean, cv);
-  return Math.exp(mu + sigma * normalInvCdf(u));
-}
-
 // E[X^k x 1{X <= bound}] for X ~ LogNormal(mean, cv) — the PARTIAL (truncated,
 // UNNORMALISED) k-th moment. Note the difference from expectedOverLognormal
 // below, which renormalises: this one does not, so partial moments over
@@ -120,46 +113,37 @@ export function limitedExpectedValue(mu: number, sigma: number, limit: number): 
   return Math.exp(mu + (sigma * sigma) / 2) * normalCdf(z - sigma) + limit * (1 - normalCdf(z));
 }
 
-// --- dollar vintage -----------------------------------------------------------
-
-// An amount stated in accidentYear dollars, carried to settlementYear dollars
-// at `rate`.
+// --- dollar vintage: DELETED ------------------------------------------------
 //
-// ⚠ THIS COMMENT USED TO CLAIM IT WAS "THE single point of dollar-vintage
-// conversion", that "every vintage change in the generators routes through
-// here", and that a Math.pow(1 + someTrend, ...) anywhere else "is the bug".
-// NONE OF THAT IS TRUE ANY MORE, and the correction matters more than the
-// function does, because WORKING_PRACTICES records that convention as what
-// makes retroactive repricing possible at all.
+// ⚠ trendToSettlement AND patternTrendFactor ARE GONE, and the reasoning matters
+// more than the two functions did, because WORKING_PRACTICES recorded their
+// convention as what made retroactive repricing possible at all.
 //
-// WHAT IS ACTUALLY TRUE, traced through git rather than inferred:
+// The chain was dead END TO END and had been since 3181b18. trendToSettlement had
+// exactly one caller — patternTrendFactor — which had none. WC called
+// patternTrendFactor 7 times at 2dc146a and stopped at 3181b18, the commit that
+// ADDED the report lag; Property picked it up there and dropped it at 645c15e
+// (its mixture was fitted to amounts already trended to 2024, so trending again
+// double-counted); GL never called it.
 //
-//   - This function has ONE caller, patternTrendFactor below, in this same
-//     file. patternTrendFactor has ZERO live callers. The chain is dead end to
-//     end and has been since 645c15e.
-//   - WC called patternTrendFactor 7 times at 2dc146a and stopped at 3181b18 —
-//     the commit that ADDED the report lag, not the one that removed it.
-//     Property picked it up at 3181b18 and dropped it at 645c15e, for a reason
-//     documented in propertyClaimEngine: its mixture was fitted to amounts
-//     already trended to 2024, so trending again would double-count.
-//   - GL never called it.
+// ⚠ AND NO VINTAGE CONVERSION HAPPENS ANYWHERE. Every live
+// Math.pow(1 + trend, year - 1) in the generators — WC frequency and severity,
+// GL severity, Property's draw trend, exposureTrend's wage inflation — is a LEVEL
+// trend that establishes what a year-N accident year costs in year-N dollars. It
+// does not convert BETWEEN two vintages. There was no discipline left for these
+// to be the single point of.
 //
-// SO NO ACCIDENT-YEAR -> SETTLEMENT-YEAR CONVERSION HAPPENS ANYWHERE. Every
-// live `Math.pow(1 + trend, year - 1)` in the generators — wcClaimEngine's
-// frequency and severity trends, glClaimEngine's severity trend,
-// propertyClaimEngine's draw trend, exposureTrend's wage inflation — is a LEVEL
-// trend that sets what a year-N accident year costs in year-N dollars. That is
-// a different operation: it establishes a vintage, it does not convert between
-// two. Claims are drawn at ultimate in settlement-equivalent terms and are
-// never re-vintaged afterwards.
+// THEY WERE KEPT ONCE, AS "the right primitive for the shock repricing that is
+// next", AND THAT WAS WRONG. IBNER gives shocks a simpler route: add a term to
+// the development step and every open accident year reprices at once, surfacing
+// as adverse development — which is how social inflation actually appears in a
+// triangle. The reserve walk moves the ESTIMATE, not the claim's vintage, and
+// that is the more defensible mechanic as well as the simpler one: the claims did
+// not change, what they are expected to cost did.
 //
-// ⚠ KEPT, NOT DELETED, AND DELIBERATELY. It is dead today but it is the correct
-// primitive for the shock work that reprices prior-year claims — that repricing
-// has to be BUILT, and this is the piece it would be built on. Deleting it
-// would mean writing it again.
-export function trendToSettlement(amount: number, rate: number, accidentYear: number, settlementYear: number): number {
-  return amount * Math.pow(1 + rate, settlementYear - accidentYear);
-}
+// If a shock ever has to restate the CLAIM REGISTER itself, that wants vintage
+// conversion and it is twenty lines. Keeping a dead primitive against a design
+// that has not been written is how dead code accumulates.
 
 // --- truncated lognormal (the divergence guard) --------------------------------
 
@@ -211,43 +195,6 @@ export function expectedOverLognormal(
     weight += density;
   }
   return weight > 0 ? weighted / weight : f(Math.exp(mu));
-}
-
-// A lognormal draw restricted to (0, upperBound] by REJECT-AND-REDRAW, not by
-// clamping. A hard min(x, bound) would pile probability mass onto exactly the
-// bound, so a value "at the bound" would mean either "genuinely there" or
-// "capped down from longer" — precisely the latent ambiguity the
-// accident-year-dollar convention exists to eliminate. Rejection keeps the
-// density smooth and samples exactly the renormalised distribution that
-// expectedOverLognormal integrates.
-export function drawTruncatedLognormal(rng: SeededRandom, mean: number, cv: number, upperBound: number): number {
-  for (let attempt = 0; attempt < 64; attempt++) {
-    const x = drawLognormal(rng, mean, cv);
-    if (x <= upperBound) return x;
-  }
-  // Unreachable in practice: rejection rates are well under a few percent, so
-  // 64 consecutive rejections is a vanishing-probability event. Falls back to
-  // the median.
-  const { mu } = lognormalParams(mean, cv);
-  return Math.min(Math.exp(mu), upperBound);
-}
-
-// The multiple of an accident-year amount that a payout pattern actually
-// settles for, once each pattern year is trended at the leg's own rate.
-// Pattern index 0 is the accident year itself (factor 1.0), so a short pattern
-// yields a small, CORRECT uplift rather than the silent 1.0 that omitting
-// trend would give.
-//
-// SHARED so that every line trends a payout vector the same way. WC uses it
-// per leg (medical and indemnity at different rates); Property uses it for
-// construction-cost inflation over its 70/25/5 pattern. A second trending
-// convention is exactly what the accident-year-dollars rule exists to prevent.
-export function patternTrendFactor(pattern: number[], rate: number, accidentYear: number): number {
-  let factor = 0;
-  for (let i = 0; i < pattern.length; i++) {
-    factor += pattern[i] * trendToSettlement(1, rate, accidentYear, accidentYear + i);
-  }
-  return factor;
 }
 
 // --- pure-function-of-year memoization ---------------------------------------

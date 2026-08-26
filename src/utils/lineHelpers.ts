@@ -1,6 +1,4 @@
-import { DEFAULT_LAYERS_PLACED } from '../data/reinsuranceTower';
-import type { CoverageLine, LineDecisionSet, LinePoolState, LineResultSet, LineView, Member, ResultSet } from '../types/simulation';
-import { ASSET_ALLOCATION_DEFAULT } from '../data/defaultAssumptions';
+import type { CoverageLine, LinePoolState, LineResultSet, LineView, Member, ResultSet } from '../types/simulation';
 import { wageFactor } from '../data/exposureTrend';
 
 // A member's exposure in THIS YEAR'S DOLLARS — the NOMINAL, rating-side figure.
@@ -55,21 +53,3 @@ export function emptyLinePoolState(): LinePoolState {
   };
 }
 
-// Unused within src today (no caller); kept as a line-agnostic template, so it
-// defaults to WC's layer count rather than requiring a line argument nothing
-// currently supplies. normalizeLayersPlaced coerces a wrong-length array
-// safely if this is ever fed to a different line.
-export function emptyLineDecisionSet(): LineDecisionSet {
-  return {
-    fundingConfidenceLevel: 0.60,
-    fundingAtExpected: true,
-    dividendPct: 0,
-    assessmentPct: 0,
-    underwritingStrictness: 5,
-    riskControlPct: 0,
-    layersPlaced: [...DEFAULT_LAYERS_PLACED.WC],
-    aggregateStopLevel: -1,
-    assetAllocation: { ...ASSET_ALLOCATION_DEFAULT },
-    loanRepaymentAggressiveness: 0.5,
-  };
-}

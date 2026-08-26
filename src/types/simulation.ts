@@ -83,14 +83,6 @@ export interface Member {
   wcRatingGroup?: WcRatingGroup;
 }
 
-export interface MemberSegment {
-  type: MemberType;
-  count: number;
-  totalExposure: number;
-  averageRiskQuality: number;
-  averageSatisfaction: number;
-}
-
 export interface MemberLossResult {
   memberId: string;
   memberName: string;
@@ -663,29 +655,35 @@ export interface ResultSet {
   selectedFundingCLF: number;              // Backend actuarial factor from CLF table
 
   // A. Rate / Premium Funding Adequacy
+  //
+  // ⚠ THIS BLOCK IS NOW TWO FIELDS, AND EVERYTHING ELSE IN IT IS DELETED. It held
+  // twelve. Seven went here; five went at ebdb147 (premiumFundingRatio,
+  // premiumFundingAdequacyStatus and three aliases of them). Not one of the
+  // twelve was ever read by a page, a RESULT_METRICS entry, a narrative or a
+  // financial statement — the section was written as a funding-adequacy exhibit
+  // and the exhibit was never built.
+  //
+  // THE SEVEN REMOVED HERE, and how each was assigned:
+  //   requiredFundingPremium      = poolPremiumAndAdminExpense   (alias)
+  //   actualPremium               = poolPremiumAndAdminExpense   (alias, same one)
+  //   premiumFundingGap           = 0                            (literal)
+  //   indicatedFundingRatePer100  = poolPremiumRatePer100 + adminRatePer100
+  //   actualRatePer100            = indicatedFundingRatePer100    (alias)
+  //   rateFundingGapPer100        = 0                            (literal)
+  //   rateAdequacyRatio           = 1                            (literal)
+  //
+  // The gap was 0 and the ratio 1 BY CONSTRUCTION, because the two quantities
+  // they compared were the same value under two names. That is the tell the
+  // absolute identity check now looks for: five of these seven are bit-exact
+  // constants on every instance, which is what a quantity that was never
+  // computed twice looks like.
+  //
+  // THE CONCEPT SURVIVES UNDER ITS REAL NAME. "Premium over required premium"
+  // IS selectedFundingCLF, where 1.000 is break-even by construction, and the
+  // live code reads that directly — IBNER's booking bias, the funding panel, the
+  // audit page's rate build-up. Nothing needed reconnecting.
   expectedLoss: number;                    // Current-year expected loss before CLF
   clfAdjustedExpectedLoss: number;          // expectedLoss × selectedFundingCLF
-  requiredFundingPremium: number;           // CLF-adjusted loss + expense + RI + risk control
-  actualPremium: number;                    // Usually grossPremium
-  premiumFundingGap: number;                // actualPremium - requiredFundingPremium
-  // ⚠ premiumFundingRatio AND premiumFundingAdequacyStatus ARE GONE, WITH THEIR
-  // THREE ALIASES (fundingAdequacyRatio / fundingAdequacyStatus /
-  // fundingAdequacyIndicator). Both were assigned as LITERALS — 1 and
-  // 'Funded at Selected Confidence' — so the ratio carried no information and
-  // the status string could not vary. Nothing read any of the five: no page, no
-  // RESULT_METRICS entry, no narrative, and the FundingDetail pass-through that
-  // carried two of them into the financial statements was never rendered.
-  //
-  // THE CONCEPT IS ALIVE UNDER ITS REAL NAME. premiumFundingRatio was documented
-  // as actualPremium / requiredFundingPremium, which IS selectedFundingCLF —
-  // 1.000 is break-even by construction there. The live code had already
-  // migrated: IBNER's booking bias reads selectedFundingCLF directly. There was
-  // nothing to reconnect, only a vestige that outlived its replacement.
-
-  indicatedFundingRatePer100: number;       // requiredFundingPremium / payroll units
-  actualRatePer100: number;                 // selected/actual rate per $100 payroll
-  rateFundingGapPer100: number;             // actualRatePer100 - indicatedFundingRatePer100
-  rateAdequacyRatio: number;                // actualRatePer100 / indicatedFundingRatePer100
 
   // B. Accounting Reserve / Reserve Confidence View
   expectedNetUnpaidLoss: number;            // Expected unpaid losses (net of reinsurance)

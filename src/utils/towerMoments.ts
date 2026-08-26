@@ -327,9 +327,6 @@ export function glBandMoments(layerIndex: number, yearNumber: number): BandMomen
 export function wcBandMoments(layerIndex: number, yearNumber: number, group: WcRatingGroup): BandMoments {
   return wcBandMomentsAll(yearNumber, group)[layerIndex];
 }
-export function propertyBandMoments(layerIndex: number): BandMoments {
-  return propertyBandMomentsAll()[layerIndex];
-}
 
 // --- aggregation over a book ---------------------------------------------------
 

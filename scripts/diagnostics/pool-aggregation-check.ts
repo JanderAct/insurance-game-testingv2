@@ -57,7 +57,7 @@ const DOLLARS = new Set([
   'beginningNetReserve', 'currentYearNetReserve', 'netPaidLosses', 'endingNetReserve',
   'investedAssets', 'investmentIncome', 'outstandingLoanBalance', 'loanRepaymentApplied',
   'loanInterestAccrued', 'loanOriginatedThisYear', 'expectedLoss', 'clfAdjustedExpectedLoss',
-  'requiredFundingPremium', 'actualPremium', 'premiumFundingGap', 'expectedNetUnpaidLoss',
+  'expectedNetUnpaidLoss',
   'netFundingTarget', 'indicatedNetReserveAtConfidenceLevel', 'reserveRiskMarginNeeded',
   'fundingMarginNeeded', 'availableFunding', 'availableSurplus', 'fundingGap',
   'capitalFundingGap', 'excessAvailableSurplus', 'underwritingIncome', 'netIncome',
@@ -92,8 +92,7 @@ const NO_POOL_MEANING = new Set(['aggregateAttachment', 'commonLossFactor', 'cat
 const FIRST_LINE_PLACEHOLDER = new Set([
   'yearNumber', 'calendarYear', 'rateLevel', 'ratePer100', 'purePremiumPer100', 'purePremium',
   'expectedCededPer100', 'netPurePremiumPer100', 'selectedFundingConfidenceLevel',
-  'selectedFundingCLF', 'indicatedFundingRatePer100', 'actualRatePer100',
-  'rateFundingGapPer100', 'rateAdequacyRatio', 'fundingCLF',
+  'selectedFundingCLF', 'fundingCLF',
   'historyAttempt',
 ]);
 

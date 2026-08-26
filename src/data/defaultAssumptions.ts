@@ -90,7 +90,6 @@ export const AGGREGATE_LOSS_DISTRIBUTION = {
 // (below) replaced rating classes. See WC_RATING_GROUP_BY_TYPE for the one
 // remaining WC-side use, which is group assignment, not class payroll.
 export const WC_CLASS_KEYS = ['clerical', 'publicWorks', 'police', 'fire'] as const;
-export type WcClassKey = (typeof WC_CLASS_KEYS)[number];
 
 // --- Rating groups ---------------------------------------------------------
 //

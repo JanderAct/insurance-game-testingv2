@@ -193,15 +193,27 @@ Things that were discovered expensively and live only in conversation memory. Re
 
 ## Claim-generator conventions (binding on all lines)
 Established by the WC and GL builds. Property and any future line inherit these.
-- **Accident-year dollars, with `trendToSettlement` (`src/utils/claimMath.ts`) as the ONLY vintage
-  conversion point.** No ambiguous-vintage values enter the model. This is what makes retroactive
-  repricing (social inflation, legislative shocks) possible at all.
+- **⚠ CORRECTED: THERE IS NO VINTAGE CONVERSION, AND `trendToSettlement` IS DELETED.** This bullet used
+  to name it as "the ONLY vintage conversion point" and claim that was what made retroactive repricing
+  possible at all. Traced through git, the chain (`trendToSettlement` ← `patternTrendFactor`) was dead
+  end to end from 3181b18 and had no live caller in any generator. **A claim's amount is fixed at draw and
+  is never re-vintaged.** Every live `Math.pow(1 + trend, year - 1)` — WC frequency and severity, GL
+  severity, Property's draw trend, `exposureTrend`'s wage inflation — is a LEVEL trend that sets what a
+  year-N accident year costs in year-N dollars. That establishes a vintage; it does not convert between
+  two. Amounts are still unambiguous, but by construction rather than by routing.
+  **What retroactive repricing actually runs on is IBNER:** add a term to the development step and every
+  open accident year reprices at once, surfacing as adverse development. That moves the ESTIMATE, not the
+  claim's vintage, which is how social inflation appears in a real triangle.
 - **Every trend-compounded lag MUST be truncated and renormalized, and the analytic must integrate the
   IDENTICAL truncated density.** `E[(1+r)^lag]` over an unbounded lognormal lag is mathematically
   DIVERGENT, not merely large — the moment series grows like `exp(k²σ²/2)`. WC presumption at 6% over a
   lognormal mean-8yr lag returned 6.6e27 from quadrature; the true value is infinite. Bounds in use:
-  WC presumption 40y; GL general 10y, EPL/LE 12y, abuse 50y. Prefer truncate-and-renormalize (reject and
-  redraw) over a hard `min(lag, cap)`, which piles artificial probability mass exactly at the bound.
+  GL general 10y, EPL/LE 12y, abuse 50y. Prefer truncate-and-renormalize (reject and redraw) over a hard
+  `min(lag, cap)`, which piles artificial probability mass exactly at the bound.
+  ⚠ THIS IS A RULE FOR THE NEXT LINE THAT TRENDS OVER A LAG, NOT A DESCRIPTION OF WC. WC's 40y presumption
+  bound went with the presumption process; WC severity now carries no trend, so it has no lag to truncate
+  (see the header of `wcClaimEngine.ts`, point 4). The shared `drawTruncatedLognormal` helper was deleted
+  unused along with it — the rule survives, its one-size implementation did not.
 - **Risk control applies to the DRAW only, never to the pricing expectation.** Applying it to both cancels
   and recreates finding 17's no-op.
 - **Pure premium is derived ONCE from the neutral (RQ 5) full-roster analytic expectation and HELD.**

@@ -85,11 +85,10 @@ export function blendInvestmentReturn(
   return { returnRate, income };
 }
 
-// Convenience wrapper: draw a fresh market and blend it in one call.
-export function simulateInvestmentReturn(
-  investedAssets: number,
-  allocation: AssetAllocation,
-  rng: SeededRandom,
-): InvestmentResult {
-  return blendInvestmentReturn(investedAssets, allocation, simulateMarketReturns(rng));
-}
+// A `simulateInvestmentReturn(assets, allocation, rng)` wrapper — draw the
+// market and blend it in one call — used to live here and was deleted unused.
+// Do not restore it: the engine deliberately draws the market ONCE per year
+// (simulateMarketReturns) and blends it per line (blendInvestmentReturn),
+// because the market is shared across lines. A per-line wrapper that draws its
+// own market re-seeds the market once per line and silently decorrelates them,
+// which is the exact bug the two-function split exists to prevent.

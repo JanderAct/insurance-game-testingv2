@@ -221,10 +221,16 @@ export function currentPurePremiumPer100(
     : PROPERTY_HELD_PURE_PREMIUM_PER_100;
 }
 
-// The risk-control effectiveness this year's decision produces. Exported for
-// the same reason: Property's pure premium above depends on it, so the panel
-// cannot reach a matching pure premium without it.
-export function projectedRcEffectiveness(
+// The risk-control effectiveness this year's decision produces.
+//
+// ⚠ NO LONGER EXPORTED, and its old comment was stale. It said Property's pure
+// premium depends on it "so the panel cannot reach a matching pure premium
+// without it" — that stopped being true when Property was held (see the block
+// above): heldPurePremiumPer100 is now a pure function of the year for all
+// three lines and reads no rcEffectiveness at all. The only caller left is
+// processLineYear below, in this file. File-local now; re-export it if a panel
+// ever needs to project effectiveness itself.
+function projectedRcEffectiveness(
   priorRCEffectiveness: number,
   riskControlPct: number,
 ): number {
@@ -653,8 +659,13 @@ export function processLineYear(
   const rateAtConfidenceLevelPer100 =
     netPurePremiumPer100 * selectedFundingCLF * pricingAdjustment;
 
-  const poolPremiumRatePer100 = rateAtConfidenceLevelPer100;
-
+  // ⚠ `poolPremiumRatePer100` AND `adminRatePer100` WERE LOCALS HERE AND ARE GONE.
+  // Both existed only to build indicatedFundingRatePer100, and both died with it.
+  // The identically-named fields on linePricing's LineRateQuote, on
+  // fundingConsequence's book and on HistoricalYear are DIFFERENT declarations in
+  // different files and are live — HistoryPage, DecisionsPage and
+  // panel-engine-parity-check all read them. Do not follow the name across files
+  // and conclude something is still needed here.
   const poolPremium =
     activeExposure * rateAtConfidenceLevelPer100 * 10_000;
 
@@ -667,7 +678,6 @@ export function processLineYear(
   // $400M book is about $0.5M/yr of expense the pool would stop collecting for
   // work it still has to do.
   const adminExpense = expectedLoss * ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM;
-  const adminRatePer100 = pricedPurePremiumPer100 * ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM;
   const poolPremiumAndAdminExpense = poolPremium + adminExpense;
 
   // isWcClaimLine / isGlClaimLine / isClaimLine are now declared further up,
@@ -1311,14 +1321,6 @@ export function processLineYear(
 
   // In this simplified contribution model, the selected CLF produces the contribution rate charged to members.
   // Operating expense, reinsurance, and risk control remain separate expenses.
-  const requiredFundingPremium = poolPremiumAndAdminExpense;
-  const actualPremium = poolPremiumAndAdminExpense;
-  const premiumFundingGap = 0;
-
-  const indicatedFundingRatePer100 = poolPremiumRatePer100 + adminRatePer100;
-  const actualRatePer100 = indicatedFundingRatePer100;
-  const rateFundingGapPer100 = 0;
-  const rateAdequacyRatio = 1;
 
   // B. Reserve Confidence View
   // This is an indicated confidence-level view, not the booked accounting reserve.
@@ -1550,14 +1552,6 @@ export function processLineYear(
 
     expectedLoss,
     clfAdjustedExpectedLoss,
-    requiredFundingPremium,
-    actualPremium,
-    premiumFundingGap,
-
-    indicatedFundingRatePer100,
-    actualRatePer100,
-    rateFundingGapPer100,
-    rateAdequacyRatio,
 
     expectedNetUnpaidLoss,
     netFundingTarget,
@@ -1573,7 +1567,6 @@ export function processLineYear(
     excessCapitalRatio,
     capitalAdequacyRatio,
     capitalAdequacyStatus,
-
 
     // Legacy fields
     fundingCLF,
@@ -2511,14 +2504,6 @@ export function aggregateLineResults(
 
     expectedLoss: expectedLossSum,
     clfAdjustedExpectedLoss: addDollars('clfAdjustedExpectedLoss'),
-    requiredFundingPremium: addDollars('requiredFundingPremium'),
-    actualPremium: addDollars('actualPremium'),
-    premiumFundingGap: addDollars('premiumFundingGap'),
-
-    indicatedFundingRatePer100: first.indicatedFundingRatePer100,
-    actualRatePer100: first.actualRatePer100,
-    rateFundingGapPer100: first.rateFundingGapPer100,
-    rateAdequacyRatio: first.rateAdequacyRatio,
 
     expectedNetUnpaidLoss: addDollars('expectedNetUnpaidLoss'),
     netFundingTarget: addDollars('netFundingTarget'),
@@ -2534,7 +2519,6 @@ export function aggregateLineResults(
     excessCapitalRatio,
     capitalAdequacyRatio: excessCapitalRatio,
     capitalAdequacyStatus,
-
 
     fundingCLF: first.fundingCLF,
 

@@ -194,12 +194,6 @@ export class SeededRandom {
   }
 }
 
-// Create a child RNG derived from a parent seed and a year number
-export function deriveYearRng(baseSeed: number, yearNumber: number): SeededRandom {
-  const mixed = (baseSeed * 2654435761 + yearNumber * 40503) >>> 0;
-  return new SeededRandom(mixed);
-}
-
 // Murmur3's 32-bit finalizer. AVALANCHE: a one-bit change anywhere in the
 // input flips about half the output bits.
 //
