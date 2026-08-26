@@ -228,13 +228,30 @@ function factorTerm(value: number, label?: string): FormulaTerm {
 // own occurrence tower. Keeping a function whose real branch never fires is
 // the same defect its own header warned about (a plausible number that means
 // nothing); deleted rather than left dead.
-function towerReinsCostFormula(x: LineResultSet): FormulaSpec {
-  const layersPaid = (x.cededByLayer ?? []).length;
+// ⚠ COUNTS WHAT WAS PLACED, NOT HOW WIDE THE TOWER IS, and the difference was a
+// false claim at LINE scope as well as pool. This read
+// `(x.cededByLayer ?? []).length` — the tower's WIDTH, which is fixed. A line
+// with every layer declined still has a 3-entry array of zeros, so the row said
+// "sum of 3 placed layer premium(s)" beside a reinsurance cost of $0. And at
+// pool scope the array is WC+GL only (Property's single layer shares no
+// attachment, so it was excluded when the elementwise sum was fixed), giving 3
+// against a true tower width of 7 across the three lines.
+//
+// layersPlaced is the actual decision, so it is what the sentence now counts.
+// A pool row is passed the per-line sets because `decisions` at pool scope is
+// one line's kept as a placeholder.
+function towerReinsCostFormula(x: LineResultSet, perLinePlaced?: { line: CoverageLine; placed: number }[]): FormulaSpec {
+  const placed = perLinePlaced
+    ? perLinePlaced.reduce((n, pl) => n + pl.placed, 0)
+    : (x.decisions?.layersPlaced ?? []).filter(Boolean).length;
+  const breakdown = perLinePlaced && perLinePlaced.length > 1
+    ? ` (${perLinePlaced.map(pl => `${pl.line} ${pl.placed}`).join(', ')})`
+    : '';
   const agg = (x.aggregatePremium ?? 0) > 0;
   return {
     kind: 'echo',
     value: x.reinsuranceCost,
-    text: `Per-occurrence tower: sum of ${layersPaid} placed layer premium(s)` +
+    text: `Per-occurrence tower: sum of ${placed} placed layer premium(s)${breakdown}` +
       `${agg ? ' + aggregate stop-loss premium' : ''}, each priced off measured expected ceded loss — ` +
       'NOT a percentage of pool premium.',
   };
@@ -1320,6 +1337,8 @@ export function buildSupportingRows(
         poolPremium: poolResult.byLine[l].poolPremium,
         totalMemberCharge: poolResult.byLine[l].totalMemberCharge,
         marketShare: poolResult.byLine[l].marketShare,
+        layersPaid: (poolResult.byLine[l].cededByLayer ?? []).filter(v => v > 0).length,
+        placed: (poolResult.byLine[l].decisions?.layersPlaced ?? []).filter(Boolean).length,
       }))
     : undefined;
   const payrollUnits = Math.max(result.activeExposure * 10_000, 1);
@@ -1458,9 +1477,28 @@ export function buildSupportingRows(
   const lossRatioCheck =
     netIncurredLossFromIncome / Math.max(result.totalMemberCharge, 1);
 
+  // ⚠ THIS CHECK COULD NOT FAIL, AND "ALWAYS ZERO" IS HOW THAT LOOKS FROM
+  // OUTSIDE. It read
+  //
+  //     (adminExpense + reinsuranceCost) / max(totalMemberCharge, 1)
+  //
+  // which is simulationEngine's actualExpenseRatio EXPRESSION VERBATIM, on the
+  // same stored inputs. The row then subtracted that from the stored ratio: a
+  // value minus itself. Measured exactly 0.0 on 480 of 480 scope-years — not
+  // 1e-17, EXACTLY zero — while the loss-ratio check beside it, whose numerator
+  // is back-solved from the income statement, shows genuine float noise on 289
+  // of the same 480. Bit-exact zero across the board is the signature of a
+  // tautology, and it is distinguishable from a held identity only by looking.
+  //
+  // NOW INDEPENDENT: the denominator is rebuilt from its COMPONENTS rather than
+  // read from the stored total. poolPremium + adminExpense + reinsuranceCost is
+  // identically totalMemberCharge (the export guard asserts the same identity),
+  // so this stays green today — worst measured residual 1.11e-16 against the
+  // row's 1e-4 tolerance — but it now fails if that identity ever breaks, which
+  // is a thing that can actually happen.
   const expenseRatioCheck =
     (result.adminExpense + result.reinsuranceCost) /
-    Math.max(result.totalMemberCharge, 1);
+    Math.max(result.poolPremium + result.adminExpense + result.reinsuranceCost, 1);
 
   const capitalFundingGapCheck =
     result.availableSurplus - result.reserveRiskMarginNeeded;
@@ -1754,7 +1792,31 @@ export function buildSupportingRows(
       // ONE PRODUCT NOW — the tower is a SUM OVER LAYERS of per-occurrence
       // cessions plus WC/Property's aggregate, not a quota share of an annual
       // excess, so a two-factor product would misdescribe it entirely.
-      formula: { kind: 'echo', value: result.reinsuranceRecovery, text: `Per-occurrence tower: ${(result.cededByLayer ?? []).filter(v => v > 0).length} layer(s) paid${(result.aggregateRecovery ?? 0) > 0 ? ' + aggregate stop-loss' : ''}` },
+      // ⚠ THE POOLED cededByLayer HAS NO LAYER COUNT TO REPORT, so at pool scope
+      // this counts per line instead of reading it. 9ace082 removed Property
+      // from the pooled array — its single $70M xs $5M layer shares no
+      // attachment with WC's and GL's $4M xs $1M, so an elementwise sum put
+      // three different treaties in one cell — and left this row reading the
+      // array it had just narrowed. The sentence then undercounted: wrong in 61
+      // of 640 pool-scope instances, and 19 of those printed "0 layer(s) paid"
+      // beside a non-zero recovery, contradicting the number on its own row.
+      //
+      // NOT n/a. "How many layers paid" is a genuine pool question with a
+      // genuine answer — it is additive across towers even though the CESSIONS
+      // are not — so the row states the total and names each line's share. What
+      // has no pool meaning is the elementwise ARRAY, not the count.
+      //
+      // LINE SCOPE IS UNCHANGED and was always right: there the array is that
+      // line's own tower.
+      formula: {
+        kind: 'echo',
+        value: result.reinsuranceRecovery,
+        text: `Per-occurrence tower: ${
+          perLine ? perLine.reduce((n, pl) => n + pl.layersPaid, 0) : (result.cededByLayer ?? []).filter(v => v > 0).length
+        } layer(s) paid${
+          perLine && perLine.length > 1 ? ` (${perLine.map(pl => `${pl.line} ${pl.layersPaid}`).join(', ')})` : ''
+        }${(result.aggregateRecovery ?? 0) > 0 ? ' + aggregate stop-loss' : ''}`,
+      },
     },
     {
       metric: 'Net Ultimate Loss + LAE',
@@ -1773,7 +1835,7 @@ export function buildSupportingRows(
       metric: 'Reinsurance Cost',
       value: formatCurrency(result.reinsuranceCost),
       numericValue: result.reinsuranceCost,
-      formula: towerReinsCostFormula(result),
+      formula: towerReinsCostFormula(result, perLine?.map(pl => ({ line: pl.line, placed: pl.placed }))),
       explain: 'Same figure as "Premiums for transferred risk" on the Statement of Revenues, Expenses & Changes in Net Position.',
     },
   ];
@@ -2021,7 +2083,8 @@ export function buildSupportingRows(
       metric: 'Expense Ratio Check Difference',
       value: formatPct(result.expenseRatio - expenseRatioCheck),
       numericValue: result.expenseRatio - expenseRatioCheck,
-      formula: { kind: 'sum', terms: [pctTerm(result.expenseRatio, 'stored'), pctTerm(-expenseRatioCheck, 'recalculated')] },
+      formula: { kind: 'sum', terms: [pctTerm(result.expenseRatio, 'stored'), pctTerm(-expenseRatioCheck, 'recalculated over premium + admin + reinsurance')] },
+      explain: 'The recalculation rebuilds the DENOMINATOR from its components rather than reading the stored total member charge, so the two paths are independent. Recomputing it the way the engine does would subtract the figure from itself and could never fail.',
       ...legacyCheck(result.expenseRatio - expenseRatioCheck, 0.0001),
     },
     {

@@ -533,6 +533,24 @@ const PROSE_CLAIMS: ProseClaim[] = [
         (n, l) => n + ((poolResult.byLine[l]?.cededByLayer ?? []).filter(v => v > 0).length), 0);
     },
   },
+  {
+    metric: 'Reinsurance Cost',
+    extract: /sum of (\d+) placed layer premium\(s\)/,
+    what: 'occurrence layers placed',
+    // ⚠ REGISTERED AFTER IT WAS CAUGHT BY HAND WHILE FIXING THE ROW ABOVE, which
+    // is the argument for registering claims eagerly rather than one per
+    // incident. It read cededByLayer.LENGTH — the tower's fixed WIDTH — so a
+    // line with everything declined claimed "3 placed layer premium(s)" beside a
+    // $0 cost, and at pool scope it read the WC+GL-only array (3) against a true
+    // total width of 7. Both wrong, and neither visible to any numeric check.
+    truth: (poolResult, scope) => {
+      const lines: CoverageLine[] = scope === 'pool'
+        ? (Object.keys(poolResult.byLine) as CoverageLine[])
+        : [scope as CoverageLine];
+      return lines.reduce(
+        (n, l) => n + ((poolResult.byLine[l]?.decisions?.layersPlaced ?? []).filter(Boolean).length), 0);
+    },
+  },
 ];
 
 interface ProseFinding {
@@ -614,6 +632,7 @@ for (const { lines, name } of CONFIGS) {
         handAudit('Statement of Revenues, Expenses & Changes in Net Position', revExp, ctx);
         handAudit('Statement of Net Position', netPos, ctx);
         handAudit('Cash & Investments Rollforward', cashInv, ctx);
+        proseAudit(revExp, ctx, poolResult, scope);
 
       }
       gs = { ...gs, currentYearNumber: y + 1, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result] };
