@@ -200,6 +200,10 @@ export interface HistoricalYear {
   totalMemberCharge: number;
   grossUltimateLoss: number;
   reinsuranceRecovery: number; // reinsurer's paid share of ceded loss
+  // Memo, same convention as above: what the tower absorbed of that year's
+  // PRIOR-YEAR development. Optional — pre-game years written before the
+  // mechanism existed carry no value and read as 0.
+  priorYearDevelopmentCeded?: number;
   // Per-occurrence tower outputs. OPTIONAL HERE ONLY: the pre-game bootstrap
   // predates the tower decision, so seeded history carries no placement. The
   // LIVE result types require these.
@@ -367,6 +371,29 @@ export interface DecisionSet {
   riskControlPct: number;            // pool-wide risk-control intensity (0.00-0.08 of each line's own premium)
 }
 
+// ONE OCCURRENCE CARRYING AN ACCIDENT YEAR'S DEVELOPMENT.
+//
+// The subset is chosen once at inception (see developmentAllocation.ts) and
+// fixed for the cohort's life, so the same claims keep deteriorating rather
+// than a fresh subset appearing each valuation. That is both how a real book
+// reads and what makes "which claims developed" a coherent story in the
+// register.
+//
+// ⚠ ONLY THE SUBSET IS STORED, NOT THE WHOLE REGISTER, and that is what keeps
+// this inside Ruling 8's storage budget. Cession is per occurrence and
+// independent between occurrences, so the marginal cession of a development
+// depends ONLY on the occurrences that moved — the other ~500 in the accident
+// year cede exactly what they always did and do not need to be carried. Three
+// records per cohort rather than five hundred.
+export interface DevelopingClaim {
+  claimId: string;
+  occurrenceId: string;
+  /** The occurrence total as first written, GROSS of reinsurance. */
+  original: number;
+  /** The occurrence total now, after every development to date. GROSS. */
+  current: number;
+}
+
 // Annual reserve cohort for simplified development. NET basis: losses enter
 // net of reinsurance recoveries (recovery cash arrives in lockstep with the
 // claim payments it offsets, so there is no separate recoverable receivable).
@@ -425,6 +452,32 @@ export interface ReserveCohort {
   // bias/horizon per year so E[netUltimate at maturity] = registerSum exactly.
   // Zero whenever the line was funded at or above break-even.
   bookingBias: number;
+
+  // --- claim-level development (see developmentAllocation.ts) --------------
+  // The occurrences this accident year's development lands on. EMPTY on a seed
+  // cohort, which has no claim register behind it — its development is retained
+  // entire, which is the honest default and is 0.4% of all adverse development.
+  developingClaims?: DevelopingClaim[];
+  // ⚠ CUMULATIVE DEVELOPMENT THE TOWER HAS TAKEN OFF THIS COHORT, and it RESTATES
+  // A STANDING IDENTITY. ibner-null-check asserted that a matured cohort's
+  // netUltimate equals registerSum exactly — the statement that the optimistic
+  // booking unwinds in full. That is no longer true and should not be: the
+  // unwind lands on claims like any other adverse movement, so a claim above the
+  // retention cedes part of it and the pool's NET ultimate ends BELOW its
+  // register sum by exactly what the reinsurer took. The identity becomes
+  //
+  //     netUltimate + cededDevelopmentToDate === registerSum   (at maturity)
+  //
+  // and it is still exact. Ceding development is precisely the pool ending up
+  // better off than its own register; an invariant saying otherwise was an
+  // invariant about the old mechanism.
+  cededDevelopmentToDate?: number;
+  // ⚠ THE LAYERS IN FORCE IN THE ACCIDENT YEAR, NOT THE VALUATION YEAR.
+  // Occurrence cover attaches to the accident year, so a development arriving
+  // in year 7 on accident year 3 is covered by what year 3 bought. Storing it
+  // on the cohort is what makes that true without having to look up a decision
+  // set that may no longer exist.
+  placedAtInception?: boolean[];
 }
 
 // ONE ACCIDENT YEAR'S ESTIMATE, AT EVERY VALUATION IT HAS SEEN — the reserve
@@ -667,6 +720,17 @@ export interface ResultSet {
 
   // Reserve development (NET basis — reserves are net of reinsurance)
   priorYearDevelopment: number; // positive = favorable, negative = adverse
+  // ⚠ WHAT THE TOWER ABSORBED OF THIS YEAR'S PRIOR-YEAR DEVELOPMENT. Positive =
+  // the reinsurer took it. Adverse development on a claim already above the
+  // retention now cedes, so the pool's own reserve moves by the RETAINED part
+  // only.
+  //
+  // ⚠ THIS IS A MEMO FIGURE AND MUST NOT BE ADDED TO INCOME AGAIN. It is the
+  // same convention as reinsuranceRecovery beside it: netUltimateLoss is
+  // already net of that recovery, and priorYearDevelopment is already net of
+  // this one. Both exist so a player can SEE the cover respond; neither is a
+  // second credit. Adding either to net income double-counts it.
+  priorYearDevelopmentCeded: number;
   beginningNetReserve: number;
   currentYearNetReserve: number; // case reserve for this accident year, net
   // ibnrReserve / ibnrAccrual / emergedPriorYearLoss / unreportedClaimCount are

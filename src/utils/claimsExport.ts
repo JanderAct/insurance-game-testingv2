@@ -37,7 +37,7 @@
 // ============================================================================
 
 import * as XLSX from 'xlsx';
-import type { Claim, CoverageLine, Member, Occurrence, ResultSet } from '../types/simulation';
+import type { Claim, CoverageLine, Member, Occurrence, PoolState, ResultSet } from '../types/simulation';
 import { FIXED_LINE_ORDER, LINE_ABBREV } from './resultsExport';
 
 type Row = (string | number)[];
@@ -252,7 +252,49 @@ function buildOccurrenceRows(lockedResults: ResultSet[], activeLines: CoverageLi
   return [[note], header, ...body];
 }
 
-export function buildClaimsWorkbook(lockedResults: ResultSet[], activeLines: CoverageLine[]): XLSX.WorkBook {
+// ⚠ WHICH CLAIMS DEVELOPED, AND BY HOW MUCH — the sheet the $25.65M hit did not
+// have a story for. A reserve deterioration used to be a number with nothing
+// behind it: no claim moved, so the register looked identical before and after.
+// It lands on claims now, and this is where a player can go and see WHICH.
+//
+// ⚠ READ FROM POOL STATE, NOT FROM lockedResults, because the developing claims
+// live on the cohort and the cohort is current-state. That also means this sheet
+// is AS AT NOW rather than per-year: it shows each accident year's developing
+// claims at their latest value, not a year-by-year triangle of them. The
+// Actuarial memorandum carries the per-year view.
+function buildDevelopmentRows(poolState: PoolState, activeLines: CoverageLine[]): Row[] {
+  const header = [
+    'Line', 'Accident Year', 'Claim ID', 'Occurrence ID', 'Original Occurrence',
+    'Current Occurrence', 'Development', 'Development %',
+  ];
+  const body: Row[] = [];
+  for (const line of FIXED_LINE_ORDER.filter(l => activeLines.includes(l))) {
+    const cohorts = poolState.lines[line]?.reserveCohorts ?? [];
+    for (const c of [...cohorts].sort((a, b) => a.yearNumber - b.yearNumber)) {
+      for (const d of c.developingClaims ?? []) {
+        const dev = d.current - d.original;
+        body.push([
+          line, c.yearNumber, d.claimId, d.occurrenceId,
+          roundOrBlank(d.original), roundOrBlank(d.current), roundOrBlank(dev),
+          d.original > 0 ? Number(((dev / d.original) * 100).toFixed(1)) : '',
+        ]);
+      }
+    }
+  }
+  const note =
+    'Development on an accident year lands on these claims (see developmentAllocation.ts). Only the ' +
+    'chosen subset is carried, not the whole register — cession is per occurrence and independent ' +
+    'between occurrences, so the claims that did not move cede exactly what they always did. Amounts ' +
+    'are OCCURRENCE totals, GROSS of reinsurance. A blank sheet means no accident year has developed ' +
+    'yet, or the cohorts carrying development are all seed cohorts, which have no claim register.';
+  return [[note], header, ...body];
+}
+
+export function buildClaimsWorkbook(
+  lockedResults: ResultSet[],
+  activeLines: CoverageLine[],
+  poolState?: PoolState,
+): XLSX.WorkBook {
   const wb = XLSX.utils.book_new();
   const orderedLines = FIXED_LINE_ORDER.filter(l => activeLines.includes(l));
 
@@ -272,6 +314,14 @@ export function buildClaimsWorkbook(lockedResults: ResultSet[], activeLines: Cov
     XLSX.utils.aoa_to_sheet(buildOccurrenceRows(lockedResults, activeLines)),
     'Occurrences'
   );
+
+  if (poolState) {
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet(buildDevelopmentRows(poolState, activeLines)),
+      'Development'
+    );
+  }
 
   return wb;
 }

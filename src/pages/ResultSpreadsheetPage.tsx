@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { Download, ClipboardList, Table, Users } from 'lucide-react';
-import type { CoverageLine, ResultSet } from '../types/simulation';
+import type { CoverageLine, ResultSet, PoolState } from '../types/simulation';
 import { formatCurrency, formatPct } from '../utils/formatters';
 import { getMemberExposure } from '../utils/lineHelpers';
 import { type SpreadsheetMetric, buildResultsWorkbook, buildExportFilename } from '../utils/resultsExport';
@@ -12,9 +12,12 @@ interface ResultSpreadsheetPageProps {
   lockedResults: ResultSet[];
   activeLines: CoverageLine[];
   instanceId: string;
+  // Current pool state, for the claims workbook's Development sheet. The
+  // developing claims live on the reserve cohorts, not on a locked result.
+  poolState: PoolState;
 }
 
-export default function ResultSpreadsheetPage({ lockedResults, activeLines, instanceId }: ResultSpreadsheetPageProps) {
+export default function ResultSpreadsheetPage({ lockedResults, activeLines, instanceId, poolState }: ResultSpreadsheetPageProps) {
   const [selectedYear, setSelectedYear] = useState<number>(
     lockedResults.length > 0 ? lockedResults[lockedResults.length - 1].yearNumber : 1
   );
@@ -109,7 +112,7 @@ export default function ResultSpreadsheetPage({ lockedResults, activeLines, inst
               // A SEPARATE workbook, deliberately — see claimsExport.ts. The
               // results workbook above is a per-metric summary; claim-level
               // detail is thousands of rows and does not belong bolted onto it.
-              const wb = buildClaimsWorkbook(lockedResults, activeLines);
+              const wb = buildClaimsWorkbook(lockedResults, activeLines, poolState);
               XLSX.writeFile(wb, claimsExportFilename);
             }}
             className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"

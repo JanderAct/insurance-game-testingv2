@@ -91,7 +91,16 @@ export default function FinancialsPage({ lockedResults, priorResults, lineView }
                     <ISLine label="Provision for claims:" value="" indent />
                     <ISLine label="Current year claims" value={formatCurrency(is.grossUltimateLoss)} indent2 />
                     {is.reinsuranceRecovery !== 0 && (
-                      <ISLine label="Less: reinsurance recoveries" value={`(${formatCurrency(is.reinsuranceRecovery)})`} indent2 />
+                      <ISLine label="Less: reinsurance recoveries — current year" value={`(${formatCurrency(is.reinsuranceRecovery)})`} indent2 />
+                    )}
+                    {/* ⚠ SPLIT OUT SO THE COVER IS VISIBLE RESPONDING TO A RESERVE
+                        BLOWING UP. Development on a prior accident year now lands
+                        on claims and cedes; folded into one recovery total the
+                        player cannot tell a $25M reserve deterioration that the
+                        tower absorbed from one it did not. Both lines are MEMO
+                        figures — the loss above is already net of each. */}
+                    {is.priorYearDevelopmentCeded !== 0 && (
+                      <ISLine label="Less: reinsurance recoveries — prior-year development" value={`(${formatCurrency(is.priorYearDevelopmentCeded)})`} indent2 />
                     )}
                     {/* DISCLOSED, NOT DEDUCTED. This band sits ABOVE the top of the
                         tower: no recovery exists against it at any price, so it is

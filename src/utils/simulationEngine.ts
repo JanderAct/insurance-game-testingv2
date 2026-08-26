@@ -27,6 +27,10 @@ import { SeededRandom, deriveSubRng } from './random';
 import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, IBNER_BOOKING_BIAS_COEFF, IBNER_HORIZON, IBNER_OPEN_FRACTION, IBNER_STEP_MIXTURE, IBNER_TOTAL_SD, IBNER_UNWIND_DECAY, LINE_RESERVE_PAYDOWN_PCT, MEMBER_LOSS_VOLATILITY, OPERATING_CASH_PCT_OF_PREMIUM, PROPERTY_HELD_PURE_PREMIUM_PER_100, RISK_CONTROL_PARAMS, WC_LOSS_MODEL } from '../data/defaultAssumptions';
 import type { TowerLine } from '../data/reinsuranceTower';
 import {
+  DEVELOPMENT_ALLOCATION, DEVELOPMENT_CESSION_ENABLED, allocateDevelopment, cedeDevelopment,
+  selectDevelopingClaims,
+} from './developmentAllocation';
+import {
   aggregateRecovery,
   cedeOccurrences,
   normalizeAggregateStopLevel,
@@ -1138,7 +1142,10 @@ export function processLineYear(
     developmentImpact,
     updatedCohorts,
     netPaidThisYear,
+    developmentCeded,
+    unallocatedDevelopment,
   } = processIbner(lineState.reserveCohorts, line, ibnerRng);
+  void unallocatedDevelopment;   // surfaced by the harness, not by the result
 
   // Current year reserve assumption: 60% unpaid, 40% paid. NET basis —
   // reinsurance recovery cash arrives in lockstep with the claim payments it
@@ -1159,6 +1166,25 @@ export function processLineYear(
   const currentYearNetReserve = bookedUltimate * IBNER_OPEN_FRACTION;
   const netPaidCurrentYear = bookedUltimate * (1 - IBNER_OPEN_FRACTION);
 
+  // ⚠ THE SUBSET IS CHOSEN HERE, ONCE, AND FROZEN. It is picked from THIS
+  // accident year's own occurrence register, and the layers in force THIS year
+  // are frozen with it — occurrence cover attaches to the accident year, so a
+  // development arriving five years from now is covered by what was bought
+  // today, not by what is bought then.
+  //
+  // ⚠ THE rng ARGUMENT IS ONLY REACHED ON THE sizeWeighted BRANCH. Under the
+  // default selection this consumes no draw, which is what lets the null test
+  // read against the pre-mechanism parent.
+  const developingClaims = DEVELOPMENT_CESSION_ENABLED && hasTractableCeded
+    ? selectDevelopingClaims(
+        (generatedOccurrences ?? []).map(o => o.id),
+        (generatedOccurrences ?? []).map(o => o.claimIds[0] ?? o.id),
+        occurrenceTotals(generatedClaims ?? [], generatedOccurrences ?? []),
+        DEVELOPMENT_ALLOCATION,
+        ibnerRng,
+      )
+    : [];
+
   const currentYearCohort: ReserveCohort = {
     yearNumber,
     calendarYear,
@@ -1172,6 +1198,11 @@ export function processLineYear(
     age: 0,
     stepMultiplier: drawStepMultiplier(ibnerRng),
     bookingBias,
+    developingClaims,
+    cededDevelopmentToDate: 0,
+    placedAtInception: hasTractableCeded
+      ? normalizeLayersPlaced(line as TowerLine, lineDecisions.layersPlaced)
+      : undefined,
   };
 
   const allCohorts = [...updatedCohorts, currentYearCohort];
@@ -1517,6 +1548,7 @@ export function processLineYear(
       : undefined,
     reinsuranceCost,
     reinsuranceRecovery,
+    priorYearDevelopmentCeded: developmentCeded,
     cededByLayer,
     retainedAboveTower,
     aggregateRecovery: aggregateRecoveryAmount,
@@ -2472,6 +2504,7 @@ export function aggregateLineResults(
     // pool attachment. Read byLine.WC / byLine.Property for the real ones.
     aggregateAttachment: noPoolMeaning(0, 'two separate treaties; a threshold is not additive — read byLine'),
     reinsuranceRecovery: addDollars('reinsuranceRecovery'),
+    priorYearDevelopmentCeded: addDollars('priorYearDevelopmentCeded'),
     netUltimateLoss: addDollars('netUltimateLoss'),
     netIncurredLoss: netIncurredLossSum,
 
@@ -2680,9 +2713,15 @@ function processIbner(
   developmentImpact: number;
   updatedCohorts: ReserveCohort[];
   netPaidThisYear: number;
+  developmentCeded: number;
+  unallocatedDevelopment: number;
 } {
   let developmentImpact = 0;
   let netPaidThisYear = 0;
+  // What the occurrence tower absorbed of this year's development, and what
+  // could not be pushed onto any claim because the cohort has no register.
+  let developmentCeded = 0;
+  let unallocatedDevelopment = 0;
 
   const updatedCohorts = cohorts
     .filter(c => !c.closed)
@@ -2691,6 +2730,8 @@ function processIbner(
       // development are separate clocks: the horizon governs how long the
       // ESTIMATE is uncertain, paydownPct governs how fast it is settled.
       const developing = c.age < c.horizon;
+      let developingClaimsOut = c.developingClaims;
+      let cededToDate = c.cededDevelopmentToDate ?? 0;
 
       // ⚠ PAY FIRST, THEN DEVELOP WHAT REMAINS. Paid is history and never moves.
       // This ordering is the whole fix — see the block comment above.
@@ -2715,7 +2756,7 @@ function processIbner(
         // 21% of WC's and 28% of Property's. The floor would have come straight
         // back, more often than before. Measured, not assumed.
         const sigma = c.stepMultiplier * reserveStepSigma(line);
-        newUnpaid *= Math.exp(sigma * rng.normal(0, 1) - (sigma * sigma) / 2);
+        const factor = Math.exp(sigma * rng.normal(0, 1) - (sigma * sigma) / 2);
 
         // The deterministic unwind of the optimistic booking, front-loaded.
         // Zero unless the line was funded below break-even in this cohort's
@@ -2738,7 +2779,53 @@ function processIbner(
         // weights summing to 1 — pathwise, not merely in expectation, and
         // independent of the stochastic path. The weights stay geometric so the
         // front-loading decision is unchanged.
-        newUnpaid += c.registerSum * c.bookingBias * ibnerUnwindWeight(c.horizon, c.age + 1);
+        const unwind = c.registerSum * c.bookingBias * ibnerUnwindWeight(c.horizon, c.age + 1);
+
+        // ⚠ THE MOVEMENT LANDS ON CLAIMS, AND THE TOWER SEES IT. This is the
+        // whole mechanism: an accident year that doubles now does so BY CLAIMS
+        // DETERIORATING, and a claim already above the retention cedes its
+        // deterioration like any other loss. The pool's reserve moves by the
+        // RETAINED part only.
+        //
+        // A cohort with no register — a seed cohort, apportioned from a reserve
+        // total at generation with no claims behind it — retains its
+        // development ENTIRE. That is the honest default rather than inventing
+        // claims to cede against, and it is 0.4% of all adverse development, so
+        // it does not matter much either.
+        const claims = c.developingClaims;
+        const canCede = DEVELOPMENT_CESSION_ENABLED && claims !== undefined && claims.length > 0;
+
+        if (canCede) {
+          const grossMovement = newUnpaid * (factor - 1) + unwind;
+          const placed = c.placedAtInception ?? normalizeLayersPlaced(line as TowerLine, undefined);
+          const { deltas, applied, unallocated } = allocateDevelopment(claims, grossMovement);
+          const { ceded, retained, moved } = cedeDevelopment(line as TowerLine, claims, deltas, placed);
+          developingClaimsOut = moved;
+          cededToDate += ceded;
+          developmentCeded += ceded;
+          unallocatedDevelopment += unallocated;
+          // `applied` differs from grossMovement only when a FAVOURABLE movement
+          // was larger than the claims had left to give. The shortfall still has
+          // to reach the reserve or the rollforward stops balancing, so it is
+          // retained rather than dropped.
+          newUnpaid += retained + (grossMovement - applied);
+        } else {
+          // ⚠ THE DISABLED PATH IS THE ORIGINAL EXPRESSION, CHARACTER FOR
+          // CHARACTER, AND IT HAS TO BE. An earlier version routed both paths
+          // through `newUnpaid + newUnpaid * (factor - 1)`, which is the same
+          // quantity in exact arithmetic and NOT the same in floating point:
+          // the null test came back with 325 changed values at ~1e-12 relative,
+          // e.g. -260838.21407143585 -> -260838.21407143213. Nothing had
+          // changed behaviourally and the gate was still right to fire — a null
+          // test that tolerates reassociation cannot tell a reassociation from
+          // a mechanism. Do not "simplify" these two lines into the branch
+          // above.
+          // Read the movement BEFORE mutating, or the tracked figure is the
+          // post-development balance rather than the increment.
+          if (DEVELOPMENT_CESSION_ENABLED) unallocatedDevelopment += newUnpaid * (factor - 1) + unwind;
+          newUnpaid *= factor;
+          newUnpaid += unwind;
+        }
       }
 
       // ⚠ THE FLOORS ARE GONE, AND THEY ARE NOW UNREACHABLE RATHER THAN MERELY
@@ -2795,6 +2882,8 @@ function processIbner(
         netPaid: newPaid,
         age: c.age + 1,
         closed: closing,
+        developingClaims: developingClaimsOut,
+        cededDevelopmentToDate: cededToDate,
       };
     });
 
@@ -2802,6 +2891,8 @@ function processIbner(
     developmentImpact,
     updatedCohorts,
     netPaidThisYear,
+    developmentCeded,
+    unallocatedDevelopment,
   };
 }
 

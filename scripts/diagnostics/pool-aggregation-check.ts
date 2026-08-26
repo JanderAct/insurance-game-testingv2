@@ -57,7 +57,7 @@ const DOLLARS = new Set([
   'beginningNetReserve', 'currentYearNetReserve', 'netPaidLosses', 'endingNetReserve',
   'investedAssets', 'investmentIncome', 'outstandingLoanBalance', 'loanRepaymentApplied',
   'loanInterestAccrued', 'loanOriginatedThisYear', 'expectedLoss', 'clfAdjustedExpectedLoss',
-  'expectedNetUnpaidLoss',
+  'expectedNetUnpaidLoss', 'priorYearDevelopmentCeded',
   'netFundingTarget', 'indicatedNetReserveAtConfidenceLevel', 'reserveRiskMarginNeeded',
   'fundingMarginNeeded', 'availableFunding', 'availableSurplus', 'fundingGap',
   'capitalFundingGap', 'excessAvailableSurplus', 'underwritingIncome', 'netIncome',
