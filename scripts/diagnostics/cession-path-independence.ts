@@ -1,5 +1,15 @@
 // ============================================================================
-// DOES SQUEEZED FUNDING BUY REINSURANCE RECOVERY? — measurement only.
+// DOES SQUEEZED FUNDING BUY REINSURANCE RECOVERY? — A GATE, NOT A MEASUREMENT.
+//
+// ⚠ THIS EXITS NON-ZERO IF ANY LINE'S PAIRED INTERVAL EXCLUDES ZERO. It began as
+// a measurement and found that squeezed recovered $27.47M more on WC, 95% CI
+// [$21.20M, $33.74M], with all three lines diverging the same way — underfunding
+// bought cover. The fix is the claim-level markdown plus the inception
+// give-back; this is the assertion that it stayed fixed.
+//
+// It is the ONLY test that can see this. A single-arm dollar total cannot: the
+// quantity is a DIFFERENCE between two arms on the same seeds, and the guard in
+// development-cession-check.ts runs its arms on different seeds by construction.
 //
 // THE ARITHMETIC THAT SHOULD HOLD. Cession on an occurrence is f(value), and
 // the increment booked each year telescopes:
@@ -50,13 +60,14 @@ interface Tally {
   registerSum: number;
   claimsAtInception: number;
   claimsFinal: number;
+  claimsDrawn: number;
   biasDollars: number;     // registerSum x bias, summed over cohorts
   clampEvents: number;
   clampUnallocated: number;
 }
 const blank = (): Tally => ({
   inception: 0, development: 0, aggregate: 0, grossWritten: 0, registerSum: 0,
-  claimsAtInception: 0, claimsFinal: 0, biasDollars: 0, clampEvents: 0, clampUnallocated: 0,
+  claimsAtInception: 0, claimsFinal: 0, claimsDrawn: 0, biasDollars: 0, clampEvents: 0, clampUnallocated: 0,
 });
 
 function runArm(g: number, squeezed: boolean): Record<string, Tally> {
@@ -96,6 +107,7 @@ function runArm(g: number, squeezed: boolean): Record<string, Tally> {
         t.registerSum += born.registerSum;
         t.biasDollars += born.registerSum * born.bookingBias;
         t.claimsAtInception += (born.developingClaims ?? []).reduce((s, c) => s + c.original, 0);
+        t.claimsDrawn += (born.developingClaims ?? []).reduce((s, c) => s + c.drawn, 0);
       }
 
       // A favourable movement bigger than the subset can absorb: the clamp.
@@ -195,25 +207,28 @@ for (const line of LINES) {
 }
 
 console.log('\n\n--- DOES THE BOOKING BIAS REACH THE CLAIM VALUES? ---');
-console.log('  The claims are seeded from occurrenceTotals() — the FULL DRAWN values. The bias');
-console.log('  is applied only to bookedUltimate. So at inception the register and the booking');
-console.log('  disagree by exactly the bias, and the unwind then adds that bias ON TOP of claims');
-console.log('  that were never reduced by it.\n');
-console.log('  line       arm        register sum   bias dollars   claims at inception   claims at end   end/inception');
+console.log('  YES, NOW. The register is marked down by the cohort\'s bias dollars at inception and');
+console.log('  the unwind restores it, so a pool booking optimistically shows optimistic CLAIM');
+console.log('  values and the claims end in the SAME PLACE under both arms.\n');
+console.log('  ⚠ THE RATIO TO WATCH IS end/DRAWN, NOT end/booked. Marking the register down moves');
+console.log('    the denominator, so end/booked legitimately differs between arms while the claims');
+console.log('    themselves converge. Against the DRAWN value — the one thing both arms share —');
+console.log('    the two columns should agree.\n');
+console.log('  line       arm        register sum   bias dollars   as booked   as drawn   claims at end   end/DRAWN');
 for (const line of LINES) {
   for (const [name, pick] of [['defaults', (p: { def: Tally; sq: Tally }) => p.def], ['squeezed', (p: { def: Tally; sq: Tally }) => p.sq]] as const) {
     const rows = paired[line].map(pick);
     const m = (f: (t: Tally) => number) => rows.reduce((s, t) => s + f(t), 0) / rows.length;
     console.log(
       `  ${line.padEnd(10)} ${name.padEnd(10)} ${money(m(t => t.registerSum)).padStart(12)} ` +
-      `${money(m(t => t.biasDollars)).padStart(14)} ${money(m(t => t.claimsAtInception)).padStart(21)} ` +
-      `${money(m(t => t.claimsFinal)).padStart(15)} ${(m(t => t.claimsFinal) / Math.max(1, m(t => t.claimsAtInception))).toFixed(3).padStart(15)}`,
+      `${money(m(t => t.biasDollars)).padStart(14)} ${money(m(t => t.claimsAtInception)).padStart(11)} ` +
+      `${money(m(t => t.claimsDrawn)).padStart(10)} ${money(m(t => t.claimsFinal)).padStart(15)} ` +
+      `${(m(t => t.claimsFinal) / Math.max(1, m(t => t.claimsDrawn))).toFixed(3).padStart(11)}`,
     );
   }
 }
-console.log('\n  ⚠ bias dollars is registerSum x bookingBias — the amount the unwind adds to the');
-console.log('    reserve over a cohort\'s life. If the claims were reduced by the bias at inception');
-console.log('    the unwind would restore them to their drawn value; instead it pushes them past it.');
+console.log('\n  bias dollars is registerSum x bookingBias — marked down at inception and added back');
+console.log('  by the unwind, so the two cancel and "as drawn" is what the claims return to.');
 
 console.log('\n\n--- THE CLAMP: WHAT HOLDS THE EXCESS? ---');
 for (const line of LINES) {
@@ -224,6 +239,12 @@ for (const line of LINES) {
   console.log(`  ${line.padEnd(10)} subset driven to exactly zero:  defaults ${String(dEv).padStart(4)} (${money(dUn)} unallocated)   squeezed ${String(sEv).padStart(4)} (${money(sUn)} unallocated)`);
 }
 
-console.log(anyDiverge
-  ? '\n\nVERDICT: AT LEAST ONE LINE DIVERGES. The decomposition above is the finding.'
-  : '\n\nVERDICT: every line\'s paired difference contains zero — reclassification, not a new recovery.');
+if (anyDiverge) {
+  console.log('\n\nFAIL: AT LEAST ONE LINE DIVERGES. Total cession depends on the funding decision,');
+  console.log('      which means underfunding buys cover. The decomposition above is the finding.');
+  process.exit(1);
+}
+console.log('\n\nTOTAL CESSION IS PATH-INDEPENDENT. Every line\'s paired 95% interval contains zero:');
+console.log('squeezing moves cession between inception and development without changing the sum,');
+console.log('so a pool cannot buy reinsurance recovery by underfunding.');
+process.exit(0);

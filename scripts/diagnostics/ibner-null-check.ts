@@ -314,11 +314,24 @@ for (const l of LINES) (IBNER_TOTAL_SD as Record<string, number>)[l] = SAVED[l];
       gs = { ...gs, currentYearNumber: y + 1, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result] };
     }
     const ps = gs.poolState as never as {
-      lines: Record<string, { reserveCohorts: { netUltimate: number; registerSum: number; age: number; horizon: number; bookingBias: number }[] }>
+      lines: Record<string, { reserveCohorts: { netUltimate: number; registerSum: number; age: number; horizon: number; bookingBias: number; cededDevelopmentToDate?: number }[] }>
     };
     for (const l of LINES) {
       for (const c of ps.lines[l]?.reserveCohorts ?? []) {
-        if (c.age >= c.horizon && c.registerSum > 0 && c.bookingBias === 0) acc[l].push(c.netUltimate / c.registerSum);
+        // ⚠ THE RECOVERY IS ADDED BACK BEFORE THE MARTINGALE IS TESTED, and this
+        // section needs it where the unwind section above does not. Development
+        // now CEDES, so a matured cohort's NET ultimate legitimately lands below
+        // its register sum by whatever the tower took — measured at 1.4% on WC
+        // and 1.8% on GL, which read as "the walk carries a mean" until the
+        // recovery is put back. The martingale is a statement about the GROSS
+        // estimate; cession moves who pays, not what the loss is.
+        //
+        // The unwind section is unaffected because there the give-back at
+        // inception and the unwind's own cession cancel exactly, leaving
+        // cededDevelopmentToDate at 0 — which is itself a check on the markdown
+        // being the same dollars the unwind restores.
+        const gross = c.netUltimate + (c.cededDevelopmentToDate ?? 0);
+        if (c.age >= c.horizon && c.registerSum > 0 && c.bookingBias === 0) acc[l].push(gross / c.registerSum);
       }
     }
   }

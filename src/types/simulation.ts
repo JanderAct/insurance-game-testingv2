@@ -388,10 +388,16 @@ export interface DecisionSet {
 export interface DevelopingClaim {
   claimId: string;
   occurrenceId: string;
-  /** The occurrence total as first written, GROSS of reinsurance. */
+  /** As the generator drew it, GROSS of reinsurance. Never moves. */
+  drawn: number;
+  /** As first BOOKED — `drawn` less this cohort's optimistic markdown. Equal to
+   *  `drawn` when the line was funded at or above break-even. Never moves. */
   original: number;
-  /** The occurrence total now, after every development to date. GROSS. */
+  /** The occurrence total now, after every movement to date. GROSS. */
   current: number;
+  /** True if this occurrence carries ADVERSE development. Favourable movements
+   *  reach every tracked occurrence regardless. */
+  carrier: boolean;
 }
 
 // Annual reserve cohort for simplified development. NET basis: losses enter
@@ -457,7 +463,15 @@ export interface ReserveCohort {
   // The occurrences this accident year's development lands on. EMPTY on a seed
   // cohort, which has no claim register behind it — its development is retained
   // entire, which is the honest default and is 0.4% of all adverse development.
+  // ⚠ TRACKED OCCURRENCES, NOT JUST THE CARRIERS. Everything at or above the
+  // retention plus the carriers — the only occurrences whose value can ever
+  // change a cession. EMPTY on a seed cohort, which has no register behind it
+  // and retains its development entire.
   developingClaims?: DevelopingClaim[];
+  // Gross total of the occurrences NOT tracked. All below the retention, so
+  // they never cede; carried so a proportional movement gets the shares right
+  // without storing five hundred numbers per cohort.
+  untrackedTotal?: number;
   // ⚠ CUMULATIVE DEVELOPMENT THE TOWER HAS TAKEN OFF THIS COHORT, and it RESTATES
   // A STANDING IDENTITY. ibner-null-check asserted that a matured cohort's
   // netUltimate equals registerSum exactly — the statement that the optimistic
@@ -731,6 +745,12 @@ export interface ResultSet {
   // this one. Both exist so a player can SEE the cover respond; neither is a
   // second credit. Adding either to net income double-counts it.
   priorYearDevelopmentCeded: number;
+  // ⚠ THE RECOVERY FORFEITED BY BOOKING THIS YEAR'S CLAIMS LOW. Negative, and
+  // already included in priorYearDevelopmentCeded above — carried separately
+  // ONLY so the Calculation Audit page can show bookedUltimate's derivation with
+  // every term visible. Zero whenever the line was funded at or above
+  // break-even. Do not add it to anything; it is already counted.
+  bookingGiveBack: number;
   beginningNetReserve: number;
   currentYearNetReserve: number; // case reserve for this accident year, net
   // ibnrReserve / ibnrAccrual / emergedPriorYearLoss / unreportedClaimCount are

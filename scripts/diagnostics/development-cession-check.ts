@@ -33,8 +33,8 @@ import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import {
-  DEVELOPMENT_ALLOCATION, DEVELOPMENT_CESSION_ENABLED, allocateDevelopment, cedeDevelopment,
-  selectDevelopingClaims,
+  DEVELOPMENT_ALLOCATION, DEVELOPMENT_CESSION_ENABLED, allocateDevelopment, buildTrackedSet,
+  cedeDevelopment,
 } from '../../src/utils/developmentAllocation';
 import { REINSURANCE_TOWER, TOWER_TOP, type TowerLine } from '../../src/data/reinsuranceTower';
 import { SLIDER_RANGES, WC_FUNDING_CONFIDENCE_RANGE, WC_SEVERITY_CAP } from '../../src/data/defaultAssumptions';
@@ -94,40 +94,51 @@ for (const a of ARMS) perArmCeded[a.name] = 0;
 console.log('=== CLAIM-LEVEL DEVELOPMENT CESSION CHECK ===\n');
 console.log('--- ALLOCATOR CONTRACT (direct) ---');
 {
-  const mk = (vals: number[]) => vals.map((v, i) => ({ claimId: `c${i}`, occurrenceId: `o${i}`, original: v, current: v }));
-  const cases: { name: string; claims: number[]; amount: number }[] = [
-    { name: 'adverse, sized', claims: [3e6, 2e6, 1e6], amount: 6e6 },
-    { name: 'favourable, within', claims: [3e6, 2e6, 1e6], amount: -3e6 },
-    { name: 'favourable, EXCEEDS the claims', claims: [1e5, 5e4, 1e4], amount: -9e9 },
-    { name: 'favourable, exactly the claims', claims: [1e6, 1e6], amount: -2e6 },
-    { name: 'zero movement', claims: [1e6], amount: 0 },
-    { name: 'all-zero claims, adverse', claims: [0, 0], amount: 5e5 },
-    { name: 'single claim', claims: [4e6], amount: 2.5e6 },
+  const mk = (vals: number[]) => vals.map((v, i) => ({
+    claimId: `c${i}`, occurrenceId: `o${i}`, drawn: v, original: v, current: v, carrier: i < 3,
+  }));
+  const cases: { name: string; claims: number[]; untracked: number; amount: number; mode: 'carriers' | 'proportional' }[] = [
+    { name: 'adverse -> carriers', claims: [3e6, 2e6, 1e6], untracked: 5e6, amount: 6e6, mode: 'carriers' },
+    { name: 'favourable -> proportional', claims: [3e6, 2e6, 1e6], untracked: 5e6, amount: -3e6, mode: 'proportional' },
+    { name: 'favourable, EXCEEDS everything', claims: [1e5, 5e4, 1e4], untracked: 1e4, amount: -9e9, mode: 'proportional' },
+    { name: 'favourable, exactly everything', claims: [1e6, 1e6], untracked: 0, amount: -2e6, mode: 'proportional' },
+    { name: 'zero movement', claims: [1e6], untracked: 0, amount: 0, mode: 'carriers' },
+    { name: 'all-zero claims, adverse', claims: [0, 0], untracked: 0, amount: 5e5, mode: 'carriers' },
+    { name: 'single claim', claims: [4e6], untracked: 0, amount: 2.5e6, mode: 'carriers' },
+    { name: 'untracked mass only', claims: [], untracked: 9e6, amount: -1e6, mode: 'proportional' },
   ];
   let unitFails = 0;
   for (const cse of cases) {
     const claims = mk(cse.claims);
-    const { deltas, applied, unallocated } = allocateDevelopment(claims, cse.amount);
-    const sum = deltas.reduce((a, b) => a + b, 0);
-    // EXACT, not within a tolerance — the residual is placed on the last
+    const { deltas, untrackedDelta, applied, unallocated } = allocateDevelopment(claims, cse.untracked, cse.amount, cse.mode);
+    const sum = deltas.reduce((a, b) => a + b, 0) + untrackedDelta;
+    // EXACT, not within a tolerance — the residual is placed on the last tracked
     // element precisely so this can be an equality.
-    if (sum !== applied) { console.log(`  FAIL ${cse.name}: deltas sum ${sum} !== applied ${applied}`); unitFails++; }
+    if (Math.abs(sum - applied) > 1e-9) { console.log(`  FAIL ${cse.name}: parts sum ${sum} !== applied ${applied}`); unitFails++; }
     if (Math.abs((applied + unallocated) - cse.amount) > 1e-9) { console.log(`  FAIL ${cse.name}: applied+unallocated !== amount`); unitFails++; }
-    const { ceded, retained, moved } = cedeDevelopment('WC', claims, deltas, [true, true, true]);
-    if (Math.abs((ceded + retained) - sum) > 1e-9) { console.log(`  FAIL ${cse.name}: ceded+retained !== sum(deltas)`); unitFails++; }
+    const { ceded, retained, moved } = cedeDevelopment('WC', claims, deltas, untrackedDelta, [true, true, true]);
+    if (Math.abs((ceded + retained) - sum) > 1e-9) { console.log(`  FAIL ${cse.name}: ceded+retained !== movement`); unitFails++; }
     if (moved.some(m => m.current < 0)) { console.log(`  FAIL ${cse.name}: a developed value went negative`); unitFails++; }
+    if (cse.untracked + untrackedDelta < -1e-9) { console.log(`  FAIL ${cse.name}: untracked mass went negative`); unitFails++; }
+    // ⚠ ADVERSE MUST NOT TOUCH A NON-CARRIER. That is the asymmetry, asserted
+    // rather than assumed — it is the whole reason clamping went away.
+    if (cse.mode === 'carriers' && cse.amount > 0 && claims.some((c, i) => !c.carrier && deltas[i] !== 0)) {
+      console.log(`  FAIL ${cse.name}: adverse development reached a non-carrier`); unitFails++;
+    }
   }
   console.log(unitFails === 0
-    ? `  OK — ${cases.length} cases: deltas sum EXACTLY to applied, ceded+retained reconciles, nothing negative.`
+    ? `  OK — ${cases.length} cases: parts sum EXACTLY to applied, ceded+retained reconciles, nothing negative,`
+      + '\n       and adverse development never reaches a non-carrier.'
     : `  ${unitFails} unit failure(s).`);
 
-  // Selection determinism, and that the default spends no randomness.
-  const totals = [5e6, 1e6, 3e6, 2e6];
-  const picked = selectDevelopingClaims(['a', 'b', 'c', 'd'], ['a', 'b', 'c', 'd'], totals);
-  const expect = [5e6, 3e6, 2e6];
-  console.log(picked.map(p => p.current).join(',') === expect.join(',')
-    ? `  OK — default selection takes the largest ${DEVELOPMENT_ALLOCATION.claimCount}, in size order, with no rng argument.`
-    : `  FAIL — default selection returned ${picked.map(p => p.current)}`);
+  // The tracked set: carriers plus everything at or above the retention.
+  const built = buildTrackedSet('WC', ['a', 'b', 'c', 'd', 'e'], ['a', 'b', 'c', 'd', 'e'],
+    [5e6, 1e5, 3e6, 2e6, 1.5e6]);
+  const carriers = built.tracked.filter(t => t.carrier).map(t => t.drawn);
+  console.log(carriers.join(',') === [5e6, 3e6, 2e6].join(',')
+    ? `  OK — carriers are the largest ${DEVELOPMENT_ALLOCATION.claimCount}; ${built.tracked.length} occurrences tracked, `
+      + `${(built.untrackedTotal / 1e6).toFixed(2)}M untracked, with no rng argument.`
+    : `  FAIL — carriers came back as ${carriers}`);
 }
 
 // ---------------------------------------------------------------- game checks
@@ -266,8 +277,14 @@ if (cover.cohortsWithoutClaims === 0) coverageErrors.push('no register-less coho
 // The no-tower arm still cedes on PRE-GAME accident years, which bought cover.
 // What it must not do is cede on a year that declined every layer, asserted
 // per-cohort above.
-if (perArmCeded['squeezed'] <= perArmCeded['defaults']) {
-  coverageErrors.push('the squeezed arm did not cede more than defaults — the unwind is not reaching the tower');
+// ⚠ THE OLD ASSERTION HERE — "squeezed must cede MORE than defaults" — WAS
+// WRITTEN FOR THE DEFECT AND IS NOW EXACTLY BACKWARDS. Squeezed ceding more was
+// the perverse incentive: underfunding bought cover. Total cession is supposed
+// to be path-independent, and the arm comparison that tests it needs PAIRED
+// seeds, so it lives in cession-path-independence.ts, which is now a gate.
+// Nothing about a one-armed dollar total can stand in for it.
+if (cover.negativeAvoided > 0) {
+  coverageErrors.push(`${cover.negativeAvoided} claim(s) were driven to exactly zero — favourable development should now be proportional across the whole register and reach zero essentially never`);
 }
 
 console.log('\n--- FINDINGS ---');
