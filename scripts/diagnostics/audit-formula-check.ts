@@ -144,6 +144,43 @@ const ARMS: Arm[] = [
       )) as never,
     }),
   },
+  // ⚠ FUNDING IS LEFT AT ITS DEFAULT IN BOTH ARMS BELOW, DELIBERATELY. If a row
+  // fails here it is the DECISION that reached it, not the squeeze — the two
+  // dimensions stay separable and a finding is attributable to one of them.
+  {
+    name: 'decisions',
+    why: 'dividends, assessments, risk control and the aggregate stop-loss all ON; funding at default',
+    decisions: (d, lines) => ({
+      ...d,
+      riskControlPct: 0.05,
+      byLine: Object.fromEntries(lines.map(l => [l, {
+        ...d.byLine[l],
+        dividendPct: 0.10,
+        assessmentPct: 0.10,
+        riskControlPct: 0.05,
+        // Level 0 is the LOWEST attachment and so the one most likely to pay.
+        // GL has no aggregate; normalizeAggregateStopLevel returns it to -1.
+        aggregateStopLevel: 0,
+      }])) as never,
+    }),
+  },
+  {
+    name: 'selfInsured',
+    why: 'every occurrence layer declined: no tower, no recovery; funding at default',
+    // ⚠ MUTUALLY EXCLUSIVE WITH THE ARM ABOVE, WHICH IS WHY IT IS A SECOND ARM
+    // RATHER THAN MORE FLAGS ON THE FIRST. The aggregate stop-loss is CONDITIONAL
+    // on a placed occurrence layer (linePricing gates quoteAggregate on
+    // placedForCost), so "aggregate paid" and "all layers declined" cannot hold
+    // in the same run by construction. Two arms is the minimum, not a choice.
+    decisions: (d, lines) => ({
+      ...d,
+      byLine: Object.fromEntries(lines.map(l => [l, {
+        ...d.byLine[l],
+        layersPlaced: d.byLine[l].layersPlaced.map(() => false),
+        aggregateStopLevel: -1,
+      }])) as never,
+    }),
+  },
 ];
 
 // Display/storage quantum per term format. These are the precisions the page
@@ -217,6 +254,19 @@ interface Finding {
 }
 
 const findings: Finding[] = [];
+// ============================================================================
+// SELF-RECORDED COVERAGE. A row whose value is identically $0 in every arm has
+// not been tested — a sum of zeros reconciles trivially and proves nothing.
+// `Member dividends`, `Member assessments` and `Loss prevention expenses` sat
+// in exactly that state through every run of this check before the decisions
+// arm existed: green, and unable to be otherwise.
+//
+// So each arm records which rows it made NON-ZERO. The report then names what
+// each arm uniquely reaches, and — more usefully — what NO arm reaches, which
+// is the honest statement of this check's remaining blind spot.
+// ============================================================================
+const armNonZero: Record<string, Set<string>> = {};
+const allRowsSeen = new Set<string>();
 let failures = 0;
 let checked = 0;
 const byKind: Record<string, number> = {};
@@ -262,6 +312,11 @@ function auditRows(section: string, rows: AuditRow[], ctx: { arm: string; config
     checked++;
     byKind[s.kind] = (byKind[s.kind] ?? 0) + 1;
     secChecked[section] = (secChecked[section] ?? 0) + 1;
+    const rowKey = `${section}|${row.metric}`;
+    allRowsSeen.add(rowKey);
+    if (Math.abs(row.numericValue) > 0) {
+      (armNonZero[ctx.arm] ??= new Set()).add(rowKey);
+    }
     const gap = Math.abs(evaluated - row.numericValue);
     // Floor at a cent so an exact-zero bound on an all-currency sum does not
     // make float noise a failure.
@@ -429,6 +484,86 @@ function handAudit(section: string, rows: AuditRow[], ctx: { arm: string; config
   }
 }
 
+
+// ============================================================================
+// PROSE THAT STATES A CHECKABLE FACT.
+//
+// ⚠ THE THIRD KIND OF CLAIM ON THIS PAGE, AND UNTIL NOW THE ONLY UNGUARDED ONE.
+// A row can be wrong in three ways: its arithmetic can fail (the formula
+// check), its printing can fail (the hand check), or its PROSE can assert a
+// fact that is not true. The third was invisible to both: an `echo` row whose
+// number is right passes everything above while the sentence beside it counts
+// something else entirely.
+//
+// The live instance is Reinsurance Recovery. Its text reads "Per-occurrence
+// tower: N layer(s) paid", where N is read off `result.cededByLayer`. At POOL
+// scope that array deliberately excludes Property — its single $70M xs $5M
+// layer shares no attachment with WC's and GL's $4M xs $1M, so summing them
+// elementwise was meaningless and Property was removed. The COUNT was not
+// updated with it, so the pooled row now undercounts: wrong in 92.5% of
+// pool-years, and twice printing "0 layer(s) paid" beside a non-zero recovery.
+//
+// Neither arm nor either check above can see that, because the NUMBER on the
+// row is correct. Only the sentence is wrong. Hence this section.
+//
+// EXTENSIBLE BY DESIGN: add a claim here whenever a row's prose states
+// something derivable. The cost of not having it is measured above.
+// ============================================================================
+interface ProseClaim {
+  metric: string;
+  /** Pulls the asserted number out of the rendered text. */
+  extract: RegExp;
+  /** What the number SHOULD be, from the data the page had available. */
+  truth: (poolResult: ResultSet, scope: LineView) => number;
+  what: string;
+}
+const PROSE_CLAIMS: ProseClaim[] = [
+  {
+    metric: 'Reinsurance Recovery',
+    extract: /Per-occurrence tower: (\d+) layer\(s\) paid/,
+    what: 'occurrence layers that paid',
+    // Every line's own paid-layer count, summed. At line scope this is that
+    // line's own array; at pool scope it is the sum across active lines, which
+    // is what "how many layers paid" means for a pool.
+    truth: (poolResult, scope) => {
+      const lines: CoverageLine[] = scope === 'pool'
+        ? (Object.keys(poolResult.byLine) as CoverageLine[])
+        : [scope as CoverageLine];
+      return lines.reduce(
+        (n, l) => n + ((poolResult.byLine[l]?.cededByLayer ?? []).filter(v => v > 0).length), 0);
+    },
+  },
+];
+
+interface ProseFinding {
+  arm: string; config: string; scope: string; metric: string;
+  what: string; stated: number; truth: number; text: string;
+}
+const proseFindings: ProseFinding[] = [];
+let proseChecked = 0;
+const proseNoMatch: Record<string, number> = {};
+
+function proseAudit(rows: AuditRow[], ctx: { arm: string; config: string; scope: string },
+                    poolResult: ResultSet, scope: LineView) {
+  for (const row of rows) {
+    const claim = PROSE_CLAIMS.find(c => c.metric === row.metric);
+    if (!claim) continue;
+    const spec: FormulaSpec = typeof row.formula === 'string' ? { kind: 'text', text: row.formula } : row.formula;
+    const text = renderFormula(spec);
+    const m = text.match(claim.extract);
+    // A row whose prose does not carry the claim this year (a conditional
+    // branch that did not render) is counted, not silently passed — a claim
+    // that stopped appearing would show as a rising count here.
+    if (!m) { proseNoMatch[claim.metric] = (proseNoMatch[claim.metric] ?? 0) + 1; continue; }
+    proseChecked++;
+    const stated = Number(m[1]);
+    const truth = claim.truth(poolResult, scope);
+    if (stated !== truth) {
+      proseFindings.push({ ...ctx, metric: row.metric, what: claim.what, stated, truth, text });
+    }
+  }
+}
+
 console.log('=== AUDIT PAGE FORMULA RECONCILIATION ===\n');
 
 for (const arm of ARMS) {
@@ -461,6 +596,7 @@ for (const { lines, name } of CONFIGS) {
         handAudit('Funding Rate Build-Up', sup.rateRows, ctx);
         auditRows('Losses and Reinsurance', sup.lossRows, ctx);
         handAudit('Losses and Reinsurance', sup.lossRows, ctx);
+        proseAudit(sup.lossRows, ctx, poolResult, scope);
         auditRows('Reserve Rollforward', sup.reserveRows, ctx);
         handAudit('Reserve Rollforward', sup.reserveRows, ctx);
         auditRows('Ratios', sup.ratioRows, ctx);
@@ -701,9 +837,70 @@ report(declared, 'DECLARED VARIANCE — the row documents a capped tolerance (no
   for (const arm of ARMS) {
     console.log(`  ${arm.name.padEnd(10)} ${String(defects.filter(f => f.arm === arm.name).length).padStart(5)} instance(s)   (${arm.why})`);
   }
-  console.log(`\n  distinct rows failing in BOTH arms:        ${both}`);
-  console.log(`  distinct rows failing ONLY when squeezed:  ${squeezeOnly}   <- invisible to a defaults-only run`);
-  console.log(`  distinct rows failing ONLY at defaults:    ${defaultOnly}`);
+  const armsOf = (k: string) => [...byRow.get(k)!].sort().join('+');
+  const tally: Record<string, number> = {};
+  for (const k of byRow.keys()) tally[armsOf(k)] = (tally[armsOf(k)] ?? 0) + 1;
+  console.log('\n  distinct rows by the arm combination that catches them:');
+  for (const [combo, n] of Object.entries(tally).sort((a, b) => b[1] - a[1])) {
+    const only = !combo.includes('+') && combo !== 'defaults';
+    console.log(`    ${combo.padEnd(34)} ${String(n).padStart(3)}${only ? `   <- invisible without the ${combo} arm` : ''}`);
+  }
+  void both; void squeezeOnly; void defaultOnly;
+}
+
+// --- WHAT EACH ARM UNIQUELY EXERCISES ------------------------------------
+{
+  console.log('\n--- COVERAGE BY ARM: which rows does each arm make non-zero? ---');
+  console.log('  A row identically $0 in every arm is not passing — it is untested.\n');
+  const names = ARMS.map(a => a.name);
+  for (const a of names) {
+    const mine = armNonZero[a] ?? new Set<string>();
+    const others = new Set<string>();
+    for (const b of names) if (b !== a) for (const k of (armNonZero[b] ?? new Set())) others.add(k);
+    const unique = [...mine].filter(k => !others.has(k)).sort();
+    console.log(`  ${a.padEnd(12)} ${String(mine.size).padStart(3)} rows non-zero, ${unique.length} of them reached by NO other arm`);
+    for (const k of unique) console.log(`        ${k.split('|')[1]}`);
+  }
+  // ⚠ NON-ZERO IS THE WRONG METRIC FOR ONE ARM, AND SAYING SO IS THE POINT.
+  // selfInsured's whole contribution is driving rows TO zero — no tower, no
+  // recovery, no ceded layers — so it can never show up as "uniquely non-zero".
+  // The branch it reaches is the empty one, which is exactly where Reinsurance
+  // Recovery's "0 layer(s) paid" text lives. Reported separately rather than
+  // left looking like an arm that earns nothing.
+  for (const a of names) {
+    const mine = armNonZero[a] ?? new Set<string>();
+    const zeroedHere = [...allRowsSeen].filter(k =>
+      !mine.has(k) && names.some(b => b !== a && (armNonZero[b] ?? new Set()).has(k)));
+    if (zeroedHere.length) {
+      console.log(`\n  ${a} additionally drives ${zeroedHere.length} row(s) to ZERO that another arm makes non-zero`);
+      console.log('  (the empty branch — a distinct code path, not an absence of coverage):');
+      for (const k of zeroedHere.sort()) console.log(`        ${k.split('|')[1]}`);
+    }
+  }
+  const covered = new Set<string>();
+  for (const a of names) for (const k of (armNonZero[a] ?? new Set())) covered.add(k);
+  const never = [...allRowsSeen].filter(k => !covered.has(k)).sort();
+  // ⚠ ZERO MEANS TWO DIFFERENT THINGS AND THE LIST MUST NOT CONFLATE THEM. On a
+  // "Check Difference" row zero is the PASS state — the reconciliation held — so
+  // an always-zero one is either a permanently satisfied identity or a check
+  // that cannot fire, and only reading it tells you which. On a value row,
+  // always-zero means the row was never exercised at all.
+  const [alwaysZeroChecks, alwaysZeroValues] = [
+    never.filter(k => /Check Difference|Check$/.test(k.split('|')[1])),
+    never.filter(k => !/Check Difference|Check$/.test(k.split('|')[1])),
+  ];
+  console.log(`\n  rows identically ZERO in ALL ${names.length} arms: ${never.length}`);
+  if (alwaysZeroValues.length) {
+    console.log(`    VALUE rows — genuinely unexercised, nothing here is tested: ${alwaysZeroValues.length}`);
+    for (const k of alwaysZeroValues) console.log(`        ${k.split('|')[0]} / ${k.split('|')[1]}`);
+  } else {
+    console.log('    VALUE rows — genuinely unexercised: 0   (every value row is non-zero in some arm)');
+  }
+  if (alwaysZeroChecks.length) {
+    console.log(`    CHECK rows — zero is their PASS state, so this is a satisfied identity`);
+    console.log(`    rather than a hole; worth reading once to confirm it CAN fire: ${alwaysZeroChecks.length}`);
+    for (const k of alwaysZeroChecks) console.log(`        ${k.split('|')[0]} / ${k.split('|')[1]}`);
+  }
 }
 
 // --- HAND-MULTIPLICATION -------------------------------------------------
@@ -749,9 +946,42 @@ if (handFindings.length === 0) {
   }
 }
 
-if (defects.length === 0 && handFindings.length === 0 && failures === 0) {
-  console.log('\nALL FORMULA ROWS RECONCILE within their own derived bounds, in both arms,');
-  console.log('and every hand-checkable row reproduces from its printed operands.');
+// --- PROSE CLAIMS ---------------------------------------------------------
+console.log('\n--- DOES THE PROSE STATE A TRUE FACT? ---');
+console.log('  A row whose NUMBER is right can still carry a sentence that is not. Neither');
+console.log('  check above can see that; this one can, for claims that are derivable.\n');
+console.log(`  ${proseChecked.toLocaleString()} prose claim(s) evaluated across ${PROSE_CLAIMS.length} registered claim(s).`);
+for (const [metric, n] of Object.entries(proseNoMatch)) {
+  console.log(`    ${String(n).padStart(6)}  ${metric}: the claim's branch did not render this time (counted, not passed)`);
+}
+if (proseFindings.length === 0) {
+  console.log('\n  OK — every registered prose claim matches the data.');
+} else {
+  const worst = new Map<string, { f: ProseFinding; n: number; scopes: Set<string>; arms: Set<string>; zeroBesidePaid: number }>();
+  for (const f of proseFindings) {
+    const e = worst.get(f.metric) ?? { f, n: 0, scopes: new Set<string>(), arms: new Set<string>(), zeroBesidePaid: 0 };
+    e.n++; e.scopes.add(f.scope); e.arms.add(f.arm);
+    if (f.stated === 0 && f.truth > 0) e.zeroBesidePaid++;
+    if (Math.abs(f.stated - f.truth) > Math.abs(e.f.stated - e.f.truth)) e.f = f;
+    worst.set(f.metric, e);
+  }
+  console.log(`\n  FALSE PROSE — ${proseFindings.length} instance(s) across ${worst.size} distinct row(s):\n`);
+  for (const [metric, e] of worst) {
+    console.log(`    ${metric}   ${e.n} of ${proseChecked} claim(s) wrong (${(100 * e.n / proseChecked).toFixed(1)}%)`);
+    console.log(`      scopes: ${[...e.scopes].sort().join(', ')}   arms: ${[...e.arms].sort().join(', ')}`);
+    console.log(`      worst: states ${e.f.stated} ${e.f.what}, data supports ${e.f.truth}`);
+    if (e.zeroBesidePaid) {
+      console.log(`      ⚠ ${e.zeroBesidePaid} instance(s) state ZERO beside a non-zero recovery — a self-contradiction on one row`);
+    }
+    console.log('');
+  }
 }
 
-process.exitCode = (defects.length === 0 && handFindings.length === 0 && failures === 0) ? 0 : 1;
+if (defects.length === 0 && handFindings.length === 0 && proseFindings.length === 0 && failures === 0) {
+  console.log('\nALL FORMULA ROWS RECONCILE within their own derived bounds, in every arm;');
+  console.log('every hand-checkable row reproduces from its printed operands; and every');
+  console.log('registered prose claim matches the data.');
+}
+
+process.exitCode =
+  (defects.length === 0 && handFindings.length === 0 && proseFindings.length === 0 && failures === 0) ? 0 : 1;
