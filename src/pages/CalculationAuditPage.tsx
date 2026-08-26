@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { hasStaticClf, staticClf } from '../data/clfTables';
-import { lookupCLF } from '../utils/simulationEngine';
+import { lookupCLF, ibnerBookingBias } from '../utils/simulationEngine';
 import {
   Calculator,
   ClipboardList,
@@ -38,6 +38,7 @@ import {
   STARTING_FINANCIALS,
   SLIDER_RANGES,
   RESERVE_PAYDOWN_PCT,
+  IBNER_OPEN_FRACTION,
   LINE_RESERVE_PAYDOWN_PCT,
   OPERATING_CASH_PCT_OF_PREMIUM,
 } from '../data/defaultAssumptions';
@@ -1422,17 +1423,39 @@ export function buildSupportingRows(
     : null;
 
   // Real engine constants behind the reserve rollforward below: the CURRENT
-  // accident year splits 60% reserved / 40% paid immediately. This is a
-  // hardcoded literal in simulationEngine.ts (currentYearNetReserve =
-  // netUltimateLoss * 0.60), NOT sourced from RESERVE_PAYDOWN_PCT (35%) —
-  // that constant governs how much of the OPENING/PRIOR reserve balance runs
-  // off each subsequent year, a different rate for a different cohort age.
-  // Verified against the engine (not invented); not a named/displayed
-  // assumption anywhere, so shown as a literal with an explain note rather
-  // than a cross-reference.
-  const currentYearUnpaidPct = 0.60;
+  // ⚠ IMPORTED, NOT A LITERAL. This read `const currentYearUnpaidPct = 0.60` —
+  // a THIRD copy of IBNER_OPEN_FRACTION, whose own comment says it is read in
+  // exactly two places precisely so a change to one cannot drift from the other.
+  // This page was the silent third, and its explain text asserted the constant
+  // was "not shown as a named assumption anywhere" while naming a paydown rate
+  // (35%) that is now per-line and 65% on Property.
+  const currentYearUnpaidPct = IBNER_OPEN_FRACTION;
   const currentYearPaidPct = 1 - currentYearUnpaidPct;
-  const netPaidCurrentYear = result.netUltimateLoss * currentYearPaidPct;
+
+  // ⚠ THE BOOKED ULTIMATE IS NOT THE DRAWN ULTIMATE, AND THAT WAS THE DEFECT.
+  // netUltimateLoss is the register sum — what the generator drew, net of the
+  // tower. What the engine BOOKS is that figure less IBNER's optimistic bias:
+  //
+  //     bookedUltimate = netUltimateLoss x (1 - ibnerBookingBias(CLF))
+  //
+  // and every reserve figure below is built on the BOOKED number. The rows here
+  // used netUltimateLoss directly, so they were right only where the bias is
+  // zero — which is every default run, because fundingAtExpected pins CLF to
+  // 1.000. Under a squeeze the gap reached 26-29%, the largest on the page, and
+  // it failed at LINE scope in every solo config rather than only at pool.
+  //
+  // PER LINE AT POOL SCOPE, because the bias is a function of each line's OWN
+  // selected CLF. There is no single pool bias to factor out: at pool scope
+  // selectedFundingCLF is one line's value kept as a placeholder, so deriving a
+  // pool bias from it would reintroduce the same class of error one level up.
+  const bookedUltimateOf = (r: LineResultSet) =>
+    r.netUltimateLoss * (1 - ibnerBookingBias(r.selectedFundingCLF));
+  const bookedUltimate = isPoolView
+    ? MARGIN_ORDER.filter(l => poolResult.byLine[l]).reduce((sum, l) => sum + bookedUltimateOf(poolResult.byLine[l]), 0)
+    : bookedUltimateOf(result);
+  const bookingBiasHere = isPoolView ? undefined : ibnerBookingBias(result.selectedFundingCLF);
+
+  const netPaidCurrentYear = bookedUltimate * currentYearPaidPct;
   const priorCohortPaydown = result.netPaidLosses - netPaidCurrentYear;
 
   const exposureRows: AuditRow[] = [
@@ -1674,8 +1697,19 @@ export function buildSupportingRows(
       metric: 'Current-Year Net Reserve',
       value: formatCurrency(result.currentYearNetReserve),
       numericValue: result.currentYearNetReserve,
-      formula: { kind: 'product', factors: [curTerm(result.netUltimateLoss, 'this year\'s net ultimate'), pctTerm(currentYearUnpaidPct, 'current-year unpaid portion')] },
-      explain: 'A fixed 60% reserved / 40% paid split for the current accident year, hardcoded in the engine — not RESERVE_PAYDOWN_PCT (35%, which governs runoff of OLDER cohorts) and not shown as a named assumption anywhere.',
+      // THREE FACTORS AT LINE SCOPE, so the bias is visible rather than folded
+      // in. At defaults it renders as 1 and the row reads as it always did; the
+      // moment a player funds below break-even it shows where the reserve went.
+      formula: isPoolView
+        ? { kind: 'product', factors: [curTerm(bookedUltimate, 'booked ultimate, summed per line'), pctTerm(currentYearUnpaidPct, 'unpaid portion')] }
+        : { kind: 'product', factors: [
+            curTerm(result.netUltimateLoss, 'net ultimate drawn'),
+            factorTerm(1 - (bookingBiasHere ?? 0), 'booked at, after IBNER\'s optimistic bias'),
+            pctTerm(currentYearUnpaidPct, 'current-year unpaid portion'),
+          ] },
+      explain: isPoolView
+        ? `IBNER_OPEN_FRACTION (${formatPct(IBNER_OPEN_FRACTION, 0)}) of the BOOKED ultimate is reserved and the rest paid within the year. The booked figure is summed per line because IBNER's optimistic booking bias is a function of each line's own selected CLF — there is no single pool bias, so no pool factor to show.`
+        : `IBNER_OPEN_FRACTION (${formatPct(IBNER_OPEN_FRACTION, 0)}) of the BOOKED ultimate is reserved, the rest paid within the year — the same named constant reserveStepSigma derives its scale from, not a literal. Distinct from LINE_RESERVE_PAYDOWN_PCT (${formatPct(LINE_RESERVE_PAYDOWN_PCT[lineView as CoverageLine] ?? 0, 0)} on this line), which governs runoff of OLDER cohorts. The booked ultimate is the drawn ultimate less IBNER's bias, which is zero whenever the line is funded at or above break-even.`,
     },
     {
       metric: 'Net Paid Losses',
@@ -1684,7 +1718,7 @@ export function buildSupportingRows(
       formula: {
         kind: 'sum',
         terms: [
-          curTerm(netPaidCurrentYear, 'current-year paid, 40%'),
+          curTerm(netPaidCurrentYear, `current-year paid, ${formatPct(currentYearPaidPct, 0)} of booked ultimate`),
           curTerm(priorCohortPaydown, 'prior-year cohort paydowns'),
         ],
       },
@@ -1698,12 +1732,20 @@ export function buildSupportingRows(
         kind: 'sum',
         terms: [
           curTerm(result.beginningNetReserve, 'beginning'),
-          curTerm(result.netUltimateLoss, 'net ultimate'),
+          curTerm(bookedUltimate, 'booked ultimate'),
           curTerm(-result.priorYearDevelopment, 'prior-year development'),
           curTerm(-result.netPaidLosses, 'net paid'),
         ],
       },
-      explain: 'Reuses the same identity as the Net Incurred Loss Check below (net incurred = paid + reserve change, and net incurred = net ultimate − development).',
+      // ⚠ BOOKED, NOT DRAWN, AND THE DERIVATION IS WHY. Writing R for reserve,
+      // U for booked ultimate, D for development and P for paid: each prior
+      // cohort satisfies newUnpaid = oldUnpaid - paydown - dev, so summing gives
+      // endingPrior = beginning - priorPaydown - D. Adding the current year's
+      // U x OPEN and substituting priorPaydown = P - U x (1 - OPEN) collapses
+      // the OPEN terms exactly and leaves ending = beginning + U - D - P. U is
+      // the BOOKED figure at every step, so using netUltimateLoss here was only
+      // right where the bias is zero.
+      explain: 'Reuses the same identity as the Net Incurred Loss Check below (net incurred = paid + reserve change, and net incurred = booked ultimate − development). The ultimate here is the BOOKED figure, net of IBNER\'s optimistic bias — the drawn figure would overstate the reserve by exactly that bias.',
       ...checkNote(endingNetReserveDifference, {
         varianceCap: CLAIMS_VARIANCE_CAP,
         varianceReason: CLAIMS_VARIANCE_REASON,
