@@ -1276,11 +1276,23 @@ export function buildSupportingRows(
   // Mirrors simulationEngine's reserveMarginCLF dispatch: the line's own static
   // table where it has one, FUNDING_CLF_TABLE otherwise.
   const MARGIN_ORDER: CoverageLine[] = ['WC', 'GL', 'Property'];
+  // ⚠ EVERY POOL-SCOPE PRODUCT INVOLVING A CLF HAS TO BE A SUM, and this carries
+  // the pieces for all of them. At pool scope selectedFundingCLF is ONE LINE'S
+  // value kept as a placeholder, so `poolTotal x thatCLF` is not the pool figure
+  // for any choice of factor once two lines price at different confidence
+  // levels. Four rows were doing exactly that and agreed only at defaults, where
+  // fundingAtExpected pins every line to 1.000 and the placeholder is
+  // accidentally right.
   const perLine = isPoolView
     ? MARGIN_ORDER.filter(l => poolResult.byLine[l]).map(l => ({
         line: l,
         expectedNetUnpaidLoss: poolResult.byLine[l].expectedNetUnpaidLoss,
         marginFactor: (hasStaticClf(l) ? staticClf(l, 0.90) : lookupCLF(0.90)) - 1,
+        expectedLoss: poolResult.byLine[l].expectedLoss,
+        clf: poolResult.byLine[l].selectedFundingCLF,
+        poolPremium: poolResult.byLine[l].poolPremium,
+        totalMemberCharge: poolResult.byLine[l].totalMemberCharge,
+        marketShare: poolResult.byLine[l].marketShare,
       }))
     : undefined;
   const payrollUnits = Math.max(result.activeExposure * 10_000, 1);
@@ -1350,7 +1362,15 @@ export function buildSupportingRows(
     ? (result.decisions.fundingAtExpected
         ? 'Expected funding — the table is bypassed entirely and the multiplier is exactly 1.000'
         : `STATIC_CLF_TABLE.${result.line}[${formatPct(result.selectedFundingConfidenceLevel, 0)}] — see clfTables.ts`)
-    : `FUNDING_CLF_TABLE[${formatPct(result.selectedFundingConfidenceLevel, 0)}] — see Default Assumptions`;
+    // ⚠ POOL SCOPE NAMED A TABLE NO LINE READS. result.line is undefined on the
+    // pooled row, so this fell through to FUNDING_CLF_TABLE — and every line now
+    // has its own static table, leaving the generic one with no pricing consumer
+    // at all (see clfTables.ts). Worse, the pooled selectedFundingCLF is one
+    // line's value kept as a placeholder, so there is no pool CLF for any table
+    // to be the source of. Say that instead of citing a curve.
+    : isPoolView
+      ? 'No pool CLF exists: each line prices off its OWN static table, and this figure is one line\'s value kept as a placeholder. Select a line tab for the real one.'
+      : `FUNDING_CLF_TABLE[${formatPct(result.selectedFundingConfidenceLevel, 0)}] — see Default Assumptions`;
 
   const reserveRiskMarginCheck =
     result.expectedNetUnpaidLoss * (reserveMarginCLFForLine - 1);
@@ -1496,7 +1516,42 @@ export function buildSupportingRows(
       metric: 'Market Share',
       value: formatPct(result.marketShare),
       numericValue: result.marketShare,
-      formula: { kind: 'ratio', numerator: { value: result.activeExposure, format: 'exposure' }, denominator: { value: result.totalMarketExposure, format: 'exposure' } },
+      // ⚠ THE POOL FORMULA WAS THE RETIRED ONE. activeExposure /
+      // totalMarketExposure stopped being how marketShare is computed at pool
+      // scope when that ratio was found to add WC/GL payroll to Property TIV —
+      // a mixed-unit fraction. The engine replaced it with the CHARGE-WEIGHTED
+      // average of each line's own (dimensionless) share; the formula here was
+      // not replaced with it, so the row stated one number and derived another
+      // for a full release, in EVERY arm.
+      //
+      // Shown as the real weighted average rather than gated to n/a: unlike a
+      // pool CLF, this quantity genuinely exists at pool scope — it is exactly
+      // what the engine computes — so declining to explain it would hide a
+      // derivation that is available and correct. The per-line build-up is
+      // beneath it.
+      //
+      // LINE SCOPE IS UNCHANGED: there the exposure ratio IS the definition, one
+      // clean unit, and it reconciles exactly.
+      formula: isPoolView && perLine && perLine.length > 0
+        ? {
+            kind: 'ratio',
+            numerator: curTerm(perLine.reduce((sum, pl) => sum + pl.marketShare * pl.totalMemberCharge, 0), 'charge-weighted share'),
+            denominator: curTerm(perLine.reduce((sum, pl) => sum + pl.totalMemberCharge, 0), 'total member charge'),
+          }
+        : { kind: 'ratio', numerator: { value: result.activeExposure, format: 'exposure' }, denominator: { value: result.totalMarketExposure, format: 'exposure' } },
+      subFormula: isPoolView && perLine && perLine.length > 0
+        ? {
+            label: 'charge-weighted share',
+            value: perLine.reduce((sum, pl) => sum + pl.marketShare * pl.totalMemberCharge, 0),
+            spec: { kind: 'sum', terms: perLine.map(pl => ({
+              product: [pctTerm(pl.marketShare, 'its own share'), curTerm(pl.totalMemberCharge, 'its member charge')],
+              label: pl.line,
+            })) },
+          }
+        : undefined,
+      explain: isPoolView
+        ? 'Each line\'s own share, weighted by what its members actually pay. NOT summed exposure over summed market exposure — that adds payroll to insured value and is not a ratio of anything.'
+        : undefined,
     },
   ];
 
@@ -1640,8 +1695,18 @@ export function buildSupportingRows(
       metric: 'CLF-Adjusted Gross Expected Loss',
       value: formatCurrency(result.clfAdjustedExpectedLoss),
       numericValue: result.clfAdjustedExpectedLoss,
-      formula: { kind: 'product', factors: [curTerm(result.expectedLoss, 'GROSS expected loss'), factorTerm(result.selectedFundingCLF)] },
-      explain: 'Gross expected loss at the selected CLF. This is NOT the pool premium: the premium funds NET expected loss (see Pool Premium Rate above), so on WC and GL this figure sits well above it.',
+      // A SUM AT POOL SCOPE, for the same reason Reserve Risk Margin Needed is —
+      // see the block there. Each line applies its OWN CLF, so no single factor
+      // reproduces the total.
+      formula: isPoolView && perLine && perLine.length > 0
+        ? { kind: 'sum', terms: perLine.map(pl => ({
+            product: [curTerm(pl.expectedLoss, 'gross expected loss'), factorTerm(pl.clf, 'its own CLF')],
+            label: pl.line,
+          })) }
+        : { kind: 'product', factors: [curTerm(result.expectedLoss, 'GROSS expected loss'), factorTerm(result.selectedFundingCLF)] },
+      explain: isPoolView
+        ? 'Gross expected loss at the selected CLF, summed per line — each line applies its own CLF, so there is no single pool factor. This is NOT the pool premium: the premium funds NET expected loss.'
+        : 'Gross expected loss at the selected CLF. This is NOT the pool premium: the premium funds NET expected loss (see Pool Premium Rate above), so on WC and GL this figure sits well above it.',
     },
     {
       metric: 'CLF-Adjusted Gross Expected Loss Check Difference',
@@ -1818,7 +1883,25 @@ export function buildSupportingRows(
   // it the excess is the funding shortfall, both correct.
   // The numerator both expected-loss ratios are built from, mirroring
   // simulationEngine's fundedNetExpectedLoss so the rows show what is computed.
-  const fundedNetLoss = result.poolPremium / Math.max(result.selectedFundingCLF, 1e-9);
+  // ⚠ PER LINE AT POOL SCOPE. This read poolPremium / selectedFundingCLF, and at
+  // pool scope that CLF is one line's placeholder — so the numerator of BOTH
+  // expected-loss ratios was a pool premium divided by a single line's
+  // confidence loading. The engine sums fundedNetExpectedLoss per line, and this
+  // now mirrors that, which is what the comment above already claimed it did.
+  const fundedNetLoss = isPoolView && perLine && perLine.length > 0
+    ? perLine.reduce((sum, pl) => sum + pl.poolPremium / Math.max(pl.clf, 1e-9), 0)
+    : result.poolPremium / Math.max(result.selectedFundingCLF, 1e-9);
+  // Shown beneath the ratio so the summed numerator is not an unexplained figure.
+  const fundedNetLossSub = isPoolView && perLine && perLine.length > 0
+    ? {
+        label: 'net expected loss the premium funds',
+        value: fundedNetLoss,
+        spec: { kind: 'sum' as const, terms: perLine.map(pl => ({
+          product: [curTerm(pl.poolPremium, 'pool premium'), factorTerm(1 / Math.max(pl.clf, 1e-9), 'divided by its own CLF')],
+          label: pl.line,
+        })) },
+      }
+    : undefined;
   const numeratorGuardApplies = result.selectedFundingCLF === 1.0;
   const numeratorGuardDiff = Math.abs(result.expectedCombinedRatio - 1);
   const numeratorGuardFails = numeratorGuardApplies && numeratorGuardDiff >= 1e-12;
@@ -1843,7 +1926,7 @@ export function buildSupportingRows(
       value: formatPct(result.expectedLossRatio),
       numericValue: result.expectedLossRatio,
       formula: { kind: 'ratio', numerator: curTerm(fundedNetLoss, 'net expected loss the premium funds'), denominator: curTerm(result.poolPremium + result.adminExpense, 'pool premium + admin expense') },
-      subFormula: {
+      subFormula: fundedNetLossSub ?? {
         label: 'pool premium + admin expense',
         value: result.poolPremium + result.adminExpense,
         spec: { kind: 'sum', terms: [curTerm(result.poolPremium, 'pool premium'), curTerm(result.adminExpense, 'admin expense')] },
@@ -1945,7 +2028,15 @@ export function buildSupportingRows(
       metric: 'Indicated Net Reserve at Confidence Level',
       value: formatCurrency(result.indicatedNetReserveAtConfidenceLevel),
       numericValue: result.indicatedNetReserveAtConfidenceLevel,
-      formula: { kind: 'product', factors: [curTerm(result.expectedNetUnpaidLoss, 'expected net unpaid loss'), factorTerm(result.selectedFundingCLF, `selected CLF at ${(result.selectedFundingConfidenceLevel * 100).toFixed(0)}%`)] },
+      formula: isPoolView && perLine && perLine.length > 0
+        ? { kind: 'sum', terms: perLine.map(pl => ({
+            product: [curTerm(pl.expectedNetUnpaidLoss, 'expected net unpaid loss'), factorTerm(pl.clf, 'its own CLF')],
+            label: pl.line,
+          })) }
+        : { kind: 'product', factors: [curTerm(result.expectedNetUnpaidLoss, 'expected net unpaid loss'), factorTerm(result.selectedFundingCLF, `selected CLF at ${(result.selectedFundingConfidenceLevel * 100).toFixed(0)}%`)] },
+      explain: isPoolView
+        ? 'Summed per line, each at its own CLF — the pool has no single confidence level to multiply by.'
+        : undefined,
     },
     {
       metric: 'Indicated Net Reserve Check Difference',
