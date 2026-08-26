@@ -1,7 +1,7 @@
 // Core simulation engine for Risk Pool Simulation v1
 // Premium formula: Premium = Exposure($M) × Rate_per_$100_payroll × 10,000
 
-import type { Claim, GameState, Occurrence, PoolState, DecisionSet, LinePoolState, LineDecisionSet, ResultSet, LineResultSet, ReserveCohort, Member, MemberLossResult, MembershipHistory, CoverageLine, GameInstance, AssetAllocation } from '../types/simulation';
+import type { Claim, GameState, Occurrence, PoolState, DecisionSet, LinePoolState, LineDecisionSet, ResultSet, LineResultSet, ReserveCohort, ReserveDevelopmentRow, Member, MemberLossResult, MembershipHistory, CoverageLine, GameInstance, AssetAllocation } from '../types/simulation';
 import type { LineShockEffects, ShockFiring, ShockRecord } from '../types/shocks';
 import { resolveShocks, ownFreqMultipliers, ownComponentFreqMultipliers, ownSevMultipliers } from './shockResolver';
 import { WHOLE_LINE } from './shockEffects';
@@ -1615,6 +1615,13 @@ export function processLineYear(
     riskControlEffectiveness: newRCEffectiveness,
 
     reserveCohorts: allCohorts,
+    reserveDevelopment: recordReserveDevelopment(
+      lineState.reserveDevelopment ?? [],
+      lineState.reserveCohorts,
+      updatedCohorts,
+      currentYearCohort,
+      yearNumber,
+    ),
     members: memberResult.activeMembers,
 
     netUnpaidReserve: endingNetReserve,
@@ -2560,6 +2567,80 @@ export function aggregateLineResults(
 // A cohort is closed once it has matured and its remaining balance falls below
 // this. The residual is PAID at closure, never dropped — see processIbner.
 const RESERVE_COHORT_CLOSE_FLOOR = 1000;
+
+// ============================================================================
+// THE DEVELOPMENT LEDGER — a recording, not a computation.
+//
+// Appends this valuation's estimate to each accident year's row, creating the
+// row the first time an accident year is seen. Read only by the Actuarial
+// memorandum; see ReserveDevelopmentRow for why the path cannot be recovered
+// after the fact and therefore has to be written down as it happens.
+//
+// ⚠ TAKES BOTH SIDES OF THE STEP ON PURPOSE. `before` is needed only to open a
+// row for a cohort the ledger has never seen — a SEED cohort, which exists
+// before the first processed year and would otherwise have its opening estimate
+// overwritten by its first development. For those the opening entry is the
+// estimate as at GAME START, filed against valuation year `yearNumber - 1`,
+// because that is the valuation it actually describes.
+//
+// ⚠ PURE, AND IT MUST STAY PURE. No RNG, no mutation of either input, and no
+// return path into any booked or priced quantity. That is what keeps a display
+// feature out of the value gates.
+function recordReserveDevelopment(
+  ledger: ReserveDevelopmentRow[],
+  before: ReserveCohort[],
+  after: ReserveCohort[],
+  incepted: ReserveCohort,
+  yearNumber: number,
+): ReserveDevelopmentRow[] {
+  const byYear = new Map(ledger.map(r => [r.yearNumber, { ...r, ultimateByValuation: [...r.ultimateByValuation] }]));
+
+  // Open a row for any pre-existing cohort the ledger has not met yet. Only
+  // seed cohorts reach this: an engine-written accident year is registered in
+  // the year it inceptes, by the `incepted` block below.
+  for (const c of before) {
+    if (c.closed || byYear.has(c.yearNumber)) continue;
+    byYear.set(c.yearNumber, {
+      yearNumber: c.yearNumber,
+      calendarYear: c.calendarYear,
+      ultimateByValuation: [c.netUltimate],
+      firstValuationYear: yearNumber - 1,
+      ageAtFirstValuation: c.age,
+      horizon: c.horizon,
+      seeded: true,
+    });
+  }
+
+  // This valuation's estimate for every cohort that survived the step.
+  for (const c of after) {
+    const row = byYear.get(c.yearNumber);
+    if (!row) continue;
+    const idx = yearNumber - row.firstValuationYear;
+    // Idempotent under a replayed year: write at the index the valuation year
+    // maps to rather than pushing, so re-processing a year cannot lengthen the
+    // history. Gaps cannot arise (every open cohort is valued every year), but
+    // a short array is padded rather than left holed if one ever did.
+    while (row.ultimateByValuation.length < idx) {
+      row.ultimateByValuation.push(row.ultimateByValuation[row.ultimateByValuation.length - 1]);
+    }
+    row.ultimateByValuation[idx] = c.netUltimate;
+  }
+
+  // The accident year written this year, at its inception estimate.
+  if (!byYear.has(incepted.yearNumber)) {
+    byYear.set(incepted.yearNumber, {
+      yearNumber: incepted.yearNumber,
+      calendarYear: incepted.calendarYear,
+      ultimateByValuation: [incepted.netUltimate],
+      firstValuationYear: yearNumber,
+      ageAtFirstValuation: 0,
+      horizon: incepted.horizon,
+      seeded: false,
+    });
+  }
+
+  return [...byYear.values()].sort((a, b) => a.yearNumber - b.yearNumber);
+}
 
 // ============================================================================
 // IBNER — the per-cohort development walk. See defaultAssumptions.ts's IBNER_*

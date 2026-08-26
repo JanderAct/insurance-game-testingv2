@@ -427,6 +427,50 @@ export interface ReserveCohort {
   bookingBias: number;
 }
 
+// ONE ACCIDENT YEAR'S ESTIMATE, AT EVERY VALUATION IT HAS SEEN — the reserve
+// development exhibit's only source.
+//
+// ⚠ THIS EXISTS BECAUSE THE PATH IS NOT RECONSTRUCTIBLE, and that is worth
+// stating plainly before anyone tries to delete it as redundant with
+// ReserveCohort. A cohort stores its CURRENT estimate and nothing else. Each
+// development step multiplies the remaining reserve by a fresh lognormal draw
+// (processIbner), so yesterday's estimate cannot be recovered from today's by
+// dividing anything out: the draw is gone. And a cohort is filtered out of
+// `reserveCohorts` the year after it closes, so even its final estimate stops
+// being readable. A development triangle needs both. Hence an append-only
+// ledger that no engine arithmetic reads.
+//
+// ⚠ NOTHING IN THE ENGINE CONSUMES THIS. It is written by processLineYear and
+// read only by the Actuarial memorandum. Adding it moved no value and spent no
+// RNG draw, which is the property that let a display feature ship against
+// unchanged gates. Keep it that way: if a priced or booked quantity ever starts
+// reading this ledger, the ledger has become engine state and needs the
+// scrutiny that goes with it.
+export interface ReserveDevelopmentRow {
+  yearNumber: number;          // the ACCIDENT year this row describes
+  calendarYear: number;
+  // The cohort's estimate of ULTIMATE as at the end of each successive
+  // valuation year, oldest first. Index k is valuation year
+  // firstValuationYear + k. Ultimate, not reported/incurred: the exhibit is
+  // about the gap between what is reported and what is estimated, so the
+  // ambiguous word is wrong exactly where the distinction is the point.
+  ultimateByValuation: number[];
+  // The valuation year that ultimateByValuation[0] belongs to.
+  firstValuationYear: number;
+  // The cohort's age at that first valuation. Zero for an accident year the
+  // engine wrote; POSITIVE for a seed cohort, which is born already aged.
+  ageAtFirstValuation: number;
+  // Runoff length. Development stops once age exceeds it.
+  horizon: number;
+  // ⚠ SEEDED COHORTS HAVE NO REGISTER BEHIND THEM. They are apportioned from a
+  // drawn reserve total rather than summed from claims, so their first entry is
+  // their estimate AS AT GAME START, not at inception — there was no inception.
+  // The exhibit labels their column differently for that reason; presenting a
+  // game-start value as an original estimate would be the fiction that
+  // generateStartingReserveCohorts' header refuses to invent.
+  seeded: boolean;
+}
+
 // Full result for one completed simulation year
 export interface ResultSet {
   yearNumber: number;
@@ -779,6 +823,11 @@ export interface LinePoolState {
   averageRiskQuality: number;
   riskControlEffectiveness: number; // rolling score 0-1
   reserveCohorts: ReserveCohort[];
+  // Append-only development ledger, one row per accident year, never pruned —
+  // see ReserveDevelopmentRow. Optional because saves written before the
+  // Actuarial memorandum existed do not carry it; read it as `?? []` and the
+  // exhibit is simply empty on those, which is honest rather than invented.
+  reserveDevelopment?: ReserveDevelopmentRow[];
   // WC ONLY, empty on GL and Property. Claims drawn but not yet reported.
   //
   members: Member[];

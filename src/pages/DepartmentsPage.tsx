@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { GameState } from '../types/simulation';
 import DocumentReader, { type DocumentEntry } from '../components/DocumentReader';
 import investmentMemoRaw from '../data/documents/investmentMemo.md?raw';
+import { buildActuarialMemo } from '../utils/actuarialMemo';
 
 interface DepartmentsPageProps {
   gameState: GameState;
@@ -17,12 +18,20 @@ export default function DepartmentsPage({ gameState }: DepartmentsPageProps) {
 
   const years = Array.from({ length: gameState.currentYearNumber }, (_, i) => i + 1);
 
+  // Rebuilt only when the year or the underlying state moves. The exhibit walks
+  // every accident year's whole valuation history for every line, so it is not
+  // work to redo on an unrelated re-render.
+  const actuarialMemo = useMemo(
+    () => buildActuarialMemo({ gameState, asAtYear: selectedYear }),
+    [gameState, selectedYear],
+  );
+
   const documents: DocumentEntry[] = [
     {
       id: 'actuarial',
       title: 'Actuarial',
-      summary: 'Loss trends and funding adequacy',
-      notBuiltNote: 'The Actuarial Department has not filed a memorandum yet.',
+      summary: 'Reserve development by accident year',
+      content: actuarialMemo,
     },
     {
       id: 'claims',
