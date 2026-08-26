@@ -1314,8 +1314,6 @@ export function processLineYear(
   const requiredFundingPremium = poolPremiumAndAdminExpense;
   const actualPremium = poolPremiumAndAdminExpense;
   const premiumFundingGap = 0;
-  const premiumFundingRatio = 1;
-  const premiumFundingAdequacyStatus = 'Funded at Selected Confidence';
 
   const indicatedFundingRatePer100 = poolPremiumRatePer100 + adminRatePer100;
   const actualRatePer100 = indicatedFundingRatePer100;
@@ -1385,12 +1383,8 @@ export function processLineYear(
           : 'Deficient';
 
   // Legacy compatibility fields.
-  // Going forward, fundingAdequacyRatio means premium funding adequacy.
   const fundingGap = capitalFundingGap;
-  const fundingAdequacyRatio = premiumFundingRatio;
-  const fundingAdequacyStatus = premiumFundingAdequacyStatus;
   const fundingCLF = selectedFundingCLF;
-  const fundingAdequacyIndicator = premiumFundingAdequacyStatus;
 
   // --- Ratios ---
   // Use net incurred loss instead of net ultimate loss so the ratios match the accounting income statement.
@@ -1559,8 +1553,6 @@ export function processLineYear(
     requiredFundingPremium,
     actualPremium,
     premiumFundingGap,
-    premiumFundingRatio,
-    premiumFundingAdequacyStatus,
 
     indicatedFundingRatePer100,
     actualRatePer100,
@@ -1582,12 +1574,9 @@ export function processLineYear(
     capitalAdequacyRatio,
     capitalAdequacyStatus,
 
-    fundingAdequacyRatio,
-    fundingAdequacyStatus,
 
     // Legacy fields
     fundingCLF,
-    fundingAdequacyIndicator,
 
     // Income and balance sheet
     underwritingIncome,
@@ -2525,8 +2514,6 @@ export function aggregateLineResults(
     requiredFundingPremium: addDollars('requiredFundingPremium'),
     actualPremium: addDollars('actualPremium'),
     premiumFundingGap: addDollars('premiumFundingGap'),
-    premiumFundingRatio: first.premiumFundingRatio,
-    premiumFundingAdequacyStatus: first.premiumFundingAdequacyStatus,
 
     indicatedFundingRatePer100: first.indicatedFundingRatePer100,
     actualRatePer100: first.actualRatePer100,
@@ -2548,11 +2535,8 @@ export function aggregateLineResults(
     capitalAdequacyRatio: excessCapitalRatio,
     capitalAdequacyStatus,
 
-    fundingAdequacyRatio: first.fundingAdequacyRatio,
-    fundingAdequacyStatus: first.fundingAdequacyStatus,
 
     fundingCLF: first.fundingCLF,
-    fundingAdequacyIndicator: first.fundingAdequacyIndicator,
 
     underwritingIncome: addDollars('underwritingIncome'),
     netIncome: addDollars('netIncome'),
@@ -2601,7 +2585,9 @@ const RESERVE_COHORT_CLOSE_FLOOR = 1000;
 // The old function multiplied each open cohort's UNPAID balance by
 // rng.range(0.92, 1.10) shifted by `fundingImpactOnDevelopment`, which read
 // priorFundingAdequacyRatio -> fundingAdequacyRatio -> premiumFundingRatio, a
-// HARDCODED 1. Measured over 40 games x 10 years x 3 lines at funding levels
+// HARDCODED 1 (all three of those names are now DELETED — the chain is kept
+// here because it is why this function exists). Measured over 40 games x 10
+// years x 3 lines at funding levels
 // 0.30/0.60/0.95, that ratio took exactly one distinct value, so the shift was
 // identically zero on every path the game can reach.
 //

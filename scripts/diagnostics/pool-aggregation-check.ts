@@ -92,8 +92,8 @@ const NO_POOL_MEANING = new Set(['aggregateAttachment', 'commonLossFactor', 'cat
 const FIRST_LINE_PLACEHOLDER = new Set([
   'yearNumber', 'calendarYear', 'rateLevel', 'ratePer100', 'purePremiumPer100', 'purePremium',
   'expectedCededPer100', 'netPurePremiumPer100', 'selectedFundingConfidenceLevel',
-  'selectedFundingCLF', 'premiumFundingRatio', 'indicatedFundingRatePer100', 'actualRatePer100',
-  'rateFundingGapPer100', 'rateAdequacyRatio', 'fundingAdequacyRatio', 'fundingCLF',
+  'selectedFundingCLF', 'indicatedFundingRatePer100', 'actualRatePer100',
+  'rateFundingGapPer100', 'rateAdequacyRatio', 'fundingCLF',
   'historyAttempt',
 ]);
 

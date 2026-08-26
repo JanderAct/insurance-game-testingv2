@@ -62,8 +62,6 @@ export interface FundingDetail {
   fundingMarginNeeded: number;            // netFundingTarget - expectedNetUnpaid
   availableFunding: number;               // endingSurplus (capital available)
   fundingGap: number;                    // availableFunding - netFundingTarget
-  fundingAdequacyRatio: number;          // available / target
-  fundingAdequacyStatus: string;         // "Strong" | "Adequate" | "Thin" | "Deficient"
   requiredReserveMargin: number;
   excessAvailableSurplus: number;
   excessCapitalRatio: number | null;
@@ -152,8 +150,6 @@ export function deriveAnnualStatement(result: LineResultSet): AnnualFinancialSta
     fundingMarginNeeded: result.fundingMarginNeeded,
     availableFunding: result.availableFunding,
     fundingGap: result.fundingGap,
-    fundingAdequacyRatio: result.fundingAdequacyRatio,
-    fundingAdequacyStatus: result.fundingAdequacyStatus,
     requiredReserveMargin: result.reserveRiskMarginNeeded,
     excessAvailableSurplus: result.excessAvailableSurplus,
     excessCapitalRatio: result.excessCapitalRatio,

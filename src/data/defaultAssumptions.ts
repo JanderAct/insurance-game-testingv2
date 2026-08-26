@@ -1421,8 +1421,14 @@ export const IBNER_STEP_MIXTURE: readonly { weight: number; multiplier: number }
 // is assigned from premiumFundingRatio — a hardcoded 1. Measured across 40
 // games x 10 years x 3 lines at funding levels 0.30/0.60/0.95, that ratio took
 // exactly one distinct value: 1. So the old bias was identically zero on every
-// path, not merely weak. premiumFundingRatio is a separate defect and is
-// deliberately NOT fixed here.
+// path, not merely weak.
+//
+// ⚠ ALL THREE OF THOSE FIELD NAMES ARE NOW DELETED, and this comment keeps them
+// only to record the chain. They were resolved by DELETION rather than repair:
+// the concept was already live under its real name, since premiumFundingRatio
+// was documented as actualPremium / requiredFundingPremium and that IS
+// selectedFundingCLF. The line above — reading selectedFundingCLF directly — is
+// the migrated version, and the vestige simply outlived it.
 export const IBNER_BOOKING_BIAS_COEFF = 0.80;
 
 // ⚠ THE UNWIND IS FRONT-LOADED, NOT SPREAD EVENLY, and the shape is the point.

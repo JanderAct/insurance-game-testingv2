@@ -122,10 +122,41 @@ export function limitedExpectedValue(mu: number, sigma: number, limit: number): 
 
 // --- dollar vintage -----------------------------------------------------------
 
-// THE single point of dollar-vintage conversion. An amount stated in
-// accidentYear dollars, carried to settlementYear dollars at `rate`. Every
-// vintage change in the generators routes through here — if you find yourself
-// writing Math.pow(1 + someTrend, ...) anywhere else, that is the bug.
+// An amount stated in accidentYear dollars, carried to settlementYear dollars
+// at `rate`.
+//
+// ⚠ THIS COMMENT USED TO CLAIM IT WAS "THE single point of dollar-vintage
+// conversion", that "every vintage change in the generators routes through
+// here", and that a Math.pow(1 + someTrend, ...) anywhere else "is the bug".
+// NONE OF THAT IS TRUE ANY MORE, and the correction matters more than the
+// function does, because WORKING_PRACTICES records that convention as what
+// makes retroactive repricing possible at all.
+//
+// WHAT IS ACTUALLY TRUE, traced through git rather than inferred:
+//
+//   - This function has ONE caller, patternTrendFactor below, in this same
+//     file. patternTrendFactor has ZERO live callers. The chain is dead end to
+//     end and has been since 645c15e.
+//   - WC called patternTrendFactor 7 times at 2dc146a and stopped at 3181b18 —
+//     the commit that ADDED the report lag, not the one that removed it.
+//     Property picked it up at 3181b18 and dropped it at 645c15e, for a reason
+//     documented in propertyClaimEngine: its mixture was fitted to amounts
+//     already trended to 2024, so trending again would double-count.
+//   - GL never called it.
+//
+// SO NO ACCIDENT-YEAR -> SETTLEMENT-YEAR CONVERSION HAPPENS ANYWHERE. Every
+// live `Math.pow(1 + trend, year - 1)` in the generators — wcClaimEngine's
+// frequency and severity trends, glClaimEngine's severity trend,
+// propertyClaimEngine's draw trend, exposureTrend's wage inflation — is a LEVEL
+// trend that sets what a year-N accident year costs in year-N dollars. That is
+// a different operation: it establishes a vintage, it does not convert between
+// two. Claims are drawn at ultimate in settlement-equivalent terms and are
+// never re-vintaged afterwards.
+//
+// ⚠ KEPT, NOT DELETED, AND DELIBERATELY. It is dead today but it is the correct
+// primitive for the shock work that reprices prior-year claims — that repricing
+// has to be BUILT, and this is the piece it would be built on. Deleting it
+// would mean writing it again.
 export function trendToSettlement(amount: number, rate: number, accidentYear: number, settlementYear: number): number {
   return amount * Math.pow(1 + rate, settlementYear - accidentYear);
 }

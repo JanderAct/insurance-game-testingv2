@@ -63,8 +63,14 @@ function severityFactor(riskQuality: number): number {
 // the only line that does not. This is a property of the FIT, not a
 // simplification.
 //
-// WC and GL parameterise severity at ACCIDENT-year level and multiply by
-// patternTrendFactor to reach settlement dollars. Property's mixture was fitted
+// ⚠ THE SENTENCE THAT STOOD HERE WAS ALREADY FALSE WHEN IT WAS WRITTEN. It read
+// "WC and GL parameterise severity at ACCIDENT-year level and multiply by
+// patternTrendFactor to reach settlement dollars." WC stopped calling
+// patternTrendFactor at 3181b18 — the same commit this comment came in with —
+// and GL never called it at all. Neither line reaches settlement dollars by any
+// route; both trend severity to an ACCIDENT-year level and stop there.
+//
+// The conclusion below is unaffected and still correct: Property's mixture was fitted
 // to claim AMOUNTS ALREADY TRENDED TO 2024 — that is, to what those claims
 // actually cost when settled. Multiplying again would apply the settlement lag
 // twice.

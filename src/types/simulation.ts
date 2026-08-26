@@ -668,8 +668,19 @@ export interface ResultSet {
   requiredFundingPremium: number;           // CLF-adjusted loss + expense + RI + risk control
   actualPremium: number;                    // Usually grossPremium
   premiumFundingGap: number;                // actualPremium - requiredFundingPremium
-  premiumFundingRatio: number;              // actualPremium / requiredFundingPremium
-  premiumFundingAdequacyStatus: string;     // "Strong" | "Adequate" | "Thin" | "Deficient"
+  // ⚠ premiumFundingRatio AND premiumFundingAdequacyStatus ARE GONE, WITH THEIR
+  // THREE ALIASES (fundingAdequacyRatio / fundingAdequacyStatus /
+  // fundingAdequacyIndicator). Both were assigned as LITERALS — 1 and
+  // 'Funded at Selected Confidence' — so the ratio carried no information and
+  // the status string could not vary. Nothing read any of the five: no page, no
+  // RESULT_METRICS entry, no narrative, and the FundingDetail pass-through that
+  // carried two of them into the financial statements was never rendered.
+  //
+  // THE CONCEPT IS ALIVE UNDER ITS REAL NAME. premiumFundingRatio was documented
+  // as actualPremium / requiredFundingPremium, which IS selectedFundingCLF —
+  // 1.000 is break-even by construction there. The live code had already
+  // migrated: IBNER's booking bias reads selectedFundingCLF directly. There was
+  // nothing to reconnect, only a vestige that outlived its replacement.
 
   indicatedFundingRatePer100: number;       // requiredFundingPremium / payroll units
   actualRatePer100: number;                 // selected/actual rate per $100 payroll
@@ -696,11 +707,7 @@ export interface ResultSet {
   capitalAdequacyStatus: string;            // "Strong" | "Adequate" | "Thin" | "Deficient"
 
   // Legacy compatibility
-  // Going forward, fundingAdequacyRatio/status describe premium funding adequacy.
-  fundingAdequacyRatio: number;             // Alias for premiumFundingRatio
-  fundingAdequacyStatus: string;            // Alias for premiumFundingAdequacyStatus
   fundingCLF: number;                       // Alias for selectedFundingCLF
-  fundingAdequacyIndicator: string;         // Alias for premiumFundingAdequacyStatus
 
   // Income statement
   underwritingIncome: number;   // totalMemberCharge + assessments − netIncurredLoss − operatingExpense − riskControlInvestment − reinsuranceCost − dividends
