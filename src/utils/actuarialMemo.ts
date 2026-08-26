@@ -40,8 +40,37 @@ export interface ExhibitRow {
   current: number;
   oneYear: number | null;
   total: number | null;
-  settled: boolean;
+  // ⚠ MATURED, NOT "SETTLED", AND THE RENAME IS THE POINT. Reaching the horizon
+  // means IBNER has stopped developing the cohort. It does NOT mean the accident
+  // year is finished: it is still open and still paying. processIbner's own
+  // header says so — "runoff and development are separate clocks: the horizon
+  // governs how long the ESTIMATE is uncertain, paydownPct governs how fast it
+  // is settled" — and the old label collapsed the two, telling a player a year
+  // was done while it was still writing cheques.
+  matured: boolean;
+  /** True only for the collapsed Prior row. */
+  isPrior: boolean;
 }
+
+// ============================================================================
+// THE PRIOR BOUNDARY — accident years OLDER than this collapse into one row.
+//
+// ⚠ NOT AN ARBITRARY CUT-OFF. It is exactly the line between cohorts that have a
+// claim register and cohorts that do not. Accident years -2, -1 and 0 were run
+// through processLineYear and have real registers behind them, so their INITIAL
+// column is a real original estimate. Everything older is a SEED cohort,
+// apportioned from a drawn reserve total at generation with no claims behind it
+// at all — its "initial" is a game-start valuation and not an original estimate.
+//
+// So the collapse separates rows whose initial value means something from rows
+// whose does not, and the "as at game start" caveat now attaches to ONE row
+// rather than being sprinkled across four that a reader has to check
+// individually. Collapsing to a Prior row is also simply what a development
+// exhibit does.
+// ============================================================================
+export const PRIOR_BOUNDARY = -2;
+/** Sentinel accident year for the collapsed row, so it sorts first. */
+export const PRIOR_ROW_YEAR = -9999;
 
 // The estimate as at valuation year `v`, clamped at both ends.
 //
@@ -84,7 +113,8 @@ export function exhibitRows(ledger: ReserveDevelopmentRow[], asAt: number): Exhi
         prior,
         oneYear: prior === null ? null : current - prior,
         total: isFirst ? null : current - initial,
-        settled: ageAt(r, asAt) > r.horizon,
+        matured: ageAt(r, asAt) > r.horizon,
+        isPrior: false,
       };
     })
     .sort((a, b) => a.yearNumber - b.yearNumber);
@@ -124,12 +154,50 @@ export function poolExhibitRows(perLine: ExhibitRow[][]): ExhibitRow[] {
         current: sum(r => r.current),
         oneYear: anyNull(r => r.oneYear) ? null : sum(r => r.oneYear ?? 0),
         total: anyNull(r => r.total) ? null : sum(r => r.total ?? 0),
-        // Settled only when EVERY contributing line has stopped moving. One
-        // line still developing makes the pool row still developing.
-        settled: rows.every(r => r.settled),
+        // Matured only when EVERY contributing line has stopped developing. One
+        // line still moving makes the pool row still moving.
+        matured: rows.every(r => r.matured),
+        isPrior: false,
       };
     })
     .sort((a, b) => a.yearNumber - b.yearNumber);
+}
+
+// Fold every accident year older than PRIOR_BOUNDARY into a single Prior row at
+// the top. Applied LAST, to whichever row set is being rendered — per line, or to
+// the pooled set — which is equivalent either way because both operations are
+// sums.
+//
+// ⚠ PRIOR'S COLUMNS ARE SUMMED, NOT RE-DERIVED. initial, current, prior and the
+// two development columns each add their constituents directly, so the row ties
+// to the cohorts it replaces by construction rather than by a second calculation
+// that could drift from them. actuarial-memo-check asserts the tie.
+export function collapsePrior(rows: ExhibitRow[]): ExhibitRow[] {
+  const old = rows.filter(r => r.yearNumber < PRIOR_BOUNDARY);
+  const kept = rows.filter(r => r.yearNumber >= PRIOR_BOUNDARY);
+  if (old.length === 0) return kept;
+
+  const sum = (pick: (r: ExhibitRow) => number) => old.reduce((s, r) => s + pick(r), 0);
+  const anyNull = (pick: (r: ExhibitRow) => number | null) => old.some(r => pick(r) === null);
+  const priorRow: ExhibitRow = {
+    yearNumber: PRIOR_ROW_YEAR,
+    calendarYear: Math.min(...old.map(r => r.calendarYear)),
+    // Every cohort inside Prior is a seed cohort by construction — that IS the
+    // boundary. Asserted rather than assumed, because a non-seeded year falling
+    // in here would mean the cut had drifted off the register line it is
+    // supposed to trace.
+    seeded: old.every(r => r.seeded),
+    initial: sum(r => r.initial),
+    prior: anyNull(r => r.prior) ? null : sum(r => r.prior ?? 0),
+    current: sum(r => r.current),
+    oneYear: anyNull(r => r.oneYear) ? null : sum(r => r.oneYear ?? 0),
+    total: anyNull(r => r.total) ? null : sum(r => r.total ?? 0),
+    // Still developing if ANY constituent is. One live cohort inside Prior makes
+    // the whole row live.
+    matured: old.every(r => r.matured),
+    isPrior: true,
+  };
+  return [priorRow, ...kept];
 }
 
 // ⚠ ONE UNIT, IN THE HEADER, NOT PER CELL. Every dollar figure in the exhibit
@@ -164,13 +232,18 @@ const HEADER =
 function renderTable(rows: ExhibitRow[]): string {
   if (rows.length === 0) return '_No accident years on this exhibit yet._';
   const body = rows.map(r => {
-    const label = `${r.yearNumber} (${r.calendarYear})${r.seeded ? ' †' : ''}`;
-    // SETTLED replaces the 1-year cell, and only that cell. It is the "is this
-    // still moving?" column, and on a matured year it would otherwise print
-    // 0.00 down the exhibit forever. The ultimates and the total stay as
-    // numbers because they remain the answer to a different question — where
-    // the year landed, and how far it travelled to get there.
-    const oneYear = r.settled ? 'settled' : cell(r.oneYear);
+    const label = r.isPrior
+      ? `**Prior** (to ${r.calendarYear})${r.seeded ? ' †' : ''}`
+      : `${r.yearNumber} (${r.calendarYear})${r.seeded ? ' †' : ''}`;
+    // ⚠ BLANK, NOT "settled", AND NOT 0.00. A matured accident year cannot
+    // develop further, so the 1-year cell has nothing to report — and printing
+    // 0.00 would say "measured, and it did not move", which is a different and
+    // weaker claim than "there was nothing to measure". Same distinction the
+    // negative-zero rule draws in m() below.
+    //
+    // "settled" was worse than either: it collapsed MATURITY into CLOSURE and
+    // told a player the year was finished while it was still paying out.
+    const oneYear = r.matured ? EMPTY : cell(r.oneYear);
     return `| ${label} | ${m(r.initial)} | ${cell(r.prior)} | ${m(r.current)} | ${oneYear} | ${cell(r.total)} |`;
   });
   return [HEADER, ...body].join('\n');
@@ -180,12 +253,11 @@ function renderTable(rows: ExhibitRow[]): string {
 // actuarial-memo-check — every number in a sentence here is derivable, and a
 // sentence beside a correct table is exactly the defect the Calculation Audit
 // page needed a third kind of check to find.
-function sectionProse(rows: ExhibitRow[]): string {
-  const settled = rows.filter(r => r.settled).length;
-  const seeded = rows.filter(r => r.seeded).length;
-  const developing = rows.length - settled;
-  return `${rows.length} accident year(s) on this exhibit; ${settled} settled and ` +
-    `${developing} still developing; ${seeded} carried in at game start.`;
+function sectionProse(rows: ExhibitRow[], collapsed: number): string {
+  const matured = rows.filter(r => r.matured).length;
+  const developing = rows.length - matured;
+  return `${rows.length} row(s) on this exhibit; ${matured} no longer developing and ` +
+    `${developing} still developing; ${collapsed} accident year(s) collapsed into Prior.`;
 }
 
 // THE UN-EMERGED DEFICIENCY, DISCLOSED AT GAME END ONLY.
@@ -282,14 +354,21 @@ export function buildActuarialMemo({ gameState, asAtYear }: ActuarialMemoInput):
     'which is subtracted from incurred loss and is therefore positive when favourable.',
   );
 
+  // ⚠ COLLAPSED LAST, AFTER POOLING, so the pool row set is built from the raw
+  // per-line years and only then folded. Collapsing per line first and pooling
+  // the Prior rows would give the same numbers — both are sums — but it would
+  // make the pool's Prior depend on each line's Prior having been formed the
+  // same way, which is a coupling with no benefit.
   for (const { line, rows } of perLine) {
+    const shown = collapsePrior(rows);
     out.push(`## ${line}`);
-    out.push(renderTable(rows));
-    out.push(sectionProse(rows));
+    out.push(renderTable(shown));
+    out.push(sectionProse(shown, rows.length - shown.length + (shown.some(r => r.isPrior) ? 1 : 0)));
   }
 
   if (lines.length > 1) {
-    const pool = poolExhibitRows(perLine.map(p => p.rows));
+    const poolRaw = poolExhibitRows(perLine.map(p => p.rows));
+    const pool = collapsePrior(poolRaw);
     out.push('## Pool total');
     out.push(
       'The three lines added together. Addition is the right operation here and is not everywhere ' +
@@ -297,7 +376,7 @@ export function buildActuarialMemo({ gameState, asAtYear }: ActuarialMemoInput):
       'valuation date.',
     );
     out.push(renderTable(pool));
-    out.push(sectionProse(pool));
+    out.push(sectionProse(pool, poolRaw.length - pool.length + (pool.some(r => r.isPrior) ? 1 : 0)));
   }
 
   // WHICH CLAIMS MOVED — the schedule that gives a reserve deterioration a story.
@@ -320,7 +399,8 @@ export function buildActuarialMemo({ gameState, asAtYear }: ActuarialMemoInput):
       'A reserve movement is not a number on its own — it is claims deteriorating. These are the ' +
       'occurrences this pool has seen development land on, largest movement first, **as at today ' +
       'rather than as at the year selected above**. Amounts are occurrence totals, gross of ' +
-      'reinsurance.',
+      'reinsurance. Every accident year listed here appears individually in the exhibit above: ' +
+      'the years inside Prior have no claim register, so they can never contribute a row.',
     );
     out.push([
       '| Line | Accident year | Claim | As first written $M | Now $M | Development $M |',
@@ -338,24 +418,27 @@ export function buildActuarialMemo({ gameState, asAtYear }: ActuarialMemoInput):
     '- **Empty cells are not zeros.** The newest accident year has no prior valuation and no ' +
     'development, because it has had no opportunity to develop. That is different from a year ' +
     'that had the opportunity and did not move.\n' +
-    '- **`settled`** means the accident year has run past its development horizon. Its estimate ' +
-    'is final and will not move again, however much remains to be paid out on it.\n' +
-    '- **† carried in at game start.** These accident years predate the pool\'s own record. They ' +
-    'were apportioned from an opening reserve total rather than built up from claims, so their ' +
-    'INITIAL column is the estimate as at game start, not at inception — there is no inception ' +
-    'figure for them and none has been invented. Their total development is measured from game ' +
-    'start for the same reason. **They are also much smaller than a full accident year**, because ' +
-    'each is a share of one opening reserve balance rather than a year of claims; do not read the ' +
-    'step up at year -2 as a jump in loss experience.\n' +
-    '- **Accident year -3 is absent on every line, always.** The carried-in years are numbered ' +
-    'from -4 backwards and the pool\'s own simulated record begins at -2, so nothing is ever ' +
-    'written to -3. It is an artefact of how the two sets of years are numbered against each ' +
-    'other, not a year whose record has been lost.\n' +
-    '- **Short-tail lines settle and long-tail lines do not.** Property\'s accident years stop ' +
-    'moving after a few valuations while Workers\' Compensation keeps developing for a decade. ' +
-    'That is not an inconsistency in the exhibit; it is the single most useful thing on it. On a ' +
-    'short-tail line you know where you stand quickly. On a long-tail line you do not, and a ' +
-    'funding decision made today is still being marked years after you made it.',
+    '- **A blank development column means the year has run past its development horizon.** ' +
+    'Its estimate will not move again, so there is nothing to report in that column — which is ' +
+    'a different statement from measuring the movement and finding it was zero. **It does NOT ' +
+    'mean the accident year is finished.** It is still open and still paying claims out; the ' +
+    'horizon governs how long the ESTIMATE stays uncertain, not how long the year takes to pay.\n' +
+    '- **Prior** collects every accident year older than ' + PRIOR_BOUNDARY + ', as a development ' +
+    'exhibit normally does. Its columns are the sum of the years it replaces.\n' +
+    '- **† carried in at game start.** The Prior row predates the pool\'s own record. Those ' +
+    'accident years were apportioned from an opening reserve total rather than built up from ' +
+    'claims, so the INITIAL column is the estimate as at game start, not at inception — there is ' +
+    'no inception figure for them and none has been invented, and their development is measured ' +
+    'from game start for the same reason. **That is exactly why the Prior boundary sits where it ' +
+    'does:** every year shown individually has a real claim register behind it and a real ' +
+    'original estimate; everything inside Prior has neither. They are also much smaller than a ' +
+    'full accident year, being shares of one opening balance, so do not read the step up at ' +
+    'year -2 as a jump in loss experience.\n' +
+    '- **Short-tail lines stop developing and long-tail lines do not.** Property\'s accident ' +
+    'years go blank after a few valuations while Workers\' Compensation keeps moving for a ' +
+    'decade. That is not an inconsistency in the exhibit; it is the single most useful thing on ' +
+    'it. On a short-tail line you know where you stand quickly. On a long-tail line you do not, ' +
+    'and a funding decision made today is still being marked years after you made it.',
   );
 
   if (gameState.isComplete && asAt === gameState.setup.gameLength) {

@@ -18,11 +18,11 @@
 //   and eyeballed at defaults is a memo tested in the one configuration where
 //   the interesting quantity does not exist. Hence the squeezed arm, and hence
 //   the coverage assertions at the bottom that FAIL if an arm never produced a
-//   settled row, a seeded row, adverse development or a non-zero deficiency.
+//   matured row, a Prior row, adverse development or a non-zero deficiency.
 //
 // THREE KINDS OF CHECK, mirroring that page:
 //   ARITHMETIC   the row identities, on the RENDERED strings
-//   PRINTING     empty-vs-zero discipline, and settled-vs-still-moving
+//   PRINTING     empty-vs-zero discipline, and matured-vs-still-developing
 //   PROSE        registered derivable claims
 // ============================================================================
 
@@ -32,7 +32,8 @@ import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { SLIDER_RANGES, WC_FUNDING_CONFIDENCE_RANGE } from '../../src/data/defaultAssumptions';
 import {
-  buildActuarialMemo, exhibitRows, poolExhibitRows, unEmergedDeficiency, type ExhibitRow,
+  PRIOR_BOUNDARY, buildActuarialMemo, collapsePrior, exhibitRows, poolExhibitRows,
+  unEmergedDeficiency, type ExhibitRow,
 } from '../../src/utils/actuarialMemo';
 import type { CoverageLine, DecisionSet, GameState } from '../../src/types/simulation';
 
@@ -127,7 +128,7 @@ function checkTable(
   ctx: { arm: string; config: string; scope: string; year: number },
   rows: ParsedRow[],
 ) {
-  let sawSettled = 0, sawSeeded = 0, sawAdverse = 0, sawFavourable = 0, sawEmptyTriplet = 0;
+  let sawSettled = 0, sawSeeded = 0, sawAdverse = 0, sawFavourable = 0, sawEmptyTriplet = 0, sawPrior = 0;
 
   for (const r of rows) {
     const [initial, prior, current, oneYear, total] = r.cells;
@@ -142,28 +143,43 @@ function checkTable(
     }
 
     // --- ARITHMETIC: prior + 1yr === current ------------------------------
-    if (prior !== EMPTY && oneYear !== EMPTY && oneYear !== 'settled') {
+    if (prior !== EMPTY && oneYear !== EMPTY) {
       const lhs = num(prior) + num(oneYear);
       if (Math.abs(lhs - num(current)) > 2 * PRINT_QUANTUM) {
         fail(ctx, 'prior + 1yr !== current', `${where}: ${prior} + ${oneYear} = ${lhs.toFixed(2)}, printed current ${current}`);
       }
     }
 
-    // --- PRINTING: the newest year's three cells are EMPTY, not zeros -----
-    // "no prior valuation" and "developed by exactly nothing" are different
-    // facts and the exhibit must not render them the same way.
-    const emptyCount = [prior, oneYear, total].filter(c => c === EMPTY).length;
-    if (emptyCount !== 0 && emptyCount !== 3) {
-      fail(ctx, 'partial empty triplet', `${where}: prior/1yr/total = ${prior}/${oneYear}/${total} — a year either has a prior valuation or it does not`);
+    // --- PRINTING: only three blank patterns are legal --------------------
+    // ⚠ THE LEGAL SET GREW BY ONE AND THE OLD RULE WOULD NOW FIRE ON EVERY
+    // MATURED ROW. It used to be "0 or 3 blanks", because the only blank case
+    // was a year with no prior valuation. A matured year now blanks its 1-year
+    // cell alone, so the patterns are:
+    //     none        an ordinary developing year
+    //     1yr only    matured — no further development possible
+    //     all three   the newest year — no prior valuation to compare against
+    // Anything else is a cell that went blank for no stated reason.
+    const blanks = [prior, oneYear, total].map(c => c === EMPTY);
+    const emptyCount = blanks.filter(Boolean).length;
+    const maturedPattern = !blanks[0] && blanks[1] && !blanks[2];
+    if (emptyCount !== 0 && emptyCount !== 3 && !maturedPattern) {
+      fail(ctx, 'illegal blank pattern', `${where}: prior/1yr/total = ${prior}/${oneYear}/${total}`);
     }
     if (emptyCount === 3) sawEmptyTriplet++;
 
-    // --- PRINTING: a settled year must not also print a movement ----------
-    if (oneYear === 'settled') {
+    // --- PRINTING: a matured year must not have moved ----------------------
+    if (maturedPattern) {
       sawSettled++;
-      if (prior !== EMPTY && Math.abs(num(prior) - num(current)) > 2 * PRINT_QUANTUM) {
-        fail(ctx, 'settled year moved', `${where}: marked settled but prior ${prior} != current ${current}`);
+      if (Math.abs(num(prior) - num(current)) > 2 * PRINT_QUANTUM) {
+        fail(ctx, 'matured year moved', `${where}: 1-year blank but prior ${prior} != current ${current}`);
       }
+    }
+
+    // --- PRINTING: the word "settled" must never reappear -------------------
+    // It collapsed MATURITY into CLOSURE. Guarded by name so a future edit
+    // cannot quietly reintroduce it.
+    if (r.cells.some(c => /settled/i.test(c)) || /settled/i.test(r.label)) {
+      fail(ctx, 'the word "settled" is back', `${where}: reaching the horizon stops DEVELOPMENT; the year is still open and still paying`);
     }
 
     // --- PRINTING: negative zero is never emitted -------------------------
@@ -172,7 +188,14 @@ function checkTable(
     }
 
     if (r.label.includes('†')) sawSeeded++;
-    if (oneYear !== EMPTY && oneYear !== 'settled') {
+    if (r.label.includes('Prior')) sawPrior++;
+    // ⚠ THE DAGGER BELONGS TO PRIOR ALONE NOW. Every carried-in accident year is
+    // inside it, so a dagger on an individually-listed row means the boundary
+    // stopped tracing the register line it exists to trace.
+    if (r.label.includes('†') && !r.label.includes('Prior')) {
+      fail(ctx, 'dagger outside Prior', `${where}: an individually-listed year is marked as carried in at game start`);
+    }
+    if (oneYear !== EMPTY) {
       if (num(oneYear) > 0) sawAdverse++;
       if (num(oneYear) < 0) sawFavourable++;
     }
@@ -182,7 +205,7 @@ function checkTable(
   if (sawEmptyTriplet > 1) {
     fail(ctx, 'more than one year without a prior', `${sawEmptyTriplet} rows carry an empty prior/1yr/total; only the newest accident year can`);
   }
-  return { sawSettled, sawSeeded, sawAdverse, sawFavourable };
+  return { sawSettled, sawSeeded, sawAdverse, sawFavourable, sawPrior };
 }
 
 // ============================================================================
@@ -195,24 +218,28 @@ interface ProseClaim {
 }
 const PROSE_CLAIMS: ProseClaim[] = [
   {
-    what: 'accident years on the exhibit',
-    extract: /(\d+) accident year\(s\) on this exhibit/,
+    what: 'rows on the exhibit',
+    extract: /(\d+) row\(s\) on this exhibit/,
     truth: rows => rows.length,
   },
   {
-    what: 'settled accident years',
-    extract: /on this exhibit; (\d+) settled/,
-    truth: rows => rows.filter(r => r.settled).length,
+    what: 'rows no longer developing',
+    extract: /on this exhibit; (\d+) no longer developing/,
+    truth: rows => rows.filter(r => r.matured).length,
   },
   {
-    what: 'still-developing accident years',
-    extract: /settled and (\d+) still developing/,
-    truth: rows => rows.length - rows.filter(r => r.settled).length,
+    what: 'rows still developing',
+    extract: /no longer developing and (\d+) still developing/,
+    truth: rows => rows.length - rows.filter(r => r.matured).length,
   },
   {
-    what: 'accident years carried in at game start',
-    extract: /(\d+) carried in at game start/,
-    truth: rows => rows.filter(r => r.seeded).length,
+    what: 'accident years collapsed into Prior',
+    extract: /(\d+) accident year\(s\) collapsed into Prior/,
+    // ⚠ DERIVED FROM THE RAW ROWS, NOT FROM THE COLLAPSED ONES. The claim is
+    // about what was folded away, so counting it from what remains would be a
+    // value minus itself — the tautology signature this project has already been
+    // caught by once.
+    truth: () => 0,   // replaced per call site; see proseAudit's `collapsed`
   },
 ];
 
@@ -223,41 +250,77 @@ function proseAudit(
   ctx: { arm: string; config: string; scope: string; year: number },
   sentence: string,
   rows: ExhibitRow[],
+  collapsed: number,
 ) {
   for (const claim of PROSE_CLAIMS) {
     const m = sentence.match(claim.extract);
     if (!m) { proseNoMatch[claim.what] = (proseNoMatch[claim.what] ?? 0) + 1; continue; }
     proseChecked++;
     const stated = Number(m[1]);
-    const truth = claim.truth(rows);
+    const truth = claim.what === 'accident years collapsed into Prior' ? collapsed : claim.truth(rows);
     if (stated !== truth) {
       fail(ctx, `prose: ${claim.what}`, `states ${stated}, data says ${truth}`);
     }
   }
 }
 
-// The memo's own structural claim: accident year -3 exists on no line, ever.
-// Derivable, stated in prose, and therefore registered rather than trusted.
-function checkMinusThreeClaim(
+// ⚠ THE ACCIDENT-YEAR -3 CLAIM IS RETIRED, NOT SILENTLY DROPPED. The memo used to
+// state that -3 exists on no line ever, and this checked it. Collapsing everything
+// older than PRIOR_BOUNDARY put -3 inside Prior, so the absence became invisible —
+// an assertion about something a reader can no longer see is not a claim worth
+// guarding, it is a claim that can never fail informatively.
+//
+// It is REPLACED by the claim that actually justifies the new boundary, and which
+// a reader CAN check: every row shown individually has a claim register behind it,
+// and every cohort folded into Prior does not. That is what makes the cut
+// principled rather than cosmetic, so it is the thing to hold the exhibit to.
+function checkPriorBoundary(
   ctx: { arm: string; config: string; scope: string; year: number },
-  md: string,
-  rows: ExhibitRow[],
+  raw: ExhibitRow[],
+  shown: ExhibitRow[],
 ) {
-  if (!md.includes('Accident year -3 is absent on every line, always')) return false;
-  if (rows.some(r => r.yearNumber === -3)) {
-    fail(ctx, 'prose: accident year -3', 'the memo states -3 never exists, but the exhibit carries a row for it');
+  for (const r of shown) {
+    if (r.isPrior) {
+      if (!r.seeded) fail(ctx, 'prior boundary', 'the Prior row contains an accident year that HAS a claim register');
+      continue;
+    }
+    if (r.seeded) fail(ctx, 'prior boundary', `accident year ${r.yearNumber} is shown individually but has no claim register`);
+    if (r.yearNumber < PRIOR_BOUNDARY) fail(ctx, 'prior boundary', `accident year ${r.yearNumber} is older than ${PRIOR_BOUNDARY} and was not collapsed`);
   }
-  return true;
+
+  // ⚠ PRIOR'S COLUMNS MUST TIE TO THE COHORTS IT REPLACES, EXACTLY. This is the
+  // arithmetic claim the collapse introduces: a summary row that does not sum is
+  // the register-disagrees-with-the-exhibit defect in a new place.
+  const old = raw.filter(r => r.yearNumber < PRIOR_BOUNDARY);
+  const priorRow = shown.find(r => r.isPrior);
+  if (old.length === 0) {
+    if (priorRow) fail(ctx, 'prior boundary', 'a Prior row was rendered with nothing to collapse');
+    return;
+  }
+  if (!priorRow) { fail(ctx, 'prior boundary', `${old.length} year(s) older than ${PRIOR_BOUNDARY} but no Prior row`); return; }
+  const tie = (name: string, got: number | null, want: number | null) => {
+    if (got === null && want === null) return;
+    if (got === null || want === null) { fail(ctx, 'prior tie', `${name}: one side is empty and the other is not`); return; }
+    if (Math.abs(got - want) > 1) fail(ctx, 'prior tie', `${name}: Prior states ${got.toFixed(2)}, constituents sum to ${want.toFixed(2)}`);
+  };
+  const sum = (pick: (r: ExhibitRow) => number) => old.reduce((s, r) => s + pick(r), 0);
+  const anyNull = (pick: (r: ExhibitRow) => number | null) => old.some(r => pick(r) === null);
+  tie('initial', priorRow.initial, sum(r => r.initial));
+  tie('current', priorRow.current, sum(r => r.current));
+  tie('prior', priorRow.prior, anyNull(r => r.prior) ? null : sum(r => r.prior ?? 0));
+  tie('1yr', priorRow.oneYear, anyNull(r => r.oneYear) ? null : sum(r => r.oneYear ?? 0));
+  tie('total', priorRow.total, anyNull(r => r.total) ? null : sum(r => r.total ?? 0));
+  return old.length;
 }
 
 // ============================================================================
 
-console.log('=== ACTUARIAL MEMORANDUM CHECK ===\n');
+console.log('=== ACTUARIAL MEMORANDUM CHECK ===');
 
 let memosBuilt = 0;
-const coverage = { settled: 0, seeded: 0, adverse: 0, favourable: 0, deficiencyNonZero: 0, finalSections: 0 };
+const coverage = { settled: 0, seeded: 0, adverse: 0, favourable: 0, deficiencyNonZero: 0, finalSections: 0, prior: 0 };
 const perArmCoverage: Record<string, { adverse: number; deficiency: number; settled: number; seeded: number }> = {};
-let minusThreeChecked = 0;
+let boundaryChecked = 0;
 
 for (const arm of ARMS) {
   perArmCoverage[arm.name] = { adverse: 0, deficiency: 0, settled: 0, seeded: 0 };
@@ -296,16 +359,19 @@ for (const arm of ARMS) {
           const seen = checkTable(ctx, table.rows);
           coverage.settled += seen.sawSettled; coverage.seeded += seen.sawSeeded;
           coverage.adverse += seen.sawAdverse; coverage.favourable += seen.sawFavourable;
+          coverage.prior += seen.sawPrior;
           perArmCoverage[arm.name].adverse += seen.sawAdverse;
           perArmCoverage[arm.name].settled += seen.sawSettled;
           perArmCoverage[arm.name].seeded += seen.sawSeeded;
 
-          if (table.rows.length !== perLineRows[i].length) {
-            fail(ctx, 'row count', `table has ${table.rows.length} rows, exhibitRows says ${perLineRows[i].length}`);
+          const shown = collapsePrior(perLineRows[i]);
+          if (table.rows.length !== shown.length) {
+            fail(ctx, 'row count', `table has ${table.rows.length} rows, collapsePrior says ${shown.length}`);
           }
           const sentence = md.split(`## ${lines[i]}`)[1]?.split('##')[0] ?? '';
-          proseAudit(ctx, sentence, perLineRows[i]);
-          if (checkMinusThreeClaim(ctx, md, perLineRows[i])) minusThreeChecked++;
+          const collapsed = perLineRows[i].filter(r => r.yearNumber < PRIOR_BOUNDARY).length;
+          proseAudit(ctx, sentence, shown, collapsed);
+          if (checkPriorBoundary(ctx, perLineRows[i], shown)) boundaryChecked++;
         }
 
         if (lines.length > 1) {
@@ -315,23 +381,48 @@ for (const arm of ARMS) {
           if (!table) { fail(ctx, 'missing section', 'no Pool total table'); }
           else {
             checkTable(ctx, table.rows);
-            if (table.rows.length !== poolRows.length) {
-              fail(ctx, 'pool row count', `table has ${table.rows.length} rows, poolExhibitRows says ${poolRows.length}`);
+            const shownPool = collapsePrior(poolRows);
+            if (table.rows.length !== shownPool.length) {
+              fail(ctx, 'pool row count', `table has ${table.rows.length} rows, collapsePrior says ${shownPool.length}`);
             }
             // THE POOL IS THE SUM OF THE LINES, asserted on the PRINTED cells.
             // Summing is legitimate here and the check says so out loud: the
             // pool-scope aggregation defects this project fixed at 9ace082 were
             // all a scope reading one line's placeholder as a pool figure.
             for (const pr of table.rows) {
-              const year = Number(pr.label.split(' ')[0]);
-              const contributing = perLineRows.flat().filter(r => r.yearNumber === year);
+              // ⚠ THE PRIOR ROW IS MATCHED BY ITS RANGE, NOT BY A YEAR NUMBER,
+              // because it no longer has one. Parsing '**Prior**' as a year gave
+              // NaN, which matched nothing and silently skipped the one row the
+              // collapse introduced — the row most in need of the check.
+              const isPriorRow = pr.label.includes('Prior');
+              const contributing = isPriorRow
+                ? perLineRows.flat().filter(r => r.yearNumber < PRIOR_BOUNDARY)
+                : perLineRows.flat().filter(r => r.yearNumber === Number(pr.label.split(' ')[0]));
               const expect = contributing.reduce((s, r) => s + r.current, 0) / 1e6;
               if (Math.abs(num(pr.cells[2]) - expect) > lines.length * PRINT_QUANTUM) {
-                fail(ctx, 'pool current !== sum of lines', `accident year ${year}: pool prints ${pr.cells[2]}, lines sum to ${expect.toFixed(2)}`);
+                fail(ctx, 'pool current !== sum of lines', `${pr.label}: pool prints ${pr.cells[2]}, lines sum to ${expect.toFixed(2)}`);
               }
             }
             const sentence = md.split('## Pool total')[1]?.split('###')[0] ?? '';
-            proseAudit(ctx, sentence, poolRows);
+            const collapsedPool = poolRows.filter(r => r.yearNumber < PRIOR_BOUNDARY).length;
+            proseAudit(ctx, sentence, shownPool, collapsedPool);
+            if (checkPriorBoundary(ctx, poolRows, shownPool)) boundaryChecked++;
+          }
+        }
+
+        // ⚠ THE DEVELOPED-CLAIMS SCHEDULE MUST NOT NAME A YEAR THE EXHIBIT HAS
+        // COLLAPSED, or the two disagree about what a row is. It cannot today —
+        // seed cohorts carry no developingClaims, so only years -2 and later can
+        // ever contribute — but that is a property of two separate files and the
+        // memo now states it in prose, so it is guarded rather than trusted.
+        const schedule = md.split('### Which claims developed')[1]?.split('###')[0] ?? '';
+        for (const row of schedule.split('\n')) {
+          if (!row.startsWith('| ') || row.includes('Accident year')) continue;
+          const ay = Number(row.split('|')[2]?.trim());
+          if (Number.isFinite(ay) && ay < PRIOR_BOUNDARY) {
+            fail({ arm: arm.name, config: name, scope: 'schedule', year: asAt },
+              'schedule names a collapsed year',
+              `accident year ${ay} is inside Prior in the exhibit but listed individually in the claims schedule`);
           }
         }
 
@@ -374,15 +465,16 @@ console.log(`${memosBuilt.toLocaleString()} memoranda built across ${ARMS.length
 for (const arm of ARMS) console.log(`  ${arm.name.padEnd(9)} ${arm.why}`);
 
 console.log('\n--- COVERAGE: DID THE CHECK REACH THE INTERESTING STATES? ---');
-console.log('  A green run over rows that never settled, never developed adversely and never');
+console.log('  A green run over rows that never matured, never developed adversely and never');
 console.log('  carried a deficiency would be a check passing while unable to fail.\n');
-console.log(`  settled rows seen        ${coverage.settled.toLocaleString()}`);
-console.log(`  carried-in rows seen     ${coverage.seeded.toLocaleString()}`);
+console.log(`  matured rows seen        ${coverage.settled.toLocaleString()}  (1-year column blank)`);
+console.log(`  Prior rows seen          ${coverage.prior.toLocaleString()}`);
+console.log(`  carried-in rows seen     ${coverage.seeded.toLocaleString()}  (should equal Prior — the dagger belongs to it alone)`);
 console.log(`  adverse developments     ${coverage.adverse.toLocaleString()}`);
 console.log(`  favourable developments  ${coverage.favourable.toLocaleString()}`);
 console.log(`  final-position sections  ${coverage.finalSections.toLocaleString()}`);
 console.log(`  of those, deficiency > 0 ${coverage.deficiencyNonZero.toLocaleString()}`);
-console.log(`  accident-year -3 claim   ${minusThreeChecked.toLocaleString()} evaluations`);
+console.log(`  Prior boundary claim     ${boundaryChecked.toLocaleString()} evaluations`);
 
 console.log('\n  per arm:');
 for (const arm of ARMS) {
@@ -409,6 +501,11 @@ for (const arm of ARMS) {
   if (c.seeded === 0) armErrors.push(`${arm.name} arm saw no carried-in accident year at all`);
 }
 if (coverage.finalSections === 0) armErrors.push('the final-position section never rendered');
+if (coverage.prior === 0) armErrors.push('no Prior row was ever rendered — the collapse is untested');
+if (coverage.prior !== coverage.seeded) {
+  armErrors.push(`${coverage.prior} Prior rows but ${coverage.seeded} daggered rows — every carried-in year should be inside Prior and nowhere else`);
+}
+if (boundaryChecked === 0) armErrors.push('the Prior boundary claim was never evaluated');
 if (proseChecked === 0) armErrors.push('no prose claim was ever evaluated');
 
 console.log('\n--- DOES THE PROSE STATE A TRUE FACT? ---');
@@ -419,10 +516,11 @@ for (const [what, n] of Object.entries(proseNoMatch)) {
 
 console.log('\n--- FINDINGS ---');
 if (findings.length === 0 && armErrors.length === 0) {
-  console.log('\nEVERY ROW IDENTITY RECONCILES from its printed cells, in both arms; empty cells and');
-  console.log('settled markers are used exactly where they mean what they say; the pool total is the');
-  console.log('sum of its lines; every registered prose claim matches the data; and both arms reached');
-  console.log('the states that make those checks capable of failing.');
+  console.log('\nEVERY ROW IDENTITY RECONCILES from its printed cells, in both arms; blank cells are');
+  console.log('used only where the exhibit has nothing to report rather than a zero to report; the');
+  console.log('Prior row ties to the years it collapses and carries the dagger alone; the pool total');
+  console.log('is the sum of its lines; every registered prose claim matches the data; and both arms');
+  console.log('reached the states that make those checks capable of failing.');
   process.exit(0);
 }
 for (const f of findings.slice(0, 40)) {
