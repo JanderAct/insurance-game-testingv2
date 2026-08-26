@@ -93,7 +93,11 @@ export type FormulaSpec =
   // on and where the detail lives, rather than inventing a formula.
   | { kind: 'simulated'; expected: number; expectedLabel: string; where: string }
   // The same figure as another line (a gross pass-through shown twice).
-  | { kind: 'echo'; value: number; text: string }
+  // `format` defaults to currency; give it explicitly when the figure is not
+  // dollars, or the echo will print a millions figure as though it were dollars
+  // — which is how the two Written Exposure rows came to state 21390.39M beside
+  // an echo reading $21,390.
+  | { kind: 'echo'; value: number; text: string; format?: TermFormat }
   // Prose only — used for the handful of rows with no numeric expression
   // (atomic counts, categorical thresholds, or a genuinely missing operand).
   | { kind: 'text'; text: string };
@@ -113,7 +117,20 @@ function fmtTermValue(value: number, format: TermFormat): string {
     case 'currency': return formatCurrency(value);
     case 'pct': return `${trimNumber((value * 100).toFixed(4))}%`;
     case 'factor': return trimNumber(value.toFixed(6));
-    case 'exposure': return `${value.toFixed(2)}M`;
+    // ⚠ NO MAGNITUDE SUFFIX, AND THAT IS THE FIX RATHER THAN A STYLE CHOICE.
+    // This returned `${value.toFixed(2)}M`. Exposure is STORED in millions, and
+    // every formula on this page multiplies the STORED number — Payroll Units is
+    // exposure x 10,000 because a million dollars is 10,000 units of $100. So the
+    // arithmetic uses 21068.77 while the display said "21068.77M", and a reader
+    // who read the M — there being no reason not to — was out by a factor of
+    // 10^6 on six rows.
+    //
+    // THE OTHER FIX WOULD HAVE BEEN WORSE. Rescaling the term to dollars and
+    // rendering "$21.07B" forces the multiplier to become x 0.01, and the page
+    // would then describe an arithmetic the engine does not perform. This page
+    // exists to show what the engine did; the unit belongs in the LABEL, which a
+    // reader takes as annotation, not as a multiplier.
+    case 'exposure': return value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     // 4 decimals: enough that hand-multiplying the DISPLAYED per-$100 rates
     // (stored rounded to 4 decimals in the engine) reproduces the row's
     // value — 2 decimals silently dropped precision a $20.0142 rate needs.
@@ -170,7 +187,7 @@ export function renderFormula(spec: FormulaSpec): string {
     case 'simulated':
       return `Simulated draw; ${spec.expectedLabel} ${formatCurrency(spec.expected)} (see ${spec.where})`;
     case 'echo':
-      return `${formatCurrency(spec.value)} — ${spec.text}`;
+      return `${fmtTermValue(spec.value, spec.format ?? 'currency')} — ${spec.text}`;
     case 'text':
       return spec.text;
   }
@@ -179,6 +196,16 @@ export function renderFormula(spec: FormulaSpec): string {
 // Module-level term builders, shared by every card (the statement-card
 // builders keep their own local `cur` for now; these serve the six supporting
 // cards converted in this pass).
+// ⚠ ONE PLACE THAT RENDERS AN EXPOSURE FIGURE, so a row's Value column and its
+// formula cannot drift apart on the unit. Both go through fmtTermValue's
+// `exposure` case; the "$M" lives in the metric name or the term label.
+function exposureDisplay(value: number): string {
+  return fmtTermValue(value, 'exposure');
+}
+function expTerm(value: number, label: string): FormulaTerm {
+  return { value, format: 'exposure', label };
+}
+
 function curTerm(value: number, label?: string): FormulaTerm {
   return { value, format: 'currency', label };
 }
@@ -1500,16 +1527,16 @@ export function buildSupportingRows(
       // different units and is ~96% TIV by magnitude. Labelling it "Payroll" at
       // pool scope asserted a unit it does not have; the label now names both.
       // Each line's own row is a single clean unit and is the one to read.
-      metric: isPoolView ? 'Written Exposure (payroll + TIV)' : 'Written Payroll Exposure',
-      value: `${result.writtenExposure.toFixed(2)}M`,
+      metric: isPoolView ? 'Written Exposure, $M (payroll + TIV)' : 'Written Payroll Exposure, $M',
+      value: exposureDisplay(result.writtenExposure),
       numericValue: result.writtenExposure,
-      formula: { kind: 'echo', value: result.writtenExposure, text: isPoolView
+      formula: { kind: 'echo', value: result.writtenExposure, format: 'exposure', text: isPoolView
         ? 'active exposure after member movement — WC/GL payroll and Property TIV added together, so read the per-line rows for a figure in one unit'
         : 'active payroll exposure after member movement — the same figure' },
     },
     {
-      metric: isPoolView ? 'Total Market Exposure (payroll + TIV)' : 'Total Market Payroll Exposure',
-      value: `${result.totalMarketExposure.toFixed(2)}M`,
+      metric: isPoolView ? 'Total Market Exposure, $M (payroll + TIV)' : 'Total Market Payroll Exposure, $M',
+      value: exposureDisplay(result.totalMarketExposure),
       formula: { kind: 'text', text: 'The full simulated market total — no on-page breakdown by member exists.' },
     },
     {
@@ -1538,7 +1565,7 @@ export function buildSupportingRows(
             numerator: curTerm(perLine.reduce((sum, pl) => sum + pl.marketShare * pl.totalMemberCharge, 0), 'charge-weighted share'),
             denominator: curTerm(perLine.reduce((sum, pl) => sum + pl.totalMemberCharge, 0), 'total member charge'),
           }
-        : { kind: 'ratio', numerator: { value: result.activeExposure, format: 'exposure' }, denominator: { value: result.totalMarketExposure, format: 'exposure' } },
+        : { kind: 'ratio', numerator: expTerm(result.activeExposure, 'enrolled exposure, $M'), denominator: expTerm(result.totalMarketExposure, 'market exposure, $M') },
       subFormula: isPoolView && perLine && perLine.length > 0
         ? {
             label: 'charge-weighted share',
@@ -1641,7 +1668,7 @@ export function buildSupportingRows(
       metric: 'Payroll Units',
       value: payrollUnits.toLocaleString(undefined, { maximumFractionDigits: 0 }),
       numericValue: payrollUnits,
-      formula: { kind: 'product', factors: [{ value: result.activeExposure, format: 'exposure', label: 'payroll' }, { value: 10_000, format: 'plain' }] },
+      formula: { kind: 'product', factors: [expTerm(result.activeExposure, isPoolView ? 'exposure, $M' : 'payroll, $M'), { value: 10_000, format: 'plain', label: 'units of $100 per $M' }] },
     },
     {
       metric: 'Gross Premium & Admin Expense',
@@ -1651,7 +1678,7 @@ export function buildSupportingRows(
         ? { kind: 'text', text: 'Not a meaningful product at pool scope — see the note on the Check Difference row below.' }
         : {
             kind: 'product',
-            factors: [{ value: result.activeExposure, format: 'exposure' }, { value: result.ratePer100, format: 'plain', label: 'rate per $100' }, { value: 10_000, format: 'plain' }],
+            factors: [expTerm(result.activeExposure, 'payroll, $M'), { value: result.ratePer100, format: 'plain', label: 'rate per $100' }, { value: 10_000, format: 'plain', label: 'units of $100 per $M' }],
           },
     },
     {
@@ -1675,7 +1702,7 @@ export function buildSupportingRows(
         ? { kind: 'text', text: 'Not a meaningful product at pool scope — see the note on the Check Difference row below.' }
         : {
             kind: 'product',
-            factors: [{ value: result.activeExposure, format: 'exposure' }, { value: result.purePremiumPer100, format: 'plain', label: 'pure premium rate' }, { value: 10_000, format: 'plain' }],
+            factors: [expTerm(result.activeExposure, 'payroll, $M'), { value: result.purePremiumPer100, format: 'plain', label: 'pure premium rate' }, { value: 10_000, format: 'plain', label: 'units of $100 per $M' }],
           },
     },
     {
@@ -2216,8 +2243,8 @@ export function buildRevExpRows(
           factors: [
             {
               product: [
-                { value: result.activeExposure, format: 'exposure', label: 'exposure' },
-                { value: 10_000, format: 'plain', label: 'payroll units per $M' },
+                { value: result.activeExposure, format: 'exposure', label: 'exposure, $M' },
+                { value: 10_000, format: 'plain', label: 'units of $100 per $M' },
                 { value: result.netPurePremiumPer100, format: 'plain', label: 'net pure premium rate' },
               ],
               label: 'net expected loss',
