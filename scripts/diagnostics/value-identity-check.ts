@@ -302,7 +302,25 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // because nothing in baselines/ and neither guard script changed in range), and
 // solo-export-guard was run at every intermediate commit too — 84 hashes, all
 // matching.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v21.json');
+// v22: THE FIRST RANGE SINCE v11 IN WHICH THE ENGINE ITSELF MOVED, and it moved
+// on every line at once. Reserve development now lands on CLAIMS and cedes
+// through the occurrence tower, so 6,577 of 14,400 values changed across 74
+// fields and all 12 export hashes differ. There is NO LINE CONTROL — the
+// mechanism reaches WC, GL and Property identically — so the null test is the
+// MECHANISM SWITCH: DEVELOPMENT_CESSION_ENABLED = false reproduces v21
+// bit-for-bit, 0 values changed, 12/12 hashes matching.
+//
+// ⚠ TWO SHAPE ADDITIONS, BOTH MEMO FIELDS: priorYearDevelopmentCeded (what the
+// tower absorbed of prior-year development) and bookingGiveBack (the recovery
+// forfeited by booking the claim register low). NEITHER MAY BE ADDED TO INCOME —
+// netUltimateLoss is already net of the first and priorYearDevelopment of the
+// second, exactly as reinsuranceRecovery has always worked.
+//
+// ⚠ AND ONE SHAPE CHANGE THIS GATE CANNOT SEE. 1e05a55 added the
+// reserveDevelopment ledger, which lives on LinePoolState rather than ResultSet,
+// so it is invisible here — the sixth time this instrument's scope has mattered.
+// It is a recording, not a value: 0 changed at that commit.
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v22.json');
 
 function seedOf(id: string) {
   let h = 5381;

@@ -263,7 +263,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // That is a stronger statement than "the endpoint is clean". A display change
 // that broke and then repaired an export would show as clean at the endpoint and
 // red in the middle; nothing here was red in the middle.
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v21.json');
+// v22: ALL 12 HASHES CHANGE, for the first time since the engine last moved.
+// Claim-level development cession reaches every line and every config; there is
+// no control here and none is expected. The null test is the mechanism switch —
+// with DEVELOPMENT_CESSION_ENABLED false, all 12 match v21 byte for byte.
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v22.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

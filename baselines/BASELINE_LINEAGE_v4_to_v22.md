@@ -984,3 +984,131 @@ version represented and what moved between them, which is the part worth
 keeping. What remains in `baselines/` is the current gate pair (v21), its
 immediate predecessor (v20, the one to reach for if a v21 capture ever needs
 checking), and the v11 workbook set.
+
+
+---
+
+## v22 — eleven commits: reserve development lands on claims and cedes
+
+**⚠ THE FIRST RANGE SINCE v11 IN WHICH THE ENGINE ITSELF MOVED.** v20 and v21 were
+diagnostic and display ranges that moved zero values between them. This one moves
+**6,577 of 14,400 values across 74 fields**, and **all 12 export hashes differ**.
+
+**Trigger:** seed 6TJ3HNBJ, WC year 1 — $25.65M of prior-year development, **$0 of
+recovery**, net income -$23.0M against a $11.5M opening surplus. Insolvent, in a
+year the line ceded 40% of its current-year gross. Reserve development moved a net
+reserve BALANCE, so a pool that had bought per-occurrence cover was not protected
+against it: an accident year could double in size and the tower paid nothing,
+because nothing had happened to any claim.
+
+### Per commit, against the fixed v21 reference
+
+| commit | | added | removed | **values** | 12 hashes |
+|---|---|---|---|---|---|
+| `8dc3ae2` | absolute identity check | 0 | 0 | **0** | 12 MATCH |
+| `101d84e` | dead field deletion | 0 | **1050** | **0** | 12 MATCH |
+| `3da9ebb` | doc correction | 0 | 1050 | **0** | 12 MATCH |
+| `9fc6532` | doc correction | 0 | 1050 | **0** | 12 MATCH |
+| `8a3701a` | doc correction | 0 | 1050 | **0** | 12 MATCH |
+| `1e05a55` | Actuarial memorandum + ledger | 0 | 1050 | **0** | 12 MATCH |
+| `a1055ad` | sizing measurement | 0 | 1050 | **0** | 12 MATCH |
+| `cc9d8ac` | **the mechanism** | **150** | 1050 | **6574** | **12 DIFF** |
+| `b4a57a7` | perverse-incentive measurement | 150 | 1050 | 6574 | 12 DIFF |
+| `6c535d1` | **the fix** | **300** | 1050 | **6577** | 12 DIFF |
+| `9543cf6` | the merge | 300 | 1050 | 6577 | 12 DIFF |
+
+Every prediction held. The two measurement commits (`a1055ad`, `b4a57a7`) moved
+nothing, as scripts-only commits must. The three documentation commits moved
+nothing. `101d84e` was shape-only.
+
+**⚠ ONE SHAPE CHANGE THIS GATE CANNOT SEE.** `1e05a55` added the
+`reserveDevelopment` ledger, and it reads as 0 added / 0 changed here because the
+ledger lives on `LinePoolState` rather than `ResultSet`. That is the **sixth**
+time this instrument's scope has mattered. It is a recording rather than a value,
+so 0 changed is correct — but "the gate saw nothing" and "nothing happened" are
+different statements and this row is the first.
+
+### There is NO LINE CONTROL, so the null test is the mechanism switch
+
+The mechanism reaches WC, GL and Property identically — no line is unaffected and
+none can serve as a control. `DEVELOPMENT_CESSION_ENABLED = false` reproduces v21
+**bit-for-bit**: 0 values changed, 12/12 hashes matching, `ibner-null-check` green.
+
+**⚠ THAT NULL TEST FAILED THE FIRST TIME AND CAUGHT SOMETHING REAL.** Both paths
+routed through `newUnpaid + newUnpaid * (factor - 1)`, which equals
+`newUnpaid * factor` in exact arithmetic and NOT in floating point: 325 values at
+~1e-12, e.g. `-260838.21407143585 -> -260838.21407143213`. Nothing had changed
+behaviourally. The disabled branch now keeps the original two lines character for
+character, because **a null test that tolerates reassociation cannot tell a
+reassociation from a mechanism.**
+
+### ⚠ THE FINDING WORTH CARRYING: UNDERFUNDING BOUGHT REINSURANCE
+
+The first build shipped a perverse incentive, and it was measured rather than
+guessed. Squeezed funding recovered **$27.47M more on WC** than defaults on the
+SAME seeds, 95% CI [$21.20M, $33.74M], with GL (+$23.80M) and Property (+$11.92M)
+diverging the same way. Total cession should be path-independent — cession on an
+occurrence is `f(value)` and the yearly increments telescope to `f(final)` — so a
+squeeze should MOVE cession between inception and development without changing the
+sum.
+
+The premise failed because `developingClaims` was seeded from the FULL DRAWN
+values while `bookedUltimate` was `netUltimateLoss x (1 - bias)`. The unwind then
+added `registerSum x bias` to claims that had never been marked down, pushing them
+PAST their drawn value instead of restoring them TO it, and the extra height ceded.
+
+Fixed at `6c535d1` by marking the register down at inception. **The markdown ALONE
+would have left about $30M of it** — same order, same sign — because inception
+cession is taken on the drawn register while the ledger starts from the marked one,
+so a band is recognised twice. The **give-back** closes it, and the reserve
+identity then forces `bookedUltimate` to carry the forfeited recovery too.
+
+After: WC **+$0.10M** [-6.19, 6.39], GL -$2.90M, Property +$1.57M. All contain
+zero. This is now a GATE (`cession-path-independence.ts`), not a measurement.
+
+### ⚠ TWO THINGS A FUTURE READER MUST NOT MISREAD
+
+**THE CLF TABLES ARE NOT RE-DERIVED.** Cession on development adds about **+1.4%
+to E[ceded]** against a 35% baseline — roughly **0.5% on net premium**. Deferred
+DELIBERATELY until the allocation rule is settled, because re-deriving before that
+means doing it twice. **Read the CLF tables as pre-cession.** `wcClfGrid` already
+carries an open item from an earlier deferral; this is a second one on the same
+tables.
+
+**THE ALLOCATION RULE IS `largest-3 sized`, THE MOST GENEROUS OF THE MEASURED
+OPTIONS.** The dollar-weighted share of adverse development that cedes spans
+**0.5% to 86%** across plausible rules on the same events, and nothing in the model
+anchors it — it is the single most consequential free parameter in this mechanism.
+`largest` always selects claims ALREADY over the retention, which is precisely why
+WC cedes 83.6%: the subset is chosen for the property that makes it cede.
+**`sizeWeighted` is implemented, is more defensible, and is one field away.** It
+is not the default only because it consumes RNG draws, which would have made this
+null test unreadable. Settle it at the playtest.
+
+### Other findings from the range
+
+**A NEW FIELD CAN BE INACTIVE IN EXACTLY THE CONFIGURATION EVERYONE CHECKS.**
+`bookingGiveBack` reads **bit-exactly 0 on all 150 instances** in the absolute
+identity check, because that check runs at default decisions where the bias is
+zero. It is live only under a squeeze. `audit-formula-check` found bookedUltimate
+stating values its own formula no longer produced by $5.9M and $1.25M, and **both
+were invisible at defaults** — the sixth time that default has hidden a missing
+term on that page.
+
+**ASYMMETRIC ALLOCATION IS THE MODEL, NOT A GUARD.** Adverse development goes to
+the carriers (deterioration is concentrated); favourable development spreads across
+the whole register (redundancy is diffuse). A symmetric rule modelled both as
+concentrated when only one of them is, and drove the subset to exactly zero 15
+times in 4,320 line-years. **Now 0, with $0.00 unallocated.**
+
+**PROPORTIONAL ALLOCATION DID NOT COST THE WHOLE REGISTER.** An occurrence below
+the retention cedes nothing and a favourable movement only shrinks it, so only its
+SHARE matters and one scalar carries that. Measured: 2.6 occurrences per WC
+accident year reach the $1M retention, 4.8 on GL, 0.4 on Property, worst case 13.
+The cession arithmetic stays EXACT rather than approximated.
+
+**Guards at the endpoint:** `development-cession-check`, `cession-path-independence`,
+`audit-formula-check`, `actuarial-memo-check`, `ibner-null-check`,
+`pool-aggregation-check`, `roster-catalog-check`, `marketplace-generation-check` —
+all EXIT 0. The fresh v22 capture reads `added 0, removed 0, 0 changed` with no
+standing phantom line.
