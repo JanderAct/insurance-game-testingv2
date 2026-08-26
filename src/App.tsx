@@ -569,6 +569,7 @@ export default function App() {
             lockedResults={gameState.lockedResults}
             activeLines={gameState.setup.activeLines}
             instanceId={gameState.setup.instanceId}
+            poolState={gameState.poolState}
           />
         )}
 

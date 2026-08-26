@@ -27,6 +27,10 @@ import { SeededRandom, deriveSubRng } from './random';
 import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, IBNER_BOOKING_BIAS_COEFF, IBNER_HORIZON, IBNER_OPEN_FRACTION, IBNER_STEP_MIXTURE, IBNER_TOTAL_SD, IBNER_UNWIND_DECAY, LINE_RESERVE_PAYDOWN_PCT, MEMBER_LOSS_VOLATILITY, OPERATING_CASH_PCT_OF_PREMIUM, PROPERTY_HELD_PURE_PREMIUM_PER_100, RISK_CONTROL_PARAMS, WC_LOSS_MODEL } from '../data/defaultAssumptions';
 import type { TowerLine } from '../data/reinsuranceTower';
 import {
+  DEVELOPMENT_ALLOCATION, DEVELOPMENT_CESSION_ENABLED, allocateDevelopment, buildTrackedSet,
+  cedeDevelopment, markDownForBooking,
+} from './developmentAllocation';
+import {
   aggregateRecovery,
   cedeOccurrences,
   normalizeAggregateStopLevel,
@@ -1138,7 +1142,10 @@ export function processLineYear(
     developmentImpact,
     updatedCohorts,
     netPaidThisYear,
+    developmentCeded,
+    unallocatedDevelopment,
   } = processIbner(lineState.reserveCohorts, line, ibnerRng);
+  void unallocatedDevelopment;   // surfaced by the harness, not by the result
 
   // Current year reserve assumption: 60% unpaid, 40% paid. NET basis —
   // reinsurance recovery cash arrives in lockstep with the claim payments it
@@ -1150,7 +1157,58 @@ export function processLineYear(
   // `registerSum`. What gets BOOKED is that figure less the optimistic bias,
   // which then unwinds over the horizon (see the IBNER_* block).
   const bookingBias = ibnerBookingBias(selectedFundingCLF);
-  const bookedUltimate = netUltimateLoss * (1 - bookingBias);
+
+  // ⚠ THE REGISTER IS BUILT AND MARKED DOWN BEFORE THE RESERVE IS BOOKED, and
+  // the ordering is load-bearing: bookedUltimate depends on the give-back the
+  // markdown produces. Tracked occurrences are everything at or above the
+  // retention plus the carriers; the layers in force THIS year are frozen with
+  // them, because occurrence cover attaches to the accident year rather than the
+  // valuation year.
+  //
+  // ⚠ THE rng ARGUMENT IS ONLY REACHED ON THE sizeWeighted BRANCH. Under the
+  // default selection this consumes no draw, which is what lets the null test
+  // read against the pre-mechanism parent.
+  const placedAtInception = hasTractableCeded
+    ? normalizeLayersPlaced(line as TowerLine, lineDecisions.layersPlaced)
+    : undefined;
+
+  const trackedSet = DEVELOPMENT_CESSION_ENABLED && hasTractableCeded
+    ? buildTrackedSet(
+        line as TowerLine,
+        (generatedOccurrences ?? []).map(o => o.id),
+        (generatedOccurrences ?? []).map(o => o.claimIds[0] ?? o.id),
+        occurrenceTotals(generatedClaims ?? [], generatedOccurrences ?? []),
+        DEVELOPMENT_ALLOCATION,
+        ibnerRng,
+      )
+    : { tracked: [], untrackedTotal: 0 };
+
+  // ⚠ MARKED DOWN BY THE COHORT'S OWN BIAS DOLLARS — registerSum x bias, the
+  // same amount the unwind will add back — so the unwind restores the claims TO
+  // their drawn values rather than pushing them PAST. Not subsetDrawn x bias:
+  // the unwind's total is set by the cohort, so the markdown has to be too or
+  // the two do not cancel and the residual cedes.
+  const markdown = DEVELOPMENT_CESSION_ENABLED && hasTractableCeded && placedAtInception
+    ? markDownForBooking(line as TowerLine, trackedSet, netUltimateLoss * bookingBias, placedAtInception)
+    : { tracked: trackedSet.tracked, untrackedTotal: trackedSet.untrackedTotal, giveBack: 0, markedDown: 0 };
+
+  // THE ACCIDENT YEAR'S INITIAL BOOKING. netUltimateLoss is the register sum —
+  // exactly what the generator drew, net of the tower — and it is frozen as
+  // `registerSum`. What gets BOOKED is that figure less the optimistic bias,
+  // which then unwinds over the horizon (see the IBNER_* block).
+  //
+  // ⚠ LESS THE BIAS, PLUS THE RECOVERABLE FORFEITED BY BOOKING LOW. Marking the
+  // claim register down removes GROSS dollars, and part of those dollars would
+  // have been the reinsurer's — so the pool's NET liability falls by less than
+  // the gross markdown. `markdown.giveBack` is negative, hence the subtraction.
+  //
+  // Without this term the reserve identity breaks: netUltimate lands short of
+  // registerSum at maturity by exactly the give-back, because the unwind's
+  // cession then has nothing to offset against. With no bias, or with the
+  // mechanism off, giveBack is 0 and this is netUltimateLoss x (1 - bias)
+  // unchanged — which is what the null test asserts.
+  const bookedUltimate = netUltimateLoss * (1 - bookingBias) - markdown.giveBack;
+
   // ⚠ ONE CONSTANT, READ IN TWO PLACES. reserveStepSigma derives its scale from
   // the SAME opening split, because the share of the ultimate still unpaid is
   // exactly what sets how much leverage a reserve walk has. Writing 0.60 here
@@ -1172,6 +1230,10 @@ export function processLineYear(
     age: 0,
     stepMultiplier: drawStepMultiplier(ibnerRng),
     bookingBias,
+    developingClaims: markdown.tracked,
+    untrackedTotal: markdown.untrackedTotal,
+    cededDevelopmentToDate: markdown.giveBack,
+    placedAtInception,
   };
 
   const allCohorts = [...updatedCohorts, currentYearCohort];
@@ -1517,6 +1579,8 @@ export function processLineYear(
       : undefined,
     reinsuranceCost,
     reinsuranceRecovery,
+    priorYearDevelopmentCeded: developmentCeded + markdown.giveBack,
+    bookingGiveBack: markdown.giveBack,
     cededByLayer,
     retainedAboveTower,
     aggregateRecovery: aggregateRecoveryAmount,
@@ -2472,6 +2536,8 @@ export function aggregateLineResults(
     // pool attachment. Read byLine.WC / byLine.Property for the real ones.
     aggregateAttachment: noPoolMeaning(0, 'two separate treaties; a threshold is not additive — read byLine'),
     reinsuranceRecovery: addDollars('reinsuranceRecovery'),
+    priorYearDevelopmentCeded: addDollars('priorYearDevelopmentCeded'),
+    bookingGiveBack: addDollars('bookingGiveBack'),
     netUltimateLoss: addDollars('netUltimateLoss'),
     netIncurredLoss: netIncurredLossSum,
 
@@ -2680,9 +2746,15 @@ function processIbner(
   developmentImpact: number;
   updatedCohorts: ReserveCohort[];
   netPaidThisYear: number;
+  developmentCeded: number;
+  unallocatedDevelopment: number;
 } {
   let developmentImpact = 0;
   let netPaidThisYear = 0;
+  // What the occurrence tower absorbed of this year's development, and what
+  // could not be pushed onto any claim because the cohort has no register.
+  let developmentCeded = 0;
+  let unallocatedDevelopment = 0;
 
   const updatedCohorts = cohorts
     .filter(c => !c.closed)
@@ -2691,6 +2763,9 @@ function processIbner(
       // development are separate clocks: the horizon governs how long the
       // ESTIMATE is uncertain, paydownPct governs how fast it is settled.
       const developing = c.age < c.horizon;
+      let developingClaimsOut = c.developingClaims;
+      let cededToDate = c.cededDevelopmentToDate ?? 0;
+      let untrackedOut = c.untrackedTotal;
 
       // ⚠ PAY FIRST, THEN DEVELOP WHAT REMAINS. Paid is history and never moves.
       // This ordering is the whole fix — see the block comment above.
@@ -2715,7 +2790,7 @@ function processIbner(
         // 21% of WC's and 28% of Property's. The floor would have come straight
         // back, more often than before. Measured, not assumed.
         const sigma = c.stepMultiplier * reserveStepSigma(line);
-        newUnpaid *= Math.exp(sigma * rng.normal(0, 1) - (sigma * sigma) / 2);
+        const factor = Math.exp(sigma * rng.normal(0, 1) - (sigma * sigma) / 2);
 
         // The deterministic unwind of the optimistic booking, front-loaded.
         // Zero unless the line was funded below break-even in this cohort's
@@ -2738,7 +2813,74 @@ function processIbner(
         // weights summing to 1 — pathwise, not merely in expectation, and
         // independent of the stochastic path. The weights stay geometric so the
         // front-loading decision is unchanged.
-        newUnpaid += c.registerSum * c.bookingBias * ibnerUnwindWeight(c.horizon, c.age + 1);
+        const unwind = c.registerSum * c.bookingBias * ibnerUnwindWeight(c.horizon, c.age + 1);
+
+        // ⚠ THE MOVEMENT LANDS ON CLAIMS, AND THE TOWER SEES IT. This is the
+        // whole mechanism: an accident year that doubles now does so BY CLAIMS
+        // DETERIORATING, and a claim already above the retention cedes its
+        // deterioration like any other loss. The pool's reserve moves by the
+        // RETAINED part only.
+        //
+        // A cohort with no register — a seed cohort, apportioned from a reserve
+        // total at generation with no claims behind it — retains its
+        // development ENTIRE. That is the honest default rather than inventing
+        // claims to cede against, and it is 0.4% of all adverse development, so
+        // it does not matter much either.
+        const claims = c.developingClaims;
+        const canCede = DEVELOPMENT_CESSION_ENABLED && claims !== undefined && claims.length > 0;
+
+        if (canCede) {
+          const placed = c.placedAtInception ?? normalizeLayersPlaced(line as TowerLine, undefined);
+          let live = claims;
+          let untracked = c.untrackedTotal ?? 0;
+
+          // ⚠ TWO MOVEMENTS, TWO MODES, APPLIED SEPARATELY — and they cannot be
+          // summed first. The unwind REVERSES a markdown that was applied
+          // proportionally across the whole register, so it has to come back the
+          // same way or the claims do not return to their drawn values. The
+          // stochastic step is real deterioration or real redundancy, so it goes
+          // to the carriers when adverse and across the register when
+          // favourable. Adding them into one number and picking a mode by the
+          // sign of the sum would send the unwind to three claims whenever the
+          // lognormal step happened to dominate.
+          const stochastic = newUnpaid * (factor - 1);
+          const steps: { amount: number; mode: 'carriers' | 'proportional' }[] = [
+            { amount: stochastic, mode: stochastic >= 0 ? 'carriers' : 'proportional' },
+            { amount: unwind, mode: 'proportional' },
+          ];
+
+          for (const step of steps) {
+            if (step.amount === 0) continue;
+            const alloc = allocateDevelopment(live, untracked, step.amount, step.mode);
+            const res = cedeDevelopment(line as TowerLine, live, alloc.deltas, alloc.untrackedDelta, placed);
+            live = res.moved;
+            untracked = Math.max(0, untracked + alloc.untrackedDelta);
+            cededToDate += res.ceded;
+            developmentCeded += res.ceded;
+            unallocatedDevelopment += alloc.unallocated;
+            // `unallocated` is non-zero only when a favourable movement exceeded
+            // the WHOLE register — essentially unreachable now that favourable
+            // movements are proportional. It still has to reach the reserve or
+            // the rollforward stops balancing, so it is retained rather than
+            // dropped.
+            newUnpaid += res.retained + alloc.unallocated;
+          }
+          developingClaimsOut = live;
+          untrackedOut = untracked;
+        } else {
+          // ⚠ THE DISABLED PATH IS THE ORIGINAL EXPRESSION, CHARACTER FOR
+          // CHARACTER, AND IT HAS TO BE. An earlier version routed both paths
+          // through `newUnpaid + newUnpaid * (factor - 1)`, which is the same
+          // quantity in exact arithmetic and NOT the same in floating point:
+          // the null test came back with 325 changed values at ~1e-12, e.g.
+          // -260838.21407143585 -> -260838.21407143213. Nothing had changed
+          // behaviourally and the gate was still right to fire — a null test
+          // that tolerates reassociation cannot tell a reassociation from a
+          // mechanism. Do not "simplify" these two lines into the branch above.
+          if (DEVELOPMENT_CESSION_ENABLED) unallocatedDevelopment += newUnpaid * (factor - 1) + unwind;
+          newUnpaid *= factor;
+          newUnpaid += unwind;
+        }
       }
 
       // ⚠ THE FLOORS ARE GONE, AND THEY ARE NOW UNREACHABLE RATHER THAN MERELY
@@ -2795,6 +2937,9 @@ function processIbner(
         netPaid: newPaid,
         age: c.age + 1,
         closed: closing,
+        developingClaims: developingClaimsOut,
+        untrackedTotal: untrackedOut,
+        cededDevelopmentToDate: cededToDate,
       };
     });
 
@@ -2802,6 +2947,8 @@ function processIbner(
     developmentImpact,
     updatedCohorts,
     netPaidThisYear,
+    developmentCeded,
+    unallocatedDevelopment,
   };
 }
 

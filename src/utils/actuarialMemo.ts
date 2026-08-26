@@ -300,6 +300,39 @@ export function buildActuarialMemo({ gameState, asAtYear }: ActuarialMemoInput):
     out.push(sectionProse(pool));
   }
 
+  // WHICH CLAIMS MOVED — the schedule that gives a reserve deterioration a story.
+  //
+  // ⚠ AS AT NOW, NOT AS AT THE SELECTED YEAR. The developing claims live on the
+  // reserve cohort, which carries only its CURRENT value; the per-valuation
+  // history above is the ledger's job and the claim subset has no equivalent.
+  // Labelled rather than quietly presented as if it followed the selector.
+  const developed = lines.flatMap(line =>
+    (gameState.poolState.lines[line]?.reserveCohorts ?? []).flatMap(c =>
+      (c.developingClaims ?? [])
+        .filter(d => Math.abs(d.current - d.original) >= 1000)
+        .map(d => ({ line, accidentYear: c.yearNumber, ...d })),
+    ),
+  ).sort((a, b) => (b.current - b.original) - (a.current - a.original));
+
+  if (developed.length > 0) {
+    out.push('### Which claims developed');
+    out.push(
+      'A reserve movement is not a number on its own — it is claims deteriorating. These are the ' +
+      'occurrences this pool has seen development land on, largest movement first, **as at today ' +
+      'rather than as at the year selected above**. Amounts are occurrence totals, gross of ' +
+      'reinsurance.',
+    );
+    out.push([
+      '| Line | Accident year | Claim | As first written $M | Now $M | Development $M |',
+      '|---|---:|---|---:|---:|---:|',
+      ...developed.slice(0, 25).map(d =>
+        `| ${d.line} | ${d.accidentYear} | ${d.claimId} | ${m(d.original)} | ${m(d.current)} | ${m(d.current - d.original)} |`),
+    ].join('\n'));
+    if (developed.length > 25) {
+      out.push(`_${developed.length - 25} further developed claim(s) not shown; the claims workbook carries all of them._`);
+    }
+  }
+
   out.push('### Reading this exhibit');
   out.push(
     '- **Empty cells are not zeros.** The newest accident year has no prior valuation and no ' +

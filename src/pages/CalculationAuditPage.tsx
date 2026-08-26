@@ -1533,8 +1533,16 @@ export function buildSupportingRows(
   // selected CLF. There is no single pool bias to factor out: at pool scope
   // selectedFundingCLF is one line's value kept as a placeholder, so deriving a
   // pool bias from it would reintroduce the same class of error one level up.
+  // ⚠ LESS THE BIAS, LESS THE GIVE-BACK. Marking the claim register down for an
+  // optimistic booking removes GROSS dollars, part of which would have been the
+  // reinsurer's — so the pool's NET liability falls by less than the gross
+  // markdown, and bookedUltimate carries that term. bookingGiveBack is negative,
+  // hence the subtraction. Omitting it left this row stating a value its own
+  // formula did not produce, by $5.9M at pool scope, INVISIBLE AT DEFAULTS
+  // because the bias is zero there — the sixth time that default has hidden a
+  // missing term on this page.
   const bookedUltimateOf = (r: LineResultSet) =>
-    r.netUltimateLoss * (1 - ibnerBookingBias(r.selectedFundingCLF));
+    r.netUltimateLoss * (1 - ibnerBookingBias(r.selectedFundingCLF)) - (r.bookingGiveBack ?? 0);
   const bookedUltimate = isPoolView
     ? MARGIN_ORDER.filter(l => poolResult.byLine[l]).reduce((sum, l) => sum + bookedUltimateOf(poolResult.byLine[l]), 0)
     : bookedUltimateOf(result);
@@ -1851,16 +1859,29 @@ export function buildSupportingRows(
       metric: 'Current-Year Net Reserve',
       value: formatCurrency(result.currentYearNetReserve),
       numericValue: result.currentYearNetReserve,
-      // THREE FACTORS AT LINE SCOPE, so the bias is visible rather than folded
-      // in. At defaults it renders as 1 and the row reads as it always did; the
-      // moment a player funds below break-even it shows where the reserve went.
-      formula: isPoolView
-        ? { kind: 'product', factors: [curTerm(bookedUltimate, 'booked ultimate, summed per line'), pctTerm(currentYearUnpaidPct, 'unpaid portion')] }
-        : { kind: 'product', factors: [
+      // ⚠ THE BOOKED ULTIMATE IS NOW A SUM, NOT A SINGLE FACTOR, so it moved into
+      // a subFormula rather than being folded into the product. It used to be
+      // drawn x (1 - bias) and three factors read cleanly; marking the claim
+      // register down for an optimistic booking added a second term — the
+      // recovery forfeited because part of the marked-down dollars would have
+      // been the reinsurer's. Leaving it out had this row stating a value its own
+      // formula did not produce by $1.25M, and INVISIBLE AT DEFAULTS because
+      // both the bias and the give-back are zero there.
+      formula: { kind: 'product', factors: [
+        curTerm(bookedUltimate, isPoolView ? 'booked ultimate, summed per line' : 'booked ultimate'),
+        pctTerm(currentYearUnpaidPct, 'current-year unpaid portion'),
+      ] },
+      subFormula: isPoolView ? undefined : {
+        label: 'booked ultimate',
+        value: bookedUltimate,
+        spec: { kind: 'sum', terms: [
+          { product: [
             curTerm(result.netUltimateLoss, 'net ultimate drawn'),
             factorTerm(1 - (bookingBiasHere ?? 0), 'booked at, after IBNER\'s optimistic bias'),
-            pctTerm(currentYearUnpaidPct, 'current-year unpaid portion'),
-          ] },
+          ], label: 'optimistic booking' },
+          curTerm(-(result.bookingGiveBack ?? 0), 'recovery forfeited by booking the claim register low'),
+        ] },
+      },
       explain: isPoolView
         ? `IBNER_OPEN_FRACTION (${formatPct(IBNER_OPEN_FRACTION, 0)}) of the BOOKED ultimate is reserved and the rest paid within the year. The booked figure is summed per line because IBNER's optimistic booking bias is a function of each line's own selected CLF — there is no single pool bias, so no pool factor to show.`
         : `IBNER_OPEN_FRACTION (${formatPct(IBNER_OPEN_FRACTION, 0)}) of the BOOKED ultimate is reserved, the rest paid within the year — the same named constant reserveStepSigma derives its scale from, not a literal. Distinct from LINE_RESERVE_PAYDOWN_PCT (${formatPct(LINE_RESERVE_PAYDOWN_PCT[lineView as CoverageLine] ?? 0, 0)} on this line), which governs runoff of OLDER cohorts. The booked ultimate is the drawn ultimate less IBNER's bias, which is zero whenever the line is funded at or above break-even.`,

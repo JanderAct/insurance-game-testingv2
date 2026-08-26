@@ -354,6 +354,7 @@ export function toHistoricalYear(r: LineResultSet): HistoricalYear {
     totalMemberCharge: r.totalMemberCharge,
     grossUltimateLoss: r.grossUltimateLoss,
     reinsuranceRecovery: r.reinsuranceRecovery,
+    priorYearDevelopmentCeded: r.priorYearDevelopmentCeded,
     netUltimateLoss: r.netUltimateLoss,
     netPaidLosses: r.netPaidLosses,
     endingNetReserve: r.endingNetReserve,

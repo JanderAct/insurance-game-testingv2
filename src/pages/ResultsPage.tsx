@@ -56,7 +56,8 @@ const COMPARISON_METRICS: ComparisonMetric[] = [
   { key: 'lossRatio', label: 'Actual Loss Ratio', kind: 'ratio', polarity: 'goodDown', getValue: r => r.actualLossRatio, showPctChange: true },
   { key: 'combinedRatio', label: 'Actual Combined Ratio', kind: 'ratio', polarity: 'goodDown', getValue: r => r.actualCombinedRatio, showPctChange: true },
   { key: 'reserves', label: 'Ending Net Reserve', kind: 'currency', polarity: 'neutral', getValue: r => r.endingNetReserve, showPctChange: true },
-  { key: 'reinsRecovery', label: 'Reinsurance Recovery', kind: 'currency', polarity: 'neutral', getValue: r => r.reinsuranceRecovery, showPctChange: false },
+  { key: 'reinsRecovery', label: 'Reinsurance Recovery (current year)', kind: 'currency', polarity: 'neutral', getValue: r => r.reinsuranceRecovery, showPctChange: false },
+  { key: 'reinsRecoveryDev', label: 'Reinsurance Recovery (prior-year development)', kind: 'currency', polarity: 'neutral', getValue: r => r.priorYearDevelopmentCeded, showPctChange: false },
   { key: 'investmentIncome', label: 'Investment Income', kind: 'currency', polarity: 'goodUp', getValue: r => r.investmentIncome, showPctChange: false },
   { key: 'netIncome', label: 'Net Income', kind: 'currency', polarity: 'goodUp', getValue: r => r.netIncome, showPctChange: false },
   { key: 'endingSurplus', label: 'Ending Surplus', kind: 'currency', polarity: 'goodUp', getValue: r => r.endingSurplus, showPctChange: true },
@@ -299,7 +300,8 @@ export default function ResultsPage({ lockedResults, lineView }: ResultsPageProp
               <Row label="Dividends / Returned Pool Premium" value={formatCurrency(result.dividends)} valueColor="text-red-600" />
               <div className="border-t border-gray-100 my-1" />
               <Row label="Actual Ultimate Losses" value={formatCurrency(result.grossUltimateLoss)} valueColor="text-red-600" />
-              <Row label="Reinsurance Recovery" value={formatCurrency(result.reinsuranceRecovery)} valueColor="text-emerald-600" />
+              <Row label="Reinsurance Recovery (current year)" value={formatCurrency(result.reinsuranceRecovery)} valueColor="text-emerald-600" />
+              <Row label="Reinsurance Recovery (prior-year development)" value={formatCurrency(result.priorYearDevelopmentCeded)} valueColor="text-emerald-600" />
               <Row label="Net Ultimate Loss" value={formatCurrency(result.netUltimateLoss)} valueColor="text-red-600" />
             </ResultCard>
 
