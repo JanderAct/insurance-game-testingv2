@@ -1,9 +1,15 @@
 // Workers' Compensation claim-level loss generator.
 //
-// Draws ONE loss amount per claim from a per-rating-group lognormal mixture,
-// then a REPORT LAG. Replaces the four-tier structure (medical-only /
-// temporary / permanent / catastrophic plus a separate presumption process)
-// whose parameters were authored as priors and then fitted to each other.
+// Draws ONE loss amount per claim from a per-rating-group lognormal mixture.
+// Replaces the four-tier structure (medical-only / temporary / permanent /
+// catastrophic plus a separate presumption process) whose parameters were
+// authored as priors and then fitted to each other.
+//
+// ⚠ "then a REPORT LAG" STOOD HERE AND THE LAG IS GONE (reportLag deleted
+// wholesale — see defaultAssumptions.ts:403). Nothing is drawn after the
+// amount. This sentence is what made point 4's lag framing below read as
+// coherent, so it is corrected in the same pass rather than left to be
+// rediscovered.
 //
 // FOUR INVARIANTS THIS MODULE EXISTS TO HOLD
 //
@@ -34,13 +40,31 @@
 //    roster; computeKLine does the per-year risk-quality-mix correction. Both
 //    tracking enrolment would double-correct.
 //
-// 4. A CLAIM'S AMOUNT IS FIXED AT DRAW, AND THE LAG DOES NOT TREND IT.
-//    Severity carries no trend at all in this model, so there is no dollar
-//    vintage to track and no truncation to impose. That is not a simplification
-//    for its own sake: trending severity over the lag would make
-//    E[(1 + r)^lag] over an unbounded lognormal DIVERGENT, which is precisely
-//    why the retired presumption process had to bound its lag at 40 years. The
-//    severity fit stays exactly as fitted.
+// 4. DOLLAR VINTAGE IS THE ACCIDENT YEAR, ONCE. Severity IS trended, to the
+//    accident year at the draw, and frozen onto the claim. WC has NO REPORT
+//    LAG — every claim reports in its own accident year — so there is no
+//    emergence to re-value and no lag for the trend to compound over.
+//
+//    ⚠ THIS POINT USED TO READ "Severity carries no trend at all in this
+//    model", AND THAT WAS FALSE FROM THE COMMIT THAT ADDED wcSeverityTrend.
+//    The trend is defined sixty lines below, applied through trendedMu, and is
+//    what carries WC_SEVERITY_CAP from $85M in year 1 to $117.6M by year 10
+//    (cb00971). The CONCLUSION was right and its stated REASON was not, and the
+//    reason is the part that got copied: the false sentence propagated into
+//    WORKING_PRACTICES and PROJECT_STATE_SUMMARY and had to be corrected twice
+//    downstream (3da9ebb, 9fc6532) while this line still said it.
+//
+//    WHAT IS ABSENT IS A LAG, NOT A TREND. The two are separate facts and
+//    collapsing them is what made this wrong:
+//        (1 + r)^L         L a DRAWN lag           — divergent, needs a bound
+//        (1 + r)^(year-1)  year a bounded integer  — deterministic and finite
+//    WC trends through the second form only. Trending severity over a lag
+//    instead would make E[(1 + r)^lag] over an unbounded lognormal DIVERGENT,
+//    not merely large, which is precisely why the retired presumption process
+//    had to bound its lag at 40 years. That hazard is real and is why no lag
+//    may be reintroduced without the bound and the matching truncated density
+//    in the analytic — see WORKING_PRACTICES' truncate-and-renormalize rule.
+//    The severity fit itself stays exactly as fitted.
 
 import type {
   Claim,
