@@ -356,6 +356,10 @@ const nowKeys = new Set(Object.keys(out));
 const added = [...nowKeys].filter(k => !baseKeys.has(k));
 const removed = [...baseKeys].filter(k => !nowKeys.has(k));
 const changed = [...nowKeys].filter(k => baseKeys.has(k) && base[k] !== out[k]);
+// Raised by the ABSOLUTE identity check below. Kept separate from `changed` so
+// the two failure modes stay distinguishable in the exit code's reason: values
+// moving is one thing, an identity being untrue is another.
+let identityFailures = 0;
 
 const fieldNames = (keys: string[]) => [...new Set(keys.map(k => k.split('|').pop()!))].sort();
 
@@ -464,9 +468,214 @@ if (changed.length === 0) {
   }
 }
 
-if (changed.length === 0) {
+
+// ============================================================================
+// ABSOLUTE IDENTITY CHECK — is the identity TRUE, not merely UNMOVED?
+//
+// ⚠ THIS RUNS UNCONDITIONALLY, AND THAT IS THE WHOLE POINT. The BROKEN
+// IDENTITIES rule above walks the CHANGED list, so it answers "did this
+// depart from baseline" and can only speak when something departed. Two
+// consequences, both real:
+//
+//   1. WHEN NOTHING CHANGES IT CANNOT FIRE, so its silence is not evidence.
+//      The entire v20 -> v21 range moved 0 of 15,150 values across seven
+//      commits. The relative rule was silent for all seven, and that silence
+//      said nothing whatever about whether expectedCombinedRatio was still 1.
+//      Verifying it by hand at the v21 recapture was the right instinct and is
+//      the reason this section exists.
+//
+//   2. AN IDENTITY ALREADY WRONG WHEN FIRST BASELINED STAYS WRONG AND SILENT
+//      FOREVER. The relative rule requires the baseline to be uniform to arm
+//      at all, so a partly-broken identity is invisible to it by construction
+//      — it is not in the changed list and it was never uniform.
+//
+// So: candidates are DETECTED from the baseline (the same uniformity test the
+// relative rule uses) and then ASSERTED against the CURRENT capture, every run,
+// whether or not anything moved. Case 2 is covered by the SUSPECTED PARTIAL
+// section below, which looks for near-uniformity rather than uniformity.
+//
+// ⚠ AND BIT-EXACTNESS IS CLASSIFIED, NOT PASSED. A genuine identity computed
+// two ways carries float noise: expectedCombinedRatio sums per-line terms and
+// lands within 2.22e-16 of 1, never ON it. A field that is bit-exact on every
+// single instance was not computed twice — it is a value minus itself, an
+// inactive quantity, or a pinned constant. That is how Expense Ratio Check
+// Difference was caught: exactly 0.0 on 480 of 480 scope-years, against a
+// neighbour showing real 1e-16 noise on 289 of the same 480. Passing a
+// tautology as a satisfied identity is the failure mode this whole file exists
+// to prevent, so bit-exactness is reported separately rather than counted as a
+// pass.
+//
+// ⚠ SCOPE LIMIT, SO THE PRECEDENT IS NOT MISREAD. This section sees RESULTSET
+// FIELDS. Expense Ratio Check Difference is an AUDIT-PAGE ROW computed inside
+// CalculationAuditPage, so it would never have appeared here — it is named above
+// as the archetype of the pattern, not as something this check would have
+// caught. Audit-page reconciliations are covered by audit-formula-check, which
+// gained its own arms and prose checks for the same reason. Two files, two
+// populations; neither is a substitute for the other.
+// ============================================================================
+{
+  const IDENTITY_EPS_ABS = 1e-12;
+  const byFieldAll = (keys: string[]) => {
+    const m = new Map<string, string[]>();
+    for (const k of keys) {
+      const f = k.split('|').pop()!;
+      if (!m.has(f)) m.set(f, []);
+      m.get(f)!.push(k);
+    }
+    return m;
+  };
+  const baseFields = byFieldAll([...baseKeys]);
+  const nowFields = byFieldAll([...nowKeys]);
+
+  // ⚠ DETECT LOOSE, ASSERT TIGHT — and that asymmetry is what closes the "already
+  // wrong when first baselined" gap. If detection used the SAME 1e-12 band as the
+  // assertion, a field baselined at a uniform 1.000000001 would not be recognised
+  // as an identity at all: not in the changed list (it never moves), not uniform
+  // at 1 (it is uniform at 1+1e-9), and therefore silent in both rules forever.
+  // Recognising it as identity-SHAPED at 1e-6 and then holding it to 1e-12 is what
+  // makes that case fail instead.
+  //
+  // THE BAND IS ONE-SIDED ON PURPOSE. A value that should be 1 is a RATIO, so a
+  // dimensionless band is meaningful. A value that should be 0 has UNITS — there
+  // is no scale-free epsilon for it — so zero keeps an EXACT test on both sides,
+  // the same reasoning the relative rule above already records.
+  const DETECT_BAND = 1e-6;
+  const shapedLikeOne = (v: number) => Math.abs(v - 1) <= DETECT_BAND;
+  const nearOne = (v: number) => Math.abs(v - 1) <= IDENTITY_EPS_ABS;
+  const nearZero = (v: number) => v === 0;
+
+  type Verdict = {
+    field: string; target: 0 | 1; n: number;
+    violations: number; worst: number;
+    bitExact: number; noisy: number;
+  };
+  const held: Verdict[] = [];
+  const violated: Verdict[] = [];
+  const tautologies: Verdict[] = [];
+
+  for (const [f, bKeys] of baseFields) {
+    // DETECTED FROM THE BASELINE — the same uniformity test the relative rule
+    // applies, so the two rules agree on what an identity IS and differ only in
+    // what they do about it.
+    const allOne = bKeys.length > 0 && bKeys.every(k => shapedLikeOne(base[k]));
+    const allZero = bKeys.length > 0 && bKeys.every(k => nearZero(base[k]));
+    if (!allOne && !allZero) continue;
+    const target: 0 | 1 = allOne ? 1 : 0;
+
+    // ASSERTED AGAINST THE CURRENT CAPTURE, every instance, every run.
+    const cur = nowFields.get(f) ?? [];
+    if (cur.length === 0) continue;   // field removed; the shape report covers that
+    const bad = cur.filter(k => target === 1 ? !nearOne(out[k]) : !nearZero(out[k]));
+    const bitExact = cur.filter(k => out[k] === target).length;
+    const v: Verdict = {
+      field: f, target, n: cur.length,
+      violations: bad.length,
+      worst: bad.length ? Math.max(...bad.map(k => Math.abs(out[k] - target))) : 0,
+      bitExact, noisy: cur.length - bitExact,
+    };
+    if (bad.length > 0) violated.push(v);
+    else if (bitExact === cur.length) tautologies.push(v);
+    else held.push(v);
+  }
+
+  const total = held.length + violated.length + tautologies.length;
+  console.log(`\nABSOLUTE IDENTITIES — asserted every run, independent of what moved:`);
+  console.log(`  ${total} field(s) detected as an identity in the baseline (uniformly 1 or uniformly 0).`);
+
+  if (held.length) {
+    console.log(`\n  HELD, computed two ways (float noise present — the signature of a real identity):`);
+    for (const v of held.sort((a, b) => a.field.localeCompare(b.field))) {
+      console.log(`    ${v.field.padEnd(34)} = ${v.target} on all ${String(v.n).padStart(4)} instances   ` +
+        `${v.noisy} carry noise, ${v.bitExact} bit-exact`);
+    }
+  }
+
+  if (tautologies.length) {
+    console.log(`\n  ⚠ BIT-EXACT ON EVERY INSTANCE — reported, NOT passed as satisfied identities.`);
+    console.log(`  A quantity computed two ways does not land bit-exactly every time. Each of these`);
+    console.log(`  is a value minus itself, a quantity that is simply inactive, or a pinned constant`);
+    console.log(`  — and only reading it says which. A reconciliation-shaped NAME on this list is the`);
+    console.log(`  strong signal: that is what Expense Ratio Check Difference looked like.`);
+    const looksLikeCheck = (f: string) => /Difference|Check|TieOut|tieOut/.test(f);
+    const suspicious = tautologies.filter(v => looksLikeCheck(v.field));
+    const inactive = tautologies.filter(v => !looksLikeCheck(v.field));
+    if (suspicious.length) {
+      console.log(`\n    RECONCILIATION-SHAPED (a check that may be unable to fail):`);
+      for (const v of suspicious.sort((a, b) => a.field.localeCompare(b.field))) {
+        console.log(`      ${v.field.padEnd(34)} = ${v.target} bit-exactly on all ${v.n} instances`);
+      }
+    }
+    if (inactive.length) {
+      console.log(`\n    NOT RECONCILIATION-SHAPED (more likely inactive or pinned, still unverified):`);
+      for (const v of inactive.sort((a, b) => a.field.localeCompare(b.field))) {
+        console.log(`      ${v.field.padEnd(34)} = ${v.target} bit-exactly on all ${v.n} instances`);
+      }
+    }
+  }
+
+  if (violated.length) {
+    identityFailures += violated.length;
+    console.log(`\n  ⚠ IDENTITY VIOLATED — a field the baseline holds to be exactly ${''}1 or 0 does not read it NOW.`);
+    console.log(`  This fires whether or not the field moved, which is what the relative rule cannot do.`);
+    for (const v of violated.sort((a, b) => b.worst - a.worst)) {
+      console.log(`    ${v.field.padEnd(34)} should be ${v.target}; ${v.violations} of ${v.n} instances are not, ` +
+        `worst departure ${v.worst.toExponential(2)}`);
+    }
+  }
+
+  // --- CASE 2: an identity that was ALREADY WRONG when first baselined -------
+  //
+  // Uniformity detection cannot see this by construction, so near-uniformity is
+  // the only available signal. NOT GATED: a field that is merely usually-zero
+  // (dividends, assessments, shock loss at default decisions) looks identical
+  // from here, and gating on it would be the cry-wolf failure this file already
+  // warns about twice. Reported so a real one can be recognised.
+  const NEAR = 0.90;
+  const partial: { field: string; target: 0 | 1; at: number; n: number; worst: number }[] = [];
+  for (const [f, cur] of nowFields) {
+    if (cur.length < 10) continue;
+    for (const target of [1, 0] as const) {
+      const hit = cur.filter(k => target === 1 ? nearOne(out[k]) : nearZero(out[k]));
+      if (hit.length === cur.length) continue;               // uniform: handled above
+      if (hit.length / cur.length < NEAR) continue;          // not identity-shaped
+      const off = cur.filter(k => !hit.includes(k));
+      partial.push({ field: f, target, at: hit.length, n: cur.length, worst: Math.max(...off.map(k => Math.abs(out[k] - target))) });
+    }
+  }
+  if (partial.length) {
+    console.log(`\n  SUSPECTED PARTIAL IDENTITY — ${NEAR * 100}%+ of instances sit exactly on 1 or 0 and the rest`);
+    console.log(`  do not. This is the shape of an identity that was ALREADY BROKEN when it was first`);
+    console.log(`  baselined, which uniformity detection can never see. NOT GATED: a merely`);
+    console.log(`  usually-zero quantity looks the same from here.`);
+    for (const p of partial.sort((a, b) => b.at / b.n - a.at / a.n)) {
+      console.log(`    ${p.field.padEnd(34)} ${p.at}/${p.n} at exactly ${p.target}, worst outlier ${p.worst.toExponential(2)}`);
+    }
+  } else {
+    console.log(`\n  SUSPECTED PARTIAL IDENTITY: none — no field sits on 1 or 0 for ${NEAR * 100}%+ of its`);
+    console.log(`  instances without doing so for all of them.`);
+  }
+}
+
+// ⚠ TWO GATES, TWO QUESTIONS, AND BOTH ARE KEPT. The relative rule answers "did
+// this MOVE"; the absolute one answers "is this TRUE". Neither subsumes the
+// other: a range that moves nothing silences the first, and an identity broken
+// before it was ever baselined is invisible to it permanently. The v20 -> v21
+// range is exactly the case where only the second one speaks.
+// ⚠ THE TWO VERDICTS ARE STATED SEPARATELY BECAUSE THEY CAN DISAGREE, and the
+// disagreement is the interesting case: "no value moved" and "an identity is
+// false" are both true at once when a broken identity was baselined. Printing an
+// unqualified HOLDS above a failure line would be the report contradicting
+// itself.
+const movedVerdict = changed.length === 0
+  ? `VALUES UNMOVED${added.length || removed.length ? ' (shape changed — expected for a display-layer fix)' : ''}`
+  : 'VALUES MOVED — if this was meant to be a display-only change, it was not one';
+if (identityFailures > 0) {
+  console.log(`\n${movedVerdict}, BUT ${identityFailures} ABSOLUTE IDENTITY FAILURE(S):`);
+  console.log(`a field that must read exactly 1 or 0 does not. An unmoved wrong value is still`);
+  console.log(`wrong — this is precisely what the relative rule cannot report.`);
+} else if (changed.length === 0) {
   console.log(`\nVALUE IDENTITY HOLDS${added.length || removed.length ? ' (shape changed — expected for a display-layer fix)' : ''}.`);
 } else {
-  console.log(`\nVALUES MOVED — if this was meant to be a display-only change, it was not one.`);
+  console.log(`\n${movedVerdict}.`);
 }
-process.exitCode = changed.length === 0 ? 0 : 1;
+process.exitCode = (changed.length === 0 && identityFailures === 0) ? 0 : 1;
