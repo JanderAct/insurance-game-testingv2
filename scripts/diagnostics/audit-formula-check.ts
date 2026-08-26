@@ -23,6 +23,33 @@
 // flat epsilon would either miss real defects on large rows or fail correct
 // ones on small rows.
 //
+// ============================================================================
+// ⚠ TWO ARMS, BECAUSE ONE ARM WAS MEASURING THE DEFAULTS AND CALLING IT THE
+// PAGE. This check ran only at default decisions and reported ONE defect. The
+// identical evaluation under squeezed funding reports ELEVEN. Same rows, same
+// bounds, same code — the arm was the whole difference.
+//
+// WHY THE DEFAULT HIDES THEM, and it is not bad luck:
+//
+//   defaultLineDecisionSet sets fundingAtExpected on every line, which pins
+//   selectedFundingCLF to exactly 1.000 EVERYWHERE. Four pool-scope rows read
+//   `first.selectedFundingCLF` as a pool placeholder, and a placeholder taken
+//   from one line is only right when every line agrees. At defaults they do.
+//
+//   The same flag makes IBNER's bookingBias exactly 0, so two reserve rows
+//   that omit the (1 - bias) term are right for the same accidental reason.
+//
+// A row that is correct only because three lines happen to be identical is not
+// a correct row; it is an untested one. The squeezed arm separates the two by
+// driving each line to its OWN reachable minimum stop, which spreads the CLFs
+// apart AND turns the bias on.
+//
+// ⚠ EACH LINE'S OWN MINIMUM, NOT A FLAT VALUE. WC's slider reaches stop 0.10
+// (WC_FUNDING_CONFIDENCE_RANGE); GL and Property stop at 0.30 (SLIDER_RANGES).
+// Driving all three to 0.10 would test Property at a booking bias the UI cannot
+// produce, which overstates the failure and tests nothing a player can reach.
+// ============================================================================
+//
 // So each row gets a bound computed from its OWN operands by first-order
 // sensitivity propagation:
 //
@@ -39,13 +66,16 @@ import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
+import { SLIDER_RANGES, WC_FUNDING_CONFIDENCE_RANGE } from '../../src/data/defaultAssumptions';
 import {
   evaluateFormula, renderFormula, computeAuditChecks, buildSupportingRows,
   buildRevExpRows, buildNetPositionRows, buildCashInvestmentRows,
   type AuditRow, type FormulaSpec, type FormulaTerm,
 } from '../../src/pages/CalculationAuditPage';
 import { RESULT_METRICS } from '../../src/utils/resultMetrics';
-import type { CoverageLine, GameState, LineResultSet, LineView, ResultSet } from '../../src/types/simulation';
+import type {
+  CoverageLine, DecisionSet, GameState, LineResultSet, LineView, ResultSet,
+} from '../../src/types/simulation';
 
 const GAMES = Number(process.env.GAMES ?? 4);
 const YEARS = Number(process.env.YEARS ?? 4);
@@ -56,6 +86,65 @@ const CONFIGS: { lines: CoverageLine[]; name: string }[] = [
   { lines: ['WC', 'GL', 'Property'], name: 'tri' },
 ];
 const GATE_MULTIPLE = 3;
+
+// Each line's own reachable minimum stop — see the header on why this is not a
+// flat number.
+const MIN_STOP: Record<string, number> = {
+  WC: WC_FUNDING_CONFIDENCE_RANGE.min,
+  GL: SLIDER_RANGES.fundingConfidenceLevel.min,
+  Property: SLIDER_RANGES.fundingConfidenceLevel.min,
+};
+
+// ⚠ IS A THIRD ARM WARRANTED? YES, BUT NOT ANOTHER FUNDING ONE — MEASURED, NOT
+// GUESSED. Both arms move the same slider, so both leave every other decision
+// at its default. Counting observable conditions over 36 pool-years per arm:
+//
+//   condition                        defaults  squeezed
+//   shock year                             36        36
+//   adverse development                    16        33
+//   loss above tower top                    4         4
+//   capital thin / deficient                5         7
+//   negative surplus                        1         5
+//   ---- never reached by EITHER arm ----------------------------
+//   dividend paid                           0         0
+//   assessment levied                       0         0
+//   risk-control spend                      0         0
+//   aggregate stop-loss paid                0         0
+//   no tower layer paid (all declined)      0         0
+//   no reinsurance recovery at all          0         0
+//   inter-line loan outstanding             0         0
+//
+// The squeeze widens the loss/capital conditions — adverse development doubles,
+// negative surplus goes 1 -> 5 — but every unreached row is DECISION-gated, not
+// funding-gated: dividends, assessments, risk control, the aggregate purchase
+// and declining layers are all separate controls the defaults pin at zero.
+//
+// So the gap a third arm would close is a DECISIONS arm, and the rows it would
+// reach are nameable: `Member dividends & returned premium`, `Member
+// assessments` and `Loss prevention expenses` are all identically $0 in both
+// arms today (a sum of zeros reconciles trivially and proves nothing), and
+// Reinsurance Recovery's "+ aggregate stop-loss" and "0 layer(s) paid" text
+// branches never render at all. NOT ADDED HERE: this commit is the funding
+// dimension, and adding a second dimension in the same pass would make it
+// impossible to say which arm found what.
+interface Arm { name: string; why: string; decisions: (d: DecisionSet, lines: CoverageLine[]) => DecisionSet }
+const ARMS: Arm[] = [
+  {
+    name: 'defaults',
+    why: 'fundingAtExpected on every line: CLF pinned to 1.000, bookingBias 0',
+    decisions: d => d,
+  },
+  {
+    name: 'squeezed',
+    why: 'every line at its own minimum stop: CLFs spread apart, bookingBias live',
+    decisions: (d, lines) => ({
+      ...d,
+      byLine: Object.fromEntries(lines.map(l =>
+        [l, { ...d.byLine[l], fundingConfidenceLevel: MIN_STOP[l], fundingAtExpected: false }],
+      )) as never,
+    }),
+  },
+];
 
 // Display/storage quantum per term format. These are the precisions the page
 // itself renders at (fmtTermValue) and, for `exposure` and `plain`, also the
@@ -120,6 +209,7 @@ function toleranceFor(spec: FormulaSpec): number {
 }
 
 interface Finding {
+  arm: string;
   config: string; seed: string; year: number; scope: string; section: string;
   metric: string; kind: string; evaluated: number; stated: number;
   gap: number; bound: number; ratio: number; formula: string;
@@ -140,7 +230,7 @@ const secProse: Record<string, number> = {};
 // genuinely unguarded rows, and naming them is the point of the exercise.
 const secProseUnchecked: Record<string, number> = {};
 
-function auditRows(section: string, rows: AuditRow[], ctx: { config: string; seed: string; year: number; scope: string }) {
+function auditRows(section: string, rows: AuditRow[], ctx: { arm: string; config: string; seed: string; year: number; scope: string }) {
   for (const row of rows) {
     if (row.kind === 'section') continue;
     const spec = row.formula;
@@ -187,8 +277,161 @@ function auditRows(section: string, rows: AuditRow[], ctx: { config: string; see
   }
 }
 
+
+// ============================================================================
+// CAN A READER REPRODUCE THE ROW BY HAND?
+//
+// Everything above works from `numericValue` and is therefore BLIND TO
+// FORMATTING. A row can reconcile perfectly here and still be unusable on
+// screen, because what the page PRINTS is not what it MULTIPLIED.
+//
+// ⚠ WORKING_PRACTICES ALREADY CARRIES THIS RULE. It was written after two
+// occurrences found by hand — a rate shown at a precision too coarse to
+// hand-multiply back to its own row. This is the third, the first found
+// mechanically, and it is a different mechanism from the first two: not lost
+// PRECISION but a lost SCALE. `exposure` terms render as `toFixed(2) + "M"`
+// while evalTerm returns the bare number, so a reader who reads the M — and
+// there is no reason not to — is out by a factor of 10^6.
+//
+// So this section re-does the arithmetic the way a reader with a calculator
+// would: take each operand AS PRINTED, parse it as printed (a "%" is a
+// percent, an "M" is a million), combine them as the layout shows, and compare
+// against the row's PRINTED value.
+//
+// ⚠ IT USES THE PAGE'S OWN RENDERER, never a copy. renderFormula on a
+// single-factor product returns exactly that term's rendered string, so the
+// strings tested here are the strings shipped. A duplicated formatter in this
+// file would drift from the page's, which is the very defect class this
+// project keeps rediscovering.
+//
+// THE BOUND IS THE DISPLAY'S OWN ROUNDING, inferred from each printed string:
+// decimals give the quantum, the suffix scales it ("21068.77M" -> 0.01 x 10^6).
+// Propagated through the layout exactly as toleranceFor does, plus the printed
+// result's own quantum. Anything past that is not rounding — it is a row a
+// reader cannot check.
+// ============================================================================
+
+// Parse a printed operand the way a reader does. Returns null when the string
+// states no number (a status word, a blank grouping header, "n/a").
+function parsePrinted(raw: string): { value: number; quantum: number } | null {
+  let t = raw.trim();
+  // Drop a trailing "(label)" — a reader reads it as annotation, not arithmetic.
+  t = t.replace(/\s*\([^()]*[A-Za-z][^()]*\)\s*$/, '').trim();
+  // An echo prints "value — prose"; the number is the part before the dash.
+  const dash = t.indexOf(' — ');
+  if (dash > 0) t = t.slice(0, dash).trim();
+  const m = t.match(/^\(?(−|-)?\$?\s*([\d,]+(?:\.(\d+))?)\s*([%MBK]?)\)?$/);
+  if (!m) return null;
+  let v = parseFloat(m[2].replace(/,/g, ''));
+  let q = m[3] ? Math.pow(10, -m[3].length) : 1;
+  const suffix = m[4];
+  if (suffix === '%') { v /= 100; q /= 100; }
+  else if (suffix === 'M') { v *= 1e6; q *= 1e6; }
+  else if (suffix === 'B') { v *= 1e9; q *= 1e9; }
+  else if (suffix === 'K') { v *= 1e3; q *= 1e3; }
+  if (m[1]) v = -v;
+  return { value: v, quantum: q };
+}
+
+// A term as the page prints it, via the page's own renderer.
+const printTerm = (t: FormulaTerm): string => renderFormula({ kind: 'product', factors: [t] });
+
+// Hand-evaluate a leaf or nested term from its printed form.
+function handTerm(t: FormulaTerm): { value: number; quantum: number } | null {
+  if ('product' in t) {
+    let v = 1, rel = 0;
+    for (const x of t.product) {
+      const p = handTerm(x);
+      if (!p) return null;
+      v *= p.value;
+      if (Math.abs(p.value) > 0) rel += p.quantum / Math.abs(p.value);
+    }
+    if (t.negate) v = -v;
+    return { value: v, quantum: Math.abs(v) * rel };
+  }
+  return parsePrinted(printTerm(t));
+}
+
+type HandResult = { value: number; quantum: number } | null;
+function handEvaluate(spec: FormulaSpec): HandResult {
+  switch (spec.kind) {
+    case 'product': {
+      let v = 1, rel = 0;
+      for (const t of spec.factors) {
+        const p = handTerm(t);
+        if (!p) return null;
+        v *= p.value;
+        if (Math.abs(p.value) > 0) rel += p.quantum / Math.abs(p.value);
+      }
+      return { value: v, quantum: Math.abs(v) * rel };
+    }
+    case 'sum': {
+      let v = 0, q = 0;
+      for (const t of spec.terms) {
+        const p = handTerm(t);
+        if (!p) return null;
+        v += p.value; q += p.quantum;
+      }
+      return { value: v, quantum: q };
+    }
+    case 'ratio': {
+      const n = handTerm(spec.numerator), d = handTerm(spec.denominator);
+      if (!n || !d || d.value === 0) return null;
+      const v = n.value / d.value;
+      return { value: v, quantum: Math.abs(n.quantum / d.value) + Math.abs((n.value * d.quantum) / (d.value * d.value)) };
+    }
+    case 'echo': {
+      const p = parsePrinted(renderFormula(spec));
+      return p;
+    }
+    default: return null;
+  }
+}
+
+// Rows a reader legitimately cannot hand-check, named with the reason rather
+// than quietly dropped. Each is a DELIBERATE exclusion, not a loosened bound.
+const HAND_EXCLUSIONS: { why: string; test: (row: AuditRow, spec: FormulaSpec) => boolean }[] = [
+  { why: 'states no arithmetic (prose or a simulated draw)',
+    test: (_r, s) => s.kind === 'text' || s.kind === 'simulated' },
+  { why: 'prints no number in its Value column (grouping header, or n/a at this scope)',
+    test: r => parsePrinted(r.value) === null },
+];
+
+interface HandFinding {
+  arm: string; scope: string; config: string; section: string; metric: string;
+  printed: string; printedValue: string; hand: number; stated: number; gap: number; bound: number; ratio: number;
+}
+const handFindings: HandFinding[] = [];
+let handChecked = 0;
+const handExcluded: Record<string, number> = {};
+
+function handAudit(section: string, rows: AuditRow[], ctx: { arm: string; config: string; scope: string }) {
+  for (const row of rows) {
+    if (row.kind === 'section') continue;
+    const spec: FormulaSpec = typeof row.formula === 'string' ? { kind: 'text', text: row.formula } : row.formula;
+    const ex = HAND_EXCLUSIONS.find(e => e.test(row, spec));
+    if (ex) { handExcluded[ex.why] = (handExcluded[ex.why] ?? 0) + 1; continue; }
+    const hand = handEvaluate(spec);
+    if (!hand) { handExcluded['an operand prints no parseable number'] = (handExcluded['an operand prints no parseable number'] ?? 0) + 1; continue; }
+    const printedValue = parsePrinted(row.value);
+    if (!printedValue) { handExcluded['prints no number in its Value column (grouping header, or n/a at this scope)'] = (handExcluded['prints no number in its Value column (grouping header, or n/a at this scope)'] ?? 0) + 1; continue; }
+    handChecked++;
+    const gap = Math.abs(hand.value - printedValue.value);
+    const bound = Math.max(hand.quantum + printedValue.quantum, Math.abs(printedValue.value) * 1e-12, 1e-9);
+    const ratio = gap / bound;
+    if (ratio > GATE_MULTIPLE) {
+      handFindings.push({
+        ...ctx, section, metric: row.metric,
+        printed: renderFormula(spec), printedValue: row.value,
+        hand: hand.value, stated: printedValue.value, gap, bound, ratio,
+      });
+    }
+  }
+}
+
 console.log('=== AUDIT PAGE FORMULA RECONCILIATION ===\n');
 
+for (const arm of ARMS) {
 for (const { lines, name } of CONFIGS) {
   for (let g = 0; g < GAMES; g++) {
     const id = `AFC${name}${g}`;
@@ -200,7 +443,7 @@ for (const { lines, name } of CONFIGS) {
       poolState, lockedResults: [], currentDecisions: defaultDecisionSet(1), priorHistory,
     };
     for (let y = 1; y <= YEARS; y++) {
-      const p = processYear(gs, defaultDecisionSet(y));
+      const p = processYear(gs, arm.decisions(defaultDecisionSet(y), lines));
       const poolResult = p.result as ResultSet;
       // Every scope the page can be viewed at: the pool tab and each line tab.
       const scopes: LineView[] = ['pool', ...lines];
@@ -208,30 +451,42 @@ for (const { lines, name } of CONFIGS) {
         const isPoolView = scope === 'pool';
         const result = isPoolView ? poolResult : poolResult.byLine[scope as CoverageLine];
         if (!result) continue;
-        const ctx = { config: name, seed: id, year: y, scope: String(scope) };
+        const ctx = { arm: arm.name, config: name, seed: id, year: y, scope: String(scope) };
         const checks = computeAuditChecks(poolResult, scope, inst.seed);
 
         const sup = buildSupportingRows(poolResult, scope);
         auditRows('Exposure and Membership', sup.exposureRows, ctx);
+        handAudit('Exposure and Membership', sup.exposureRows, ctx);
         auditRows('Funding Rate Build-Up', sup.rateRows, ctx);
+        handAudit('Funding Rate Build-Up', sup.rateRows, ctx);
         auditRows('Losses and Reinsurance', sup.lossRows, ctx);
+        handAudit('Losses and Reinsurance', sup.lossRows, ctx);
         auditRows('Reserve Rollforward', sup.reserveRows, ctx);
+        handAudit('Reserve Rollforward', sup.reserveRows, ctx);
         auditRows('Ratios', sup.ratioRows, ctx);
+        handAudit('Ratios', sup.ratioRows, ctx);
         auditRows('Capital and Reserve Confidence', sup.capitalRows, ctx);
+        handAudit('Capital and Reserve Confidence', sup.capitalRows, ctx);
 
-        auditRows('Statement of Revenues, Expenses & Changes in Net Position',
-          buildRevExpRows(poolResult, scope, checks), ctx);
+        const revExp = buildRevExpRows(poolResult, scope, checks);
+        const netPos = buildNetPositionRows(poolResult, scope, checks);
+        const cashInv = buildCashInvestmentRows(poolResult, scope, checks);
+        auditRows('Statement of Revenues, Expenses & Changes in Net Position', revExp, ctx);
         // ⚠ THE TWO SECTIONS NEVER READ ROW-BY-ROW, now covered by construction.
-        auditRows('Statement of Net Position', buildNetPositionRows(poolResult, scope, checks), ctx);
-        auditRows('Cash & Investments Rollforward', buildCashInvestmentRows(poolResult, scope, checks), ctx);
+        auditRows('Statement of Net Position', netPos, ctx);
+        auditRows('Cash & Investments Rollforward', cashInv, ctx);
+        handAudit('Statement of Revenues, Expenses & Changes in Net Position', revExp, ctx);
+        handAudit('Statement of Net Position', netPos, ctx);
+        handAudit('Cash & Investments Rollforward', cashInv, ctx);
 
       }
       gs = { ...gs, currentYearNumber: y + 1, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result] };
     }
   }
 }
+}
 
-console.log(`Evaluated ${checked.toLocaleString()} formula rows across ${CONFIGS.length} configs x ${GAMES} seeds x ${YEARS} years,`);
+console.log(`Evaluated ${checked.toLocaleString()} formula rows across ${ARMS.length} arms x ${CONFIGS.length} configs x ${GAMES} seeds x ${YEARS} years,`);
 console.log(`at every scope the page can be viewed at (pool + each active line).\n`);
 console.log('  by formula kind: ' + Object.entries(byKind).map(([k, v]) => `${k} ${v}`).join(', '));
 console.log('  not arithmetic (correctly unreachable): ' +
@@ -290,10 +545,16 @@ function report(list: Finding[], heading: string) {
   console.log(`\n${heading} — ${list.length} row-instance(s) across ${worstByMetric.size} distinct row(s):\n`);
   for (const [key, f] of [...worstByMetric.entries()].sort((a, b) => b[1].ratio - a[1].ratio)) {
     const [section, metric] = key.split('|');
-    const scopes = [...new Set(list.filter(x => `${x.section}|${x.metric}` === key).map(x => x.scope))].sort();
-    const configs = [...new Set(list.filter(x => `${x.section}|${x.metric}` === key).map(x => x.config))].sort();
+    const mine = list.filter(x => `${x.section}|${x.metric}` === key);
+    const scopes = [...new Set(mine.map(x => x.scope))].sort();
+    const configs = [...new Set(mine.map(x => x.config))].sort();
+    const arms = [...new Set(mine.map(x => x.arm))].sort();
     console.log(`  ${section}`);
     console.log(`    ${metric}   [${f.kind}]   ${countByMetric.get(key)} instance(s)`);
+    // ⚠ AN ARM LIST OF ONLY `squeezed` IS THE INTERESTING CASE: the row is
+    // correct at defaults and wrong the moment a player moves the slider, which
+    // is precisely what a defaults-only run could not say.
+    console.log(`      arms: ${arms.join(', ')}${arms.length === 1 && arms[0] === 'squeezed' ? '   <- invisible at defaults' : ''}`);
     console.log(`      formula evaluates to  ${f.evaluated.toLocaleString(undefined, { maximumFractionDigits: 4 })}`);
     console.log(`      row states            ${f.stated.toLocaleString(undefined, { maximumFractionDigits: 4 })}`);
     console.log(`      gap ${f.gap.toLocaleString(undefined, { maximumFractionDigits: 4 })}  vs bound ${f.bound.toLocaleString(undefined, { maximumFractionDigits: 4 })}  = ${f.ratio.toFixed(1)}x`);
@@ -349,10 +610,22 @@ const EXPORT_IDENTITIES: {
     check: v => [v.grossUltimateLoss - v.reinsuranceRecovery, v.netUltimateLoss] },
   { label: 'endingNetReserve = beginningNetReserve + netUltimate - development - netPaid',
     parts: ['endingNetReserve', 'beginningNetReserve', 'netUltimateLoss', 'priorYearDevelopment', 'netPaidLosses'],
-    // The page declares a capped variance on this same identity (a closed
-    // cohort's residual floored to zero). Honour that cap here rather than
-    // re-litigating a decision already taken and documented.
-    bound: 10_000, why: 'the page\'s own declared closed-cohort variance cap',
+    // ⚠ THIS BOUND WAS $10,000 AND IS NOW THE ROUNDING FLOOR, BECAUSE THE
+    // VARIANCE IT ALLOWED FOR NO LONGER EXISTS. It honoured the page's declared
+    // closed-cohort cap: the old mechanism marked a cohort closed at
+    // newUnpaid < 1000 and DROPPED it the following year, so up to $1,000 of
+    // booked liability left the rollforward and the identity genuinely could
+    // not close. IBNER pays that residual out instead — closing moves the
+    // remainder from unpaid to paid and is ultimate-neutral — so the identity
+    // is now EXACT. Measured at $0.0000 worst across 1,920 scope-years on the
+    // engine fields.
+    //
+    // A $10,000 allowance on an identity that closes exactly would hide a
+    // $9,999 defect, and this is the FOURTH tolerance in this project found
+    // sitting on a provable identity after the reason for it was removed. The
+    // bound is now derived exactly as its three neighbours are — five columns,
+    // each rounded to whole dollars by the export — and nothing else.
+    bound: 5 * 0.5, why: '5 columns each rounded to whole dollars in the export; the identity itself is exact',
     check: v => [v.beginningNetReserve + v.netUltimateLoss - v.priorYearDevelopment - v.netPaidLosses, v.endingNetReserve] },
 ];
 
@@ -410,8 +683,75 @@ console.log('  fields, so it checks what actually ships.\n');
 report(defects, 'DEFECTS — formula does not produce the stated value');
 report(declared, 'DECLARED VARIANCE — the row documents a capped tolerance (not gated)');
 
-if (defects.length === 0) {
-  console.log('\nALL FORMULA ROWS RECONCILE within their own derived bounds.');
+// --- WHICH ARM SAW WHAT --------------------------------------------------
+//
+// The split is the finding, not bookkeeping: a row failing ONLY under squeeze
+// is one a defaults-only run declared healthy.
+{
+  const byRow = new Map<string, Set<string>>();
+  for (const f of defects) {
+    const k = `${f.section}|${f.metric}`;
+    if (!byRow.has(k)) byRow.set(k, new Set());
+    byRow.get(k)!.add(f.arm);
+  }
+  const both = [...byRow.values()].filter(a => a.size === 2).length;
+  const squeezeOnly = [...byRow.values()].filter(a => a.size === 1 && a.has('squeezed')).length;
+  const defaultOnly = [...byRow.values()].filter(a => a.size === 1 && a.has('defaults')).length;
+  console.log('\n--- ARM BREAKDOWN ---');
+  for (const arm of ARMS) {
+    console.log(`  ${arm.name.padEnd(10)} ${String(defects.filter(f => f.arm === arm.name).length).padStart(5)} instance(s)   (${arm.why})`);
+  }
+  console.log(`\n  distinct rows failing in BOTH arms:        ${both}`);
+  console.log(`  distinct rows failing ONLY when squeezed:  ${squeezeOnly}   <- invisible to a defaults-only run`);
+  console.log(`  distinct rows failing ONLY at defaults:    ${defaultOnly}`);
 }
 
-process.exitCode = (defects.length === 0 && failures === 0) ? 0 : 1;
+// --- HAND-MULTIPLICATION -------------------------------------------------
+console.log('\n--- CAN A READER REPRODUCE THE ROW BY HAND? ---');
+console.log('  The operands AS PRINTED, combined as the layout shows, against the value AS');
+console.log('  PRINTED. Bound is the printed strings\' own rounding and nothing else.\n');
+console.log(`  ${handChecked.toLocaleString()} row-instances hand-evaluated.`);
+console.log('  excluded, with reason (a deliberate exclusion, never a loosened bound):');
+for (const [why, n] of Object.entries(handExcluded).sort((a, b) => b[1] - a[1])) {
+  console.log(`    ${String(n).padStart(6)}  ${why}`);
+}
+if (handFindings.length === 0) {
+  console.log('\n  OK — every hand-checkable row reproduces from its printed operands.');
+} else {
+  const worst = new Map<string, HandFinding>();
+  const count = new Map<string, number>();
+  for (const f of handFindings) {
+    const k = `${f.section}|${f.metric}`;
+    const cur = worst.get(k);
+    if (!cur || f.ratio > cur.ratio) worst.set(k, f);
+    count.set(k, (count.get(k) ?? 0) + 1);
+  }
+  // ⚠ THE TWO CHECKS OVERLAP, AND THE NON-OVERLAP IS THE POINT. A row whose
+  // FORMULA is wrong also fails here, because a wrong formula printed is still
+  // a formula a reader cannot reproduce. Rows failing HERE ONLY are the
+  // purely-presentational ones — the arithmetic is right and the printing is
+  // not — and they are the set the formula check can never reach.
+  const defectRows = new Set(defects.map(f => `${f.section}|${f.metric}`));
+  const formattingOnly = [...worst.keys()].filter(k => !defectRows.has(k));
+  console.log(`\n  NOT HAND-REPRODUCIBLE — ${handFindings.length} row-instance(s) across ${worst.size} distinct row(s),`);
+  console.log(`  of which ${formattingOnly.length} fail ONLY here — arithmetic correct, printing not:`);
+  for (const k of formattingOnly) console.log(`      ${k.split('|')[1]}`);
+  console.log('');
+  for (const [k, f] of [...worst.entries()].sort((a, b) => b[1].ratio - a[1].ratio)) {
+    const [section, metric] = k.split('|');
+    const scopes = [...new Set(handFindings.filter(x => `${x.section}|${x.metric}` === k).map(x => x.scope))].sort();
+    console.log(`  ${section}`);
+    console.log(`    ${metric}   ${count.get(k)} instance(s)   scopes: ${scopes.join(', ')}`);
+    console.log(`      printed:      ${f.printed.length > 130 ? f.printed.slice(0, 130) + ' …' : f.printed}`);
+    console.log(`      hand gives:   ${f.hand.toLocaleString(undefined, { maximumFractionDigits: 4 })}`);
+    console.log(`      row prints:   ${f.printedValue}`);
+    console.log(`      off by ${f.ratio > 1e6 ? f.ratio.toExponential(2) : f.ratio.toFixed(1)}x the printed rounding\n`);
+  }
+}
+
+if (defects.length === 0 && handFindings.length === 0 && failures === 0) {
+  console.log('\nALL FORMULA ROWS RECONCILE within their own derived bounds, in both arms,');
+  console.log('and every hand-checkable row reproduces from its printed operands.');
+}
+
+process.exitCode = (defects.length === 0 && handFindings.length === 0 && failures === 0) ? 0 : 1;
