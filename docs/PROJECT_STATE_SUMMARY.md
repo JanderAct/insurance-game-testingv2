@@ -111,10 +111,13 @@ Conventions established by this work and binding on all future lines:
 - **Every trend-compounded lag MUST be truncated and renormalized.** E[(1+r)^lag] over an unbounded
   lognormal lag is mathematically DIVERGENT, not merely large. Bounds that applied while lags existed:
   WC presumption 40y; GL general 10y, EPL/LE 12y, abuse 50y. The analytic expectation must integrate the
-  identical truncated density or the draw/expectation invariant breaks. ⚠ NO CURRENT LINE HAS A REPORT
-  LAG, so nothing exercises this today — it binds the next line that adds one. WC and GL DO still trend
-  severity; they trend it TO THE ACCIDENT YEAR and freeze it, which is why no lag compounding arises.
-  See WORKING_PRACTICES.md — "no lag to trend over" is not "no severity trend".
+  identical truncated density or the draw/expectation invariant breaks. ⚠ THE TRIGGER IS A RANDOM
+  EXPONENT, NOT A TREND: (1+r)^L with L a drawn lag diverges; (1+r)^(year-1) with year a bounded integer
+  is deterministic and finite. All three lines trend severity through the second form — by ACCIDENT YEAR,
+  frozen onto the claim (Property's rate is a named constant at zero, so its factor is exactly 1). None
+  raises a trend to a random power: the mixtures are fitted to settled amounts and the lags they replaced
+  are gone. The rule constrains nothing today and binds the next line that draws a lag and trends across
+  it. See WORKING_PRACTICES.md — "no random exponent" is not "no severity trend".
 - **Risk control applies to the DRAW only, never the pricing expectation** (per finding 17 — applying
   it to both cancels and recreates the no-op).
 - **Pure premium is derived ONCE from the neutral (RQ 5) full-roster analytic expectation and held**,

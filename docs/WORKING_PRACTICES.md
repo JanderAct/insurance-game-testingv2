@@ -211,15 +211,27 @@ Established by the WC and GL builds. Property and any future line inherit these.
   use while lags existed: WC presumption 40y; GL general 10y, EPL/LE 12y, abuse 50y. Prefer
   truncate-and-renormalize (reject and redraw) over a hard `min(lag, cap)`, which piles artificial
   probability mass exactly at the bound.
-  ⚠ THIS IS A RULE FOR THE NEXT LINE THAT TRENDS OVER A LAG, AND NO CURRENT LINE HAS ONE. **The condition
-  the rule needs is a LAG, not a trend.** WC and GL both still trend severity — `wcSeverityTrend`
-  (`wcClaimEngine.ts:171`) shifts mu via `trendedMu` and trends `WC_SEVERITY_CAP` from $85M in year 1 to
-  $117.6M by year 10 — but both trend TO THE ACCIDENT YEAR and freeze there. The report lag is gone from
-  both lines, so there is no gap between accident and settlement year for a trend to compound over, and
-  `E[(1+r)^lag]` cannot arise. See `wcClaimEngine.ts:588` and `glClaimEngine.ts:578`, which state it at
-  the draw sites.
-  ⚠ DO NOT COMPRESS THAT TO "WC CARRIES NO SEVERITY TREND" — that sentence stood here between 101d84e and
-  its correction and it is false. "No lag to trend over" and "no severity trend" are different facts, and
+  ⚠ **THE TRIGGER IS A RANDOM EXPONENT, NOT A TREND.** The divergence above is a property of raising a
+  trend to a DRAWN power, and stating the rule without that is what makes "WC has a severity trend" and
+  "the rule does not apply to WC" look contradictory. They are not:
+
+      (1+r)^L         L a drawn lag           — DIVERGENT, needs the bound and the matching density
+      (1+r)^(year-1)  year a bounded integer  — deterministic and finite, needs nothing
+
+  Every line trends severity through the second form and none through the first. All three route the same
+  accident-year factor `Math.pow(1 + r, max(1, year) - 1)`: `wcSeverityTrend` (`wcClaimEngine.ts:171`,
+  shifting mu via `trendedMu`, and what carries `WC_SEVERITY_CAP` from $85M in year 1 to $117.6M by year
+  10), `glSeverityTrend`, and `propertySeverityTrend`. ⚠ PROPERTY'S RATE IS A NAMED CONSTANT AT ZERO, so
+  its factor is exactly 1 — same shape and same call sites, deliberately not a stub, so turning it on is a
+  one-constant edit. Do not read "all three trend" as "all three trend at a non-zero rate"; that is the
+  same flattening this bullet exists to prevent.
+
+  The trend is applied at the accident year and frozen onto the claim. No line raises a trend to a random
+  power any more: the fitted mixtures are fitted to settled amounts, and the lags they replaced are gone.
+  So the rule constrains NOTHING today and remains binding on any future line that draws a lag and trends
+  across it. See `wcClaimEngine.ts:588` and `glClaimEngine.ts:578`, which state it at the draw sites.
+  ⚠ DO NOT COMPRESS THIS TO "WC CARRIES NO SEVERITY TREND" — that sentence stood here between 101d84e and
+  3da9ebb and it is false. "No random exponent" and "no severity trend" are different facts, and
   collapsing them mis-describes the live severity model. The shared `drawTruncatedLognormal` helper was
   deleted unused: the rule survives, its one-size implementation did not.
 - **Risk control applies to the DRAW only, never to the pricing expectation.** Applying it to both cancels
