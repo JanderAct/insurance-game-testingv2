@@ -109,9 +109,12 @@ Conventions established by this work and binding on all future lines:
   LEVEL trend that establishes a vintage rather than converting between two. Retroactive repricing runs
   through the IBNER development step, which moves the estimate, not the claim. See WORKING_PRACTICES.md.
 - **Every trend-compounded lag MUST be truncated and renormalized.** E[(1+r)^lag] over an unbounded
-  lognormal lag is mathematically DIVERGENT, not merely large. Bounds: WC presumption 40y; GL
-  general 10y, EPL/LE 12y, abuse 50y. The analytic expectation must integrate the identical
-  truncated density or the draw/expectation invariant breaks.
+  lognormal lag is mathematically DIVERGENT, not merely large. Bounds that applied while lags existed:
+  WC presumption 40y; GL general 10y, EPL/LE 12y, abuse 50y. The analytic expectation must integrate the
+  identical truncated density or the draw/expectation invariant breaks. ⚠ NO CURRENT LINE HAS A REPORT
+  LAG, so nothing exercises this today — it binds the next line that adds one. WC and GL DO still trend
+  severity; they trend it TO THE ACCIDENT YEAR and freeze it, which is why no lag compounding arises.
+  See WORKING_PRACTICES.md — "no lag to trend over" is not "no severity trend".
 - **Risk control applies to the DRAW only, never the pricing expectation** (per finding 17 — applying
   it to both cancels and recreates the no-op).
 - **Pure premium is derived ONCE from the neutral (RQ 5) full-roster analytic expectation and held**,

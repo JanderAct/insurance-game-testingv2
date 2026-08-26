@@ -207,13 +207,21 @@ Established by the WC and GL builds. Property and any future line inherit these.
 - **Every trend-compounded lag MUST be truncated and renormalized, and the analytic must integrate the
   IDENTICAL truncated density.** `E[(1+r)^lag]` over an unbounded lognormal lag is mathematically
   DIVERGENT, not merely large — the moment series grows like `exp(k²σ²/2)`. WC presumption at 6% over a
-  lognormal mean-8yr lag returned 6.6e27 from quadrature; the true value is infinite. Bounds in use:
-  GL general 10y, EPL/LE 12y, abuse 50y. Prefer truncate-and-renormalize (reject and redraw) over a hard
-  `min(lag, cap)`, which piles artificial probability mass exactly at the bound.
-  ⚠ THIS IS A RULE FOR THE NEXT LINE THAT TRENDS OVER A LAG, NOT A DESCRIPTION OF WC. WC's 40y presumption
-  bound went with the presumption process; WC severity now carries no trend, so it has no lag to truncate
-  (see the header of `wcClaimEngine.ts`, point 4). The shared `drawTruncatedLognormal` helper was deleted
-  unused along with it — the rule survives, its one-size implementation did not.
+  lognormal mean-8yr lag returned 6.6e27 from quadrature; the true value is infinite. Bounds that were in
+  use while lags existed: WC presumption 40y; GL general 10y, EPL/LE 12y, abuse 50y. Prefer
+  truncate-and-renormalize (reject and redraw) over a hard `min(lag, cap)`, which piles artificial
+  probability mass exactly at the bound.
+  ⚠ THIS IS A RULE FOR THE NEXT LINE THAT TRENDS OVER A LAG, AND NO CURRENT LINE HAS ONE. **The condition
+  the rule needs is a LAG, not a trend.** WC and GL both still trend severity — `wcSeverityTrend`
+  (`wcClaimEngine.ts:171`) shifts mu via `trendedMu` and trends `WC_SEVERITY_CAP` from $85M in year 1 to
+  $117.6M by year 10 — but both trend TO THE ACCIDENT YEAR and freeze there. The report lag is gone from
+  both lines, so there is no gap between accident and settlement year for a trend to compound over, and
+  `E[(1+r)^lag]` cannot arise. See `wcClaimEngine.ts:588` and `glClaimEngine.ts:578`, which state it at
+  the draw sites.
+  ⚠ DO NOT COMPRESS THAT TO "WC CARRIES NO SEVERITY TREND" — that sentence stood here between 101d84e and
+  its correction and it is false. "No lag to trend over" and "no severity trend" are different facts, and
+  collapsing them mis-describes the live severity model. The shared `drawTruncatedLognormal` helper was
+  deleted unused: the rule survives, its one-size implementation did not.
 - **Risk control applies to the DRAW only, never to the pricing expectation.** Applying it to both cancels
   and recreates finding 17's no-op.
 - **Pure premium is derived ONCE from the neutral (RQ 5) full-roster analytic expectation and HELD.**
