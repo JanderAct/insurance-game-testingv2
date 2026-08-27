@@ -12,6 +12,7 @@ export interface IncomeStatement {
   grossUltimateLoss: number;
   reinsuranceRecovery: number;
   priorYearDevelopmentCeded: number;
+  bookingGiveBack: number;
   netUltimateLoss: number;
   netIncurredLoss: number;
   operatingExpense: number;
@@ -102,6 +103,7 @@ export function deriveAnnualStatement(result: LineResultSet): AnnualFinancialSta
     grossUltimateLoss: result.grossUltimateLoss,
     reinsuranceRecovery: result.reinsuranceRecovery,
     priorYearDevelopmentCeded: result.priorYearDevelopmentCeded,
+    bookingGiveBack: result.bookingGiveBack,
     netUltimateLoss: result.netUltimateLoss,
     netIncurredLoss: result.netIncurredLoss,
     operatingExpense: result.operatingExpense,

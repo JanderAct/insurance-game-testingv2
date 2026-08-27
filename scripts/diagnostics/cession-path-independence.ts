@@ -97,7 +97,13 @@ function runArm(g: number, squeezed: boolean): Record<string, Tally> {
       // aggregate difference masquerade as an occurrence-cession difference.
       t.aggregate += r.aggregateRecovery ?? 0;
       t.inception += r.reinsuranceRecovery - (r.aggregateRecovery ?? 0);
-      t.development += r.priorYearDevelopmentCeded;
+      // ⚠ THE GIVE-BACK IS ADDED EXPLICITLY NOW. It used to arrive folded inside
+      // priorYearDevelopmentCeded; splitting the field would have silently
+      // dropped it from the telescoping total and this gate would have gone red
+      // with squeezed recovering MORE — the original perverse incentive,
+      // re-reported as a regression it is not. It is part of total cession
+      // wherever it is carried.
+      t.development += r.priorYearDevelopmentCeded + r.bookingGiveBack;
       t.grossWritten += r.grossUltimateLoss;
 
       // The cohort written this year: its register sum, its bias dollars, and

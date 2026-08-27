@@ -201,9 +201,12 @@ export interface HistoricalYear {
   grossUltimateLoss: number;
   reinsuranceRecovery: number; // reinsurer's paid share of ceded loss
   // Memo, same convention as above: what the tower absorbed of that year's
-  // PRIOR-YEAR development. Optional — pre-game years written before the
-  // mechanism existed carry no value and read as 0.
+  // PRIOR-YEAR development, and nothing else. Optional — pre-game years written
+  // before the mechanism existed carry no value and read as 0.
   priorYearDevelopmentCeded?: number;
+  // Recovery DEFERRED by booking that year's register low. A current-year item;
+  // it used to be folded into the line above and was mislabelled there.
+  bookingGiveBack?: number;
   // Per-occurrence tower outputs. OPTIONAL HERE ONLY: the pre-game bootstrap
   // predates the tower decision, so seeded history carries no placement. The
   // LIVE result types require these.
@@ -734,10 +737,22 @@ export interface ResultSet {
 
   // Reserve development (NET basis — reserves are net of reinsurance)
   priorYearDevelopment: number; // positive = favorable, negative = adverse
-  // ⚠ WHAT THE TOWER ABSORBED OF THIS YEAR'S PRIOR-YEAR DEVELOPMENT. Positive =
-  // the reinsurer took it. Adverse development on a claim already above the
-  // retention now cedes, so the pool's own reserve moves by the RETAINED part
-  // only.
+  // ⚠ WHAT THE TOWER ABSORBED OF THIS YEAR'S PRIOR-YEAR DEVELOPMENT, AND NOTHING
+  // ELSE. Positive = the reinsurer took it. Adverse development on a claim
+  // already above the retention cedes, so the pool's own reserve moves by the
+  // RETAINED part only.
+  //
+  // ⚠ IT USED TO ALSO CARRY bookingGiveBack AND THAT WAS A DEFECT. The two are
+  // unrelated events — one is cession on a PRIOR accident year's deterioration,
+  // the other is recovery deferred on THIS year's inception — and summing them
+  // gave a field that was only correct once a reader subtracted one back out.
+  // Measured on one WC year: the field read $3,531,155 while the actual
+  // development cession was $6,177,235 and the give-back was -$2,646,080. Any
+  // consumer computing "gross development = net + this field" was short by the
+  // give-back. One field doing two jobs, with a name that invites the wrong one.
+  //
+  // GROSS PRIOR-YEAR DEVELOPMENT IS NOW priorYearDevelopment + this, with nothing
+  // to correct.
   //
   // ⚠ THIS IS A MEMO FIGURE AND MUST NOT BE ADDED TO INCOME AGAIN. It is the
   // same convention as reinsuranceRecovery beside it: netUltimateLoss is
@@ -745,11 +760,18 @@ export interface ResultSet {
   // this one. Both exist so a player can SEE the cover respond; neither is a
   // second credit. Adding either to net income double-counts it.
   priorYearDevelopmentCeded: number;
-  // ⚠ THE RECOVERY FORFEITED BY BOOKING THIS YEAR'S CLAIMS LOW. Negative, and
-  // already included in priorYearDevelopmentCeded above — carried separately
-  // ONLY so the Calculation Audit page can show bookedUltimate's derivation with
-  // every term visible. Zero whenever the line was funded at or above
-  // break-even. Do not add it to anything; it is already counted.
+  // ⚠ RECOVERY DEFERRED BY BOOKING THIS YEAR'S CLAIM REGISTER LOW. Negative, and
+  // STANDS ALONE — it is no longer folded into priorYearDevelopmentCeded.
+  //
+  // DEFERRED, NOT FORGONE, and the word matters. Marking the register down for an
+  // optimistic booking reduces the recoverable along with the claims, but the
+  // unwind restores both: every dollar deferred here comes back through
+  // priorYearDevelopmentCeded as the accident year develops. Calling it
+  // "forgone" would assert a permanent loss and there is not one.
+  //
+  // A CURRENT-YEAR ITEM, so it belongs beside the current-year recovery it
+  // reduces — not beside prior-year development, where it was mislabelled.
+  // Zero whenever the line was funded at or above break-even.
   bookingGiveBack: number;
   beginningNetReserve: number;
   currentYearNetReserve: number; // case reserve for this accident year, net

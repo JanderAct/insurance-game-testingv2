@@ -52,6 +52,7 @@ export default function HistoryPage({ historicalYears, lineView }: HistoryPagePr
     // trying to approximate.
     { label: 'Reinsurance Losses', value: year => formatCurrency(year.reinsuranceRecovery) },
     { label: 'Reinsurance Recovery — prior-year development', value: year => formatCurrency(year.priorYearDevelopmentCeded ?? 0) },
+    { label: 'Recovery deferred by optimistic booking', value: year => formatCurrency(year.bookingGiveBack ?? 0) },
     { label: 'Net Ultimate Loss', value: year => formatCurrency(year.netUltimateLoss) },
     {
       label: 'Actual Combined Ratio',

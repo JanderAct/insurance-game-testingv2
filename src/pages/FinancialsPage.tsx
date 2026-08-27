@@ -93,11 +93,27 @@ export default function FinancialsPage({ lockedResults, priorResults, lineView }
                     {is.reinsuranceRecovery !== 0 && (
                       <ISLine label="Less: reinsurance recoveries — current year" value={`(${formatCurrency(is.reinsuranceRecovery)})`} indent2 />
                     )}
+                    {/* ⚠ BESIDE THE CURRENT-YEAR RECOVERY, BECAUSE THAT IS WHAT IT
+                        REDUCES. Booking this year's claim register low reduces the
+                        recoverable along with the claims. It used to hide inside the
+                        prior-year development line below, where it was a CURRENT-year
+                        item wearing a prior-year label and made that line understate
+                        development cession by its own size.
+
+                        DEFERRED, NOT FORGONE. Every dollar here comes back through
+                        the line below as the accident year develops and the
+                        optimistic booking unwinds — so the word must not assert a
+                        permanent loss. Reads $0 whenever the line is funded at or
+                        above break-even, which is the common case and has to look
+                        unremarkable. */}
+                    {is.bookingGiveBack !== 0 && (
+                      <ISLine label="Recovery deferred by optimistic booking" value={formatCurrency(is.bookingGiveBack)} indent2 />
+                    )}
                     {/* ⚠ SPLIT OUT SO THE COVER IS VISIBLE RESPONDING TO A RESERVE
                         BLOWING UP. Development on a prior accident year now lands
                         on claims and cedes; folded into one recovery total the
                         player cannot tell a $25M reserve deterioration that the
-                        tower absorbed from one it did not. Both lines are MEMO
+                        tower absorbed from one it did not. These lines are MEMO
                         figures — the loss above is already net of each. */}
                     {is.priorYearDevelopmentCeded !== 0 && (
                       <ISLine label="Less: reinsurance recoveries — prior-year development" value={`(${formatCurrency(is.priorYearDevelopmentCeded)})`} indent2 />

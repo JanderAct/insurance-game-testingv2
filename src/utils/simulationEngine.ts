@@ -1579,7 +1579,7 @@ export function processLineYear(
       : undefined,
     reinsuranceCost,
     reinsuranceRecovery,
-    priorYearDevelopmentCeded: developmentCeded + markdown.giveBack,
+    priorYearDevelopmentCeded: developmentCeded,
     bookingGiveBack: markdown.giveBack,
     cededByLayer,
     retainedAboveTower,

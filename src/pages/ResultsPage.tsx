@@ -58,6 +58,7 @@ const COMPARISON_METRICS: ComparisonMetric[] = [
   { key: 'reserves', label: 'Ending Net Reserve', kind: 'currency', polarity: 'neutral', getValue: r => r.endingNetReserve, showPctChange: true },
   { key: 'reinsRecovery', label: 'Reinsurance Recovery (current year)', kind: 'currency', polarity: 'neutral', getValue: r => r.reinsuranceRecovery, showPctChange: false },
   { key: 'reinsRecoveryDev', label: 'Reinsurance Recovery (prior-year development)', kind: 'currency', polarity: 'neutral', getValue: r => r.priorYearDevelopmentCeded, showPctChange: false },
+  { key: 'bookingGiveBack', label: 'Recovery deferred by optimistic booking', kind: 'currency', polarity: 'neutral', getValue: r => r.bookingGiveBack, showPctChange: false },
   { key: 'investmentIncome', label: 'Investment Income', kind: 'currency', polarity: 'goodUp', getValue: r => r.investmentIncome, showPctChange: false },
   { key: 'netIncome', label: 'Net Income', kind: 'currency', polarity: 'goodUp', getValue: r => r.netIncome, showPctChange: false },
   { key: 'endingSurplus', label: 'Ending Surplus', kind: 'currency', polarity: 'goodUp', getValue: r => r.endingSurplus, showPctChange: true },
@@ -302,6 +303,7 @@ export default function ResultsPage({ lockedResults, lineView }: ResultsPageProp
               <Row label="Actual Ultimate Losses" value={formatCurrency(result.grossUltimateLoss)} valueColor="text-red-600" />
               <Row label="Reinsurance Recovery (current year)" value={formatCurrency(result.reinsuranceRecovery)} valueColor="text-emerald-600" />
               <Row label="Reinsurance Recovery (prior-year development)" value={formatCurrency(result.priorYearDevelopmentCeded)} valueColor="text-emerald-600" />
+              <Row label="Recovery deferred by optimistic booking" value={formatCurrency(result.bookingGiveBack)} />
               <Row label="Net Ultimate Loss" value={formatCurrency(result.netUltimateLoss)} valueColor="text-red-600" />
             </ResultCard>
 
