@@ -283,7 +283,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // changed of 28,500. Recaptured in the same commit rather than deferred to the
 // next range: a guard left red for everyone is a guard people learn to skip, and
 // this file's own history has the phantom "removed 300" line as the case study.
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v25.json');
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v26.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

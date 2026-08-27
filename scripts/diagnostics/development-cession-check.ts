@@ -3,11 +3,24 @@
 //
 // ⚠ THE NULL TEST IS THE MECHANISM SWITCH, NOT A LINE CONTROL. Every value in
 // the model moves when this mechanism is on, so a same-tree line-by-line
-// comparison has nothing to compare against. What CAN be asserted is that
-// turning DEVELOPMENT_CESSION_ENABLED off reproduces the pre-mechanism parent
-// bit-for-bit — run that arm with the flag flipped and value-identity-check
-// against VALUE_IDENTITY_v21 (documented at the bottom; it needs a rebuild of
-// the constant, so it cannot run inside this process).
+// comparison has nothing to compare against.
+//
+// ⚠ AND SINCE THE SELECTION WENT SIZE-WEIGHTED IT IS NOT A COMPARISON AGAINST A
+// STORED BASELINE EITHER. buildTrackedSet now spends an RNG draw per carrier,
+// which reseeds every later draw in the `ibner` stream, so the mechanism-ON tree
+// cannot be compared to ANY earlier capture — not the pre-mechanism parent, not
+// the previous baseline. What survives is that the mechanism-OFF path does not
+// call buildTrackedSet at all and therefore spends no draw. So the test becomes a
+// BEFORE-AND-AFTER OF THE OFF PATH, taken across the change:
+//
+//   # on the parent commit
+//   sed -i 's/ENABLED = true/ENABLED = false/' src/utils/developmentAllocation.ts
+//   npx tsx scripts/diagnostics/value-identity-check.ts --write   # to a scratch copy
+//   git checkout baselines/ && sed -i 's/ENABLED = false/ENABLED = true/' src/utils/developmentAllocation.ts
+//   # repeat on the child commit, then diff the two captures field by field
+//
+// Zero differing fields means nothing outside the mechanism moved. Run at the
+// symmetric-routing commit: 28,500 fields, 0 added, 0 removed, 0 differing.
 //
 // THIS SCRIPT ASSERTS THE INVARIANTS THAT HOLD WITH THE MECHANISM ON:
 //
@@ -37,6 +50,7 @@ import {
   cedeDevelopment,
 } from '../../src/utils/developmentAllocation';
 import { REINSURANCE_TOWER, TOWER_TOP, type TowerLine } from '../../src/data/reinsuranceTower';
+import { SeededRandom } from '../../src/utils/random';
 import { SLIDER_RANGES, WC_FUNDING_CONFIDENCE_RANGE, WC_SEVERITY_CAP } from '../../src/data/defaultAssumptions';
 import { wcSeverityTrend } from '../../src/utils/wcClaimEngine';
 import { IBNER_OPEN_FRACTION } from '../../src/data/defaultAssumptions';
@@ -83,6 +97,7 @@ const cover = {
   cohortsWithClaims: 0, cohortsWithoutClaims: 0,
   cededEvents: 0, cededDollars: 0, retainedDollars: 0,
   favourableClamped: 0, negativeAvoided: 0,
+  zeroedOccIds: new Set<string>(), reinflatedAboveRetention: new Set<string>(),
   overTowerTop: 0, overSeverityCap: 0, maxWcOcc: 0,
   noTowerCeded: 0,
 };
@@ -106,6 +121,15 @@ console.log('--- ALLOCATOR CONTRACT (direct) ---');
     { name: 'all-zero claims, adverse', claims: [0, 0], untracked: 0, amount: 5e5, mode: 'carriers' },
     { name: 'single claim', claims: [4e6], untracked: 0, amount: 2.5e6, mode: 'carriers' },
     { name: 'untracked mass only', claims: [], untracked: 9e6, amount: -1e6, mode: 'proportional' },
+    // ⚠ SITE D — THE CARRIERS-MODE POOL. These four could not fire before the
+    // symmetric-routing commit, because a favourable movement never took this
+    // branch. The pool must be the CARRIERS' own total, not `trackedTotal`: a
+    // give-back between the two would otherwise drive a carrier negative and be
+    // silently clamped away in cedeDevelopment.
+    { name: 'D: favourable -> carriers, inside their own value', claims: [3e6, 2e6, 1e6, 9e6], untracked: 5e6, amount: -3e6, mode: 'carriers' },
+    { name: 'D: favourable -> carriers, EXACTLY their value', claims: [3e6, 2e6, 1e6, 9e6], untracked: 5e6, amount: -6e6, mode: 'carriers' },
+    { name: 'D: favourable -> carriers, past their value, under trackedTotal', claims: [3e6, 2e6, 1e6, 9e6], untracked: 5e6, amount: -8e6, mode: 'carriers' },
+    { name: 'D: favourable -> carriers, past the whole register', claims: [3e6, 2e6, 1e6, 9e6], untracked: 5e6, amount: -9e9, mode: 'carriers' },
   ];
   let unitFails = 0;
   for (const cse of cases) {
@@ -120,25 +144,48 @@ console.log('--- ALLOCATOR CONTRACT (direct) ---');
     if (Math.abs((ceded + retained) - sum) > 1e-9) { console.log(`  FAIL ${cse.name}: ceded+retained !== movement`); unitFails++; }
     if (moved.some(m => m.current < 0)) { console.log(`  FAIL ${cse.name}: a developed value went negative`); unitFails++; }
     if (cse.untracked + untrackedDelta < -1e-9) { console.log(`  FAIL ${cse.name}: untracked mass went negative`); unitFails++; }
-    // ⚠ ADVERSE MUST NOT TOUCH A NON-CARRIER. That is the asymmetry, asserted
-    // rather than assumed — it is the whole reason clamping went away.
-    if (cse.mode === 'carriers' && cse.amount > 0 && claims.some((c, i) => !c.carrier && deltas[i] !== 0)) {
-      console.log(`  FAIL ${cse.name}: adverse development reached a non-carrier`); unitFails++;
+    // ⚠ THE CARRIERS BRANCH MUST NOT TOUCH A NON-CARRIER, IN EITHER DIRECTION.
+    // This asserted `amount > 0` only, back when that was the only sign that
+    // could reach this branch. Symmetric routing sends both here, so the
+    // assertion widens with the mechanism.
+    if (cse.mode === 'carriers' && claims.some(c => c.carrier)
+        && claims.some((c, i) => !c.carrier && deltas[i] !== 0)) {
+      console.log(`  FAIL ${cse.name}: carriers-mode development reached a non-carrier`); unitFails++;
+    }
+    // ⚠ SITE D, ASSERTED DIRECTLY. In carriers mode the clamp in cedeDevelopment
+    // must never be what keeps a value non-negative — the allocator must have
+    // bounded it already. `moved` above only proves the CLAMPED result is
+    // non-negative; this proves the UNCLAMPED one is, which is the actual fix.
+    if (cse.mode === 'carriers' && claims.some((c, i) => c.current + deltas[i] < -1e-9)) {
+      console.log(`  FAIL ${cse.name}: an occurrence needed the zero clamp — the pool bound is wrong`); unitFails++;
     }
   }
   console.log(unitFails === 0
     ? `  OK — ${cases.length} cases: parts sum EXACTLY to applied, ceded+retained reconciles, nothing negative,`
-      + '\n       and adverse development never reaches a non-carrier.'
+      + '\n       the carriers branch never reaches a non-carrier in EITHER direction, and no occurrence'
+      + '\n       ever needs the zero clamp — the pool bound holds on its own (site D).'
     : `  ${unitFails} unit failure(s).`);
 
-  // The tracked set: carriers plus everything at or above the retention.
-  const built = buildTrackedSet('WC', ['a', 'b', 'c', 'd', 'e'], ['a', 'b', 'c', 'd', 'e'],
-    [5e6, 1e5, 3e6, 2e6, 1.5e6]);
-  const carriers = built.tracked.filter(t => t.carrier).map(t => t.drawn);
-  console.log(carriers.join(',') === [5e6, 3e6, 2e6].join(',')
-    ? `  OK — carriers are the largest ${DEVELOPMENT_ALLOCATION.claimCount}; ${built.tracked.length} occurrences tracked, `
-      + `${(built.untrackedTotal / 1e6).toFixed(2)}M untracked, with no rng argument.`
-    : `  FAIL — carriers came back as ${carriers}`);
+  // ⚠ THE TRACKED SET UNDER A SIZE-WEIGHTED DRAW. This asserted "carriers are the
+  // largest 3, with no rng argument", which was a statement about the RETIRED
+  // `largest` selection and would now throw. What survives the change to
+  // sizeWeighted is weaker but still exact: the count, the absence of duplicates,
+  // and — the property the mechanism actually depends on — that EVERY occurrence
+  // at or above the retention is tracked whether or not it was drawn as a carrier.
+  const totals = [5e6, 1e5, 3e6, 2e6, 1.5e6, 4e5, 2.5e6];
+  const built = buildTrackedSet('WC', totals.map((_, i) => `o${i}`), totals.map((_, i) => `c${i}`),
+    totals, DEVELOPMENT_ALLOCATION, new SeededRandom(20260827));
+  const carrierCount = built.tracked.filter(t => t.carrier).length;
+  const retention = REINSURANCE_TOWER.WC[0].attachment;
+  const aboveMissing = totals.filter(t => t >= retention).length
+    - built.tracked.filter(t => t.drawn >= retention).length;
+  const dupes = new Set(built.tracked.map(t => t.occurrenceId)).size !== built.tracked.length;
+  const expectCarriers = Math.min(DEVELOPMENT_ALLOCATION.claimCount, totals.length);
+  console.log(carrierCount === expectCarriers && aboveMissing === 0 && !dupes
+    ? `  OK — ${carrierCount} carriers drawn size-weighted from ${totals.length} occurrences, no duplicates, and all `
+      + `${totals.filter(t => t >= retention).length} occurrences at or above the $${(retention / 1e6).toFixed(0)}M retention are tracked `
+      + `(${built.tracked.length} total, ${(built.untrackedTotal / 1e6).toFixed(2)}M untracked).`
+    : `  FAIL — ${carrierCount} carriers (expected ${expectCarriers}), ${aboveMissing} above-retention missing, dupes ${dupes}`);
 }
 
 // ---------------------------------------------------------------- game checks
@@ -215,7 +262,22 @@ for (const arm of ARMS) {
           // --- NON-NEGATIVITY ------------------------------------------------
           for (const d of ac) {
             if (d.current < 0) fail(ctx, 'developed value negative', `AY ${b.yearNumber} claim ${d.claimId} at ${d.current}`);
-            if (d.current === 0 && d.original > 0) cover.negativeAvoided++;
+            // ⚠ OCCURRENCE-YEARS, NOT OCCURRENCES. A zeroed occurrence is counted
+            // again every year it stays at zero, so this number is inflated by
+            // persistence and the distinct count below is the one to read.
+            if (d.current === 0 && d.original > 0) {
+              cover.negativeAvoided++;
+              cover.zeroedOccIds.add(`${arm.name}|${line}|${g}|${d.occurrenceId}`);
+            }
+            // ⚠ THE ACTUAL HARM, MEASURED RATHER THAN FEARED. A claim at zero
+            // loses its position above the retention: re-inflating from zero, the
+            // first dollars back up are RETAINED even though the occurrence was
+            // originally above and had already ceded them. That only bites if it
+            // re-inflates, so count the ones that do.
+            const key = `${arm.name}|${line}|${g}|${d.occurrenceId}`;
+            if (cover.zeroedOccIds.has(key) && d.current >= REINSURANCE_TOWER[line][0].attachment) {
+              cover.reinflatedAboveRetention.add(key);
+            }
           }
 
           // --- THE SUBSET IS FROZEN ------------------------------------------
@@ -264,7 +326,9 @@ console.log(`  cohort-years with a register      ${cover.cohortsWithClaims.toLoc
 console.log(`  cohort-years WITHOUT (seeds)      ${cover.cohortsWithoutClaims.toLocaleString()}`);
 console.log(`  line-years with a cession         ${cover.cededEvents.toLocaleString()}`);
 console.log(`  total ceded development           ${money(cover.cededDollars)}`);
-console.log(`  claims driven to exactly zero     ${cover.negativeAvoided.toLocaleString()}  (favourable development clamped, never negative)`);
+console.log(`  occurrence-YEARS at exactly zero  ${cover.negativeAvoided.toLocaleString()}  (favourable development clamped, never negative)`);
+console.log(`  distinct occurrences ever zeroed  ${cover.zeroedOccIds.size.toLocaleString()}`);
+console.log(`  ... that later re-inflate above the retention  ${cover.reinflatedAboveRetention.size.toLocaleString()}  <- the only case that costs anything`);
 console.log(`  occurrences above the tower top   ${cover.overTowerTop.toLocaleString()}  (exhaustion — correct, not compensated for)`);
 console.log(`  occurrences above WC's cap        ${cover.overSeverityCap.toLocaleString()}  (permitted by ruling — the cap bounds the DRAW)`);
 console.log(`  largest developed WC occurrence   ${money(cover.maxWcOcc)}`);
@@ -283,8 +347,19 @@ if (cover.cohortsWithoutClaims === 0) coverageErrors.push('no register-less coho
 // to be path-independent, and the arm comparison that tests it needs PAIRED
 // seeds, so it lives in cession-path-independence.ts, which is now a gate.
 // Nothing about a one-armed dollar total can stand in for it.
-if (cover.negativeAvoided > 0) {
-  coverageErrors.push(`${cover.negativeAvoided} claim(s) were driven to exactly zero — favourable development should now be proportional across the whole register and reach zero essentially never`);
+// ⚠ THIS THRESHOLD REPLACED "EXACTLY ZERO IS A BUG", and the reason is the
+// symmetric-routing commit. Under the retired rule favourable development went
+// proportionally across the whole register, so an occurrence could only reach
+// zero if the entire register did — it never happened, and zero was the right
+// bar. Symmetric routing sends favourable movements to the same ten carriers
+// adverse uses, and a give-back larger than those ten hold takes them to zero by
+// construction; it is what SYMMETRY MEANS at the boundary, since adverse has no
+// matching bound. So the bar is now the HARM rather than the event: an
+// occurrence sitting at zero costs nothing unless it climbs back over the
+// retention, where the dollars it already ceded would be retained a second time.
+const REINFLATION_LIMIT = 25;
+if (cover.reinflatedAboveRetention.size > REINFLATION_LIMIT) {
+  coverageErrors.push(`${cover.reinflatedAboveRetention.size} occurrence(s) were driven to zero and then re-inflated above the retention (limit ${REINFLATION_LIMIT}) — dollars already ceded would be retained a second time`);
 }
 
 console.log('\n--- FINDINGS ---');
@@ -293,10 +368,10 @@ if (findings.length === 0 && coverageErrors.length === 0) {
   console.log('balances with development net of cession, a declined tower cedes exactly nothing,');
   console.log('and the developing subset stays frozen for each cohort\'s life.');
   console.log('\n⚠ THE NULL TEST IS NOT RUN HERE and cannot be: it needs DEVELOPMENT_CESSION_ENABLED');
-  console.log('  rebuilt to false. Run it as:');
-  console.log('    sed -i \'s/ENABLED = true/ENABLED = false/\' src/utils/developmentAllocation.ts');
-  console.log('    npx tsx scripts/diagnostics/value-identity-check.ts     # expect 0 values changed');
-  console.log('    sed -i \'s/ENABLED = false/ENABLED = true/\' src/utils/developmentAllocation.ts');
+  console.log('  rebuilt to false. And since the selection went size-weighted it is no longer a');
+  console.log('  comparison against a stored baseline — the mechanism-ON tree reseeds. It is a');
+  console.log('  BEFORE-AND-AFTER of the mechanism-OFF path across a change; procedure in this');
+  console.log('  file\'s header. At the symmetric-routing commit: 28,500 fields, 0 differing.');
   process.exit(0);
 }
 for (const f of findings.slice(0, 30)) console.log(`  [${f.arm}/${f.line}/g${f.game} y${f.year}] ${f.what}: ${f.detail}`);

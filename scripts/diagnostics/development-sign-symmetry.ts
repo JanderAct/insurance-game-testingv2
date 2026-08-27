@@ -1,7 +1,44 @@
 // ============================================================================
-// WHY DOES PRIOR-YEAR RECOVERY EXCEED GROSS PRIOR-YEAR DEVELOPMENT?
+// DEVELOPMENT SIGN SYMMETRY — A GATE, NOT A MEASUREMENT.
 //
-// READ-ONLY DIAGNOSTIC. Nothing here changes the engine.
+// ⚠ THIS EXITS NON-ZERO. It began as the diagnostic for a pool-year reading
+// gross -$676,463 adverse, recovery $997,044, net +$320,580 FAVOURABLE — the
+// reinsurer paying more than the loss — and it is now the standing assertion
+// that the mechanism it found stays fixed.
+//
+// ⚠ IT EXISTS BECAUSE NEITHER STANDING GATE CAN SEE THIS, and that is worth
+// stating before anyone folds it into one of them:
+//
+//   cession-path-independence takes a PAIRED DIFFERENCE between two funding
+//   arms. Both arms were equally asymmetric, so the difference was zero and it
+//   passed throughout. Its own header says why: "A single-arm dollar total
+//   cannot: the quantity is a DIFFERENCE between two arms." True for the
+//   question it was built for, and exactly what left this one unwatched.
+//
+//   development-cession-check asserts that E[ultimate] is unchanged on the
+//   GROSS side. It is. The gate never asks whether NET is, and net was drifting
+//   favourable by the whole expected recovery.
+//
+// So the two assertions here are deliberately the shapes those cannot take: a
+// SINGLE-ARM dollar statement, and a PAIRED-PROBE statement about the mechanism
+// rather than about two runs of it.
+//
+//   THE PROBE       +X and -X on identical cohort state, through the engine's
+//                   OWN routing (STOCHASTIC_ALLOCATION_MODE, imported rather
+//                   than restated). The adverse/favourable marginal cession
+//                   ratio must be near 1. It read 2.28x on WC before the
+//                   symmetric-routing commit.
+// ⚠ THE SINGLE-ARM DOLLAR ASSERTION LIVES IN cession-uplift-basis.ts, NOT HERE,
+// and the reason is a measurement error this script made first. Recovery per
+// dollar of movement over a fixed WINDOW is not zero even under perfectly
+// symmetric routing, because a window truncates cohorts mid-life: their adverse
+// phase is counted and their settlement is not. It reads +6.2% here at defaults
+// with the mechanism working correctly. The honest single-arm statement is over
+// COMPLETE cohort lives and against inception cession, which is what that script
+// measures and gates. The window figure is still printed below, unasserted,
+// because it is the number the original symptom was reported in.
+//
+// READ-ONLY on the engine. Nothing here changes it.
 //
 // THE SYMPTOM: a pool-year reading gross -$676,463 adverse, recovery $997,044,
 // net +$320,580 FAVOURABLE — the reinsurer paying more than the loss.
@@ -22,7 +59,7 @@
 //                hypothesis is dead and the cancellation is something else.
 // ============================================================================
 
-import { allocateDevelopment, cedeDevelopment } from '../../src/utils/developmentAllocation';
+import { STOCHASTIC_ALLOCATION_MODE, allocateDevelopment, cedeDevelopment } from '../../src/utils/developmentAllocation';
 import { REINSURANCE_TOWER, type TowerLine } from '../../src/data/reinsuranceTower';
 import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { processYear } from '../../src/utils/simulationEngine';
@@ -66,9 +103,26 @@ interface CohortMove {
 interface LineYear {
   arm: string; line: string; game: number; year: number;
   grossTotal: number; cededTotal: number; netTotal: number;
+  absTotal: number;
   reportedNet: number; reportedCeded: number;
   cohorts: CohortMove[];
 }
+
+// GATE THRESHOLDS.
+//
+// ⚠ SET WITH HEADROOM OVER THE MEASURED VALUE AND UNDER THE DEFECT, which is the
+// only way a threshold means anything. Measured at 15 games x 10 years:
+//
+//                        before symmetric routing    after
+//   probe ratio, WC              2.28x               1.05x
+//   probe ratio, GL              1.66x               1.02x
+//   probe ratio, Property        1.36x               1.04x
+//   recovery / |movement|, def   see below           see below
+//
+// A ratio of 1.02-1.05 is the tower's own convexity at the attachment and is
+// irreducible; 1.20 is comfortably above it and far below the 1.36x of the
+// mildest line under the retired rule.
+const MAX_PROBE_RATIO = 1.20;
 
 const all: LineYear[] = [];
 
@@ -131,6 +185,7 @@ for (const arm of ARMS) {
           grossTotal: cohorts.reduce((s, c) => s + c.gross, 0),
           cededTotal: cohorts.reduce((s, c) => s + c.ceded, 0),
           netTotal: cohorts.reduce((s, c) => s + c.retained, 0),
+          absTotal: cohorts.reduce((s, c) => s + Math.abs(c.gross), 0),
           reportedNet: -r.priorYearDevelopment,          // to adverse-positive
           reportedCeded: r.priorYearDevelopmentCeded,
           cohorts,
@@ -297,8 +352,8 @@ console.log('\n--- 4. PAIRED PROBE: +X AND -X ON IDENTICAL COHORT STATE ---');
     a.n++;
     // AS THE ENGINE ACTUALLY ROUTES THEM: adverse to the carriers, favourable
     // proportionally across the whole register.
-    a.advCeded += cede(p, +X, 'carriers');
-    a.favCeded += -cede(p, -X, 'proportional');
+    a.advCeded += cede(p, +X, STOCHASTIC_ALLOCATION_MODE);
+    a.favCeded += -cede(p, -X, STOCHASTIC_ALLOCATION_MODE);
     // BOTH PROPORTIONAL — the allocation rule held constant, so anything left is
     // the tower's own shape.
     a.sameModeAdv += cede(p, +X, 'proportional');
@@ -343,8 +398,8 @@ console.log('\n--- 4b. PER COHORT STATE: DOES ANY SINGLE SITE TREAT THE SIGNS DI
   let propAdvOnly = 0;
   let propFavOnly = 0;
   for (const p of probes) {
-    const a = cede(p, +X, 'carriers');
-    const f = -cede(p, -X, 'proportional');
+    const a = cede(p, +X, STOCHASTIC_ALLOCATION_MODE);
+    const f = -cede(p, -X, STOCHASTIC_ALLOCATION_MODE);
     if (a > 0.01 && f <= 0.01) advOnly++;
     else if (f > 0.01 && a <= 0.01) favOnly++;
     else if (a > 0.01) both++;
@@ -438,21 +493,33 @@ console.log('\n--- 6. FLOOR SWEEP: WHERE IS FAVOURABLE BOUNDED AND ADVERSE NOT? 
 }
 
 // ============================================================================
-// 7. THE DEFAULTS ARM ON ITS OWN — the cleanest statement of the finding.
+// 7. THE DEFAULTS ARM OVER A WINDOW — the form the symptom was first reported in.
+//
 // bookingBias is zero at defaults, so the only movement is the mean-1 lognormal
-// step. Gross development should be a martingale. Whatever recovery it collects
-// is recovery on a walk that went nowhere.
+// step and the gross walk has no drift.
+//
+// ⚠ THE DENOMINATOR IS TOTAL ABSOLUTE MOVEMENT, NOT CUMULATIVE GROSS. Cumulative
+// gross is near zero by cancellation — that is the premise — so dividing by it
+// produces a ratio that explodes on exactly the runs where the mechanism is
+// working best.
+//
+// ⚠ AND THIS IS NOT ZERO EVEN WHEN THE MECHANISM IS RIGHT. Cession is a CONVEX
+// function of occurrence size, so a driftless walk through it has positive
+// expected cession by Jensen — that is what an excess-of-loss treaty on a
+// diffusing claim is worth, not a defect. A window compounds it by cutting
+// cohorts off mid-development. Gated over complete lives in cession-uplift-basis.
 // ============================================================================
-console.log('\n--- 7. AT DEFAULTS, WHERE THE GROSS WALK HAS NO DRIFT ---');
+console.log('\n--- 7. REPORTED, NOT GATED: AT DEFAULTS, OVER A 10-YEAR WINDOW ---');
+let gateFail = 0;
 {
   const d = all.filter(ly => ly.arm === 'def');
   for (const line of [...LINES, 'ALL']) {
-    const s = line === 'ALL' ? d : d.filter(ly => ly.line === line);
-    const g = s.reduce((a, ly) => a + ly.grossTotal, 0);
-    const c = s.reduce((a, ly) => a + ly.cededTotal, 0);
-    const n = s.reduce((a, ly) => a + ly.netTotal, 0);
+    const s2 = line === 'ALL' ? d : d.filter(ly => ly.line === line);
+    const g = s2.reduce((a, ly) => a + ly.grossTotal, 0);
+    const c = s2.reduce((a, ly) => a + ly.cededTotal, 0);
+    const abs = s2.reduce((a, ly) => a + ly.absTotal, 0);
     console.log(`  ${String(line).padEnd(9)} gross ${m(g).padStart(10)}  recovery ${m(c).padStart(10)}  `
-      + `net ${m(n).padStart(10)}   recovery is ${Math.abs(g) < 1 ? 'inf' : (c / Math.abs(g)).toFixed(2)}x |gross|`);
+      + `absolute movement ${m(abs).padStart(11)}  recovery/movement ${pct(c, abs).padStart(7)}`);
   }
 }
 
@@ -488,3 +555,37 @@ console.log('\n--- 8. THE SYMPTOM AT POOL SCOPE ---');
     console.log(`    ${arm}  ${b} of ${n}  (${((b / n) * 100).toFixed(1)}%)`);
   }
 }
+
+
+// ============================================================================
+// 9. THE GATE: THE PROBE RATIO.
+// ============================================================================
+console.log('\n--- 9. GATE: ADVERSE / FAVOURABLE MARGINAL CESSION RATIO, ENGINE ROUTING ---');
+{
+  const X = 500_000;
+  const cede = (p: Probe, amount: number) => {
+    const t = p.tracked ?? [];
+    const a = allocateDevelopment(t, p.untracked, amount, STOCHASTIC_ALLOCATION_MODE);
+    return cedeDevelopment(p.line, t, a.deltas, a.untrackedDelta, p.placed).ceded;
+  };
+  for (const l of LINES) {
+    const ps = probes.filter(p => p.line === l);
+    if (ps.length === 0) continue;
+    let adv = 0;
+    let fav = 0;
+    for (const p of ps) { adv += cede(p, +X); fav += -cede(p, -X); }
+    const ratio = adv / fav;
+    const bad = !(ratio > 1 / MAX_PROBE_RATIO && ratio < MAX_PROBE_RATIO);
+    if (bad) gateFail++;
+    console.log(`  ${l.padEnd(9)} adverse ${((adv / (ps.length * X)) * 100).toFixed(1).padStart(6)}%  `
+      + `favourable ${((fav / (ps.length * X)) * 100).toFixed(1).padStart(6)}%  ratio ${ratio.toFixed(2)}x  `
+      + `${bad ? `FAIL (limit ${MAX_PROBE_RATIO.toFixed(2)}x)` : 'ok'}`);
+  }
+}
+
+console.log(gateFail === 0
+  ? '\nDEVELOPMENT ALLOCATION IS SIGN-SYMMETRIC. Adverse and favourable movements cede at the same'
+    + '\nmarginal rate under the engine\'s own routing, on identical cohort state. The dollar statement'
+    + '\nover complete cohort lives is cession-uplift-basis.ts\'s gate, not this one.'
+  : `\n${gateFail} GATE FAILURE(S) — see FAIL above.`);
+process.exit(gateFail === 0 ? 0 : 1);

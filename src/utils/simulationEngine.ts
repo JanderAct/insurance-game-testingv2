@@ -27,8 +27,8 @@ import { SeededRandom, deriveSubRng } from './random';
 import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, IBNER_BOOKING_BIAS_COEFF, IBNER_HORIZON, IBNER_OPEN_FRACTION, IBNER_STEP_MIXTURE, IBNER_TOTAL_SD, IBNER_UNWIND_DECAY, LINE_RESERVE_PAYDOWN_PCT, MEMBER_LOSS_VOLATILITY, OPERATING_CASH_PCT_OF_PREMIUM, PROPERTY_HELD_PURE_PREMIUM_PER_100, RISK_CONTROL_PARAMS, WC_LOSS_MODEL } from '../data/defaultAssumptions';
 import type { TowerLine } from '../data/reinsuranceTower';
 import {
-  DEVELOPMENT_ALLOCATION, DEVELOPMENT_CESSION_ENABLED, allocateDevelopment, buildTrackedSet,
-  cedeDevelopment, markDownForBooking,
+  DEVELOPMENT_ALLOCATION, DEVELOPMENT_CESSION_ENABLED, STOCHASTIC_ALLOCATION_MODE,
+  allocateDevelopment, buildTrackedSet, cedeDevelopment, markDownForBooking,
 } from './developmentAllocation';
 import {
   aggregateRecovery,
@@ -2848,14 +2848,24 @@ function processIbner(
           // summed first. The unwind REVERSES a markdown that was applied
           // proportionally across the whole register, so it has to come back the
           // same way or the claims do not return to their drawn values. The
-          // stochastic step is real deterioration or real redundancy, so it goes
-          // to the carriers when adverse and across the register when
-          // favourable. Adding them into one number and picking a mode by the
-          // sign of the sum would send the unwind to three claims whenever the
+          // stochastic step is real deterioration or real redundancy and goes to
+          // the carriers. Adding them into one number and picking a mode by the
+          // sign of the sum would send the unwind to the carriers whenever the
           // lognormal step happened to dominate.
+          //
+          // ⚠ THE STOCHASTIC MODE NO LONGER DEPENDS ON THE SIGN, and that is this
+          // commit. It read `stochastic >= 0 ? 'carriers' : 'proportional'`:
+          // deterioration onto the largest claims, redundancy across the whole
+          // register. Cession is convex in occurrence size and sign-blind, so an
+          // asymmetric ROUTING through it manufactured recovery on a driftless
+          // walk — $48.2M paid on WC against a register that moved $17.7M
+          // favourable. Both directions now take the same branch. The full
+          // argument, the grid that rules out every other cell, and the
+          // second-order residual this does NOT close are in
+          // developmentAllocation.ts's header.
           const stochastic = newUnpaid * (factor - 1);
           const steps: { amount: number; mode: 'carriers' | 'proportional' }[] = [
-            { amount: stochastic, mode: stochastic >= 0 ? 'carriers' : 'proportional' },
+            { amount: stochastic, mode: STOCHASTIC_ALLOCATION_MODE },
             { amount: unwind, mode: 'proportional' },
           ];
 

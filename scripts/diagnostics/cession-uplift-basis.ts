@@ -1,7 +1,27 @@
 // ============================================================================
-// IS THE DEVELOPMENT-CESSION UPLIFT DECISION-DEPENDENT, OR AN ARTEFACT?
+// THE DEVELOPMENT-CESSION UPLIFT — A GATE, AND THE SINGLE-ARM ASSERTION.
 //
-// READ-ONLY. Nothing here changes the engine.
+// ⚠ THIS EXITS NON-ZERO. It began as the test of whether the uplift a
+// developed-register price would need is decision-dependent (it is not; the
+// apparent dependence was the give-back on the wrong side of the decomposition),
+// and it now also carries the SINGLE-ARM DOLLAR ASSERTION that development
+// cession is not a free lunch.
+//
+// ⚠ WHY THE ASSERTION IS HERE AND NOT IN development-sign-symmetry. That script
+// measures recovery per dollar of movement over a fixed WINDOW, and a window is
+// the wrong unit: it counts a cohort's adverse phase and cuts off its
+// settlement, so it reads +6.2% at defaults with a perfectly symmetric
+// mechanism. Only a COMPLETE cohort life is a fair statement, and only against
+// inception cession is it scale-free. That is what is asserted below.
+//
+// ⚠ IT IS NOT ASSERTED TO BE ZERO, and it must not be. Cession is a CONVEX
+// function of occurrence size, so a driftless walk through it has positive
+// expected cession by Jensen — that is the option value of an excess-of-loss
+// treaty on a claim that is still moving, and it is real. What the gate forbids
+// is the ROUTING asymmetry that manufactured recovery on top of it: WC read
+// +9.9% before symmetric routing and +4.1% after, against a limit of 6%.
+//
+// READ-ONLY on the engine. Nothing here changes it.
 //
 // allocation-grid measured the uplift a developed-register price would need as
 // +3.1% at defaults and +15.4% squeezed, and concluded a single constant cannot
@@ -57,6 +77,13 @@ import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { SLIDER_RANGES, WC_FUNDING_CONFIDENCE_RANGE } from '../../src/data/defaultAssumptions';
 import type { CoverageLine, DecisionSet, GameState } from '../../src/types/simulation';
+
+// GATE THRESHOLDS, set above the measured value and below the defect.
+//   pool-wide, defaults:  0.3% now, 2.8% under the retired asymmetric routing.
+//   worst line, defaults: 4.1% (WC) now, 9.9% then. WC is where the tower is
+//   most convex, so it carries most of the irreducible option value.
+const MAX_POOL_UPLIFT = 0.015;
+const MAX_LINE_UPLIFT = 0.06;
 
 const GAMES = Number(process.env.GAMES ?? 30);
 const YEARS = Number(process.env.YEARS ?? 20);
@@ -322,4 +349,33 @@ for (const line of LINES) {
     + `   spread ${p1(Math.abs(s.nw - d.nw)).padStart(7)}`);
   console.log(`  ${' '.repeat(9)} OLD basis  def ${p1(d.old).padStart(7)}  mid ${p1(i.old).padStart(7)}  sqz ${p1(s.old).padStart(7)}`
     + `   spread ${p1(Math.abs(s.old - d.old)).padStart(7)}`);
+}
+
+
+// ============================================================================
+// 6. THE GATE.
+// ============================================================================
+console.log('\n--- 6. GATE: LIFETIME DEVELOPMENT CESSION AGAINST INCEPTION CESSION, AT DEFAULTS ---');
+{
+  let fails = 0;
+  const cs = cohorts.filter(c => c.matured && c.arm === 'def');
+  for (const line of LINES) {
+    const t = cs.filter(c => c.line === line);
+    const u = sum(t, c => c.finalCededDev) / sum(t, c => c.inceptionCeded);
+    const bad = Math.abs(u) > MAX_LINE_UPLIFT;
+    if (bad) fails++;
+    console.log(`  ${line.padEnd(9)} uplift ${p1(u).padStart(7)}   `
+      + `${bad ? `FAIL (limit ${p1(MAX_LINE_UPLIFT)})` : 'ok'}`);
+  }
+  const uAll = sum(cs, c => c.finalCededDev) / sum(cs, c => c.inceptionCeded);
+  const badAll = Math.abs(uAll) > MAX_POOL_UPLIFT;
+  if (badAll) fails++;
+  console.log(`  ${'POOL'.padEnd(9)} uplift ${p1(uAll).padStart(7)}   `
+    + `${badAll ? `FAIL (limit ${p1(MAX_POOL_UPLIFT)})` : 'ok'}`);
+  console.log(fails === 0
+    ? '\nDEVELOPMENT CESSION IS NOT A FREE LUNCH. Over complete cohort lives at defaults, where the'
+      + '\nbooking bias is zero and the gross walk has no drift, the reinsurer pays a small positive'
+      + '\namount that is the convexity of its own treaty and nothing more.'
+    : `\n${fails} GATE FAILURE(S) — development cession is running ahead of the losses it is paid on.`);
+  process.exit(fails === 0 ? 0 : 1);
 }

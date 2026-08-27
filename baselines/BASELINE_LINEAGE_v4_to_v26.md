@@ -1325,3 +1325,83 @@ loss. Nothing needed building.
   reaches the workbook as "Shock Loss Incurred" Yes/No.
 
 v23 retired from the working tree; v24 kept as the immediate predecessor.
+
+---
+
+## v26 — development allocation becomes symmetric
+
+`DEVELOPMENT_ALLOCATION` goes from `{ claimCount: 3, weighting: 'sized',
+selection: 'largest' }` to `{ claimCount: 10, weighting: 'sized', selection:
+'sizeWeighted' }`, and the stochastic step routes BOTH directions through the
+carriers instead of sending adverse to the carriers and favourable across the
+whole register.
+
+### Why everything moves, and why the usual null test cannot read it
+
+| gate | reading |
+|---|---|
+| value identity | **13,780 of 28,500 changed** across 75 fields, **0 added, 0 removed** |
+| solo export guard | **24 of 24** hashes moved |
+
+Two independent reasons, and they cannot be separated:
+
+1. **The mechanism itself.** Where development lands changes what cedes, which
+   changes the net reserve, which changes every downstream financial.
+2. **`sizeWeighted` spends RNG draws.** `buildTrackedSet` now draws once per
+   carrier, before the horizon and stepMultiplier draws, so the whole `ibner`
+   stream reseeds. The stream is derived fresh per (seed, year, line), so the
+   shift re-aligns every January and cannot accumulate — but within a year every
+   later draw is different.
+
+So a line-by-line comparison against v25 says only "the mechanism changed", which
+was already known. **A stored baseline cannot verify this commit at all.**
+
+### What verified it instead: the mechanism-OFF fingerprint
+
+`DEVELOPMENT_CESSION_ENABLED = false` does not call `buildTrackedSet`, so the OFF
+path spends no draw and is untouched by the selection rule. Capturing it on both
+sides of the change and diffing field by field:
+
+**28,500 fields, 0 added, 0 removed, 0 differing bit-for-bit.**
+
+Nothing outside the mechanism moved. That is the only null test this change has,
+and it is recorded in `development-cession-check.ts`'s header as the procedure to
+repeat next time the selection rule moves.
+
+### What the change was for
+
+| | before | after |
+|---|---|---|
+| probe ratio, WC | 2.28x | **1.06x** |
+| probe ratio, GL | 1.66x | **1.02x** |
+| probe ratio, Property | 1.36x | **1.03x** |
+| lifetime uplift at defaults, WC | +9.9% | **+4.1%** |
+| lifetime uplift at defaults, pool | +2.8% | **+0.3%** |
+| site-D truncations | 4,258 of 4,258 states | **0** |
+| time-mismatch residual, WC | +2.4% CI [0.6, 4.1] | **−0.6% CI [−2.2, 1.0]** |
+
+### Two new gates, because neither standing gate could see the defect
+
+- `development-sign-symmetry.ts` — the ±$500k paired probe on identical cohort
+  state, through `STOCHASTIC_ALLOCATION_MODE` imported from the engine rather
+  than restated, asserted under 1.20x.
+- `cession-uplift-basis.ts` — the single-arm dollar assertion, over COMPLETE
+  cohort lives against inception cession, at defaults. Limits 6% per line and
+  1.5% pool-wide.
+
+`cession-path-independence` passed throughout the defect because it takes a
+paired difference and both arms were equally asymmetric. `development-cession-check`
+passed because it asserts GROSS is a martingale and never asked whether NET is.
+
+### One coverage bar was moved rather than met
+
+`development-cession-check` asserted that no occurrence is ever driven to exactly
+zero. Under the retired rule that was right: favourable development went across
+the whole register, so zero required the whole register to vanish. Symmetric
+routing makes zeroing *what symmetry means at the boundary* — a give-back larger
+than the ten carriers hold takes them to zero, and adverse has no matching bound.
+Measured: 400 occurrence-years, **87 distinct occurrences**, and **0** that later
+re-inflate above the retention, which is the only case that costs anything. The
+bar is now the harm rather than the event, limit 25.
+
+v24 retired from the working tree; v25 kept as the immediate predecessor.
