@@ -121,6 +121,107 @@ export function buildLineMetrics(baseMetrics: SpreadsheetMetric[], line: Coverag
   return relabeled;
 }
 
+// ============================================================================
+// NUMBER FORMATS, DERIVED PER ROW BECAUSE THE RESULTS SHEETS ARE ROW-WISE.
+//
+// ⚠ THE FORMAT BELONGS TO THE ROW HERE, AND TO THE COLUMN IN claimsExport. Pool
+// and line sheets put ONE QUANTITY PER ROW and a year per column, so a
+// per-column rule would format the Gross Premium row and the Loss Ratio row
+// identically. The claims sheets are transposed and take the opposite rule.
+//
+// ⚠ DERIVED FROM THE METRIC'S OWN RENDERER, NOT FROM A TABLE OF KEYS. Every
+// metric already carries `value()`, which is exactly how that number is shown on
+// screen — `formatCurrency` gives "$1,234", `formatPct` gives "12.3%", the rest
+// give a plain numeral. Reading the bucket off that makes the workbook agree
+// with the screen BY CONSTRUCTION and, more importantly, means a metric added
+// later gets its format from its own renderer instead of silently landing in a
+// default bucket because nobody remembered a second list. A key table is the
+// shape of defect this project keeps finding: two descriptions of one fact,
+// drifting apart.
+//
+// ⚠ ANYTHING UNCLASSIFIABLE IS REPORTED, NOT DEFAULTED. classifyMetricFormat
+// returns undefined and solo-export-guard's companion check counts it, so a
+// numeric row left General shows up as a number rather than as a silently
+// General column.
+//
+// THE BUCKETS
+//   #,##0     dollars — anything `value()` renders with a leading $
+//   0.00%     percentages — anything `value()` renders with a trailing %. The
+//             ENGINE STORES THESE AS FRACTIONS (marketShare 0.3012,
+//             actualLossRatio 1.7392) and Excel's percent format multiplies by
+//             100 on DISPLAY only, so nothing is multiplied here and the cell
+//             still holds the fraction. Verified by round-trip.
+//   #,##0.00  everything else numeric — ratios, multipliers, counts, factors
+//   0         years, which must not gain a thousands separator: 2026, not 2,026
+// ============================================================================
+export type NumFmt = '#,##0' | '#,##0.00' | '0.00%' | '0';
+
+// ⚠ THE ONLY KEYS NAMED EXPLICITLY, because a year renders as a bare numeral and
+// is indistinguishable from a count by its rendering alone.
+const YEAR_KEYS = new Set(['yearNumber', 'calendarYear']);
+
+// The value actually written to the cell — csvValue when present, else value.
+// Only a cell that lands as a NUMBER can carry a number format.
+const writtenValue = (m: SpreadsheetMetric, r: LineResultSet) =>
+  (m.csvValue ? m.csvValue(r) : m.value(r));
+
+export function classifyMetricFormat(metric: SpreadsheetMetric, results: LineResultSet[]): NumFmt | undefined {
+  if (results.length === 0) return undefined;
+  if (YEAR_KEYS.has(metric.key)) return '0';
+  // A row whose cells are all text needs no format, and must not be given one.
+  if (!results.some(r => typeof writtenValue(metric, r) === 'number')) return undefined;
+
+  // Probe every year, not just the first: excessCapitalRatio renders 'N/A' when
+  // the margin is zero and a numeral otherwise, so one sample can be blank on a
+  // row that is numeric everywhere else.
+  for (const r of results) {
+    const shown = metric.value(r);
+    if (typeof shown === 'number') return '#,##0.00';
+    const t = String(shown).trim();
+    // A composite string that merely CONTAINS % — the asset-allocation summary
+    // ends with one — is not a percentage. Anchored on both ends for that reason.
+    if (/^-?[\d,]+(\.\d+)?%$/.test(t)) return '0.00%';
+    // ⚠ A DOLLAR SIGN WITH DECIMALS IS A RATE, NOT AN AMOUNT, and the renderer
+    // already separates the two: formatCurrency emits whole dollars ("$1,234"),
+    // the `dollars` helper emits cents ("$1.23") and is used only for the
+    // per-$100 rates. Those are STORED AT 4dp precisely because their precision
+    // is load-bearing — see the QUANTUM table in audit-formula-check — so
+    // rounding them to whole dollars would show "$1" for a rate whose whole
+    // meaning is in the digits after the point. They take the two-decimal
+    // bucket: a rate per $100 of payroll is a rate, and the column label already
+    // carries the unit.
+    if (/^-?\$[\d,]+\.\d+$/.test(t)) return '#,##0.00';
+    if (/^-?\$[\d,]+$/.test(t)) return '#,##0';
+    if (/^-?[\d,]+(\.\d+)?$/.test(t)) return '#,##0.00';
+  }
+  return undefined;
+}
+
+// ⚠ FORMAT ONLY. `z` is the number format; `v`, the stored value, is untouched,
+// so a cell showing 42,709,940 still holds 42709939.61 and a column re-summed in
+// Excel agrees with the engine rather than with its own displayed rounding.
+// Skips any cell that did not land as a number, so a text cell on a numeric row
+// stays text.
+function applyRowFormats(ws: XLSX.WorkSheet, formats: (NumFmt | undefined)[]): void {
+  const range = XLSX.utils.decode_range(ws['!ref'] ?? 'A1');
+  for (let i = 0; i < formats.length; i++) {
+    const fmt = formats[i];
+    if (!fmt) continue;
+    const r = i + 1;            // row 0 is the header
+    // Columns 0 and 1 are Category and Metric — always text.
+    for (let c = 2; c <= range.e.c; c++) {
+      const cell = ws[XLSX.utils.encode_cell({ r, c })];
+      if (cell && cell.t === 'n') cell.z = fmt;
+    }
+  }
+}
+
+function sheetFor(results: LineResultSet[], metrics: SpreadsheetMetric[]): XLSX.WorkSheet {
+  const ws = XLSX.utils.aoa_to_sheet(buildAoaRows(results, metrics));
+  applyRowFormats(ws, metrics.map(m => classifyMetricFormat(m, results)));
+  return ws;
+}
+
 export function buildAoaRows(results: LineResultSet[], metrics: SpreadsheetMetric[]): (string | number)[][] {
   const header = ['Category', 'Metric', ...results.map(r => `Year ${r.yearNumber} / ${r.calendarYear}`)];
   const rows = metrics.map(metric => [
@@ -139,13 +240,13 @@ export function buildResultsWorkbook(
   const wb = XLSX.utils.book_new();
   const orderedLines = FIXED_LINE_ORDER.filter(l => activeLines.includes(l));
 
-  const poolSheet = XLSX.utils.aoa_to_sheet(buildAoaRows(lockedResults, buildPoolMetrics(baseMetrics, activeLines)));
-  XLSX.utils.book_append_sheet(wb, poolSheet, 'Pool');
+  XLSX.utils.book_append_sheet(
+    wb, sheetFor(lockedResults, buildPoolMetrics(baseMetrics, activeLines)), 'Pool');
 
   for (const line of orderedLines) {
     const lineResults = lockedResults.map(r => r.byLine[line]);
-    const lineSheet = XLSX.utils.aoa_to_sheet(buildAoaRows(lineResults, buildLineMetrics(baseMetrics, line)));
-    XLSX.utils.book_append_sheet(wb, lineSheet, line);
+    XLSX.utils.book_append_sheet(
+      wb, sheetFor(lineResults, buildLineMetrics(baseMetrics, line)), line);
   }
 
   // SHOCK EVENTS — a sheet, and ONLY WHEN AT LEAST ONE FIRED.
@@ -158,7 +259,23 @@ export function buildResultsWorkbook(
   // did. This is the difference between a green gate and a week of confusion.
   const shockRows = buildShockRows(lockedResults);
   if (shockRows.length > 1) {
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(shockRows), 'Shock Events');
+    const ws = XLSX.utils.aoa_to_sheet(shockRows);
+    // COLUMN-WISE, like the claims sheets: Year, Calendar Year, Event, Name,
+    // Band, Horizon, Year Fired, Lines, Attributable Gross Loss, Attributable
+    // Claims, Expected Gross Loss Added, Effects, Description.
+    const fmts: (NumFmt | undefined)[] = [
+      '0', '0', undefined, undefined, undefined, '#,##0.00', '0', undefined,
+      '#,##0', '#,##0.00', '#,##0', undefined, undefined,
+    ];
+    const range = XLSX.utils.decode_range(ws['!ref'] ?? 'A1');
+    for (let c = 0; c < fmts.length; c++) {
+      if (!fmts[c]) continue;
+      for (let r = 1; r <= range.e.r; r++) {
+        const cell = ws[XLSX.utils.encode_cell({ r, c })];
+        if (cell && cell.t === 'n') cell.z = fmts[c];
+      }
+    }
+    XLSX.utils.book_append_sheet(wb, ws, 'Shock Events');
   }
 
   return wb;

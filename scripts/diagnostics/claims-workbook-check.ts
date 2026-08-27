@@ -231,21 +231,25 @@ for (const arm of ARMS) {
           len++;
         }
         s.maxSeriesLen = Math.max(s.maxSeriesLen, len);
-        // Each cell is separately rounded, so the tolerance is the count of
-        // roundings, not a fixed epsilon.
-        const tol = yrIdx.length / 2 + 2;
+        // ⚠ THE TOLERANCE USED TO BE `yrIdx.length / 2 + 2`, sized for the fact
+        // that every cell was Math.round-ed on the way out. The number-format
+        // commit removed that rounding — `#,##0` displays whole dollars while the
+        // cell holds the full value — so the identity is now exact up to floating
+        // point and is asserted that way. A cent of drift here would be a real
+        // arithmetic fault, not a display artefact.
+        const tol = 1e-6;
         if (Math.abs(booked + sum - current) > tol) {
           fail(`${arm.name} g${g} ${line} row ${i}: Booked ${booked} + Yr sum ${sum} = ${booked + sum} !== Current ${current}`);
         }
-        if (Math.abs(total - (current - booked)) > 2) {
+        if (Math.abs(total - (current - booked)) > 1e-6) {
           fail(`${arm.name} g${g} ${line} row ${i}: Total ${total} !== Current - Booked ${current - booked}`);
         }
 
         // --- MARKDOWN --------------------------------------------------------
-        if (gross !== null && Math.abs(gross - drawn) <= 1) s.drawnEqGross++;
+        if (gross !== null && Math.abs(gross - drawn) <= 1e-6) s.drawnEqGross++;
         else fail(`${arm.name} g${g} ${line} row ${i}: Gross Incurred ${gross} !== Drawn Occurrence ${drawn}`);
-        if (drawn - booked > 1) s.drawnGtBooked++;
-        else if (Math.abs(drawn - booked) <= 1) s.drawnEqBooked++;
+        if (drawn - booked > 1e-6) s.drawnGtBooked++;
+        else if (Math.abs(drawn - booked) <= 1e-6) s.drawnEqBooked++;
         else fail(`${arm.name} g${g} ${line} row ${i}: Booked ${booked} EXCEEDS Drawn ${drawn}`);
 
         // --- ONE LOOKUP ------------------------------------------------------

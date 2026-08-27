@@ -70,9 +70,44 @@ function safeStr(v: unknown): string {
   return v === null || v === undefined ? '' : String(v);
 }
 
-function roundOrBlank(v: number | undefined): number | string {
-  return typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : '';
+// ⚠ THE ROUNDING IS GONE AND THE NUMBER FORMAT DOES IT INSTEAD. This was
+// `Math.round(v)`, so a cell holding $42,709,939.61 stored 42709940 and the
+// cents were destroyed on the way out. Rounding at the point of WRITING is only
+// ever a stand-in for a display format, and now that there is one it is worse
+// than useless: the workbook's dollar columns carry full precision, `#,##0`
+// shows whole dollars, and a column re-summed in Excel agrees with the engine
+// rather than with the accumulated rounding error of its own cells.
+//
+// The blank is kept and is not a rounding decision — see the three-state note
+// on devCells.
+function numOrBlank(v: number | undefined): number | string {
+  return typeof v === 'number' && Number.isFinite(v) ? v : '';
 }
+
+// ============================================================================
+// NUMBER FORMATS, DECLARED PER COLUMN BECAUSE THE CLAIMS SHEETS ARE COLUMN-WISE.
+//
+// ⚠ THE TWO WORKBOOKS NEED OPPOSITE RULES AND THAT IS NOT A STYLE CHOICE. These
+// sheets put ONE QUANTITY PER COLUMN — every cell under "Gross Incurred" is
+// dollars — so a format belongs to the column. The results workbook is
+// transposed: one quantity per ROW, a year per column, so the same per-column
+// rule applied there would format a dollar row and a ratio row identically. See
+// resultsExport.ts for how that side derives its formats.
+//
+// ⚠ DEVELOPMENT % IS NOT IN THE PERCENT BUCKET, and that is the one place the
+// obvious rule is wrong. Excel's `0.00%` multiplies by 100 on display, which is
+// right for everything the ENGINE stores as a fraction. Development % is already
+// multiplied — `(dev / original) * 100`, stored as 73 for 73% — so formatting it
+// as a percent would render 7300%. It is a plain number that happens to be read
+// as a percentage.
+// ============================================================================
+type NumFmt = '#,##0' | '#,##0.00' | '0.00%' | '0';
+const DOLLARS: NumFmt = '#,##0';
+const PLAIN: NumFmt = '#,##0.00';
+/** Years must not gain a thousands separator: 2026, never 2,026. */
+const YEAR: NumFmt = '0';
+/** A text column. No format, and the cell must stay a string. */
+const TEXT = undefined;
 
 // ============================================================================
 // DEVELOPMENT, KEYED BY OCCURRENCE — the one lookup both the line sheets and the
@@ -243,11 +278,21 @@ function devHeader(years: number[]): string[] {
 function devCells(dev: OccDevelopment | undefined, years: number[]): Row {
   if (!dev) return new Array<string>(years.length + 4).fill('');
   return [
-    roundOrBlank(dev.drawn), roundOrBlank(dev.booked),
-    ...years.map(y => (dev.byYear.has(y) ? roundOrBlank(dev.byYear.get(y)) : '')),
-    roundOrBlank(dev.current), roundOrBlank(dev.dev),
+    numOrBlank(dev.drawn), numOrBlank(dev.booked),
+    ...years.map(y => (dev.byYear.has(y) ? numOrBlank(dev.byYear.get(y)) : '')),
+    numOrBlank(dev.current), numOrBlank(dev.dev),
   ];
 }
+
+/** Every column the development block contributes is an occurrence amount. */
+function devFormats(years: number[]): (NumFmt | undefined)[] {
+  return new Array<NumFmt | undefined>(years.length + 4).fill(DOLLARS);
+}
+
+// Claim ID, Occurrence ID, Member ID, Member Name, Member Type are identifiers
+// and names — text, and they must stay text. Accident Year and Calendar Year are
+// years.
+const SHARED_FORMATS: (NumFmt | undefined)[] = [TEXT, TEXT, TEXT, TEXT, TEXT, YEAR, YEAR];
 
 const DEV_NOTE =
   'The development block at the right of this sheet is the claim\'s OCCURRENCE, joined on Occurrence ' +
@@ -335,6 +380,18 @@ const WC_COMPONENT_NOTE =
   'column that is always a copy is cheap; a reintroduced lag that is invisible in the export is not. ' +
   'Measured across 65,817 claims on all three lines: 0 differ.';
 
+const WC_FORMATS = (years: number[]): (NumFmt | undefined)[] => [
+  ...SHARED_FORMATS,
+  TEXT,      // Rating Group
+  TEXT,      // Component
+  TEXT,      // Status
+  DOLLARS,   // Gross Incurred
+  DOLLARS,   // Gross Paid
+  YEAR,      // Reported Year
+  TEXT,      // Enrolled
+  ...devFormats(years),
+];
+
 function buildWcSheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelopment>, years: number[]): Row[] {
   const header = [
     ...SHARED_HEADER, 'Rating Group', 'Component', 'Status', 'Gross Incurred',
@@ -343,8 +400,8 @@ function buildWcSheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelopment>
   const body = sortClaimRows(rows).map(row => [
     ...sharedCells(row),
     safeStr(row.claim.ratingClass), row.claim.tier,
-    row.claim.status, roundOrBlank(row.claim.grossUltimate),
-    roundOrBlank(row.claim.paidToDate), row.claim.reportedYear, row.enrolled ? 'Yes' : 'No',
+    row.claim.status, numOrBlank(row.claim.grossUltimate),
+    numOrBlank(row.claim.paidToDate), row.claim.reportedYear, row.enrolled ? 'Yes' : 'No',
     ...devCells(dev.get(row.claim.occurrenceId), years),
   ]);
   return [[`WC claims. ${WC_COMPONENT_NOTE} ${DEV_NOTE} ${ENROLLED_NOTE}`], header, ...body];
@@ -369,6 +426,17 @@ const GL_COMPONENT_NOTE =
   'NOT the retired general / epl / lawEnforcement / abuse sub-coverages. Reported Year always equals ' +
   'Accident Year: GL carries no report lag.';
 
+const GL_FORMATS = (years: number[]): (NumFmt | undefined)[] => [
+  ...SHARED_FORMATS,
+  TEXT,      // Component
+  TEXT,      // Status
+  DOLLARS,   // Gross Incurred
+  DOLLARS,   // Gross Paid
+  YEAR,      // Reported Year
+  TEXT,      // Enrolled
+  ...devFormats(years),
+];
+
 function buildGlSheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelopment>, years: number[]): Row[] {
   const header = [
     ...SHARED_HEADER, 'Component', 'Status', 'Gross Incurred',
@@ -377,12 +445,23 @@ function buildGlSheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelopment>
   const body = sortClaimRows(rows).map(row => [
     ...sharedCells(row),
     row.claim.tier,
-    row.claim.status, roundOrBlank(row.claim.grossUltimate),
-    roundOrBlank(row.claim.paidToDate), row.claim.reportedYear, row.enrolled ? 'Yes' : 'No',
+    row.claim.status, numOrBlank(row.claim.grossUltimate),
+    numOrBlank(row.claim.paidToDate), row.claim.reportedYear, row.enrolled ? 'Yes' : 'No',
     ...devCells(dev.get(row.claim.occurrenceId), years),
   ]);
   return [[`GL claims. ${GL_COMPONENT_NOTE} ${DEV_NOTE} ${ENROLLED_NOTE}`], header, ...body];
 }
+
+const PROPERTY_FORMATS = (years: number[]): (NumFmt | undefined)[] => [
+  ...SHARED_FORMATS,
+  TEXT,      // Band
+  TEXT,      // Status
+  DOLLARS,   // Gross Incurred
+  DOLLARS,   // Gross Paid
+  YEAR,      // Reported Year
+  TEXT,      // Enrolled
+  ...devFormats(years),
+];
 
 function buildPropertySheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelopment>, years: number[]): Row[] {
   const header = [
@@ -398,7 +477,7 @@ function buildPropertySheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelo
     claim.id, claim.occurrenceId, claim.memberId, safeStr(member?.name), safeStr(member?.type),
     claim.accidentYear, claim.calendarYear,
     claim.tier,
-    claim.status, roundOrBlank(claim.grossUltimate), roundOrBlank(claim.paidToDate),
+    claim.status, numOrBlank(claim.grossUltimate), numOrBlank(claim.paidToDate),
     claim.reportedYear, enrolled ? 'Yes' : 'No',
     ...devCells(dev.get(claim.occurrenceId), years),
   ]);
@@ -435,6 +514,16 @@ function buildPropertySheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelo
 // come off the claim's own movement series, so this sheet is a TRIANGLE now
 // rather than a pair of endpoints — but the rows are still "every occurrence
 // that has ever developed, as at today", not a snapshot as at some past year.
+const DEVELOPMENT_FORMATS = (years: number[]): (NumFmt | undefined)[] => [
+  TEXT,      // Line
+  YEAR,      // Accident Year
+  TEXT,      // Occurrence ID
+  ...devFormats(years),
+  // ⚠ PLAIN, NOT PERCENT. Already multiplied by 100 at source — see the note on
+  // the format vocabulary above.
+  PLAIN,     // Development %
+];
+
 function buildDevelopmentRows(poolState: PoolState, activeLines: CoverageLine[], years: number[]): Row[] {
   const header = [
     'Line', 'Accident Year', 'Occurrence ID', ...devHeader(years), 'Development %',
@@ -474,6 +563,37 @@ function buildDevelopmentRows(poolState: PoolState, activeLines: CoverageLine[],
   return [[note], header, ...body];
 }
 
+// ============================================================================
+// APPLY THE FORMATS TO A BUILT SHEET.
+//
+// ⚠ FORMAT ONLY. `z` is the cell's number format; `v`, the stored value, is
+// never touched. A cell showing 42,709,940 still holds 42709939.61, so a column
+// re-summed in Excel agrees with the engine rather than with the rounding its
+// own cells were displayed at. Verified by round-trip in
+// claims-workbook-check.ts, which parses values rather than rendered strings and
+// would see any change immediately.
+//
+// ⚠ ONLY NUMERIC CELLS. A text-formatted identifier must stay text, so a cell
+// whose type is not 'n' is skipped whatever its column says — an id that
+// happened to be all digits still writes as a string and keeps its leading
+// zeros. Header and note rows are skipped for the same reason: they are strings.
+//
+// `formats` is index-aligned to the header. A column with no entry (or an
+// explicit TEXT) is left General, which is correct for text and is a visible
+// omission for a number — the check below reports any numeric column that ends
+// up unformatted rather than letting it pass as General.
+function applyFormats(ws: XLSX.WorkSheet, formats: (NumFmt | undefined)[], firstDataRow: number): void {
+  const range = XLSX.utils.decode_range(ws['!ref'] ?? 'A1');
+  for (let c = range.s.c; c <= range.e.c; c++) {
+    const fmt = formats[c];
+    if (!fmt) continue;
+    for (let r = firstDataRow; r <= range.e.r; r++) {
+      const cell = ws[XLSX.utils.encode_cell({ r, c })];
+      if (cell && cell.t === 'n') cell.z = fmt;
+    }
+  }
+}
+
 export function buildClaimsWorkbook(
   lockedResults: ResultSet[],
   activeLines: CoverageLine[],
@@ -482,8 +602,18 @@ export function buildClaimsWorkbook(
   const wb = XLSX.utils.book_new();
   const orderedLines = FIXED_LINE_ORDER.filter(l => activeLines.includes(l));
 
-  const sheetBuilders: Partial<Record<CoverageLine, (rows: LineClaimRow[], dev: Map<string, OccDevelopment>, years: number[]) => Row[]>> = {
-    WC: buildWcSheetRows, GL: buildGlSheetRows, Property: buildPropertySheetRows,
+  // The builder and its format list travel together so a column added to one
+  // without the other is a type error rather than a silently General column.
+  // `noteRows` is how many leading note rows precede the header — Property
+  // carries two, the others one — which is also where the data starts.
+  const sheetBuilders: Partial<Record<CoverageLine, {
+    rows: (rows: LineClaimRow[], dev: Map<string, OccDevelopment>, years: number[]) => Row[];
+    formats: (years: number[]) => (NumFmt | undefined)[];
+    noteRows: number;
+  }>> = {
+    WC: { rows: buildWcSheetRows, formats: WC_FORMATS, noteRows: 1 },
+    GL: { rows: buildGlSheetRows, formats: GL_FORMATS, noteRows: 1 },
+    Property: { rows: buildPropertySheetRows, formats: PROPERTY_FORMATS, noteRows: 2 },
   };
 
   // ⚠ ONE YEAR SPAN FOR THE WHOLE WORKBOOK, not one per sheet, so "Yr 7" is the
@@ -498,15 +628,15 @@ export function buildClaimsWorkbook(
     if (!builder) continue;
     const rows = collectLineClaims(lockedResults, line);
     const dev = devByLine.get(line) ?? new Map<string, OccDevelopment>();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(builder(rows, dev, years)), line);
+    const ws = XLSX.utils.aoa_to_sheet(builder.rows(rows, dev, years));
+    applyFormats(ws, builder.formats(years), builder.noteRows + 1);
+    XLSX.utils.book_append_sheet(wb, ws, line);
   }
 
   if (poolState) {
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.aoa_to_sheet(buildDevelopmentRows(poolState, activeLines, years)),
-      'Development'
-    );
+    const ws = XLSX.utils.aoa_to_sheet(buildDevelopmentRows(poolState, activeLines, years));
+    applyFormats(ws, DEVELOPMENT_FORMATS(years), 2);
+    XLSX.utils.book_append_sheet(wb, ws, 'Development');
   }
 
   return wb;

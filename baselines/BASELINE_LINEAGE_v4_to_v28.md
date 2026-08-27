@@ -1496,3 +1496,96 @@ reaching its state reads green while proving nothing, which is how this went
 unwatched in the first place.
 
 v25 retired from the working tree; v26 kept as the immediate predecessor.
+
+---
+
+## v28 — number formats on both workbooks, and the rounding that made them possible
+
+Every numeric cell in both exports was General, so `0.6853085517806616` sat beside
+`42709940` in the same sheet. Four formats now apply:
+
+| format | bucket | count on the Pool sheet |
+|---|---|---|
+| `#,##0` | dollars | 46 metrics |
+| `#,##0.00` | ratios, multipliers, counts, factors, per-$100 rates | 26 metrics |
+| `0.00%` | fractions read as percentages | 16 metrics |
+| `0` | years — no thousands separator | 2 metrics |
+
+### The two workbooks needed opposite rules
+
+The Pool and line sheets put **one quantity per row** and a year per column, so
+the format belongs to the row; a per-column rule there would format the Gross
+Premium row and the Loss Ratio row identically. The claims sheets are transposed
+— one quantity per column — and take the per-column rule.
+
+Results formats are **derived from each metric's own `value()` renderer**, which
+is exactly how that number is shown on screen, so the workbook agrees with the
+screen by construction and a metric added later gets its format from its own
+renderer instead of landing in a default bucket because nobody remembered a
+second list. Claims formats are declared per column beside each header, travelling
+with the builder so a column added to one without the other is a type error.
+
+### The rounding had to go, and that is the value change
+
+`roundDollars = Math.round` was applied to 46 `csvValue`s and `roundOrBlank` to
+every claims amount, so **the exports never held cents in the first place** —
+a cell displaying $42,709,940 stored `42709940`. Rounding at write time is only
+ever a stand-in for a display format; with a format in place it is worse than
+useless. Both are gone. A column re-summed in Excel now agrees with the engine
+rather than with the accumulated rounding of its own cells.
+
+That let `claims-workbook-check` tighten its row identity from a
+`yrCols/2 + 2` dollar allowance to **1e-6** — the allowance existed only to
+absorb per-cell rounding.
+
+### Per-$100 rates are NOT in the dollars bucket
+
+`purePremiumRatePer100`, `expectedCededPer100`, `netPurePremiumRatePer100`,
+`poolPremiumRateAtSelectedClf` and `totalMemberRatePer100` render as `$1.23` via
+the `dollars` helper (2dp) rather than `formatCurrency` (0dp), and are **stored at
+4dp** because their precision is load-bearing. `#,##0` would print `$1` for a rate
+whose whole meaning is after the point. The classifier separates them by the
+renderer: a `$` with decimals is a rate, a `$` without is an amount.
+
+### Development % is NOT in the percent bucket
+
+Excel's `0.00%` multiplies by 100 on display, which is right for everything the
+engine stores as a fraction. `Development %` is already multiplied —
+`(dev/original)*100`, stored as 73 for 73% — so a percent format would render
+7300%. It takes `#,##0.00`.
+
+### Does the export guard's hash cover number formats? YES.
+
+`sheet_to_csv` emits the **displayed** string, not the stored value, so a cell
+under `#,##0` comes out as `"42,709,940"`. All 24 hashes moved and a recapture was
+required.
+
+⚠ **And that would have made the guard blind to sub-dollar drift at the exact
+moment the export first carried cents.** The guard now hashes **two** renderings
+concatenated — `sheet_to_csv` for the displayed shape and
+`sheet_to_csv(..., { rawNumbers: true })` for full stored precision. Verified:
+under the old single-hash scheme `42709939.61` and `42709939.99` collided under
+`#,##0`; under the new one they differ, and a format change with no value change
+also differs.
+
+| gate | reading |
+|---|---|
+| solo export guard | **24 of 24 moved** — formats reach the CSV, and the rounding removal changes the values |
+| value identity | **0 changed, 0 added, 0 removed** — it reads result objects, which the export layer does not touch |
+
+**`VALUE_IDENTITY_v28.json` is byte-identical to `v27`.** Recaptured only for
+lockstep; that it did not move is the statement that this change is confined to
+the export layer.
+
+### New gate
+
+`export-number-format-check.ts` builds both workbooks, round-trips them through
+xlsx **with `cellNF`** (without it SheetJS drops `z` on read and every cell looks
+General — a check written without it would report the defect it was added to
+catch), and asserts: every numeric cell carries one of the four formats (**0
+General** across 121,993 numeric cells), years render without a separator,
+identifiers stay text, percent cells still **hold fractions** with Excel
+multiplying only on display, and the stored values match the engine's own
+unrounded figures.
+
+v26 retired from the working tree; v27 kept as the immediate predecessor.

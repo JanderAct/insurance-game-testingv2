@@ -283,7 +283,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // changed of 28,500. Recaptured in the same commit rather than deferred to the
 // next range: a guard left red for everyone is a guard people learn to skip, and
 // this file's own history has the phantom "removed 300" line as the case study.
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v27.json');
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v28.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');
@@ -356,8 +356,27 @@ for (const arm of ARMS) {
 for (const id of SEEDS) {
   for (const { lines, name } of CONFIGS) {
     const wb = buildResultsWorkbook(play(id, lines, 5, arm.decisions), lines, RESULT_METRICS);
-    const csv = wb.SheetNames.map(s => XLSX.utils.sheet_to_csv(wb.Sheets[s])).join('\n#SHEET#\n');
-    out[`${arm.name}|${id}|${name}`] = sha(Buffer.from(csv, 'utf8'));
+    // ============================================================================
+    // ⚠ TWO RENDERINGS, HASHED TOGETHER, AND THE SECOND ONE IS NEW.
+    //
+    // sheet_to_csv emits the DISPLAYED string, not the stored value: a cell
+    // holding 42709939.61 under `#,##0` comes out as "42,709,940". That is right
+    // for a shape guard — a number format is part of what the reader sees, and a
+    // format change should turn this red — but on its own it would have made the
+    // guard BLIND TO SUB-DOLLAR DRIFT the moment dollar columns got a whole-dollar
+    // format.
+    //
+    // That blindness would have arrived at exactly the wrong moment. The same
+    // commit that added the formats REMOVED the Math.round that used to be
+    // applied at write time, so the export now carries full precision for the
+    // first time — and hashing only the rendered text would have thrown it away
+    // again one line later. `rawNumbers` re-renders the same sheets at full
+    // stored precision, and both go into the hash: a format change moves the
+    // first, a cent of value drift moves the second.
+    // ============================================================================
+    const shown = wb.SheetNames.map(s => XLSX.utils.sheet_to_csv(wb.Sheets[s])).join('\n#SHEET#\n');
+    const raw = wb.SheetNames.map(s => XLSX.utils.sheet_to_csv(wb.Sheets[s], { rawNumbers: true })).join('\n#SHEET#\n');
+    out[`${arm.name}|${id}|${name}`] = sha(Buffer.from(`${shown}\n#RAW#\n${raw}`, 'utf8'));
   }
 }
 }
