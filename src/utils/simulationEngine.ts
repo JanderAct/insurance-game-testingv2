@@ -1619,6 +1619,8 @@ export function processLineYear(
     loanRepaymentApplied: 0,
     loanInterestAccrued: 0,
     loanOriginatedThisYear: 0,
+    interLineTransfer: 0,
+    interLineCashTransfer: 0,
     dividendBlocked: ctx.dividendBlocked,
 
     // CLF / funding confidence fields
@@ -2028,11 +2030,12 @@ export function processYear(
       result.loanInterestAccrued = interest;
       result.loanRepaymentApplied = applied;
       result.endingSurplus -= applied;
-      result.availableSurplus = result.endingSurplus;
-      result.availableFunding = result.endingSurplus;
       result.endingInvestments -= fromInvestments;
       result.endingCash -= fromCash;
       result.totalAssets -= applied;
+      result.interLineTransfer -= applied;
+      result.interLineCashTransfer -= fromCash;
+      resyncSurplusDerived(result);
       updatedShared.cash = result.endingCash;
 
       for (const [lender, lenderShare] of Object.entries(loan.lenderShares)) {
@@ -2070,10 +2073,10 @@ export function processYear(
     const lenderState = updatedLineStates[lender];
     if (!entry || !lenderState) continue;
     entry.result.endingSurplus += credit;
-    entry.result.availableSurplus = entry.result.endingSurplus;
-    entry.result.availableFunding = entry.result.endingSurplus;
     entry.result.endingInvestments += credit;
     entry.result.totalAssets += credit;
+    entry.result.interLineTransfer += credit;
+    resyncSurplusDerived(entry.result);
     lenderState.surplus = entry.result.endingSurplus;
     lenderState.investedAssets = entry.result.endingInvestments;
   }
@@ -2133,6 +2136,50 @@ export function processYear(
   return { updatedPoolState, result, lineResults, loanOffers, priorPoolResult };
 }
 
+// ============================================================================
+// RE-DERIVE EVERYTHING THAT HANGS OFF endingSurplus, AFTER AN INTER-LINE LOAN
+// HAS MOVED IT.
+//
+// ⚠ SEVEN FIELDS WERE LEFT STALE, AND THEY WERE STALE IN THE SHIPPED ENGINE
+// RATHER THAN ONLY ON THE AUDIT PAGE. processLineYear computes the capital
+// cushion, the legacy aliases and the surplus tie-out from endingSurplus, and
+// THEN the loan passes move endingSurplus and update only `availableSurplus` and
+// `availableFunding` beside it. A line that lent $43M went on reporting the
+// excess surplus, the adequacy ratio and the adequacy STATUS it had before
+// lending — a "Strong" label on a balance sheet $43M lighter.
+//
+// ⚠ AND surplusTieOutDifference IS NOT SUPPOSED TO STAY ZERO. It is
+// endingSurplus - surplusFromIncome, and an inter-line loan legitimately moves
+// surplus WITHOUT touching the income statement, so after a transfer the tie-out
+// SHOULD equal that transfer exactly. Holding it at zero was not a conservative
+// choice; it was the balance sheet and the income statement disagreeing with
+// nothing to say so. `interLineTransfer` is written from the transfer side and
+// the tie-out from the surplus side, so the two agreeing is a real check.
+//
+// Called from every site that moves endingSurplus after processLineYear has
+// returned: the repayment pass, the lender credit pass, and both halves of
+// applyLoanAuthorizations.
+// ============================================================================
+function resyncSurplusDerived(r: LineResultSet): void {
+  r.availableSurplus = r.endingSurplus;
+  r.availableFunding = r.endingSurplus;
+  r.capitalFundingGap = r.availableSurplus - r.reserveRiskMarginNeeded;
+  r.excessAvailableSurplus = r.capitalFundingGap;
+  r.fundingGap = r.capitalFundingGap;
+  const excess = r.reserveRiskMarginNeeded > 0
+    ? r.excessAvailableSurplus / r.reserveRiskMarginNeeded
+    : null;
+  r.excessCapitalRatio = excess;
+  r.capitalAdequacyRatio = excess;
+  r.capitalAdequacyStatus =
+    excess === null ? 'N/A'
+      : excess >= 0.25 ? 'Strong'
+      : excess >= 0 ? 'Adequate'
+      : excess >= -0.10 ? 'Thin'
+      : 'Deficient';
+  r.surplusTieOutDifference = r.endingSurplus - r.surplusFromIncome;
+}
+
 // Finalize a processed year after the player has chosen which loan offers to
 // authorize. Stage 2.9: authorization is a REAL transfer — each lending line's
 // invested assets are debited by its share of the deficit (its surplus drops
@@ -2170,10 +2217,10 @@ export function applyLoanAuthorizations(
       const lenderEntry = processed.lineResults.find(lr => lr.line === lender);
       if (lenderEntry) {
         lenderEntry.result.endingSurplus -= amount;
-        lenderEntry.result.availableSurplus = lenderEntry.result.endingSurplus;
-        lenderEntry.result.availableFunding = lenderEntry.result.endingSurplus;
         lenderEntry.result.endingInvestments -= amount;
         lenderEntry.result.totalAssets -= amount;
+        lenderEntry.result.interLineTransfer -= amount;
+        resyncSurplusDerived(lenderEntry.result);
       }
       updatedLines[lender] = {
         ...updatedLines[lender],
@@ -2186,12 +2233,12 @@ export function applyLoanAuthorizations(
     const entry = processed.lineResults.find(lr => lr.line === offer.line);
     if (entry) {
       entry.result.endingSurplus = 0;
-      entry.result.availableSurplus = 0;
-      entry.result.availableFunding = 0;
       entry.result.endingInvestments += offer.deficit;
       entry.result.totalAssets += offer.deficit;
       entry.result.outstandingLoanBalance = offer.deficit;
       entry.result.loanOriginatedThisYear = offer.deficit;
+      entry.result.interLineTransfer += offer.deficit;
+      resyncSurplusDerived(entry.result);
     }
     updatedLines[offer.line] = {
       ...updatedLines[offer.line],
@@ -2580,6 +2627,9 @@ export function aggregateLineResults(
     loanRepaymentApplied: addDollars('loanRepaymentApplied'),
     loanInterestAccrued: addDollars('loanInterestAccrued'),
     loanOriginatedThisYear: addDollars('loanOriginatedThisYear'),
+    // Sums to zero across lines by construction — see the field comment.
+    interLineTransfer: addDollars('interLineTransfer'),
+    interLineCashTransfer: addDollars('interLineCashTransfer'),
     dividendBlocked: results.some(r => r.dividendBlocked),
 
     selectedFundingConfidenceLevel: first.selectedFundingConfidenceLevel,

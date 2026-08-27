@@ -817,6 +817,35 @@ export interface ResultSet {
   loanRepaymentApplied: number;     // net income skimmed this year to repay the loan
   loanInterestAccrued: number;      // interest added to the balance this year
   loanOriginatedThisYear: number;   // principal of a loan originated this year (0 if none)
+
+  // ⚠ WHAT INTER-LINE LENDING DID TO THIS LINE'S BALANCE SHEET THIS YEAR, and it
+  // exists because THE LENDER SIDE HAD NO FIELD AT ALL. The four fields above are
+  // all BORROWER-side: a line that LENDS $26M sees its surplus and investments
+  // fall by $26M with every one of them still reading zero. Nothing downstream
+  // could tell a lender's balance sheet from an unexplained hole in it, and the
+  // audit page's cash/investment reconstruction — written before inter-line
+  // lending existed — silently omitted the term and reported a $26.40M gap as a
+  // formula failure.
+  //
+  // Sign is FROM THIS LINE'S POINT OF VIEW: positive when the line received
+  // (borrowed proceeds, or a repayment credited back to it as a lender),
+  // negative when it paid (its share of a loan it funded, or a repayment it
+  // made). Covers BOTH passes — the in-year repayment and the post-authorization
+  // transfer — so it is the complete post-sweep movement, not just origination.
+  //
+  // ⚠ IT SUMS TO ZERO ACROSS LINES, BY CONSTRUCTION. Every dollar one line
+  // receives another line paid, so the POOL row is always 0 and that is a real
+  // check rather than a definition — the two sides are written at different
+  // places in the engine and a pool total that drifts off zero means one of them
+  // is wrong.
+  interLineTransfer: number;
+  // The part of `interLineTransfer` that moved through CASH rather than
+  // investments. Non-zero only when a repayment exhausted the line's portfolio
+  // and had to come out of operating cash; every other movement is investments.
+  // Carried separately because the sweep reconstruction has to split the term
+  // between the two accounts and cannot recover the split from anything else.
+  interLineCashTransfer: number;
+
   dividendBlocked: boolean;         // true if this line's dividend was blocked (negative surplus carried in)
 
   // CLF / Funding Confidence

@@ -2608,9 +2608,19 @@ export function buildRevExpRows(
       metric: 'Net position, end of year',
       value: formatCurrency(result.endingSurplus),
       numericValue: result.endingSurplus,
+      // ⚠ A LOAN IS NOT INCOME, WHICH IS WHY IT IS A THIRD TERM RATHER THAN PART
+      // OF THE SECOND. Beginning plus change IS the income-statement answer, and
+      // it stays that; an inter-line transfer moves surplus between lines without
+      // any line earning or losing anything, so it is added beside the change
+      // rather than folded into it. The pool row never shows this term, because
+      // the transfers net to zero across lines.
       formula: {
         kind: 'sum',
-        terms: [cur(result.beginingSurplus, 'beginning'), cur(result.netIncome, 'change')],
+        terms: [
+          cur(result.beginingSurplus, 'beginning'),
+          cur(result.netIncome, 'change'),
+          ...(result.interLineTransfer === 0 ? [] : [cur(result.interLineTransfer, 'inter-line loan transfer')]),
+        ],
       },
       explain: `Stored tie-out difference ${formatCurrency(result.surplusTieOutDifference)}.`,
       emphasis: 'total',
@@ -2828,6 +2838,30 @@ export function buildCashInvestmentRows(
       ? { product: [cur(p.preSweepCash + p.investmentsBeforeSweep)], label: `${p.line} (liquidity floor bound)` }
       : { product: [cur(p.operatingCashTarget)], label: `${p.line} (swept to target)` };
 
+  // ============================================================================
+  // ⚠ THE SWEEP IS NOT THE LAST THING THAT TOUCHES THESE TWO ACCOUNTS.
+  //
+  // reconstructSweep reproduces the engine's year-end sweep exactly, and the
+  // sweep is where processLineYear stops. Inter-line lending runs AFTER it —
+  // authorization credits the borrower's investments and debits every lender's,
+  // and a repayment takes money back out — so a reconstruction that ends at the
+  // sweep is short by the whole transfer. Measured on seed B4YHSTVN year 3: the
+  // row read $42,709,940 against a formula giving $16,311,943, a $26,397,997 gap
+  // that was exactly the loan GL had originated.
+  //
+  // ⚠ THE TERM IS TAKEN FROM THE ENGINE, NOT BACKED OUT OF THE ANSWER. It would
+  // have been one line to write `endingInvestments - investmentsAfterSweep` and
+  // call the row reconciled, and that is a formula that cannot fail: it proves
+  // the row equals itself. interLineTransfer is written where the transfer
+  // happens, so the row is checked against an independently-computed figure.
+  //
+  // Split across the two accounts because a repayment comes out of investments
+  // first and only reaches cash once the portfolio is exhausted.
+  const loanCash = result.interLineCashTransfer;
+  const loanInvestments = result.interLineTransfer - result.interLineCashTransfer;
+  const loanTerm = (v: number, what: string): FormulaTerm[] =>
+    v === 0 ? [] : [cur(v, `inter-line ${v > 0 ? 'proceeds into' : 'transfer out of'} ${what}`)];
+
   return [
 
     {
@@ -2914,7 +2948,7 @@ export function buildCashInvestmentRows(
       metric: 'Ending Cash / Operating Cash Sweep',
       value: formatCurrency(result.endingCash),
       numericValue: result.endingCash,
-      formula: { kind: 'sum', terms: sweeps.map(endingCashTermFor) },
+      formula: { kind: 'sum', terms: [...sweeps.map(endingCashTermFor), ...loanTerm(loanCash, 'cash')] },
       subFormula: sweeps.length === 1 && !sweeps[0].liquidityFloorBound ? {
         label: 'pre-sweep cash',
         value: sweeps[0].preSweepCash,
@@ -2947,9 +2981,15 @@ export function buildCashInvestmentRows(
         terms: [
           cur(checks.investmentsBeforeSweep, 'investments before sweep'),
           cur(checks.sweepTransfer, 'sweep transfer'),
+          ...loanTerm(loanInvestments, 'investments'),
         ],
       },
-      explain: 'The mirror image of the cash reconstruction above — the sweep conserves total assets, moving money between the two accounts.',
+      explain: loanInvestments !== 0
+        ? 'The sweep conserves total assets, moving money between the two accounts — but it is not the '
+          + 'last step. Inter-line lending settles AFTER the sweep and lands in the portfolio, so the '
+          + 'third term is this line\'s share of it: positive where the line borrowed or was repaid, '
+          + 'negative where it funded another line\'s deficit.'
+        : 'The mirror image of the cash reconstruction above — the sweep conserves total assets, moving money between the two accounts.',
       note: checks.endingInvestmentsSweep.note,
       status: checks.endingInvestmentsSweep.status,
     },
@@ -2982,7 +3022,12 @@ export function buildCashInvestmentRows(
         kind: 'sum',
         terms: [cur(result.endingSurplus, 'ending surplus'), cur(-result.surplusFromIncome, 'less surplus from income')],
       },
-      explain: 'Zero when the balance sheet and income statement agree.',
+      explain: result.interLineTransfer === 0
+        ? 'Zero when the balance sheet and income statement agree.'
+        : 'NOT EXPECTED TO BE ZERO THIS YEAR. An inter-line loan moves surplus between lines without '
+          + 'passing through either line\'s income statement, so the two statements legitimately differ '
+          + 'by exactly that transfer. It should equal the inter-line term on the net-position row above; '
+          + 'the two are computed at different places in the engine, so their agreeing is a real check.',
       ...legacyCheck(tieOutDifferenceDifference),
     },
   ];

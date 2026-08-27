@@ -63,7 +63,7 @@
 // enter twice when the same rounded field appears in two operands.
 
 import { generateGameInstance } from '../../src/utils/instanceGenerator';
-import { processYear } from '../../src/utils/simulationEngine';
+import { applyLoanAuthorizations, processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { SLIDER_RANGES, WC_FUNDING_CONFIDENCE_RANGE } from '../../src/data/defaultAssumptions';
@@ -127,7 +127,13 @@ const MIN_STOP: Record<string, number> = {
 // branches never render at all. NOT ADDED HERE: this commit is the funding
 // dimension, and adding a second dimension in the same pass would make it
 // impossible to say which arm found what.
-interface Arm { name: string; why: string; decisions: (d: DecisionSet, lines: CoverageLine[]) => DecisionSet }
+interface Arm {
+  name: string;
+  why: string;
+  decisions: (d: DecisionSet, lines: CoverageLine[]) => DecisionSet;
+  /** Accept every inter-line loan offer the year produced. See the LOANS arm. */
+  authorizeLoans?: boolean;
+}
 const ARMS: Arm[] = [
   {
     name: 'defaults',
@@ -161,6 +167,47 @@ const ARMS: Arm[] = [
         // Level 0 is the LOWEST attachment and so the one most likely to pay.
         // GL has no aggregate; normalizeAggregateStopLevel returns it to -1.
         aggregateStopLevel: 0,
+      }])) as never,
+    }),
+  },
+  // ============================================================================
+  // ⚠ THE LOAN ARM, AND IT IS THE FIFTH INSTRUMENT WITH CONFIGURATION BLINDNESS —
+  // the first where the blind spot was FOUND, REASONED ABOUT, AND CLOSED FOR A
+  // REASON THAT TURNED OUT TO BE WRONG.
+  //
+  // The sweep at 9f63680 established that offers are made freely (3 at defaults,
+  // up to 14 in selfInsured) and that this driver never ACCEPTS one, so
+  // applyLoanAuthorizations is unreachable in every arm. The decision not to add
+  // an arm rested on the audit page carrying zero loan references — true when it
+  // was checked, and false as a reason, because the page reconstructs
+  // endingInvestments and endingCash from flows that a loan then changes AFTER
+  // the sweep. A row does not have to mention a mechanic to be broken by it.
+  //
+  // ⚠ THE LESSON IS NOT "ADD MORE ARMS". It is that "the display never names X"
+  // does not establish "the display is independent of X". The right question is
+  // whether the RECONSTRUCTION is complete, and a reconstruction written before a
+  // term existed cannot be.
+  //
+  // ⚠ ONLY THE `tri` CONFIG CAN PRODUCE A LOAN. An inter-line loan needs another
+  // line to lend, so the three solo configs run this arm as a duplicate of
+  // selfInsured. That is not waste — it is the control that says the arm's
+  // findings are the LOAN and not the declined tower.
+  // ============================================================================
+  {
+    name: 'loans',
+    why: 'every layer declined to force deficits, and EVERY loan offer authorized — the only arm '
+      + 'in which applyLoanAuthorizations runs at all',
+    authorizeLoans: true,
+    decisions: (d, lines) => ({
+      ...d,
+      byLine: Object.fromEntries(lines.map(l => [l, {
+        ...d.byLine[l],
+        layersPlaced: d.byLine[l].layersPlaced.map(() => false),
+        aggregateStopLevel: -1,
+        // Left at its default 0.5 rather than raised: repayment has to actually
+        // fire in the years AFTER origination, and the default is what a player
+        // gets. Raising it would test a path the shipped default does not take.
+        loanRepaymentAggressiveness: d.byLine[l].loanRepaymentAggressiveness,
       }])) as never,
     }),
   },
@@ -582,6 +629,13 @@ function proseAudit(rows: AuditRow[], ctx: { arm: string; config: string; scope:
   }
 }
 
+let loansAuthorized = 0;
+let loanDollars = 0;
+let loanYears = 0;
+let repaymentYears = 0;
+let loanBearingScopes = 0;
+const coverageFailures: string[] = [];
+
 console.log('=== AUDIT PAGE FORMULA RECONCILIATION ===\n');
 
 for (const arm of ARMS) {
@@ -597,7 +651,20 @@ for (const { lines, name } of CONFIGS) {
     };
     for (let y = 1; y <= YEARS; y++) {
       const p = processYear(gs, arm.decisions(defaultDecisionSet(y), lines));
-      const poolResult = p.result as ResultSet;
+      // ⚠ AUTHORIZE BEFORE READING ANYTHING. applyLoanAuthorizations mutates the
+      // line results in place and returns a RE-AGGREGATED pool result, so the
+      // page must be built from what it returns, not from what processYear did.
+      // Reading p.result after authorizing would audit a pool row that no longer
+      // matches its own lines.
+      let poolState = p.updatedPoolState;
+      let poolResult = p.result as ResultSet;
+      if (arm.authorizeLoans && p.loanOffers.length > 0) {
+        const applied = applyLoanAuthorizations(p, y, p.loanOffers.map(o => o.line));
+        poolState = applied.updatedPoolState;
+        poolResult = applied.result;
+        loansAuthorized += p.loanOffers.length;
+        loanDollars += p.loanOffers.reduce((a, o) => a + o.deficit, 0);
+      }
       // Every scope the page can be viewed at: the pool tab and each line tab.
       const scopes: LineView[] = ['pool', ...lines];
       for (const scope of scopes) {
@@ -605,6 +672,12 @@ for (const { lines, name } of CONFIGS) {
         const result = isPoolView ? poolResult : poolResult.byLine[scope as CoverageLine];
         if (!result) continue;
         const ctx = { arm: arm.name, config: name, seed: id, year: y, scope: String(scope) };
+        // Coverage: a loan arm that never reaches a loan-bearing scope proves
+        // nothing, so the states are counted rather than assumed.
+        if (result.loanOriginatedThisYear !== 0) loanYears++;
+        if (result.loanRepaymentApplied !== 0) repaymentYears++;
+        if (result.outstandingLoanBalance !== 0 || result.loanOriginatedThisYear !== 0
+            || result.loanRepaymentApplied !== 0) loanBearingScopes++;
         const checks = computeAuditChecks(poolResult, scope, inst.seed);
 
         const sup = buildSupportingRows(poolResult, scope);
@@ -635,7 +708,7 @@ for (const { lines, name } of CONFIGS) {
         proseAudit(revExp, ctx, poolResult, scope);
 
       }
-      gs = { ...gs, currentYearNumber: y + 1, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result] };
+      gs = { ...gs, currentYearNumber: y + 1, poolState, lockedResults: [...gs.lockedResults, poolResult] };
     }
   }
 }
@@ -644,6 +717,21 @@ for (const { lines, name } of CONFIGS) {
 console.log(`Evaluated ${checked.toLocaleString()} formula rows across ${ARMS.length} arms x ${CONFIGS.length} configs x ${GAMES} seeds x ${YEARS} years,`);
 console.log(`at every scope the page can be viewed at (pool + each active line).\n`);
 console.log('  by formula kind: ' + Object.entries(byKind).map(([k, v]) => `${k} ${v}`).join(', '));
+console.log(`  inter-line loans: ${loansAuthorized} authorized totalling $${(loanDollars / 1e6).toFixed(2)}M; `
+  + `${loanYears} scope-years with an origination, ${repaymentYears} with a repayment, `
+  + `${loanBearingScopes} carrying a loan at all`);
+// ⚠ AN ARM THAT STOPS REACHING ITS STATE IS WORSE THAN NO ARM, because it reads
+// green while proving nothing — which is exactly how the loan went unwatched for
+// as long as it did. Origination AND repayment are both required: the two passes
+// touch the balance sheet at different places and only the second one runs in
+// the years after a loan is taken.
+if (loanYears === 0 || repaymentYears === 0) {
+  coverageFailures.push(
+    `THE LOAN ARM REACHED NOTHING: ${loanYears} origination(s), ${repaymentYears} repayment(s). `
+    + 'The arm exists to make applyLoanAuthorizations reachable; if no offer is produced or none is '
+    + 'repaid, it is measuring the selfInsured arm again and the rows it was added to guard are '
+    + 'unguarded once more.');
+}
 console.log('  not arithmetic (correctly unreachable): ' +
   (Object.keys(skipped).length ? Object.entries(skipped).map(([k, v]) => `${k} ${v}`).join(', ') : 'none'));
 
@@ -996,11 +1084,15 @@ if (proseFindings.length === 0) {
   }
 }
 
-if (defects.length === 0 && handFindings.length === 0 && proseFindings.length === 0 && failures === 0) {
+for (const c of coverageFailures) console.log(`\n⚠ COVERAGE FAILURE: ${c}`);
+
+if (coverageFailures.length === 0
+    && defects.length === 0 && handFindings.length === 0 && proseFindings.length === 0 && failures === 0) {
   console.log('\nALL FORMULA ROWS RECONCILE within their own derived bounds, in every arm;');
   console.log('every hand-checkable row reproduces from its printed operands; and every');
   console.log('registered prose claim matches the data.');
 }
 
 process.exitCode =
-  (defects.length === 0 && handFindings.length === 0 && proseFindings.length === 0 && failures === 0) ? 0 : 1;
+  (coverageFailures.length === 0
+    && defects.length === 0 && handFindings.length === 0 && proseFindings.length === 0 && failures === 0) ? 0 : 1;

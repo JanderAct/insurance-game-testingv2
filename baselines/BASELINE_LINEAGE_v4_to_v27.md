@@ -1405,3 +1405,94 @@ re-inflate above the retention, which is the only case that costs anything. The
 bar is now the harm rather than the event, limit 25.
 
 v24 retired from the working tree; v25 kept as the immediate predecessor.
+
+---
+
+## v27 — inter-line loan proceeds reach the balance-sheet reconstructions
+
+### The defect
+
+The audit page's `reconstructSweep` reproduces the engine's year-end cash/investment
+sweep exactly — and the sweep is where `processLineYear` stops. Inter-line lending
+settles **after** it. Seed B4YHSTVN year 3: Ending Investments / Sweep read
+$42,709,940 against a formula giving $16,311,943, a **$26,397,997** gap that was
+exactly the loan GL had originated.
+
+Four rows broke, all at line scope, all only when a loan fired:
+
+| row | what was wrong |
+|---|---|
+| Ending Investments / Sweep | formula omitted the transfer |
+| Net position, end of year | formula omitted the transfer |
+| Excess Available Surplus | **stored value stale** — `capitalFundingGap` computed pre-loan |
+| Tie-Out Difference | **stored value stale** — held at −0 when it should equal the transfer |
+
+The pool row never broke: transfers net to zero across lines.
+
+### It was not display-only
+
+Two of the four were stale ENGINE fields, and the family is larger than the two
+rows that surfaced it. `processLineYear` derives `capitalFundingGap`,
+`excessAvailableSurplus`, `fundingGap`, `excessCapitalRatio`,
+`capitalAdequacyRatio`, `capitalAdequacyStatus` and `surplusTieOutDifference` from
+`endingSurplus`; the loan passes then move `endingSurplus` and refreshed only
+`availableSurplus` and `availableFunding`. **A line that lent $43M went on
+reporting the capital adequacy STATUS it had before lending.** `resyncSurplusDerived`
+now re-derives all seven at every site that moves surplus after the fact — the
+repayment pass, the lender credit pass, and both halves of `applyLoanAuthorizations`.
+
+`surplusTieOutDifference` is no longer expected to be zero. A loan moves surplus
+without passing through either line's income statement, so the tie-out should
+equal the transfer exactly, and the row now says so.
+
+### Two new fields, because the lender side had none
+
+Every existing loan field is BORROWER-side. A line that lends $26M sees surplus
+and investments fall with all four reading zero, so nothing downstream could tell
+a lender's balance sheet from an unexplained hole in it.
+
+- `interLineTransfer` — net movement in this line's surplus from inter-line
+  lending this year. Sums to **zero** across lines by construction.
+- `interLineCashTransfer` — the part that moved through cash rather than
+  investments. Non-zero only when a repayment exhausted the portfolio.
+
+Taken from the engine rather than backed out of the answer. `endingInvestments −
+investmentsAfterSweep` would have reconciled every row in one line and proved
+only that the row equals itself.
+
+### Gate readings
+
+| gate | reading |
+|---|---|
+| value identity | **0 changed, 0 removed, 600 added** (2 fields × 300 instances, zero in every arm) |
+| solo export guard | **24 of 24 byte-identical** |
+
+**`SOLO_EXPORT_GUARD_v27.json` is byte-identical to `v26`.** Recaptured only to
+keep the two gates in lockstep; that it did not move is the finding, not an
+omission — the new fields are deliberately not in `RESULT_METRICS`.
+
+⚠ **Neither gate can see this defect, and both being green proves nothing about
+it.** The loan does not fire in either gate's arms. That is why the fix landed
+with the arm.
+
+### The fifth instrument with configuration blindness
+
+`audit-formula-check` gains a `loans` arm: every layer declined to force
+deficits, and **every offer authorized** — the only arm in which
+`applyLoanAuthorizations` runs at all. It reaches 3 authorizations totalling
+$54.84M, 5 scope-years with an origination and 7 with a repayment, and it found
+all four rows on the first run.
+
+This is the first blind spot that was **identified, reasoned about, and closed
+for a reason that turned out to be wrong.** The sweep at 9f63680 found that
+offers are made freely and never accepted, and declined to add an arm because the
+audit page carried zero loan references. True when checked; false as a reason.
+**A row does not have to mention a mechanic to be broken by it** — the question is
+whether the RECONSTRUCTION is complete, and one written before a term existed
+cannot be.
+
+The arm now fails if it reaches no origination or no repayment: an arm that stops
+reaching its state reads green while proving nothing, which is how this went
+unwatched in the first place.
+
+v25 retired from the working tree; v26 kept as the immediate predecessor.

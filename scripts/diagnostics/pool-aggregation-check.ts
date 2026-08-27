@@ -56,7 +56,14 @@ const DOLLARS = new Set([
   'operatingExpense', 'riskControlInvestment', 'priorYearDevelopment',
   'beginningNetReserve', 'currentYearNetReserve', 'netPaidLosses', 'endingNetReserve',
   'investedAssets', 'investmentIncome', 'outstandingLoanBalance', 'loanRepaymentApplied',
-  'loanInterestAccrued', 'loanOriginatedThisYear', 'expectedLoss', 'clfAdjustedExpectedLoss',
+  'loanInterestAccrued', 'loanOriginatedThisYear',
+  // ⚠ THESE TWO SUM TO ZERO AT POOL SCOPE RATHER THAN TO A TOTAL, and they are
+  // still DOLLARS: every dollar one line receives from inter-line lending is a
+  // dollar another line paid, so the pool row is 0 by construction. Summing is
+  // the correct aggregation AND the check — a pool total that drifts off zero
+  // means the borrower side and the lender side disagree.
+  'interLineTransfer', 'interLineCashTransfer',
+  'expectedLoss', 'clfAdjustedExpectedLoss',
   'expectedNetUnpaidLoss', 'priorYearDevelopmentCeded', 'bookingGiveBack',
   'netFundingTarget', 'indicatedNetReserveAtConfidenceLevel', 'reserveRiskMarginNeeded',
   'fundingMarginNeeded', 'availableFunding', 'availableSurplus', 'fundingGap',
