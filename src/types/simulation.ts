@@ -401,6 +401,33 @@ export interface DevelopingClaim {
   /** True if this occurrence carries ADVERSE development. Favourable movements
    *  reach every tracked occurrence regardless. */
   carrier: boolean;
+  /** THIS OCCURRENCE'S MOVEMENT AT EACH VALUATION, oldest first. Index k is the
+   *  step taken from age k to age k+1, so it belongs to valuation year
+   *  `yearNumber + k + 1` of the cohort that holds it. The two movements a step
+   *  makes — the stochastic draw and the deterministic unwind — are summed into
+   *  ONE entry, because a valuation produces one revised estimate and the split
+   *  between them is a mechanism detail, not something a valuation reports.
+   *
+   *  ⚠ THE MARKDOWN IS NOT IN HERE. `drawn -> original` happens at inception, not
+   *  at a valuation, and is readable as the difference between those two fields.
+   *  Putting it in the series would make the first entry a booking decision
+   *  wearing a valuation's clothes.
+   *
+   *  ⚠ WHY THIS IS STORED RATHER THAN DERIVED. The same reason
+   *  ReserveDevelopmentRow exists: each step multiplies by a fresh lognormal draw
+   *  and then SPLITS it across occurrences by their then-current values, so
+   *  yesterday's value cannot be recovered from today's — neither the draw nor
+   *  the split survives. `current - original` is the only thing a derivation can
+   *  reach, and it nets a claim that doubled then halved to nothing.
+   *
+   *  ⚠ AND IT IS BOUNDED, which is what keeps it inside Ruling 8. Length is
+   *  capped by the cohort's horizon, not by game length: at most 12 entries (WC's
+   *  IBNER_HORIZON.max), 8 on GL, 4 on Property. It does NOT grow as the game runs
+   *  on — a year-30 save carries the same per-claim series a year-12 save does.
+   *  Measured over 3 games x 10 years x 3 lines in both funding arms
+   *  (scripts/diagnostics/claims-workbook-check.ts): 12.7-13.5 KB of a 389 KB
+   *  serialised poolState, 3.3-3.5% of it and ~0.27% of a 5MB quota. */
+  movementByStep?: number[];
 }
 
 // Annual reserve cohort for simplified development. NET basis: losses enter

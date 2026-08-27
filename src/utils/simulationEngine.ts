@@ -2875,7 +2875,23 @@ function processIbner(
             // dropped.
             newUnpaid += res.retained + alloc.unallocated;
           }
-          developingClaimsOut = live;
+          // ⚠ ONE ENTRY PER VALUATION, WRITTEN AFTER BOTH STEPS, AND THAT IS
+          // DELIBERATE. A valuation revises an estimate once; the stochastic draw
+          // and the unwind are how this engine gets there, not two things a
+          // reader should see. Differencing against the values the year STARTED
+          // with also makes the entry exactly what the claim moved by, with no
+          // dependence on how many internal steps ran.
+          //
+          // Written at index `age` rather than pushed, for the same reason
+          // recordReserveDevelopment writes at an index: a replayed year must
+          // restate its own entry, not append a second one.
+          developingClaimsOut = live.map((d, i) => {
+            const moved = d.current - claims[i].current;
+            const series = [...(d.movementByStep ?? [])];
+            while (series.length < c.age) series.push(0);
+            series[c.age] = moved;
+            return { ...d, movementByStep: series };
+          });
           untrackedOut = untracked;
         } else {
           // ⚠ THE DISABLED PATH IS THE ORIGINAL EXPRESSION, CHARACTER FOR

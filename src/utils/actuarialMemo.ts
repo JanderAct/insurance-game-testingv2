@@ -381,10 +381,16 @@ export function buildActuarialMemo({ gameState, asAtYear }: ActuarialMemoInput):
 
   // WHICH CLAIMS MOVED — the schedule that gives a reserve deterioration a story.
   //
-  // ⚠ AS AT NOW, NOT AS AT THE SELECTED YEAR. The developing claims live on the
-  // reserve cohort, which carries only its CURRENT value; the per-valuation
-  // history above is the ledger's job and the claim subset has no equivalent.
-  // Labelled rather than quietly presented as if it followed the selector.
+  // ⚠ AS AT NOW, NOT AS AT THE SELECTED YEAR — and the reason has narrowed.
+  // These rows show each occurrence's CURRENT value against its booked one, so
+  // they do not follow the year selector, and they are labelled rather than
+  // quietly presented as if they did.
+  //
+  // The old reason — "the claim subset has no per-valuation history" — is no
+  // longer true: DevelopingClaim.movementByStep carries one entry per valuation,
+  // and the claims workbook renders it as a triangle. So this schedule COULD be
+  // cut as at the selected year. It is not, because that is a change to the
+  // memo's content rather than a correction, and nobody has asked for it.
   const developed = lines.flatMap(line =>
     (gameState.poolState.lines[line]?.reserveCohorts ?? []).flatMap(c =>
       (c.developingClaims ?? [])
