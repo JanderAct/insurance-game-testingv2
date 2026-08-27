@@ -312,10 +312,37 @@ export default function ResultsPage({ lockedResults, lineView }: ResultsPageProp
               <Row label="Risk Control Investment" value={formatCurrency(result.riskControlInvestment)} valueColor="text-amber-600" />
               <Row label="Reinsurance Cost" value={formatCurrency(result.reinsuranceCost)} valueColor="text-red-600" />
               <div className="border-t border-gray-100 my-1" />
+              {/* ⚠ GROSS, THEN THE RECOVERY, THEN NET — mirroring Premium & Losses
+                  above, which already reads correctly down the column. This row used
+                  to show the NET figure alone under the bare label "Prior-Year
+                  Development", while the recovery ON it sat on the other card. One
+                  observed year read -$215,030 here against $3,205,174 of recovery
+                  there: a small development beside a large recovery on it, with
+                  nothing to tell a reader they were the same event.
+
+                  SIGN: the field is favourable-positive, and ceding makes an adverse
+                  year LESS adverse — so gross is net MINUS the recovery, and prints
+                  more negative than the net beneath it. Verified against the cohort
+                  walk: net $547,634 adverse + $6,177,235 ceded = $6,724,869 gross.
+
+                  This is only arithmetic a reader can follow because 932246f made
+                  priorYearDevelopmentCeded mean one thing. While it still carried
+                  bookingGiveBack, this sum was short by the give-back. */}
               <Row
-                label="Prior-Year Development"
+                label="Prior-Year Development (gross)"
+                value={formatCurrency(result.priorYearDevelopment - result.priorYearDevelopmentCeded)}
+                valueColor={result.priorYearDevelopment - result.priorYearDevelopmentCeded >= 0 ? 'text-emerald-600' : 'text-red-600'}
+              />
+              <Row
+                label="Reinsurance Recovery (prior-year development)"
+                value={formatCurrency(result.priorYearDevelopmentCeded)}
+                valueColor="text-emerald-600"
+              />
+              <Row
+                label="Prior-Year Development (net)"
                 value={formatCurrency(result.priorYearDevelopment)}
                 valueColor={result.priorYearDevelopment >= 0 ? 'text-emerald-600' : 'text-red-600'}
+                bold
               />
               <Row label="Beginning Net Reserve" value={formatCurrency(result.beginningNetReserve)} />
               <Row label="Current-Year Net Reserve" value={formatCurrency(result.currentYearNetReserve)} />
