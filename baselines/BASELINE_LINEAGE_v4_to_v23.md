@@ -1112,3 +1112,85 @@ The cession arithmetic stays EXACT rather than approximated.
 `pool-aggregation-check`, `roster-catalog-check`, `marketplace-generation-check` —
 all EXIT 0. The fresh v22 capture reads `added 0, removed 0, 0 changed` with no
 standing phantom line.
+
+
+---
+
+## v23 — the gates gain a squeezed arm. NO VALUE MOVED.
+
+**Not a range. An INSTRUMENT change.** `value-identity-check` and `solo-export-guard`
+both ran at `defaultDecisionSet` only. They now run **two arms**: defaults, and every
+line squeezed to its own reachable minimum stop (WC 0.10, GL and Property 0.30 —
+the same constants `audit-formula-check` uses, for the same reason).
+
+Capture doubles: **14,400 → 28,800 numeric fields, 12 → 24 export hashes.**
+
+### ⚠ WHY: THE PAIR EVERY COMMIT IS MEASURED AGAINST READ CLEAN ON A REAL CHANGE
+
+At `932246f` a field was split in two, moving **171 instances under squeezed
+funding**. Both gates reported **0 changed and 12/12 matching** — because
+`bookingGiveBack` is bit-exactly 0 at default decisions, so at the only
+configuration either exercised, the change did not exist.
+
+"Both gates identical" was a statement about one configuration.
+
+**THIRD INSTRUMENT WITH THIS BLINDNESS.** `audit-formula-check` had it and was given
+a squeezed arm at `118b1fb` — which turned ONE reported defect into ELEVEN. The
+absolute identity check has it and says so. This was the one that mattered most,
+because it is the pair every other commit is judged by.
+
+### The arm was proved to fire, on the exact change that slipped through
+
+Reverting `932246f`'s split with the new arm in place:
+
+```
+VALUES — THE GATE:
+  126 changed across 1 field(s):
+    priorYearDevelopmentCeded   126 instances   461017.54 -> -1171954.75
+```
+
+All 126 in the `sqz|` arm. The old gate reported 0 on the same edit.
+
+### ⚠ AND A SECOND, DIFFERENT BLINDNESS THAT AN ARM CANNOT FIX
+
+**`solo-export-guard` still reports 24/24 MATCH on that same reverted edit**, and
+the squeezed arm does not help. `priorYearDevelopmentCeded` and `bookingGiveBack`
+are **not in `RESULT_METRICS`**, so they never reach the workbook this guard hashes.
+
+That is the SCOPE blindness, not the CONFIGURATION blindness, and the two are
+independent:
+
+| gate | blind because | fixed by the arm? |
+|---|---|---|
+| `value-identity-check` | ran one configuration | **yes** |
+| `solo-export-guard` | hashes only `RESULT_METRICS` | **no — cannot be** |
+
+So the brief's premise at `932246f` — "priorYearDevelopmentCeded is exported, so 12
+hashes move" — was wrong on the export point as well as the configuration point.
+The field is displayed on three pages and is **not** in the exported workbook.
+Whether it should be is a product decision and is left open; adding it would move
+all 24 hashes.
+
+The arm still earns its place on the export guard: the 12 `sqz|` hashes differ from
+all 12 `def|` hashes, so it covers a genuinely different configuration for
+everything that IS exported.
+
+### The recapture launders nothing, and that was checked rather than asserted
+
+An arm with no baseline is a gate that cannot run, so the instrument change and its
+capture had to land in one commit — which is normally the thing the recapture
+discipline exists to prevent. The risk was closed a different way: **the defaults
+half was diffed against v22 key-for-key BEFORE the new file was written.**
+
+```
+v22 keys                14400
+v23 def| keys           14400     missing 0   extra 0
+CHANGED among shared        0
+v23 sqz| keys (new arm) 14400
+export: v22 12 hashes, v23 def| 12 hashes, CHANGED 0, new sqz| 12
+```
+
+Every v22 value reappears bit-identical under a `def|` prefix. The only new content
+is a new arm on an unchanged tree.
+
+v21 retired from the working tree; v22 kept as the immediate predecessor.

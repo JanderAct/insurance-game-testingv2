@@ -223,7 +223,8 @@ import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { buildResultsWorkbook } from '../../src/utils/resultsExport';
 import { RESULT_METRICS } from '../../src/utils/resultMetrics';
-import type { GameState, CoverageLine, ResultSet } from '../../src/types/simulation';
+import type { DecisionSet, GameState, CoverageLine, ResultSet } from '../../src/types/simulation';
+import { SLIDER_RANGES, WC_FUNDING_CONFIDENCE_RANGE } from '../../src/data/defaultAssumptions';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // v19: retired v18 at the feature/ibner merge. All 12 hashes moved, and they are
@@ -267,18 +268,22 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Claim-level development cession reaches every line and every config; there is
 // no control here and none is expected. The null test is the mechanism switch —
 // with DEVELOPMENT_CESSION_ENABLED false, all 12 match v21 byte for byte.
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v22.json');
+// v23: 12 hashes become 24 — this guard gained a SQUEEZED ARM. The 12 `def|`
+// hashes are byte-identical to v22; the 12 `sqz|` hashes are new. Verified
+// before capture, not after.
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v23.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');
 
-function play(id: string, lines: CoverageLine[], years: number): ResultSet[] {
+function play(id: string, lines: CoverageLine[], years: number,
+              decisions: (y: number, l: CoverageLine[]) => DecisionSet = y => defaultDecisionSet(y)): ResultSet[] {
   const instance = generateGameInstance(id, seedOf(id));
   const setup = { poolName: 'G', gameLength: years, startingYear: 2026, instanceId: id, activeLines: lines };
   const { poolState, priorHistory } = runPriorHistory(instance, setup as never);
   let gs: GameState = { setup: setup as never, instance, currentYearNumber: 1, isStarted: true, isComplete: false, poolState, lockedResults: [], currentDecisions: defaultDecisionSet(1), priorHistory };
   for (let y = 1; y <= years; y++) {
-    const p = processYear(gs, defaultDecisionSet(y));
+    const p = processYear(gs, decisions(y, lines));
     gs = { ...gs, currentYearNumber: y + 1, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result] };
   }
   return gs.lockedResults;
@@ -292,19 +297,63 @@ const CONFIGS: { lines: CoverageLine[]; name: string }[] = [
   { lines: ['WC', 'GL', 'Property'], name: 'tri' },
 ];
 
+
+// ============================================================================
+// THE ARMS. BOTH, NOT JUST DEFAULTS.
+//
+// ⚠ THIS GATE WAS BLIND TO A REAL CHANGE AND READ CLEAN. At 932246f a field was
+// split in two, moving 171 instances under squeezed funding — and this script
+// and solo-export-guard BOTH reported 0 changed and 12/12 matching, because
+// bookingGiveBack is bit-exactly 0 at default decisions and the split was
+// therefore invisible at the only configuration either of them exercised.
+//
+// "Both gates identical" was a statement about ONE configuration, and this is
+// the pair every commit is measured against. THIRD INSTRUMENT WITH THIS
+// BLINDNESS: audit-formula-check had it and was given a squeezed arm at 118b1fb
+// (which turned one reported defect into eleven), the absolute identity check
+// has it and reports it, and this is the one that mattered most.
+//
+// The squeeze uses EACH LINE'S OWN REACHABLE MINIMUM, not a flat value — WC
+// stops at 0.10 (WC_FUNDING_CONFIDENCE_RANGE), GL and Property at 0.30
+// (SLIDER_RANGES). Driving all three to 0.10 would test Property at a booking
+// bias the UI cannot produce, which overstates the exercise and tests nothing a
+// player can reach. Same reasoning, same constants, as audit-formula-check.
+// ============================================================================
+const MIN_STOP: Record<string, number> = {
+  WC: WC_FUNDING_CONFIDENCE_RANGE.min,
+  GL: SLIDER_RANGES.fundingConfidenceLevel.min,
+  Property: SLIDER_RANGES.fundingConfidenceLevel.min,
+};
+const ARMS: { name: string; decisions: (y: number, lines: CoverageLine[]) => DecisionSet }[] = [
+  { name: 'def', decisions: y => defaultDecisionSet(y) },
+  {
+    name: 'sqz',
+    decisions: (y, lines) => {
+      const d = defaultDecisionSet(y);
+      return {
+        ...d,
+        byLine: Object.fromEntries(lines.map(l =>
+          [l, { ...d.byLine[l], fundingConfidenceLevel: MIN_STOP[l], fundingAtExpected: false }])) as never,
+      };
+    },
+  },
+];
+
 const out: Record<string, string> = {};
+for (const arm of ARMS) {
 for (const id of SEEDS) {
   for (const { lines, name } of CONFIGS) {
-    const wb = buildResultsWorkbook(play(id, lines, 5), lines, RESULT_METRICS);
+    const wb = buildResultsWorkbook(play(id, lines, 5, arm.decisions), lines, RESULT_METRICS);
     const csv = wb.SheetNames.map(s => XLSX.utils.sheet_to_csv(wb.Sheets[s])).join('\n#SHEET#\n');
-    out[`${id}|${name}`] = sha(Buffer.from(csv, 'utf8'));
+    out[`${arm.name}|${id}|${name}`] = sha(Buffer.from(csv, 'utf8'));
   }
+}
 }
 
 if (process.argv.includes('--write')) {
   fs.writeFileSync(BASELINE, JSON.stringify(out, null, 2) + '\n');
   console.log(`Captured ${Object.keys(out).length} hashes -> ${BASELINE}`);
-  for (const [k, v] of Object.entries(out)) console.log(`  ${k.padEnd(22)} ${v.slice(0, 16)}`);
+  for (const [k, v] of Object.entries(out)) console.log(`  ${k.padEnd(26)} ${v.slice(0, 16)}`);
 } else {
   const base: Record<string, string> = JSON.parse(fs.readFileSync(BASELINE, 'utf8'));
   let diffs = 0;

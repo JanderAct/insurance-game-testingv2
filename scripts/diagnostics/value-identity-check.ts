@@ -49,7 +49,8 @@ import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
-import type { CoverageLine, GameState, LineResultSet, ResultSet } from '../../src/types/simulation';
+import { SLIDER_RANGES, WC_FUNDING_CONFIDENCE_RANGE } from '../../src/data/defaultAssumptions';
+import type { CoverageLine, DecisionSet, GameState, LineResultSet, ResultSet } from '../../src/types/simulation';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // v6: retired v5 at the per-member RNG stream change plus the deriveSubRng
@@ -320,7 +321,19 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // reserveDevelopment ledger, which lives on LinePoolState rather than ResultSet,
 // so it is invisible here — the sixth time this instrument's scope has mattered.
 // It is a recording, not a value: 0 changed at that commit.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v22.json');
+// v23: NO VALUE MOVED. The capture DOUBLED, from 14,400 fields to 28,800, because
+// this gate gained a SQUEEZED ARM — see THE ARMS below. Every v22 key reappears
+// under a `def|` prefix with a bit-identical value; everything new is `sqz|`.
+//
+// ⚠ THE ARM AND ITS BASELINE HAD TO LAND TOGETHER, and the laundering risk that
+// normally argues against that is controlled a different way here. A recapture
+// blesses whatever is in the tree, so the discipline is to separate the
+// instrument change from the capture — but an arm with no baseline is a gate
+// that cannot run, so there was nothing to separate them into. Instead the
+// defaults half was diffed against v22 key-for-key BEFORE this file was written:
+// 14,400 keys, 14,400 matched, 0 changed. The new content is a new arm on an
+// unchanged tree, and that is checkable rather than asserted.
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v23.json');
 
 function seedOf(id: string) {
   let h = 5381;
@@ -336,7 +349,49 @@ const CONFIGS: { lines: CoverageLine[]; name: string }[] = [
   { lines: ['WC', 'GL', 'Property'], name: 'tri' },
 ];
 
+// ============================================================================
+// THE ARMS. BOTH, NOT JUST DEFAULTS.
+//
+// ⚠ THIS GATE WAS BLIND TO A REAL CHANGE AND READ CLEAN. At 932246f a field was
+// split in two, moving 171 instances under squeezed funding — and this script
+// and solo-export-guard BOTH reported 0 changed and 12/12 matching, because
+// bookingGiveBack is bit-exactly 0 at default decisions and the split was
+// therefore invisible at the only configuration either of them exercised.
+//
+// "Both gates identical" was a statement about ONE configuration, and this is
+// the pair every commit is measured against. THIRD INSTRUMENT WITH THIS
+// BLINDNESS: audit-formula-check had it and was given a squeezed arm at 118b1fb
+// (which turned one reported defect into eleven), the absolute identity check
+// has it and reports it, and this is the one that mattered most.
+//
+// The squeeze uses EACH LINE'S OWN REACHABLE MINIMUM, not a flat value — WC
+// stops at 0.10 (WC_FUNDING_CONFIDENCE_RANGE), GL and Property at 0.30
+// (SLIDER_RANGES). Driving all three to 0.10 would test Property at a booking
+// bias the UI cannot produce, which overstates the exercise and tests nothing a
+// player can reach. Same reasoning, same constants, as audit-formula-check.
+// ============================================================================
+const MIN_STOP: Record<string, number> = {
+  WC: WC_FUNDING_CONFIDENCE_RANGE.min,
+  GL: SLIDER_RANGES.fundingConfidenceLevel.min,
+  Property: SLIDER_RANGES.fundingConfidenceLevel.min,
+};
+const ARMS: { name: string; decisions: (y: number, lines: CoverageLine[]) => DecisionSet }[] = [
+  { name: 'def', decisions: y => defaultDecisionSet(y) },
+  {
+    name: 'sqz',
+    decisions: (y, lines) => {
+      const d = defaultDecisionSet(y);
+      return {
+        ...d,
+        byLine: Object.fromEntries(lines.map(l =>
+          [l, { ...d.byLine[l], fundingConfidenceLevel: MIN_STOP[l], fundingAtExpected: false }])) as never,
+      };
+    },
+  },
+];
+
 const out: Record<string, number> = {};
+for (const arm of ARMS) {
 for (const id of SEEDS) {
   for (const { lines, name } of CONFIGS) {
     const instance = generateGameInstance(id, seedOf(id));
@@ -347,19 +402,20 @@ for (const id of SEEDS) {
       poolState, lockedResults: [], currentDecisions: defaultDecisionSet(1), priorHistory,
     };
     for (let y = 1; y <= 5; y++) {
-      const p = processYear(gs, defaultDecisionSet(y));
+      const p = processYear(gs, arm.decisions(y, lines));
       const scopes: [string, ResultSet | LineResultSet][] = [
         ['pool', p.result],
         ...lines.map(l => [l, p.result.byLine[l]] as [string, LineResultSet]),
       ];
       for (const [scope, r] of scopes) {
         for (const [k, v] of Object.entries(r)) {
-          if (typeof v === 'number' && Number.isFinite(v)) out[`${id}|${name}|Y${y}|${scope}|${k}`] = v;
+          if (typeof v === 'number' && Number.isFinite(v)) out[`${arm.name}|${id}|${name}|Y${y}|${scope}|${k}`] = v;
         }
       }
       gs = { ...gs, currentYearNumber: y + 1, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result] };
     }
   }
+}
 }
 
 if (process.argv.includes('--write')) {
