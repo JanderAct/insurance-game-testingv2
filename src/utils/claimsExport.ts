@@ -29,11 +29,18 @@
 // project is marketplace-wide already), this export flags them correctly
 // without being touched again.
 //
-// Property currently contributes ZERO rows, not an enrolled subset — it still
-// runs the legacy aggregate path (fd77636), which never constructs a Claim or
-// Occurrence at all. propertyClaimEngine.ts's attritional and weather
-// generators exist but are unwired (e45232f, 7c2a97e). The Property sheet
-// carries a note saying so, rather than reading as a bug.
+// ⚠ THE PARAGRAPH THAT STOOD HERE SAID PROPERTY CONTRIBUTES ZERO ROWS BECAUSE IT
+// STILL RUNS THE LEGACY AGGREGATE PATH. Property cut over to a claim-level
+// generator at 645c15e and its sheet carries real rows — 2,915 occurrences over
+// 8 games x 10 years when this was measured. The claim was false in both halves
+// and it was the worst kind of false: it told a reader checking Property's claims
+// that an EMPTY SHEET WAS NORMAL, so a genuine generator failure would have read
+// as expected behaviour.
+//
+// ⚠ AND IT SURVIVED BECAUSE NOBODY RE-READS AN EXPORT HEADER. Six statements in
+// this file were true when written and false by the time they were found, all in
+// one pass. When a mechanic is retired, grep the export layer — it describes the
+// engine and is never exercised by a test.
 // ============================================================================
 
 import * as XLSX from 'xlsx';
@@ -51,9 +58,10 @@ const ENROLLED_NOTE =
   'documentation and so this stays correct if that ever changes.';
 
 const PROPERTY_NOTE =
-  'Property still runs the legacy aggregate loss model (no claim-level generator wired into the live ' +
-  'engine yet), so this sheet has NO rows today — that is expected, not missing data. ' +
-  'propertyClaimEngine.ts has attritional and weather generators built but unwired.';
+  'Property claims are drawn from a mixture fitted to the pool\'s own nine years of claims. Band is ' +
+  'a tier label kept so Claim.tier stays populated — there is ONE band, not a set: the separate ' +
+  'weather and catastrophe bands went with the fit (weather is inside the mixture; catastrophes are ' +
+  'shock events now). Reported Year always equals Accident Year: Property carries no report lag.';
 
 function safeStr(v: unknown): string {
   return v === null || v === undefined ? '' : String(v);
@@ -62,6 +70,69 @@ function safeStr(v: unknown): string {
 function roundOrBlank(v: number | undefined): number | string {
   return typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : '';
 }
+
+// ============================================================================
+// DEVELOPMENT, KEYED BY OCCURRENCE — the one lookup both the line sheets and the
+// Development sheet read, so the two cannot disagree about what developed.
+//
+// ⚠ KEYED ON OCCURRENCE ID, NOT CLAIM ID, AND THE GRAIN IS THE REASON. The
+// developing-claim record stores an OCCURRENCE total (developmentAllocation.ts
+// cedes per occurrence, because the tower attaches per occurrence), while the
+// line sheets are per CLAIM. Its `claimId` is the occurrence's FIRST claim —
+// `o.claimIds[0]` — so joining on it would hand that one claim the whole
+// occurrence's development and leave its siblings BLANK, which reads as "they did
+// not develop" when they are part of an occurrence that did.
+//
+// Joining on occurrence id has no such failure mode: every claim in a developed
+// occurrence shows the same figures, and the columns are NAMED "Occurrence ..."
+// so nobody reads them as that claim's share. The alternative — apportioning the
+// occurrence's development across its claims pro rata — would invent a split the
+// model does not have.
+//
+// ⚠ VACUOUS TODAY, LIVE THE DAY A CAT BAND LANDS. Measured across 65,817
+// occurrences on all three lines: ZERO carry more than one claim, so occurrence
+// and claim are the same grain and every resolution agrees. But reinsuranceTower's
+// header already requires a future catastrophe to be emitted as ONE occurrence
+// with many claims, and on that day a claim-id join starts misattributing
+// silently. This is written for that day rather than for today.
+interface OccDevelopment { original: number; current: number; dev: number; pct: number | ''; accidentYear: number }
+
+function developmentByOccurrence(poolState: PoolState | undefined, line: CoverageLine): Map<string, OccDevelopment> {
+  const m = new Map<string, OccDevelopment>();
+  for (const c of poolState?.lines[line]?.reserveCohorts ?? []) {
+    for (const d of c.developingClaims ?? []) {
+      const dev = d.current - d.original;
+      m.set(d.occurrenceId, {
+        original: d.original, current: d.current, dev,
+        pct: d.original > 0 ? Number(((dev / d.original) * 100).toFixed(1)) : '',
+        accidentYear: c.yearNumber,
+      });
+    }
+  }
+  return m;
+}
+
+const DEV_HEADER = [
+  'Occurrence Original', 'Occurrence Current', 'Occurrence Development', 'Occurrence Development %',
+];
+
+// ⚠ BLANK, NOT ZERO, FOR A CLAIM THAT NEVER DEVELOPED — and that is a THIRD
+// state, not a restatement of the -0.00 rule. "Moved by nothing" and "moved by
+// too little to print" are the two that rule separates; "was never in the subset
+// that can move at all" is neither, and a 0 in these columns would assert the
+// claim was watched and held still.
+function devCells(dev: OccDevelopment | undefined): Row {
+  if (!dev) return ['', '', '', ''];
+  return [roundOrBlank(dev.original), roundOrBlank(dev.current), roundOrBlank(dev.dev), dev.pct];
+}
+
+const DEV_NOTE =
+  'The four Occurrence Development columns are the claim\'s OCCURRENCE, joined on Occurrence ID. ' +
+  'Blank means the claim was never in the subset that carries development — a different thing from ' +
+  'developing by zero. ⚠ DO NOT SUM THESE COLUMNS: on an occurrence with several claims the same ' +
+  'figure repeats on each of its rows. Every occurrence carries exactly one claim today, so the sum ' +
+  'happens to be right, and it will stop being right the day a catastrophe band emits a multi-claim ' +
+  'event. Use the Development sheet for a total.';
 
 // Every claim and its enrolled-membership flag, for one line across every
 // locked year — the unit both the claim sheets and the occurrence totals are
@@ -130,21 +201,25 @@ const WC_COMPONENT_NOTE =
   'indemnity split. Tier is the MIXTURE COMPONENT the claim was drawn from (small / medium / large / ' +
   'schoolsMedium, or "injected" for a shock claim) — these are NOT the retired medOnly / temp / perm / ' +
   'catastrophic tiers. Rating Class is the rating GROUP (county / schools / highSafety / lowSafety). ' +
-  'Reported Year exceeds Accident Year on a late-reported claim; those sit in the IBNR inventory in ' +
-  'between and are not counted in any year before they report.';
+  'Reported Year always equals Accident Year: WC\'s report lag and the IBNR inventory it fed were ' +
+  'both removed, and every claim is reported in the year it happens. The column is KEPT rather than ' +
+  'dropped so that if a lag is ever reintroduced the divergence shows up here immediately — a ' +
+  'column that is always a copy is cheap; a reintroduced lag that is invisible in the export is not. ' +
+  'Measured across 65,817 claims on all three lines: 0 differ.';
 
-function buildWcSheetRows(rows: LineClaimRow[]): Row[] {
+function buildWcSheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelopment>): Row[] {
   const header = [
     ...SHARED_HEADER, 'Rating Group', 'Component', 'Status', 'Gross Incurred',
-    'Gross Paid', 'Reported Year', 'Enrolled',
+    'Gross Paid', 'Reported Year', 'Enrolled', ...DEV_HEADER,
   ];
   const body = sortClaimRows(rows).map(row => [
     ...sharedCells(row),
     safeStr(row.claim.ratingClass), row.claim.tier,
     row.claim.status, roundOrBlank(row.claim.grossUltimate),
     roundOrBlank(row.claim.paidToDate), row.claim.reportedYear, row.enrolled ? 'Yes' : 'No',
+    ...devCells(dev.get(row.claim.occurrenceId)),
   ]);
-  return [[`WC claims. ${WC_COMPONENT_NOTE} ${ENROLLED_NOTE}`], header, ...body];
+  return [[`WC claims. ${WC_COMPONENT_NOTE} ${DEV_NOTE} ${ENROLLED_NOTE}`], header, ...body];
 }
 
 // ⚠ THE SUB-COVERAGE / LEGAL BASIS / LITIGATION STAGE / INDEMNITY / ALAE /
@@ -158,28 +233,30 @@ function buildWcSheetRows(rows: LineClaimRow[]): Row[] {
 // This changes the sheet's SHAPE, so solo-export-guard's GL hash moves. That
 // is expected and is a shape change, not a value change.
 const GL_COMPONENT_NOTE =
-  'One amount per claim: GL severity is a flat 3-component lognormal mixture CLAMPED AT A $100M ' +
-  'PER-CLAIM CEILING (GL_SEVERITY_CAP), with no sub-coverage, ' +
+  'One amount per claim: GL severity is a flat 3-component lognormal mixture clamped at a per-claim ' +
+  'ceiling that TRENDS — GL_SEVERITY_CAP is $100M in YEAR 1 and is carried forward by ' +
+  'glSeverityTrend, so a later accident year is capped higher. With no sub-coverage, ' +
   'gate, litigation stage, or indemnity/ALAE split (ALAE is included in the drawn amount). Tier is ' +
   'the MIXTURE COMPONENT the claim was drawn from (component1 / component2 / component3) — these are ' +
   'NOT the retired general / epl / lawEnforcement / abuse sub-coverages. Reported Year always equals ' +
   'Accident Year: GL carries no report lag.';
 
-function buildGlSheetRows(rows: LineClaimRow[]): Row[] {
+function buildGlSheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelopment>): Row[] {
   const header = [
     ...SHARED_HEADER, 'Component', 'Status', 'Gross Incurred',
-    'Gross Paid', 'Reported Year', 'Enrolled',
+    'Gross Paid', 'Reported Year', 'Enrolled', ...DEV_HEADER,
   ];
   const body = sortClaimRows(rows).map(row => [
     ...sharedCells(row),
     row.claim.tier,
     row.claim.status, roundOrBlank(row.claim.grossUltimate),
     roundOrBlank(row.claim.paidToDate), row.claim.reportedYear, row.enrolled ? 'Yes' : 'No',
+    ...devCells(dev.get(row.claim.occurrenceId)),
   ]);
-  return [[`GL claims. ${GL_COMPONENT_NOTE} ${ENROLLED_NOTE}`], header, ...body];
+  return [[`GL claims. ${GL_COMPONENT_NOTE} ${DEV_NOTE} ${ENROLLED_NOTE}`], header, ...body];
 }
 
-function buildPropertySheetRows(rows: LineClaimRow[]): Row[] {
+function buildPropertySheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelopment>): Row[] {
   const header = [
     ...SHARED_HEADER, 'Band',
     // Damage Ratio and Location TIV are GONE with Property's rebuild. They were
@@ -187,7 +264,7 @@ function buildPropertySheetRows(rows: LineClaimRow[]): Row[] {
     // populated on no other line; the fitted mixture draws an amount directly,
     // so there is nothing for either column to hold.
     'Status', 'Gross Incurred', 'Gross Paid',
-    'Reported Year', 'Enrolled',
+    'Reported Year', 'Enrolled', ...DEV_HEADER,
   ];
   const body = sortClaimRows(rows).map(({ claim, member, enrolled }) => [
     claim.id, claim.occurrenceId, claim.memberId, safeStr(member?.name), safeStr(member?.type),
@@ -195,11 +272,9 @@ function buildPropertySheetRows(rows: LineClaimRow[]): Row[] {
     claim.tier,
     claim.status, roundOrBlank(claim.grossUltimate), roundOrBlank(claim.paidToDate),
     claim.reportedYear, enrolled ? 'Yes' : 'No',
+    ...devCells(dev.get(claim.occurrenceId)),
   ]);
-  // Property's note leads with why the sheet is (currently) empty, since an
-  // enrolled-scope note alone would read as "the prospects are missing" rather
-  // than "nothing is generated yet" — a different and more important fact.
-  return [[PROPERTY_NOTE], [ENROLLED_NOTE], header, ...body];
+  return [[PROPERTY_NOTE], [`${DEV_NOTE} ${ENROLLED_NOTE}`], header, ...body];
 }
 
 // One row per occurrence, pooled across every active claim line — a Line
@@ -207,9 +282,12 @@ function buildPropertySheetRows(rows: LineClaimRow[]): Row[] {
 // one row per event rather than one sheet per line.
 //
 // TOTAL GROSS is summed from the claims list by id, not read off any
-// occurrence-level field (Occurrence carries no gross total of its own) — this
-// is what turns a GL abuse batch's five claimant claims, or a weather event's
-// forty location claims, into one legible row instead of an invisible grouping.
+// occurrence-level field (Occurrence carries no gross total of its own). The
+// multi-claim events that made grouping matter — GL abuse batches, Property
+// weather — are both retired, so the sum currently runs over exactly one claim
+// every time. Kept summing rather than collapsed to a lookup because a cat band
+// brings them straight back, and the tower's correctness depends on the grouping
+// being right on the day it does.
 function buildOccurrenceRows(lockedResults: ResultSet[], activeLines: CoverageLine[]): Row[] {
   interface OccRow { occ: Occurrence; line: CoverageLine; totalGross: number; memberCount: number; }
   const rows: OccRow[] = [];
@@ -241,9 +319,13 @@ function buildOccurrenceRows(lockedResults: ResultSet[], activeLines: CoverageLi
     'Claim Count', 'Member Count', 'Total Gross', 'Peril', 'Region',
   ];
   const note =
-    'One row per occurrence, pooled across lines. Member Count is what distinguishes a multi-claim, ' +
-    'single-member event (a GL abuse batch) from a genuinely multi-member one (a weather event) — ' +
-    'Claim Count alone cannot tell the two apart. ' + ENROLLED_NOTE;
+    'One row per occurrence, pooled across lines. ⚠ EVERY OCCURRENCE CARRIES EXACTLY ONE CLAIM TODAY ' +
+    'on all three lines — measured at 0 multi-claim occurrences out of 65,817 — because GL\'s abuse ' +
+    'batches and Property\'s weather band, the two multi-claim events this sheet was built to make ' +
+    'legible, were both removed. Claim Count and Member Count are kept because a catastrophe band ' +
+    'would reintroduce multi-claim occurrences immediately, and the reinsurance tower REQUIRES such ' +
+    'an event to be modelled as ONE occurrence (see reinsuranceTower.ts) — these two columns are how ' +
+    'a reader would check that it was. ' + ENROLLED_NOTE;
   const body = rows.map(({ occ, line, totalGross, memberCount }) => [
     occ.id, line, occ.accidentYear, occ.calendarYear,
     occ.claimIds.length, memberCount, Math.round(totalGross),
@@ -264,29 +346,36 @@ function buildOccurrenceRows(lockedResults: ResultSet[], activeLines: CoverageLi
 // Actuarial memorandum carries the per-year view.
 function buildDevelopmentRows(poolState: PoolState, activeLines: CoverageLine[]): Row[] {
   const header = [
-    'Line', 'Accident Year', 'Claim ID', 'Occurrence ID', 'Original Occurrence',
+    'Line', 'Accident Year', 'Occurrence ID', 'Original Occurrence',
     'Current Occurrence', 'Development', 'Development %',
   ];
   const body: Row[] = [];
   for (const line of FIXED_LINE_ORDER.filter(l => activeLines.includes(l))) {
-    const cohorts = poolState.lines[line]?.reserveCohorts ?? [];
-    for (const c of [...cohorts].sort((a, b) => a.yearNumber - b.yearNumber)) {
-      for (const d of c.developingClaims ?? []) {
-        const dev = d.current - d.original;
-        body.push([
-          line, c.yearNumber, d.claimId, d.occurrenceId,
-          roundOrBlank(d.original), roundOrBlank(d.current), roundOrBlank(dev),
-          d.original > 0 ? Number(((dev / d.original) * 100).toFixed(1)) : '',
-        ]);
-      }
+    // ⚠ THE SAME LOOKUP THE LINE SHEETS READ. This sheet is now a filtered VIEW
+    // of what they carry, and building it from a second traversal of the cohorts
+    // is exactly how two views of one fact drift apart. One source, two
+    // presentations.
+    const rows = [...developmentByOccurrence(poolState, line).entries()]
+      .sort((a, b) => (a[1].accidentYear - b[1].accidentYear) || a[0].localeCompare(b[0]));
+    for (const [occurrenceId, d] of rows) {
+      body.push([
+        line, d.accidentYear, occurrenceId,
+        roundOrBlank(d.original), roundOrBlank(d.current), roundOrBlank(d.dev), d.pct,
+      ]);
     }
   }
   const note =
-    'Development on an accident year lands on these claims (see developmentAllocation.ts). Only the ' +
-    'chosen subset is carried, not the whole register — cession is per occurrence and independent ' +
-    'between occurrences, so the claims that did not move cede exactly what they always did. Amounts ' +
-    'are OCCURRENCE totals, GROSS of reinsurance. A blank sheet means no accident year has developed ' +
-    'yet, or the cohorts carrying development are all seed cohorts, which have no claim register.';
+    'Development on an accident year lands on these occurrences (see developmentAllocation.ts). Only ' +
+    'the chosen subset is carried, not the whole register — cession is per occurrence and independent ' +
+    'between occurrences, so the ones that did not move cede exactly what they always did. Amounts are ' +
+    'OCCURRENCE totals, GROSS of reinsurance. A blank sheet means no accident year has developed yet, ' +
+    'or the cohorts carrying it are all seed cohorts, which have no claim register. ' +
+    '⚠ KEPT ALONGSIDE THE PER-CLAIM COLUMNS ON THE LINE SHEETS, not instead of them: this is the only ' +
+    'view that is POOLED ACROSS LINES and one row per developed occurrence, so "what developed?" reads ' +
+    'in tens of rows rather than by filtering three sheets of thousands. It cannot drift from them — ' +
+    'both read one lookup — and it is the column to total, because these rows do not repeat. ' +
+    'The Claim ID column was DROPPED: it held the occurrence\'s FIRST claim beside an occurrence-level ' +
+    'amount, which is a misattribution waiting for the first multi-claim event.';
   return [[note], header, ...body];
 }
 
@@ -298,7 +387,7 @@ export function buildClaimsWorkbook(
   const wb = XLSX.utils.book_new();
   const orderedLines = FIXED_LINE_ORDER.filter(l => activeLines.includes(l));
 
-  const sheetBuilders: Partial<Record<CoverageLine, (rows: LineClaimRow[]) => Row[]>> = {
+  const sheetBuilders: Partial<Record<CoverageLine, (rows: LineClaimRow[], dev: Map<string, OccDevelopment>) => Row[]>> = {
     WC: buildWcSheetRows, GL: buildGlSheetRows, Property: buildPropertySheetRows,
   };
 
@@ -306,7 +395,8 @@ export function buildClaimsWorkbook(
     const builder = sheetBuilders[line];
     if (!builder) continue;
     const rows = collectLineClaims(lockedResults, line);
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(builder(rows)), line);
+    const dev = developmentByOccurrence(poolState, line);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(builder(rows, dev)), line);
   }
 
   XLSX.utils.book_append_sheet(
