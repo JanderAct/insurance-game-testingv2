@@ -151,6 +151,54 @@ Things that were discovered expensively and live only in conversation memory. Re
   averages out; state which in the harness header. Same family as the full-market/enrolled error:
   arithmetically correct, measured against the wrong thing.
 
+## ⚠ THE TWO KINDS OF GATE BLINDNESS, AND THEY HAVE DIFFERENT ANSWERS
+
+"The gate is blind" has now been said about two different failures with two
+different responses, and conflating them wastes the fix. Ask which one before
+reaching for an arm.
+
+**CONFIGURATION BLINDNESS — the gate ran one decision set.** The quantity exists
+and is watched, but is inert in the configuration the gate exercises, so a change
+to it reads as no change. **ARMS CLOSE THIS.** Three instruments have had it:
+
+| instrument | status |
+|---|---|
+| `audit-formula-check` | **fixed** at `118b1fb` — the squeezed arm turned ONE reported defect into ELEVEN |
+| `value-identity-check` / `solo-export-guard` | **fixed** at `af5788a`, after both read clean on a real 171-instance change |
+| the absolute identity check | **fixed** at the v24 recapture, and see the warning below |
+
+**SCOPE BLINDNESS — the field is not watched at all.** No configuration reaches
+it because nothing captures it. **AN ARM DOES NOTHING HERE; only widening the
+watched set does.** Seven occurrences to date: the four loss-split fields, the
+`reserveDevelopment` ledger on `LinePoolState`, the `ReserveCohort` shape change,
+and `priorYearDevelopmentCeded`.
+
+The two can hide the same change at once and look like one problem. At `932246f`
+both gates read clean on a field split: `value-identity-check` because it ran
+defaults only (configuration), and `solo-export-guard` because the field was not
+in `RESULT_METRICS` at all (scope). The arm added at `af5788a` fixed the first and
+did nothing for the second — the field only became visible to the export guard
+when it was added to `RESULT_METRICS`.
+
+**⚠ AND AN ARM CAN NARROW COVERAGE WHILE APPEARING TO WIDEN IT.** The absolute
+identity check DETECTS identities by uniformity across every captured instance.
+Adding the squeezed arm doubled that instance set with a configuration where
+several quantities legitimately stop being uniform — so `expectedCombinedRatio`
+(the only genuinely held identity it asserts), `fundingCLF`, `selectedFundingCLF`
+and `bookingGiveBack` all fell out of DETECTION, and their assertions vanished
+with no diagnostic at all. Four assertions lost, silently, by a commit whose
+purpose was more coverage.
+
+The fix is to detect PER ARM rather than pooling them, and it pays twice: the
+four come back, and `bookingGiveBack` now reads bit-exactly 0 in `def` and is
+absent from the `sqz` list — "inactive at defaults, live under squeeze" on the
+face of the report, where pooled it had been classified as a probable tautology.
+
+**The general rule: after widening a gate, check what it stopped saying.** A
+detector keyed on uniformity, a bound derived from observed magnitudes, a
+coverage counter — anything inferred FROM the captured set changes meaning when
+the set changes, and the loss is silent because nothing fails.
+
 ## Rulings and stopping
 - **A failed verification check stops the work UNCOMMITTED. Whether it blocks is the user's call, not
   Claude Code's.** Diagnosing the cause is exactly right; deciding it doesn't count is not. This applies

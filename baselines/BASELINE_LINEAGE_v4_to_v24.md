@@ -1194,3 +1194,65 @@ Every v22 value reappears bit-identical under a `def|` prefix. The only new cont
 is a new arm on an unchanged tree.
 
 v21 retired from the working tree; v22 kept as the immediate predecessor.
+
+---
+
+## v24 — the workbook gains gross/recovery/net. ALL 24 HASHES MOVE, ZERO VALUES DO.
+
+**An export-only range, and the pair of readings is the proof.**
+
+```
+value-identity-check   0 changed of 28,800, both arms, 0 added, 0 removed
+solo-export-guard      24 of 24 hashes moved
+```
+
+Every hash moving while every value holds is the signature of a change to what is
+REPORTED rather than to what is computed. It is also the only reading under which
+a 24-hash move is not alarming.
+
+### What changed, checked key-for-key rather than asserted
+
+```
+RESULT_METRICS  81 -> 84 metrics
+  ADDED    bookingGiveBack             Losses     "Recovery deferred by optimistic booking"
+  ADDED    priorYearDevelopmentGross   Reserves   "Prior-Year Development (gross)"
+  ADDED    priorYearDevelopmentCeded   Reserves   "Reinsurance Recovery (prior-year development)"
+  RENAMED  reinsuranceRecovery         "Reinsurance Recovery" -> "... (current year)"
+  RENAMED  priorYearDevelopment        "Prior-Year Development" -> "... (net)"
+  UNCHANGED  79 of 81 pre-existing metrics, 0 removed
+```
+
+**The defect:** the workbook carried one column called "Prior-Year Development"
+whose value was NET, and neither the recovery on it nor the give-back was exported
+at all. A reader saw -$215,030 of development with no way to learn that $3,205,174
+had been ceded on it.
+
+**Gross is DERIVED and still carried as its own column.** Strictly redundant — it
+is net minus ceded — but the defect being fixed is a figure whose meaning lived
+somewhere else, and making a spreadsheet reader subtract two columns to recover
+the headline number reproduces that in miniature. It cannot drift: it is computed
+from its components at emit time.
+
+### ⚠ AND A COVERAGE LOSS FROM v23 THAT NOTHING REPORTED
+
+The squeezed arm added at `af5788a` **silently removed four assertions**, including
+the only genuinely held identity the absolute identity check makes.
+
+Detection keys on UNIFORMITY across every captured instance. Doubling the instance
+set with a configuration where quantities legitimately stop being uniform dropped
+`expectedCombinedRatio` (= 1), `fundingCLF`, `selectedFundingCLF` and
+`bookingGiveBack` out of DETECTION entirely — so they stopped being asserted, and
+nothing failed to say so. **A commit whose purpose was more coverage delivered
+less.**
+
+Fixed here by detecting PER ARM. All four return, and the split says something the
+pooled form could not: `def|bookingGiveBack` is bit-exactly 0 while
+`sqz|bookingGiveBack` is absent from the list — *inactive at defaults, live under
+squeeze*, on the face of the report, where pooled it read as a probable tautology.
+
+**The transferable rule, now in WORKING_PRACTICES: after widening a gate, check
+what it stopped saying.** Anything inferred FROM the captured set — a
+uniformity detector, a bound derived from observed magnitudes, a coverage counter —
+changes meaning when the set changes, and the loss is silent because nothing fails.
+
+v22 retired from the working tree; v23 kept as the immediate predecessor.

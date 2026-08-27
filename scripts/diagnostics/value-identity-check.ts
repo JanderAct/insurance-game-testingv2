@@ -333,7 +333,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // defaults half was diffed against v22 key-for-key BEFORE this file was written:
 // 14,400 keys, 14,400 matched, 0 changed. The new content is a new arm on an
 // unchanged tree, and that is checkable rather than asserted.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v23.json');
+// v24: NOTHING MOVED HERE AT ALL. The recapture exists only so this file and
+// SOLO_EXPORT_GUARD stay on the same version number — the export gained three
+// columns and renamed two labels, which moved all 24 hashes and 0 of these
+// 28,800 values. Captured and diffed key-for-key against v23: 28,800 keys,
+// 28,800 matched, 0 changed.
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v24.json');
 
 function seedOf(id: string) {
   let h = 5381;
@@ -589,10 +594,27 @@ if (changed.length === 0) {
 // ============================================================================
 {
   const IDENTITY_EPS_ABS = 1e-12;
+  // ⚠ GROUPED BY (ARM, FIELD), NOT BY FIELD — AND POOLING THE ARMS SILENTLY
+  // DROPPED FOUR DETECTIONS, INCLUDING THE ONLY GENUINELY HELD IDENTITY THIS
+  // SECTION ASSERTS.
+  //
+  // Detection keys on UNIFORMITY across every instance. Adding the squeezed arm at
+  // af5788a doubled the instance set with a configuration where several quantities
+  // legitimately stop being uniform — so expectedCombinedRatio (= 1, the one real
+  // identity here), fundingCLF, selectedFundingCLF and bookingGiveBack all fell
+  // out of detection and their assertions vanished with no diagnostic. An arm
+  // added to widen coverage had narrowed it.
+  //
+  // Per-arm grouping restores all four AND says something the pooled form could
+  // not: bookingGiveBack is bit-exactly 0 in `def` and LIVE in `sqz`. Pooled, it
+  // read as a probable tautology. Split, "inactive at defaults, live under
+  // squeeze" is visible on the face of the report — which is the whole point of
+  // having two arms.
   const byFieldAll = (keys: string[]) => {
     const m = new Map<string, string[]>();
     for (const k of keys) {
-      const f = k.split('|').pop()!;
+      const parts = k.split('|');
+      const f = `${parts[0]}|${parts[parts.length - 1]}`;   // arm|field
       if (!m.has(f)) m.set(f, []);
       m.get(f)!.push(k);
     }

@@ -271,7 +271,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // v23: 12 hashes become 24 — this guard gained a SQUEEZED ARM. The 12 `def|`
 // hashes are byte-identical to v22; the 12 `sqz|` hashes are new. Verified
 // before capture, not after.
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v23.json');
+//
+// v24: ALL 24 HASHES MOVE AND NO ENGINE VALUE DOES. RESULT_METRICS gained three
+// columns and renamed two labels, so the workbook's values, labels and row set
+// all changed while value-identity-check read 0 of 28,800 changed on both arms.
+// That pair — every hash moving, every value holding — is the signature of an
+// export-only change, and it is the only reading under which a 24-hash move is
+// not alarming.
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v24.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');
