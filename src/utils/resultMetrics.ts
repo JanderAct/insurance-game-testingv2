@@ -384,11 +384,27 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
       value: r => (r.shockLossIncurred ? 'Yes' : 'No'),
     },
     {
+      // ⚠ "(current year)" IS NOT DECORATION. There are two reinsurance recovery
+      // lines now — this one on the year's own claims, and one on prior-year
+      // development in the Reserves block below. Leaving this one unqualified made
+      // the other read as a subdivision of it rather than a separate event.
       key: 'reinsuranceRecovery',
       category: 'Losses',
-      label: 'Reinsurance Recovery',
+      label: 'Reinsurance Recovery (current year)',
       value: r => formatCurrency(r.reinsuranceRecovery),
       csvValue: r => roundDollars(r.reinsuranceRecovery),
+    },
+    {
+      // Recovery DEFERRED by booking this year's claim register low — a
+      // current-year item, sitting beside the current-year recovery it reduces.
+      // Negative. Deferred rather than forgone: it comes back through the
+      // prior-year development recovery below as the booking unwinds. Reads $0
+      // whenever the line is funded at or above break-even.
+      key: 'bookingGiveBack',
+      category: 'Losses',
+      label: 'Recovery deferred by optimistic booking',
+      value: r => formatCurrency(r.bookingGiveBack),
+      csvValue: r => roundDollars(r.bookingGiveBack),
     },
     {
       key: 'netUltimateLoss',
@@ -450,10 +466,46 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
     },
 
     // Reserves
+    //
+    // ⚠ GROSS, RECOVERY, NET — the same three rows the Accounting Reserves card
+    // shows, in the same order. The workbook used to carry ONE column called
+    // "Prior-Year Development" whose value was NET, with nothing about the
+    // recovery taken on it: a reader saw -$215,030 of development and had no way
+    // to know $3,205,174 had been ceded on it. That is the defect 22d370b fixed on
+    // screen and left live here.
     {
+      // ⚠ DERIVED, AND CARRIED AS ITS OWN COLUMN RATHER THAN LEFT TO THE READER.
+      // It is exactly net minus ceded, so a fourth column is redundant data in the
+      // strict sense — but the defect being fixed is a figure whose meaning lived
+      // somewhere else, and asking a spreadsheet reader to subtract two columns to
+      // recover the headline number reproduces that in a smaller form. gross /
+      // ceded / net is also the triple an actuary expects to be given, not to
+      // assemble. It cannot drift from its components: it is computed from them at
+      // emit time.
+      //
+      // SIGN: priorYearDevelopment is FAVOURABLE-POSITIVE and ceding makes an
+      // adverse year less adverse, so gross is net MINUS the recovery and reads
+      // more negative than the net below it.
+      key: 'priorYearDevelopmentGross',
+      category: 'Reserves',
+      label: 'Prior-Year Development (gross)',
+      value: r => formatCurrency(r.priorYearDevelopment - r.priorYearDevelopmentCeded),
+      csvValue: r => roundDollars(r.priorYearDevelopment - r.priorYearDevelopmentCeded),
+    },
+    {
+      key: 'priorYearDevelopmentCeded',
+      category: 'Reserves',
+      label: 'Reinsurance Recovery (prior-year development)',
+      value: r => formatCurrency(r.priorYearDevelopmentCeded),
+      csvValue: r => roundDollars(r.priorYearDevelopmentCeded),
+    },
+    {
+      // RENAMED. The value did not move; the label was wrong. "Prior-Year
+      // Development" on a net figure invites a workbook reader to take it as
+      // gross, which is the whole confusion.
       key: 'priorYearDevelopment',
       category: 'Reserves',
-      label: 'Prior-Year Development',
+      label: 'Prior-Year Development (net)',
       value: r => formatCurrency(r.priorYearDevelopment),
       csvValue: r => roundDollars(r.priorYearDevelopment),
     },
