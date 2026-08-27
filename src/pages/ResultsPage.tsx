@@ -165,18 +165,23 @@ export default function ResultsPage({ lockedResults, lineView }: ResultsPageProp
             </div>
           )}
 
-          {result.shockLossIncurred && (
-            <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
-              <AlertTriangle className="text-red-500 flex-shrink-0 mt-0.5" size={20} />
-              <div>
-                <p className="font-bold text-red-800">Shock Loss Event</p>
-                <p className="text-red-700 text-sm">
-                  A significant shock loss occurred this year, materially increasing gross losses above expected levels.
-                </p>
-              </div>
-            </div>
-          )}
+          {/* ⚠ THE "Shock Loss Event" BANNER STOOD HERE AND IS GONE. It rendered on
+              shockLossIncurred, which is true whenever ANY claim reaches $1M — so it
+              fired on 100% of pool-years, 93% of WC line-years and 98% of GL's,
+              measured over 10 games x 10 years. A red warning that appears every
+              single year is not a warning; it is furniture, and it trains a reader
+              to skip the place where a real one would appear.
 
+              Its text was also false where it did fire: "a significant shock loss
+              occurred, materially increasing gross losses above expected levels"
+              describes a shock EVENT, and a $1M claim on a book this size is an
+              ordinary large loss. Nothing about it was attributable to the shock
+              system at all.
+
+              THE REAL SURFACING IS THE CARD DIRECTLY ABOVE, and it already existed:
+              one row per shock in force, with its band, horizon, affected lines,
+              injected claim count and attributable loss. Deleting this banner
+              removes a duplicate that was never telling the truth, not a signal. */}
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
             <div className="px-5 py-3.5 border-b border-gray-100 bg-gray-50/60 flex items-center gap-2">
               <GitCompare size={16} className="text-blue-600" />

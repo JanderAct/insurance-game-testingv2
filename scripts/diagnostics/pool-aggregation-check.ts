@@ -50,7 +50,7 @@ const note = (ok: boolean, msg: string) => { if (!ok) { failures++; return `FAIL
 // Extensive money and other genuinely additive quantities.
 const DOLLARS = new Set([
   'poolPremium', 'adminExpense', 'poolPremiumAndAdminExpense', 'totalMemberCharge',
-  'grossPremium', 'assessments', 'dividends', 'aggregateMemberLoss', 'shockLossAmount',
+  'grossPremium', 'assessments', 'dividends', 'aggregateMemberLoss',
   'grossUltimateLoss', 'reinsuranceCost', 'retainedAboveTower', 'aggregateRecovery',
   'aggregatePremium', 'reinsuranceRecovery', 'netUltimateLoss', 'netIncurredLoss',
   'operatingExpense', 'riskControlInvestment', 'priorYearDevelopment',

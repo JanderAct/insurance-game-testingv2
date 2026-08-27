@@ -1256,3 +1256,72 @@ uniformity detector, a bound derived from observed magnitudes, a coverage counte
 changes meaning when the set changes, and the loss is silent because nothing fails.
 
 v22 retired from the working tree; v23 kept as the immediate predecessor.
+
+---
+
+## v25 — a dead field removed. Shape only; 24 hashes move on a removed column.
+
+```
+value-identity   28,800 -> 28,500 keys, 300 removed, 0 added, CHANGED 0
+                 every removed key is shockLossAmount
+solo-export      24 of 24 hashes moved
+RESULT_METRICS   84 -> 83, one REMOVED, 0 renamed, 83 of 84 unchanged
+```
+
+`shockLossAmount` was `shockOccurred && !isClaimLine`, and `isClaimLine` became
+true for all three lines when Property got its claim generator — so the condition
+had been `shockOccurred && false` ever since. Measured at exactly 0 on every
+line-year in both arms.
+
+**⚠ THE PER-ARM SPLIT ADDED AT v23 IS WHAT MADE THIS READABLE.** It sat on the
+bit-exact list under BOTH `def|` and `sqz|`, which is the report shape for
+*structurally dead*. `bookingGiveBack` — zero in `def`, absent from `sqz` — is the
+contrast: *inactive in one configuration, live in the other*. Pooled, the two
+looked identical and both read as "probable tautology".
+
+**Recaptured in the same commit rather than deferred**, on the same argument as
+v23: a guard left red for everyone is a guard people learn to skip, and this
+lineage already carries the phantom `removed 300` line as the case study for
+exactly that.
+
+### ⚠ THE CARD THAT WENT WITH IT DID NOT HAVE THE DEFECT IT WAS REPORTED FOR
+
+The "Shock Loss Event" banner was removed too, and the reason is the opposite of
+the one it was flagged for. It rendered on `shockLossIncurred`, **not** on the
+dead field — and `shockLossIncurred` is live: true whenever ANY claim reaches
+$1M. Measured over 10 games x 10 years:
+
+| scope | fired |
+|---|---|
+| pool | **100%** of years |
+| WC | 93% |
+| GL | 98% |
+| Property | 0% (hardcoded `false`) |
+
+So it was not a card that could never fire. It was a red warning that fired
+**every single year**, which is furniture rather than a signal, and its text —
+"a significant shock loss occurred, materially increasing gross losses above
+expected levels" — described a shock EVENT when a $1M claim on this book is an
+ordinary large loss with no connection to the shock system.
+
+The real surfacing already existed directly above it: a per-event card carrying
+each shock's band, horizon, affected lines, injected claim count and attributable
+loss. Nothing needed building.
+
+### Siblings found, not fixed
+
+- **`catastropheFactor`** is `const catastropheFactor = 1` — a literal, exported
+  to four decimals, aggregated as `first.catastropheFactor`, classified
+  NO_POOL_MEANING, and multiplying nothing reachable (its only arithmetic use is
+  inside the dead aggregate path). Bit-exact 1 in both arms. A stronger case for
+  removal than the field actually removed here.
+- **`catastropheThreshold`** is now referenced ONLY from dead code. Local, not
+  exported, so no gate sees it either way.
+- **The whole `!isClaimLine` aggregate path** is unreachable — the Gamma
+  member-loss draw, the `lossRng.lognormal` branch of `commonLossFactor`, and
+  `shockOccurred = commonLossFactor > catastropheThreshold`. It contains RNG
+  draws, so removing it is a keep-the-draw question rather than a tidy-up.
+- **`shockLossIncurred`** is live but mislabelled, per the table above, and
+  reaches the workbook as "Shock Loss Incurred" Yes/No.
+
+v23 retired from the working tree; v24 kept as the immediate predecessor.

@@ -701,7 +701,6 @@ export interface ResultSet {
   claimCountsByClass?: Record<string, number>;  // WC
   claimCountsByTier?: Record<string, number>;   // WC
   claimCount?: number;                          // GL — total claims generated this line-year, no sub-coverage breakdown anymore
-  shockLossAmount: number;
   grossUltimateLoss: number;
   // ⚠ NOT THE SHOCK EVENT SYSTEM. This flag predates it and already carries
   // THREE different line-specific meanings — a WC catastrophic-tier claim, a GL

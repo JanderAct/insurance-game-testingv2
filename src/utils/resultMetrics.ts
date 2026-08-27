@@ -364,13 +364,6 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
       csvValue: r => r.catastropheFactor ?? 1,
     },
     {
-      key: 'shockLossAmount',
-      category: 'Losses',
-      label: 'Shock Uplift (included in simulated loss)',
-      value: r => formatCurrency(r.shockLossAmount ?? 0),
-      csvValue: r => roundDollars(r.shockLossAmount ?? 0),
-    },
-    {
       key: 'grossUltimateLoss',
       category: 'Losses',
       label: 'Gross Ultimate Loss + LAE',

@@ -338,7 +338,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // columns and renamed two labels, which moved all 24 hashes and 0 of these
 // 28,800 values. Captured and diffed key-for-key against v23: 28,800 keys,
 // 28,800 matched, 0 changed.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v24.json');
+// v25: SHAPE ONLY. shockLossAmount removed — 300 keys (150 instances x 2 arms),
+// 0 values changed. It was `shockOccurred && !isClaimLine`, structurally false
+// since Property got its claim generator, and this gate had it on the bit-exact
+// list under BOTH arms — which is the report shape that says "structurally dead"
+// rather than "inactive in this configuration". bookingGiveBack, zero in `def`
+// and live in `sqz`, is the contrast the per-arm split exists to draw.
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v25.json');
 
 function seedOf(id: string) {
   let h = 5381;

@@ -278,7 +278,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // That pair — every hash moving, every value holding — is the signature of an
 // export-only change, and it is the only reading under which a 24-hash move is
 // not alarming.
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v24.json');
+// v25: all 24 hashes move on a REMOVED COLUMN. shockLossAmount left
+// RESULT_METRICS, so the workbook's row set changed while value-identity read 0
+// changed of 28,500. Recaptured in the same commit rather than deferred to the
+// next range: a guard left red for everyone is a guard people learn to skip, and
+// this file's own history has the phantom "removed 300" line as the case study.
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v25.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

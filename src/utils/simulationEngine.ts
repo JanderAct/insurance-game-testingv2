@@ -1057,11 +1057,23 @@ export function processLineYear(
     );
   }
 
-  // Claim lines carry their shock inside the drawn claims themselves; the
-  // separate shock-amount add-on only exists for the aggregate (Property) path.
-  const shockLossAmount = shockOccurred && !isClaimLine
-    ? expectedLoss * Math.max(0, commonLossFactor - catastropheThreshold)
-    : 0;
+  // ⚠ shockLossAmount WAS COMPUTED HERE AND IS DELETED. It read
+  // `shockOccurred && !isClaimLine ? ... : 0`, and its own comment said the
+  // add-on "only exists for the aggregate (Property) path" — but isClaimLine
+  // became true for all three lines when Property got its claim generator, so the
+  // condition had been `shockOccurred && false` ever since. Structurally zero, not
+  // merely unobserved: measured at exactly 0 on every line-year, both arms.
+  //
+  // KEEP-THE-DRAW: the expression consumed no RNG. It read expectedLoss,
+  // commonLossFactor and catastropheThreshold, all already computed, and both of
+  // the latter remain referenced by the aggregate path below — so no stream moves.
+  //
+  // ⚠ THE AGGREGATE PATH ITSELF IS ALSO UNREACHABLE and is NOT removed here. The
+  // `else` branch below (`shockOccurred = commonLossFactor > catastropheThreshold`
+  // and the Gamma member-loss draw under it) is the `!isClaimLine` path, dead by
+  // the same test — and it contains lossRng draws, so removing it is a
+  // keep-the-draw question of its own rather than a tidy-up. Left standing and
+  // reported.
 
   let grossUltimateLoss = aggregateMemberLoss;
 
@@ -1566,7 +1578,6 @@ export function processLineYear(
     claimCount: glClaimCount,
     commonLossFactor,
     catastropheFactor,
-    shockLossAmount,
     grossUltimateLoss,
     shockLossIncurred: shockOccurred,
     shockEvents: ctx.shockFirings?.length
@@ -2483,7 +2494,6 @@ export function aggregateLineResults(
       'legacy aggregate-path factor; only GL carries a live value — read the GL row',
     ),
     catastropheFactor: first.catastropheFactor,
-    shockLossAmount: addDollars('shockLossAmount'),
     grossUltimateLoss: addDollars('grossUltimateLoss'),
     shockLossIncurred: results.some(r => r.shockLossIncurred),
     // ONE ROW PER EVENT, costs summed across the lines it hit — not one row per

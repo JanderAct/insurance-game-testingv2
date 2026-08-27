@@ -5,8 +5,7 @@
 // live years. Beyond claim integrity it checks the wiring GL shares with WC —
 // WC and GL must be DECOUPLED on the pool-year factor (WC reports 1, GL reports
 // the shared gPool draw — see WC_LOSS_MODEL.poolYearFactor),
-// neither may carry a separate shockLossAmount (their shock lives inside the
-// drawn claims), and claimCount must reconcile to the claims array (no more
+// and claimCount must reconcile to the claims array (no more
 // per-sub breakdown to reconcile — the GL sub-coverage rebuild deleted it).
 //
 //   npx tsx scripts/diagnostics/gl-cutover-check.ts 6b   # assert the ratio
@@ -47,7 +46,7 @@ const glCappedLR: number[] = [], glCappedAnalyticLR: number[] = [], perSeedGlCap
 const CAP = 1_000_000;
 const wcGrossLR: number[] = [];
 let maxTie = 0, glClaimSumErr = 0, wcClaimSumErr = 0, lineYears = 0, nonFinite = 0;
-let glShockAmtBad = 0, wcFactorNotOne = 0, glFactorIsOne = 0, countMismatch = 0, memberSumErr = 0;
+let wcFactorNotOne = 0, glFactorIsOne = 0, countMismatch = 0, memberSumErr = 0;
 const glClaimsPerYear: number[] = [], glShockYears: number[] = [];
 const wcGross: number[] = [], wcPrem: number[] = [], glGross: number[] = [], glPrem: number[] = [], prGross: number[] = [], prPrem: number[] = [];
 
@@ -78,8 +77,13 @@ for (const id of SEEDS) {
     // landing on exactly 1 would mean the draw had stopped happening).
     if (wc.commonLossFactor !== 1) wcFactorNotOne++;
     if (gl.commonLossFactor === 1) glFactorIsOne++;
-    // claim-line shockLossAmount must be 0 (shock lives inside the claims).
-    if (gl.shockLossAmount !== 0 || wc.shockLossAmount !== 0) glShockAmtBad++;
+    // ⚠ THE "claim-line shockLossAmount must be 0" ASSERTION IS GONE, AND IT IS
+    // NOT A LOST CHECK. The field itself was deleted — it had been
+    // `shockOccurred && !isClaimLine`, structurally false since Property got its
+    // claim generator — so the property this asserted at runtime is now enforced
+    // by the TYPE SYSTEM: there is no shockLossAmount to be non-zero. That is the
+    // stronger form, and it is this file's own principle (make it impossible
+    // rather than checking it harder).
     if (gl.claims) {
       glClaimSumErr = Math.max(glClaimSumErr, Math.abs(gl.claims.reduce((s, c) => s + c.grossUltimate, 0) - gl.grossUltimateLoss));
       glClaimsPerYear.push(gl.claims.length);
@@ -125,7 +129,6 @@ console.log(`  WC commonLossFactor is exactly 1 (pool factor REMOVED from WC): $
 console.log(`  GL commonLossFactor still varies (gPool draw retained for GL): ${lineYears - glFactorIsOne}/${lineYears}  ${note(glFactorIsOne === 0, 'GL commonLossFactor is exactly 1 — the shared pool-year draw has stopped')}`);
 console.log(`    WC and GL are now INDEPENDENT. gPool was the model's only cross-line correlation, so a bad`);
 console.log(`    WC year no longer carries any information about GL. Deliberate — see WC_LOSS_MODEL.poolYearFactor.`);
-console.log(`  claim-line shockLossAmount != 0 count: ${glShockAmtBad}  ${note(glShockAmtBad === 0, 'claim-line shockLossAmount nonzero')}`);
 console.log(`  claimCount mismatches: ${countMismatch}  ${note(countMismatch === 0, 'claimCount missing or does not equal claims.length')}`);
 console.log(`  GL claims/yr (enrolled book): mean ${mean(glClaimsPerYear).toFixed(1)}`);
 console.log(`  GL shock (occurrence > $1M) share of line-years: ${(mean(glShockYears) * 100).toFixed(0)}%`);
