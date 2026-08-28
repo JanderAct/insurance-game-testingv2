@@ -3,6 +3,7 @@
 
 import type { Region, CoverageLine } from '../types/simulation';
 import type { PayoutPattern } from '../utils/payoutPattern';
+import type { ClosureCurve } from '../utils/claimClosure';
 
 // Administrative expense is 15% of Pure Premium at CLF 1.000. It is added
 // after the selected CLF is applied and is not itself multiplied by the CLF.
@@ -1500,6 +1501,88 @@ export const LEGACY_GEOMETRIC_PATTERN: Record<string, PayoutPattern> = {
 };
 
 export const LINE_PAYOUT_PATTERN: Record<string, PayoutPattern> = FITTED_PAYOUT_PATTERN;
+
+// ===========================================================================
+// CLAIM CLOSURE CURVES — see claimClosure.ts for the form and the discipline.
+//
+// Fitted against the pool's own closure experience, each line separately, on the
+// share of REPORTED claims closed by age. Every line reports in its accident
+// year (no report lag anywhere in the engine), so reported is the whole
+// register and no reporting adjustment sits between the fit and the use.
+//
+// ⚠ CLOSURE IS SLOWER THAN PAYMENT AND THE TWO ARE SEPARATE PARAMETERS. WC pays
+// 41% of a cohort's dollars in year one and closes 49% of its files; GL pays 10%
+// and closes 27%. Compare the k's against FITTED_PAYOUT_PATTERN's — WC closure
+// 0.592 against payout 0.64, GL closure 1.354 against payout 1.88 — they are
+// genuinely different fits, not one number wearing two names.
+//
+// Residuals against the fitted points: WC RMSE 0.026 (worst -0.046 at age 2),
+// GL 0.018 (worst -0.027 at age 2), Property 0.010 (worst -0.020 at age 5).
+//
+// ⚠ PROPERTY REACHES 1.000 IN THE SOURCE AND A WEIBULL CANNOT. The fit reads
+// 0.998 at age 10 and approaches 1 without arriving. Harmless for a closure
+// rule — nothing divides by the open share — but recorded rather than hidden,
+// because it is the same asymptote-versus-observed-100% question the cohort
+// close rule settles by fiat in payoutPattern.ts.
+// ===========================================================================
+export const FITTED_CLOSURE_CURVE: Record<string, ClosureCurve> = {
+  WC: { k: 0.592, b: 1.640 },
+  GL: { k: 1.354, b: 2.180 },
+  Property: { k: 0.912, b: 1.340 },
+};
+
+// ===========================================================================
+// THE SIZE SPLIT — WC ONLY, AND THE ATTEMPT TO EXTEND IT FAILED ON MEASUREMENT.
+//
+// Closure correlates with size, and on WC it is extreme: of claims over $100k,
+// ZERO of the first year's cohort closed at age 1, 0.6% at 2, 2.5% at 3, against
+// 49/72/77 for all claims. A size-blind rule would hold trivial files open for
+// years and let large ones close early, and both are wrong.
+//
+// So WC's all-claims curve above is treated as a MIXTURE of a large-claim curve
+// and a small-claim one. The large-claim curve is fitted directly; the mixture
+// weight comes from the pool's own observation that from age 10 onward roughly
+// half of everything still open is over $100k, which pins the large share at
+// 6.94%; the small-claim curve is then backed out of WC's own all-claims fit.
+// Recombining reproduces WC's all-claims curve to within 0.007 — a fact used
+// only to identify the split, so reproducing it is evidence the split is real.
+//
+// ⚠ AND IT DOES NOT TRANSPLANT TO GL OR PROPERTY. Applying the same large curve
+// and the same 6.94% weight to their own all-claims fits misses those fits by
+// 0.042 and 0.039 against WC's 0.007, and the reason is arithmetic rather than
+// tuning: both lines close 99-100% of their files by age 7-10, which cannot
+// happen if 7% of them are sitting on a curve that has reached only 44% by age
+// 10. Either those lines have no comparable large-claim slowdown or their large
+// share is far smaller; the source data cannot say which, so GL and Property
+// stay SIZE-BLIND on their own fitted curve and this is recorded as the reason
+// rather than presented as a simplification.
+//
+// DISPLACED BY: per-line size-conditional closure experience, if it is ever
+// fitted. Until then, do not assume WC's split onto another line.
+//
+// ⚠ THE $100k BOUNDARY IS NOMINAL AND WILL ERODE. It is the third instance of
+// this trap on this branch, after the $1M retention and the fixed severity cap,
+// and it is the reason a continuous size function is preferred to a threshold.
+// Not resolved here: this commit only READS the curves for display, so the
+// boundary moves nothing yet. The commit that makes closure drive the developing
+// subset is where it has to be settled.
+// ===========================================================================
+export const WC_LARGE_CLAIM_THRESHOLD = 100_000;
+export const WC_LARGE_CLAIM_SHARE = 0.0694;
+export const WC_CLOSURE_BY_SIZE: { small: ClosureCurve; large: ClosureCurve } = {
+  small: { k: 0.658, b: 1.360 },
+  large: { k: 1.374, b: 14.860 },
+};
+
+// The curve a claim of this size on this line closes on.
+export function resolveClosureCurve(line: string, grossUltimate: number): ClosureCurve {
+  if (line === 'WC') {
+    return grossUltimate >= WC_LARGE_CLAIM_THRESHOLD
+      ? WC_CLOSURE_BY_SIZE.large
+      : WC_CLOSURE_BY_SIZE.small;
+  }
+  return FITTED_CLOSURE_CURVE[line] ?? FITTED_CLOSURE_CURVE.GL;
+}
 
 // ===========================================================================
 // IBNER — INCURRED BUT NOT ENOUGH REPORTED.

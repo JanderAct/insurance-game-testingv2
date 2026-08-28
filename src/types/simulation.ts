@@ -463,6 +463,23 @@ export interface ReserveCohort {
   netUltimate: number;
   netPaid: number;
   netUnpaid: number;
+
+  // --- THE GROSS PAID LEDGER (see processIbner's gross block) --------------
+  // ⚠ A PARALLEL LEDGER THAT NEVER FEEDS THE NET ENGINE, and that is the design
+  // rather than an implementation detail. These run alongside netPaid/netUnpaid
+  // at the SAME conditionalPaydown rate and absorb the SAME development, but
+  // nothing in the net path ever reads them. That is what keeps the null test
+  // available: every pre-existing field stays bit-identical, so value-identity
+  // can still tell an engine change from a recording.
+  //
+  // GROSS, because the claims are gross. Tying a gross per-claim column to a NET
+  // cohort figure would thread the cession split through every row; one basis end
+  // to end makes the tie-out arithmetic instead of a reconciliation.
+  //
+  // Optional only for cohorts deserialised from a save written before this
+  // existed; every cohort the engine creates carries both.
+  grossPaid?: number;
+  grossUnpaid?: number;
   // ⚠ `paydownPct` IS GONE. It stored a per-cohort copy of a line-level
   // constant, which was harmless while that constant was flat and a second
   // description of one fact the moment payout patterns replaced it. The rate is
@@ -556,6 +573,33 @@ export interface ReserveDevelopmentRow {
   // about the gap between what is reported and what is estimated, so the
   // ambiguous word is wrong exactly where the distinction is the point.
   ultimateByValuation: number[];
+  // CUMULATIVE NET PAID at each of the same valuations, same indexing. A
+  // RECORDING, not a computation — the figure processIbner already produced,
+  // written down so a paid triangle and a paid-to-incurred ratio exist without
+  // anything having to reconstruct them.
+  //
+  // ⚠ NET, MATCHING ultimateByValuation BESIDE IT, AND THE GROSS SERIES WAS
+  // MEASURED AND REJECTED. The paid ledger the engine runs is GROSS — that is
+  // what the claims workbook needs and what ReserveCohort.grossPaid carries —
+  // so the obvious thing was to record the gross series here too and give the
+  // exhibit a gross paid-to-incurred. It was built that way and it cost a SECOND
+  // array, because a gross ratio also needs a gross denominator per valuation.
+  // Two arrays took cohort-stock-check's poolState growth ratio from 0.65 to
+  // 0.76 against its 0.75 limit: real accumulation on a ledger that already
+  // grows a number per accident year per valuation forever. One array passes at
+  // 0.72.
+  //
+  // Given one, NET is the right one. The exhibit's other five columns are net,
+  // so a net paid column and a net paid-to-incurred make that document
+  // internally consistent and subtractable throughout — where a gross paid
+  // column sitting beside a net ultimate is precisely the mixed-basis reading
+  // this project keeps producing. The CLAIMS WORKBOOK stays gross end to end and
+  // reads ReserveCohort.grossPaid directly, so each document is coherent on its
+  // own basis. The two do not tie across documents and are not meant to; the
+  // difference is what the tower is carrying.
+  //
+  // Absent on rows written before the ledger existed, and on nothing else.
+  paidByValuation?: number[];
   // The valuation year that ultimateByValuation[0] belongs to.
   firstValuationYear: number;
   // The cohort's age at that first valuation. Zero for an accident year the

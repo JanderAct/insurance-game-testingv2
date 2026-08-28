@@ -1233,12 +1233,35 @@ export function processLineYear(
   const currentYearNetReserve = bookedUltimate * openFraction;
   const netPaidCurrentYear = bookedUltimate * (1 - openFraction);
 
+  // --- THE GROSS PAID LEDGER OPENS HERE ------------------------------------
+  // The BOOKED GROSS register: the tracked occurrences at their booked values
+  // plus the untracked remainder, which is what markDownForBooking left behind.
+  // Not grossUltimateLoss — that is the register BEFORE the optimistic markdown,
+  // and opening the gross ledger above the net one would make paid-to-incurred
+  // read low for a reason that is a booking decision rather than payment.
+  //
+  // ⚠ THE SAME openFraction AS THE NET SPLIT, deliberately: the payout pattern
+  // is a property of the LINE, not of a basis. Gross and net pay down on one
+  // schedule and differ only by what the tower takes off the development.
+  //
+  // A cohort with no register — mechanism off, or a line without a tractable
+  // tower — has nothing gross to track, so the ledger opens at the net figures
+  // and stays equal to them. That is the honest default: without claims there is
+  // no gross/net distinction to record.
+  const grossRegisterBooked = markdown.tracked.length > 0 || (markdown.untrackedTotal ?? 0) > 0
+    ? markdown.tracked.reduce((s, d) => s + d.original, 0) + (markdown.untrackedTotal ?? 0)
+    : bookedUltimate;
+  const grossUnpaidCurrentYear = grossRegisterBooked * openFraction;
+  const grossPaidCurrentYear = grossRegisterBooked * (1 - openFraction);
+
   const currentYearCohort: ReserveCohort = {
     yearNumber,
     calendarYear,
     netUltimate: bookedUltimate,
     netPaid: netPaidCurrentYear,
     netUnpaid: currentYearNetReserve,
+    grossPaid: grossPaidCurrentYear,
+    grossUnpaid: grossUnpaidCurrentYear,
     closed: false,
     registerSum: netUltimateLoss,
     horizon: ibnerRng.intRange(IBNER_HORIZON[line].min, IBNER_HORIZON[line].max),
@@ -2752,7 +2775,15 @@ function recordReserveDevelopment(
   incepted: ReserveCohort,
   yearNumber: number,
 ): ReserveDevelopmentRow[] {
-  const byYear = new Map(ledger.map(r => [r.yearNumber, { ...r, ultimateByValuation: [...r.ultimateByValuation] }]));
+  // ⚠ paidByValuation IS NET, matching ultimateByValuation. The engine's own
+  // paid ledger is GROSS and lives on the cohort; this row records the NET
+  // figure because the exhibit it feeds is a net document. See the field's own
+  // comment for why only one series is stored and why it is this one.
+  const byYear = new Map(ledger.map(r => [r.yearNumber, {
+    ...r,
+    ultimateByValuation: [...r.ultimateByValuation],
+    paidByValuation: [...(r.paidByValuation ?? [])],
+  }]));
 
   // Open a row for any pre-existing cohort the ledger has not met yet. Only
   // seed cohorts reach this: an engine-written accident year is registered in
@@ -2763,6 +2794,7 @@ function recordReserveDevelopment(
       yearNumber: c.yearNumber,
       calendarYear: c.calendarYear,
       ultimateByValuation: [c.netUltimate],
+      paidByValuation: [c.netPaid],
       firstValuationYear: yearNumber - 1,
       ageAtFirstValuation: c.age,
       horizon: c.horizon,
@@ -2783,6 +2815,13 @@ function recordReserveDevelopment(
       row.ultimateByValuation.push(row.ultimateByValuation[row.ultimateByValuation.length - 1]);
     }
     row.ultimateByValuation[idx] = c.netUltimate;
+    // The paid series is padded the same way and for the same reason. Carrying
+    // the LAST figure forward is right for paid as it is for ultimate: a gap
+    // would mean no payment happened, and a cohort that is not valued in a year
+    // is one that has closed, whose paid is final.
+    const paid = row.paidByValuation ?? (row.paidByValuation = []);
+    while (paid.length < idx) paid.push(paid.length > 0 ? paid[paid.length - 1] : 0);
+    paid[idx] = c.netPaid;
   }
 
   // The accident year written this year, at its inception estimate.
@@ -2791,6 +2830,7 @@ function recordReserveDevelopment(
       yearNumber: incepted.yearNumber,
       calendarYear: incepted.calendarYear,
       ultimateByValuation: [incepted.netUltimate],
+      paidByValuation: [incepted.netPaid],
       firstValuationYear: yearNumber,
       ageAtFirstValuation: 0,
       horizon: incepted.horizon,
@@ -2875,6 +2915,54 @@ function processIbner(
       let paydown = c.netUnpaid * conditionalPaydown(LINE_PAYOUT_PATTERN[line], c.age + 2);
       let newUnpaid = c.netUnpaid - paydown;
       let newPaid = c.netPaid + paydown;
+
+      // --- THE GROSS PAID LEDGER, RUNNING ALONGSIDE ------------------------
+      // ⚠ NOTHING BELOW READS THESE. They mirror the three lines above at the
+      // same rate and absorb the same development, and the net path never
+      // consults them — which is what lets value-identity stay green on every
+      // pre-existing field while this commit adds a recording. If a future
+      // change makes the net path read a gross figure, that is an engine change
+      // and it must be argued for as one; it is not this.
+      //
+      // ⚠ NO CLAIM EVER DRAWS ITS OWN PAYMENT SCHEDULE, and this line is where
+      // that would be violated. The engine develops the RESERVE — newUnpaid =
+      // (netUnpaid - paydown) x factor — so the cohort's paydown TOTAL sets the
+      // base development multiplies. Payment allocation is cession-neutral ONLY
+      // because the pattern fixes that total here, before anything splits it
+      // across claims. Give a claim its own curve and the total stops being the
+      // pattern's, the development base moves, and the free-lunch surface
+      // reopens where nothing is watching. claimClosure.ts carries the same
+      // warning at the split, and paid-ledger-check.ts asserts the sum.
+      // ⚠ THE GROSS UNPAID BALANCE IS FLOORED AT ZERO, AND THIS IS NOT THE
+      // RESERVE FLOOR THAT WAS A BUG. They look identical. They are not, and the
+      // difference is which quantity is being clipped.
+      //
+      // The retired `Math.max(0, newUltimate - c.netPaid)` clipped FAVOURABLE
+      // development on the NET reserve — the quantity that drives the P&L — so
+      // adverse movements were recognised in full and favourable ones truncated,
+      // E[incurred] exceeded E[ultimate], and the martingale broke. That floor is
+      // gone and stays gone. The net path below is untouched by any of this.
+      //
+      // This floor is on the GROSS LEDGER, which nothing reads. The register's
+      // own claims are already floored individually in cedeDevelopment
+      // (`Math.max(0, c.current + deltas[i])`), so a cohort whose claims settle
+      // well below what it has already paid genuinely has a register beneath its
+      // own paid-to-date. The honest ledger statement is then unpaid ZERO — fully
+      // paid, and slightly over-paid against its own latest estimate — rather
+      // than a negative balance, which would pay a NEGATIVE amount next year and
+      // make cumulative paid fall.
+      //
+      // Found by paid-ledger-check on its first run: 9 cohort-valuations of
+      // 4,386, every one a late favourable movement on an old cohort.
+      const cGrossUnpaid = Math.max(0, c.grossUnpaid ?? c.netUnpaid);
+      const cGrossPaid = c.grossPaid ?? c.netPaid;
+      let grossPaydown = cGrossUnpaid * conditionalPaydown(LINE_PAYOUT_PATTERN[line], c.age + 2);
+      let newGrossUnpaid = cGrossUnpaid - grossPaydown;
+      let newGrossPaid = cGrossPaid + grossPaydown;
+      // What the register moved by this valuation, GROSS — retained plus ceded.
+      // The net reserve takes only the retained part; the difference between the
+      // two ledgers is exactly what the tower absorbed.
+      let grossMovement = 0;
 
       // ⚠ SIGN. developmentImpact is POSITIVE for FAVORABLE development
       // (the estimate FELL), matching priorYearDevelopment's documented
@@ -2977,6 +3065,10 @@ function processIbner(
             // the rollforward stops balancing, so it is retained rather than
             // dropped.
             newUnpaid += res.retained + alloc.unallocated;
+            // GROSS ledger only — read-only with respect to everything above.
+            // `unallocated` never reached a claim, so the register did not move
+            // by it and the gross ledger must not either.
+            grossMovement += res.retained + res.ceded;
           }
           // ⚠ ONE ENTRY PER VALUATION, WRITTEN AFTER BOTH STEPS, AND THAT IS
           // DELIBERATE. A valuation revises an estimate once; the stochastic draw
@@ -3006,11 +3098,20 @@ function processIbner(
           // behaviourally and the gate was still right to fire — a null test
           // that tolerates reassociation cannot tell a reassociation from a
           // mechanism. Do not "simplify" these two lines into the branch above.
+          // GROSS ledger only, read BEFORE the two net statements and differenced
+          // AFTER them, so neither is touched. With no register to cede against
+          // the whole movement is retained, so gross and net move together.
+          const grossBefore = newUnpaid;
           if (DEVELOPMENT_CESSION_ENABLED) unallocatedDevelopment += newUnpaid * (factor - 1) + unwind;
           newUnpaid *= factor;
           newUnpaid += unwind;
+          grossMovement += newUnpaid - grossBefore;
         }
       }
+      // The register's movement lands on the gross ledger's unpaid balance, the
+      // same way the retained part lands on the net one above — then floored,
+      // for the reason set out where cGrossUnpaid is read.
+      newGrossUnpaid = Math.max(0, newGrossUnpaid + grossMovement);
 
       // ⚠ THE FLOORS ARE GONE, AND THEY ARE NOW UNREACHABLE RATHER THAN MERELY
       // UNUSED. Three of them stood here:
@@ -3061,14 +3162,24 @@ function processIbner(
         paydown += newUnpaid;
         newPaid += newUnpaid;
         newUnpaid = 0;
+        // The gross ledger closes on the same event, for the same reason: a
+        // closed cohort has paid everything it will pay, so leaving a gross
+        // residual behind would make paid-to-incurred stall short of 1 forever
+        // on exactly the cohorts that are finished.
+        grossPaydown += newGrossUnpaid;
+        newGrossPaid += newGrossUnpaid;
+        newGrossUnpaid = 0;
       }
       netPaidThisYear += paydown;
+      void grossPaydown;   // the cohort carries it; no net consumer reads it
 
       return {
         ...c,
         netUltimate: newUltimate,
         netUnpaid: newUnpaid,
         netPaid: newPaid,
+        grossPaid: newGrossPaid,
+        grossUnpaid: newGrossUnpaid,
         age: c.age + 1,
         closed: closing,
         developingClaims: developingClaimsOut,

@@ -50,6 +50,35 @@ export interface ExhibitRow {
   matured: boolean;
   /** True only for the collapsed Prior row. */
   isPrior: boolean;
+
+  // ============================================================================
+  // PAID, AND THE PAID-TO-INCURRED RATIO — BOTH NET, LIKE EVERY COLUMN ABOVE.
+  //
+  // ⚠ THE GROSS VERSION WAS BUILT FIRST AND WAS REJECTED ON MEASUREMENT, not on
+  // taste. A gross paid column beside a net ultimate is the mixed-basis reading
+  // this project produces most, and making the RATIO gross needed a second
+  // stored series for its denominator — which took cohort-stock-check's
+  // poolState growth ratio from 0.65 to 0.76 against a 0.75 limit. So the
+  // exhibit is net throughout: every cell here is subtractable against every
+  // other, and paidToIncurred is netPaid over netUltimate with no conversion in
+  // it. See ReserveDevelopmentRow.paidByValuation.
+  //
+  // The claims workbook is GROSS throughout for the same reason in reverse. The
+  // two documents do not tie to each other and are not meant to; the difference
+  // is what the tower is carrying.
+  //
+  // WHY THE RATIO IS WORTH A COLUMN: it is what says whether an accident year is
+  // nearly settled or still moving, and it only became informative once the
+  // payout patterns made the three lines differ — before them every line paid
+  // down at one rate and the ratio carried no per-line signal. Net Paid Losses is
+  // one calendar-year total per line, so nothing anywhere showed a year-one GL
+  // accident year sitting at 10% paid.
+  //
+  // Null where the ledger has no entry — the same empty-cell-is-not-a-zero rule
+  // the rest of this exhibit follows.
+  // ============================================================================
+  paid: number | null;
+  paidToIncurred: number | null;
 }
 
 // ============================================================================
@@ -85,6 +114,17 @@ function ultimateAt(row: ReserveDevelopmentRow, v: number): number {
   return h[Math.max(0, Math.min(i, h.length - 1))];
 }
 
+// A ledger series at valuation `v`, clamped forward exactly as ultimateAt is and
+// for the same reason: recording stops when a cohort closes, and a closed cohort
+// has paid everything it will pay, so the last entry IS the figure at every later
+// valuation. Null when the series is absent — a row written before the paid
+// ledger existed has no paid history, which is not the same as having paid zero.
+function seriesAt(series: number[] | undefined, row: ReserveDevelopmentRow, v: number): number | null {
+  if (!series || series.length === 0) return null;
+  const i = v - row.firstValuationYear;
+  return series[Math.max(0, Math.min(i, series.length - 1))];
+}
+
 // Could this accident year have developed during valuation year `v`?
 //
 // processIbner tests `age < horizon` with the age the cohort held ENTERING the
@@ -104,6 +144,7 @@ export function exhibitRows(ledger: ReserveDevelopmentRow[], asAt: number): Exhi
       const initial = r.ultimateByValuation[0];
       const isFirst = asAt === r.firstValuationYear;
       const prior = isFirst ? null : ultimateAt(r, asAt - 1);
+      const paid = seriesAt(r.paidByValuation, r, asAt);
       return {
         yearNumber: r.yearNumber,
         calendarYear: r.calendarYear,
@@ -115,6 +156,10 @@ export function exhibitRows(ledger: ReserveDevelopmentRow[], asAt: number): Exhi
         total: isFirst ? null : current - initial,
         matured: ageAt(r, asAt) > r.horizon,
         isPrior: false,
+        paid,
+        // NET over NET — `current` is this row's net ultimate at the same
+        // valuation, so no conversion enters the quotient.
+        paidToIncurred: paid !== null && current > 0 ? paid / current : null,
       };
     })
     .sort((a, b) => a.yearNumber - b.yearNumber);
@@ -158,6 +203,15 @@ export function poolExhibitRows(perLine: ExhibitRow[][]): ExhibitRow[] {
         // line still moving makes the pool row still moving.
         matured: rows.every(r => r.matured),
         isPrior: false,
+        // ⚠ THE RATIO IS RE-DERIVED FROM THE SUMMED DOLLARS, NEVER AVERAGED.
+        // Adding three lines' paid-to-incurred ratios is meaningless and
+        // averaging them is worse — it would weight a small line equally with a
+        // large one and read as a pool figure. Sum the two dollar columns, then
+        // divide once.
+        paid: anyNull(r => r.paid) ? null : sum(r => r.paid ?? 0),
+        paidToIncurred: anyNull(r => r.paid) || sum(r => r.current) <= 0
+          ? null
+          : sum(r => r.paid ?? 0) / sum(r => r.current),
       };
     })
     .sort((a, b) => a.yearNumber - b.yearNumber);
@@ -196,6 +250,12 @@ export function collapsePrior(rows: ExhibitRow[]): ExhibitRow[] {
     // the whole row live.
     matured: old.every(r => r.matured),
     isPrior: true,
+    // Summed and then divided once, exactly as at pool scope and for the same
+    // reason: a ratio of sums, never a sum or an average of ratios.
+    paid: anyNull(r => r.paid) ? null : sum(r => r.paid ?? 0),
+    paidToIncurred: anyNull(r => r.paid) || sum(r => r.current) <= 0
+      ? null
+      : sum(r => r.paid ?? 0) / sum(r => r.current),
   };
   return [priorRow, ...kept];
 }
@@ -220,14 +280,20 @@ function m(value: number): string {
 // and "had no opportunity to move" is the exhibit's whole subject.
 const EMPTY = '—';
 
+// The paid-to-incurred ratio, as a percentage to one decimal. Not put through
+// m(): it is not dollars and dividing it by 10^6 would render every row 0.00.
+function ratioCell(value: number | null): string {
+  return value === null ? EMPTY : `${(value * 100).toFixed(1)}%`;
+}
+
 function cell(value: number | null): string {
   return value === null ? EMPTY : m(value);
 }
 
 const HEADER =
   '| Accident year | Initial ultimate $M | Prior year ultimate $M | Current ultimate $M ' +
-  '| 1-yr development $M | Total development $M |\n' +
-  '|---|---:|---:|---:|---:|---:|';
+  '| 1-yr development $M | Total development $M | Paid to date $M | Paid / ultimate |\n' +
+  '|---|---:|---:|---:|---:|---:|---:|---:|';
 
 function renderTable(rows: ExhibitRow[]): string {
   if (rows.length === 0) return '_No accident years on this exhibit yet._';
@@ -244,7 +310,14 @@ function renderTable(rows: ExhibitRow[]): string {
     // "settled" was worse than either: it collapsed MATURITY into CLOSURE and
     // told a player the year was finished while it was still paying out.
     const oneYear = r.matured ? EMPTY : cell(r.oneYear);
-    return `| ${label} | ${m(r.initial)} | ${cell(r.prior)} | ${m(r.current)} | ${oneYear} | ${cell(r.total)} |`;
+    // ⚠ EVERY COLUMN ON THIS ROW IS NET, INCLUDING THE LAST TWO, which is what
+    // makes the row internally subtractable — paid + remaining reserve = current
+    // ultimate, exactly, on the printed figures. A gross paid column here would
+    // break that silently and would look entirely reasonable in a spreadsheet.
+    // If a gross paid figure is ever wanted on this exhibit it needs its own
+    // gross denominator stored beside it; see ReserveDevelopmentRow.
+    return `| ${label} | ${m(r.initial)} | ${cell(r.prior)} | ${m(r.current)} | ${oneYear} `
+      + `| ${cell(r.total)} | ${cell(r.paid)} | ${ratioCell(r.paidToIncurred)} |`;
   });
   return [HEADER, ...body].join('\n');
 }
@@ -421,6 +494,18 @@ export function buildActuarialMemo({ gameState, asAtYear }: ActuarialMemoInput):
 
   out.push('### Reading this exhibit');
   out.push(
+    '- **Every column here is NET of reinsurance, paid included,** so the row is subtractable ' +
+    'throughout: paid to date plus the remaining reserve is the current ultimate. The claims ' +
+    'workbook is GROSS throughout, so its Gross Paid column is a larger number for the same ' +
+    'accident year — the difference is what the reinsurance tower is carrying, and the two ' +
+    'documents are not meant to tie.\n' +
+    '- **Paid / incurred is what says whether a year is nearly settled or still moving,** and it ' +
+    'is the reading that only became informative once the three lines got their own payout ' +
+    'patterns. A recent GL year sits near 10% paid while a Property year of the same age is past ' +
+    '50%: same age, same exhibit, entirely different amounts of money still to leave. Nothing ' +
+    'else in the game shows that — Net Paid Losses is one calendar-year total per line.\n' +
+    '- **A year can be well paid and still open.** Closure is slower than payment, deliberately ' +
+    'and from the pool\'s own experience, so a high paid ratio does not mean the files are shut.\n' +
     '- **Empty cells are not zeros.** The newest accident year has no prior valuation and no ' +
     'development, because it has had no opportunity to develop. That is different from a year ' +
     'that had the opportunity and did not move.\n' +

@@ -49,6 +49,8 @@
 import * as XLSX from 'xlsx';
 import type { Claim, CoverageLine, Member, PoolState, ResultSet } from '../types/simulation';
 import { FIXED_LINE_ORDER, LINE_ABBREV } from './resultsExport';
+import { claimPaidToDate, isClaimClosed } from './claimClosure';
+import { resolveClosureCurve } from '../data/defaultAssumptions';
 
 type Row = (string | number)[];
 
@@ -59,6 +61,20 @@ const ENROLLED_NOTE =
   'claim-level detail for prospects is generated but discarded after year-end aggregation, so no ' +
   'prospect rows exist to filter. The Enrolled column is a real per-row membership check, kept for ' +
   'documentation and so this stays correct if that ever changes.';
+
+const PAID_NOTE =
+  'Gross Paid is this claim\'s share of its accident year\'s cumulative GROSS paid, split pro rata by ' +
+  'the claim\'s own gross incurred — a split of the paydown the line\'s payout pattern already set, ' +
+  'never a schedule the claim draws for itself. Status is the claim\'s own closure draw against a ' +
+  'curve fitted to the pool\'s closure experience, and closure is SLOWER than payment: money leaves ' +
+  'before files close, so a claim can be well paid and still open. Both are derived at read time and ' +
+  'neither is stored. Gross Paid and Gross Incurred are both GROSS, so they are subtractable — but ' +
+  'they are NOT the same VINTAGE, and their ratio is not this claim\'s paid-to-incurred. Gross ' +
+  'Incurred is the claim AS DRAWN and never develops; Gross Paid is a share of the accident year\'s ' +
+  'paid to date, and that year\'s register HAS developed. On a year that deteriorated the ratio can ' +
+  'exceed 100% (measured: a Property year at 102%), which is not an error — it is a claim\'s share ' +
+  'of payments on a register larger than the one it was drawn into. For a real paid-to-incurred ' +
+  'ratio use the Actuarial exhibit, where both terms come from the same ledger at the same valuation.';
 
 const PROPERTY_NOTE =
   'Property claims are drawn from a mixture fitted to the pool\'s own nine years of claims. Band is ' +
@@ -333,6 +349,95 @@ function collectLineClaims(lockedResults: ResultSet[], line: CoverageLine): Line
   return out;
 }
 
+// ============================================================================
+// PAID AND STATUS — DERIVED AT READ TIME, NEVER STORED.
+//
+// ⚠ THESE TWO COLUMNS WERE PLACEHOLDERS AND ARE NOW REAL. Gross Paid read
+// `claim.paidToDate`, which no generator ever writes, so every claim on every
+// line exported zero paid and status 'open' — including accident years sitting
+// five valuations back. The columns existed, were the right columns, and told a
+// reader that nothing had ever been paid on anything.
+//
+// ⚠ AND THEY STAY DERIVED, BECAUSE RULING 8 SAYS SO. `LineResultSet.claims` is
+// in-memory only and per-claim detail regenerates from seed x member x year on
+// demand, so a claim cannot ACCUMULATE paid or status across valuations. Both
+// are pure functions of what the claim already carries plus its cohort's ledger:
+// paid is the claim's share of the cohort's cumulative gross paid, status is its
+// own closure draw against its own curve. Nothing here writes to a claim and
+// nothing here persists.
+//
+// ⚠ ONE BASIS END TO END, AND IT IS GROSS. The claim's incurred is gross and the
+// cohort ledger read here is gross, so the two columns are subtractable and their
+// ratio is a gross paid-to-incurred. The NET figures on the same cohort are not
+// touched by this file — see the units rule on ReserveDevelopmentRow.
+// ============================================================================
+interface PaidLedgerView {
+  /** Cumulative GROSS paid on each accident year's cohort, at the latest valuation. */
+  grossPaidByAy: Map<number, number>;
+  /** Sum of every claim's gross ultimate in that accident year — the split's denominator. */
+  registerByAy: Map<number, number>;
+  /** The valuation the workbook is being written at. */
+  valuationYear: number;
+}
+
+function buildPaidLedgerView(
+  rows: LineClaimRow[],
+  lockedResults: ResultSet[],
+  poolState: PoolState | undefined,
+  line: CoverageLine,
+): PaidLedgerView {
+  const registerByAy = new Map<number, number>();
+  for (const { claim } of rows) {
+    registerByAy.set(claim.accidentYear, (registerByAy.get(claim.accidentYear) ?? 0) + claim.grossUltimate);
+  }
+
+  const grossPaidByAy = new Map<number, number>();
+  const ls = poolState?.lines?.[line];
+  // ⚠ THE LIVE COHORT ONLY, AND reserveDevelopment IS DELIBERATELY NOT READ.
+  // That ledger's paidByValuation is NET — it feeds the actuarial exhibit, which
+  // is a net document — and pulling it in here as a fallback would put net
+  // dollars in a column headed Gross Paid, on exactly the old accident years
+  // nobody would re-check. One basis per document, and this document is gross.
+  //
+  // The cost is real and is accepted: a cohort that has CLOSED is filtered out
+  // of reserveCohorts the following year, so its claims show a blank Gross Paid
+  // rather than the full amount they were paid. Blank is the workbook's own
+  // not-a-zero convention and is the honest answer here — a wrong-basis number
+  // would be worse than a missing one. Cohorts close only well after maturity
+  // (WC at age 37 under the share-based rule), so no normal-length game reaches
+  // it.
+  for (const c of ls?.reserveCohorts ?? []) {
+    if (c.grossPaid !== undefined) grossPaidByAy.set(c.yearNumber, c.grossPaid);
+  }
+
+  const valuationYear = lockedResults.length > 0
+    ? lockedResults[lockedResults.length - 1].yearNumber
+    : 0;
+  return { grossPaidByAy, registerByAy, valuationYear };
+}
+
+/** This claim's gross paid and status as at the workbook's valuation. */
+function paidAndStatus(claim: Claim, view: PaidLedgerView, line: CoverageLine): {
+  paid: number | string; status: string;
+} {
+  const cohortPaid = view.grossPaidByAy.get(claim.accidentYear);
+  const register = view.registerByAy.get(claim.accidentYear) ?? 0;
+  // ⚠ AGE CONVENTION, the same one payoutPattern.ts and claimClosure.ts use: a
+  // claim written in year Y is at curve age 1 at the end of year Y.
+  const curveAge = view.valuationYear - claim.accidentYear + 1;
+  const closed = isClaimClosed(resolveClosureCurve(line, claim.grossUltimate), claim.id, curveAge);
+  return {
+    // ⚠ BLANK, NOT ZERO, when the accident year has no ledger entry. This
+    // workbook's own convention is that an empty cell is not a zero, and a claim
+    // whose cohort predates the ledger has not been paid nothing — it is unknown.
+    // Writing 0 here would recreate the defect these columns are being fixed for.
+    paid: cohortPaid === undefined
+      ? ''
+      : numOrBlank(claimPaidToDate(cohortPaid, claim.grossUltimate, register)),
+    status: closed ? 'closed' : 'open',
+  };
+}
+
 // Shared sort for every claim sheet: accident year, then member, then claim
 // id, so one member's history reads as a consecutive block.
 function sortClaimRows(rows: LineClaimRow[]): LineClaimRow[] {
@@ -392,19 +497,22 @@ const WC_FORMATS = (years: number[]): (NumFmt | undefined)[] => [
   ...devFormats(years),
 ];
 
-function buildWcSheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelopment>, years: number[]): Row[] {
+function buildWcSheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelopment>, years: number[], view: PaidLedgerView): Row[] {
   const header = [
     ...SHARED_HEADER, 'Rating Group', 'Component', 'Status', 'Gross Incurred',
     'Gross Paid', 'Reported Year', 'Enrolled', ...devHeader(years),
   ];
-  const body = sortClaimRows(rows).map(row => [
-    ...sharedCells(row),
-    safeStr(row.claim.ratingClass), row.claim.tier,
-    row.claim.status, numOrBlank(row.claim.grossUltimate),
-    numOrBlank(row.claim.paidToDate), row.claim.reportedYear, row.enrolled ? 'Yes' : 'No',
-    ...devCells(dev.get(row.claim.occurrenceId), years),
-  ]);
-  return [[`WC claims. ${WC_COMPONENT_NOTE} ${DEV_NOTE} ${ENROLLED_NOTE}`], header, ...body];
+  const body = sortClaimRows(rows).map(row => {
+    const ps = paidAndStatus(row.claim, view, 'WC');
+    return [
+      ...sharedCells(row),
+      safeStr(row.claim.ratingClass), row.claim.tier,
+      ps.status, numOrBlank(row.claim.grossUltimate),
+      ps.paid, row.claim.reportedYear, row.enrolled ? 'Yes' : 'No',
+      ...devCells(dev.get(row.claim.occurrenceId), years),
+    ];
+  });
+  return [[`WC claims. ${WC_COMPONENT_NOTE} ${DEV_NOTE} ${ENROLLED_NOTE} ${PAID_NOTE}`], header, ...body];
 }
 
 // ⚠ THE SUB-COVERAGE / LEGAL BASIS / LITIGATION STAGE / INDEMNITY / ALAE /
@@ -437,19 +545,22 @@ const GL_FORMATS = (years: number[]): (NumFmt | undefined)[] => [
   ...devFormats(years),
 ];
 
-function buildGlSheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelopment>, years: number[]): Row[] {
+function buildGlSheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelopment>, years: number[], view: PaidLedgerView): Row[] {
   const header = [
     ...SHARED_HEADER, 'Component', 'Status', 'Gross Incurred',
     'Gross Paid', 'Reported Year', 'Enrolled', ...devHeader(years),
   ];
-  const body = sortClaimRows(rows).map(row => [
-    ...sharedCells(row),
-    row.claim.tier,
-    row.claim.status, numOrBlank(row.claim.grossUltimate),
-    numOrBlank(row.claim.paidToDate), row.claim.reportedYear, row.enrolled ? 'Yes' : 'No',
-    ...devCells(dev.get(row.claim.occurrenceId), years),
-  ]);
-  return [[`GL claims. ${GL_COMPONENT_NOTE} ${DEV_NOTE} ${ENROLLED_NOTE}`], header, ...body];
+  const body = sortClaimRows(rows).map(row => {
+    const ps = paidAndStatus(row.claim, view, 'GL');
+    return [
+      ...sharedCells(row),
+      row.claim.tier,
+      ps.status, numOrBlank(row.claim.grossUltimate),
+      ps.paid, row.claim.reportedYear, row.enrolled ? 'Yes' : 'No',
+      ...devCells(dev.get(row.claim.occurrenceId), years),
+    ];
+  });
+  return [[`GL claims. ${GL_COMPONENT_NOTE} ${DEV_NOTE} ${ENROLLED_NOTE} ${PAID_NOTE}`], header, ...body];
 }
 
 const PROPERTY_FORMATS = (years: number[]): (NumFmt | undefined)[] => [
@@ -463,7 +574,7 @@ const PROPERTY_FORMATS = (years: number[]): (NumFmt | undefined)[] => [
   ...devFormats(years),
 ];
 
-function buildPropertySheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelopment>, years: number[]): Row[] {
+function buildPropertySheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelopment>, years: number[], view: PaidLedgerView): Row[] {
   const header = [
     ...SHARED_HEADER, 'Band',
     // Damage Ratio and Location TIV are GONE with Property's rebuild. They were
@@ -473,15 +584,18 @@ function buildPropertySheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelo
     'Status', 'Gross Incurred', 'Gross Paid',
     'Reported Year', 'Enrolled', ...devHeader(years),
   ];
-  const body = sortClaimRows(rows).map(({ claim, member, enrolled }) => [
-    claim.id, claim.occurrenceId, claim.memberId, safeStr(member?.name), safeStr(member?.type),
-    claim.accidentYear, claim.calendarYear,
-    claim.tier,
-    claim.status, numOrBlank(claim.grossUltimate), numOrBlank(claim.paidToDate),
-    claim.reportedYear, enrolled ? 'Yes' : 'No',
-    ...devCells(dev.get(claim.occurrenceId), years),
-  ]);
-  return [[PROPERTY_NOTE], [`${DEV_NOTE} ${ENROLLED_NOTE}`], header, ...body];
+  const body = sortClaimRows(rows).map(({ claim, member, enrolled }) => {
+    const ps = paidAndStatus(claim, view, 'Property');
+    return [
+      claim.id, claim.occurrenceId, claim.memberId, safeStr(member?.name), safeStr(member?.type),
+      claim.accidentYear, claim.calendarYear,
+      claim.tier,
+      ps.status, numOrBlank(claim.grossUltimate), ps.paid,
+      claim.reportedYear, enrolled ? 'Yes' : 'No',
+      ...devCells(dev.get(claim.occurrenceId), years),
+    ];
+  });
+  return [[PROPERTY_NOTE], [`${DEV_NOTE} ${ENROLLED_NOTE} ${PAID_NOTE}`], header, ...body];
 }
 
 // ============================================================================
@@ -607,7 +721,7 @@ export function buildClaimsWorkbook(
   // `noteRows` is how many leading note rows precede the header — Property
   // carries two, the others one — which is also where the data starts.
   const sheetBuilders: Partial<Record<CoverageLine, {
-    rows: (rows: LineClaimRow[], dev: Map<string, OccDevelopment>, years: number[]) => Row[];
+    rows: (rows: LineClaimRow[], dev: Map<string, OccDevelopment>, years: number[], view: PaidLedgerView) => Row[];
     formats: (years: number[]) => (NumFmt | undefined)[];
     noteRows: number;
   }>> = {
@@ -628,7 +742,8 @@ export function buildClaimsWorkbook(
     if (!builder) continue;
     const rows = collectLineClaims(lockedResults, line);
     const dev = devByLine.get(line) ?? new Map<string, OccDevelopment>();
-    const ws = XLSX.utils.aoa_to_sheet(builder.rows(rows, dev, years));
+    const view = buildPaidLedgerView(rows, lockedResults, poolState, line);
+    const ws = XLSX.utils.aoa_to_sheet(builder.rows(rows, dev, years, view));
     applyFormats(ws, builder.formats(years), builder.noteRows + 1);
     XLSX.utils.book_append_sheet(wb, ws, line);
   }

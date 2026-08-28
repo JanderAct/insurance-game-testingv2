@@ -218,6 +218,14 @@ function generateStartingReserveCohorts(
       netUltimate,
       netPaid,
       netUnpaid: cohortNetUnpaid,
+      // ⚠ THE GROSS LEDGER OPENS EQUAL TO THE NET ONE ON A SEED COHORT, and that
+      // is the honest reading rather than a placeholder. A seed cohort is
+      // apportioned from a drawn NET reserve total with no claim register behind
+      // it — there is nothing gross to record, which is the same reason its
+      // development is retained entire. Inventing a gross figure here would mean
+      // inventing a cession the cohort never had.
+      grossPaid: netPaid,
+      grossUnpaid: cohortNetUnpaid,
       closed: false,
       registerSum: netUltimate,
       horizon,
