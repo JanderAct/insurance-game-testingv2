@@ -132,3 +132,76 @@ export function seedPaidRatio(p: PayoutPattern, ageYears: number): number {
   if (p.kind === 'geometric') return Math.min(0.80, ageYears * p.conditional);
   return cumulativePaid(p, ageYears);
 }
+
+// ============================================================================
+// WHEN A COHORT IS FINISHED.
+//
+// ⚠ AN ABSOLUTE DOLLAR TEST AGAINST A RELATIVE DECAY DOES NOT TERMINATE, AND
+// THAT IS WHAT THIS REPLACES. The engine closed a matured cohort at
+// `newUnpaid < $1,000`. Against a 35% geometric that bites at about age 23,
+// which is why it was never a problem. Against a Weibull it does not bite at all
+// in any relevant range: WC's unpaid share reaches $1,000 on a $20M ultimate at
+// AGE 98, so cohorts accumulated one a year and never shed — 46 open on WC by
+// year 40 and still climbing, against a stock the payout-pattern commit had
+// assumed was bounded.
+//
+// It also scaled with cohort SIZE, which nothing about being finished does. A
+// $200M accident year and a $2M one are equally finished at the same AGE, and
+// the dollar test held the large one open four times longer.
+//
+// So the test is a share of the cohort's own current ultimate. It is scale-free,
+// shape-free, and — the part that matters for maintenance — it does not have to
+// be re-tuned when a pattern moves, because it is expressed in the same units
+// the pattern is.
+//
+// ⚠ THE FRACTION IS 0.5% AND IT IS THE KNEE. Ages at which each line crosses,
+// with what the truncation costs the steady-state reserve and what the residual
+// pays early:
+//
+//   fraction   WC age   GL age   PR age   WC reserve       GL       PR   WC residual
+//      5.0%        16        7        5      -13.09%   -1.16%   -7.78%         4.46%
+//      2.0%        23        7        7       -6.40%   -1.16%   -2.24%         1.98%
+//      1.0%        30        8        8       -3.33%   -0.36%   -1.21%         0.96%
+//      0.5%        37        9        9       -1.82%   -0.10%   -0.65%         0.49%
+//      0.2%        48        9       10       -0.75%   -0.10%   -0.36%         0.19%
+//
+// Each halving of the fraction roughly halves the truncation and buys 7 to 11
+// more open cohorts, so the marginal cohort gets steadily more expensive per unit
+// of accuracy. 0.5% is where that turns: 1.82% off WC's steady-state reserve to
+// bound the array at 37, against 13% to bound it at 16. And the truncated dollars
+// are not lost — the residual is PAID, on a cohort already 37 years old and
+// decades past any decision a player makes.
+//
+// ⚠ ONE FRACTION FOR ALL THREE LINES, DELIBERATELY. The point of a share is that
+// it is shape-independent; a per-line fraction would be re-tuning by another name
+// and would put the close age back under manual control.
+export const COHORT_CLOSE_SHARE = 0.005;
+
+// ⚠ THE GEOMETRIC CONTROL KEEPS THE DOLLAR TEST, and this is the THIRD legacy
+// behaviour it now carries — with the linear seed ratio and reserveStepSigma's
+// closed form. That is a real and growing cost and it is worth naming.
+//
+// It is kept because the null test's value is that it is TOTAL. "0 values
+// changed" is a statement anyone can check; "0 changed except the ones cohort
+// closure moved" needs a judgement about which differences are allowed, and a
+// null test that needs judgement is not a null test. A share-based rule closes a
+// geometric cohort at a different age than $1,000 did, so the control either
+// keeps the dollar rule or stops being the parent.
+//
+// ⚠ THE CONTROL IS NOW A SECOND IMPLEMENTATION, not a switch, and retiring it
+// should be a deliberate decision rather than something that happens by
+// attrition. It stays useful after this branch merges — it is the standing test
+// that the pattern machinery still reproduces the pre-pattern engine — but every
+// further legacy behaviour added to it makes that claim more expensive to keep
+// true. If a fourth is ever needed, retire the control instead.
+const LEGACY_DOLLAR_CLOSE_FLOOR = 1000;
+
+/**
+ * The unpaid balance below which a MATURED cohort is finished and closes. The
+ * caller still gates on maturity — a still-developing cohort must never close,
+ * because freezing its ultimate early breaks E[ultimate] = registerSum.
+ */
+export function cohortCloseBelow(p: PayoutPattern, netUltimate: number): number {
+  if (p.kind === 'geometric') return LEGACY_DOLLAR_CLOSE_FLOOR;
+  return COHORT_CLOSE_SHARE * Math.max(0, netUltimate);
+}

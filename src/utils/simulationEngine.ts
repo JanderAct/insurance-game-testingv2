@@ -39,7 +39,7 @@ import {
   quoteAggregate,
 } from './reinsuranceTower';
 import { simulateMarketReturns, blendInvestmentReturn } from './investmentEngine';
-import { conditionalPaydown, unpaidShare } from './payoutPattern';
+import { cohortCloseBelow, conditionalPaydown, unpaidShare } from './payoutPattern';
 import { simulateMemberMovement } from './membershipEngine';
 import { cloneMembershipHistory, openInterval, closeInterval } from './membershipHistory';
 import { cloneMemberLossHistory, recordMemberLossYear } from './memberLossHistory';
@@ -2715,7 +2715,6 @@ export function aggregateLineResults(
 
 // A cohort is closed once it has matured and its remaining balance falls below
 // this. The residual is PAID at closure, never dropped — see processIbner.
-const RESERVE_COHORT_CLOSE_FLOOR = 1000;
 
 // ============================================================================
 // THE DEVELOPMENT LEDGER — a recording, not a computation.
@@ -3041,7 +3040,12 @@ function processIbner(
       // newUltimate = newPaid + newUnpaid is unchanged by it, so it cannot
       // disturb the martingale. That is why it is applied after newUltimate is
       // read off rather than before.
-      const closing = !developing && newUnpaid < RESERVE_COHORT_CLOSE_FLOOR;
+      // ⚠ A SHARE OF THIS COHORT'S OWN ULTIMATE, NOT A DOLLAR AMOUNT. This read
+      // `newUnpaid < RESERVE_COHORT_CLOSE_FLOOR`, a flat $1,000, which terminated
+      // a 35% geometric at about age 23 and does not terminate a Weibull at all:
+      // WC reached $1,000 at age 98, so cohorts accumulated one a year and never
+      // shed. See cohortCloseBelow for the fraction and what it costs.
+      const closing = !developing && newUnpaid < cohortCloseBelow(LINE_PAYOUT_PATTERN[line], newUltimate);
       if (closing) {
         paydown += newUnpaid;
         newPaid += newUnpaid;
