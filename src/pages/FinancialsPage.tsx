@@ -5,7 +5,6 @@ import { deriveAnnualStatement } from '../utils/financialStatementEngine';
 import { RETAINED_ABOVE_TOWER_CAVEAT } from '../utils/reinsuranceDisplay';
 import { formatCurrency, formatPct, colorForNetIncome } from '../utils/formatters';
 import { lineDisplayName } from '../utils/lineDisplay';
-import { LINE_RESERVE_PAYDOWN_PCT } from '../data/defaultAssumptions';
 
 interface FinancialsPageProps {
   lockedResults: LineResultSet[];
@@ -176,15 +175,16 @@ export default function FinancialsPage({ lockedResults, priorResults, lineView }
                 const totalNoncurrentAssets = noncurrentInvestments;
 
                 // Current portion = the share of each line's own net unpaid
-                // reserve expected to pay out within 12 months, using that
-                // line's own reserve paydown rate (the same rate the engine
-                // already applies to every cohort each year). Pool view sums
-                // each active line's own reserve x its own line's rate.
+                // reserve expected to pay out within 12 months. The engine emits
+                // that rate per line (nextYearPaydownRate), reserve-weighted
+                // across the cohorts the line actually holds, because under a
+                // payout pattern the rate depends on each cohort's AGE and there
+                // is no single line-level constant to multiply by any more.
                 const pooled = selectedResult as unknown as ResultSet;
                 const lineKeys = pooled.byLine ? (Object.keys(pooled.byLine) as CoverageLine[]) : null;
                 const currentUnpaidPortion = lineKeys
-                  ? lineKeys.reduce((sum, l) => sum + pooled.byLine[l].endingNetReserve * (LINE_RESERVE_PAYDOWN_PCT[l] ?? 0), 0)
-                  : bs.netUnpaidReserve * (LINE_RESERVE_PAYDOWN_PCT[lineView as CoverageLine] ?? 0);
+                  ? lineKeys.reduce((sum, l) => sum + pooled.byLine[l].endingNetReserve * pooled.byLine[l].nextYearPaydownRate, 0)
+                  : bs.netUnpaidReserve * (selectedResult?.nextYearPaydownRate ?? 0);
                 const noncurrentUnpaidPortion = bs.netUnpaidReserve - currentUnpaidPortion;
 
                 const totalCurrentLiabilities = currentUnpaidPortion;

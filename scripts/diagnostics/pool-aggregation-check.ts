@@ -83,7 +83,11 @@ const ENROLMENTS = new Set(['enrolmentCount']);
 const MIXED_UNIT_EXPOSURE = new Set(['activeExposure', 'totalMarketExposure', 'writtenExposure']);
 
 // Recomputed from summed components — never summed directly.
+// ⚠ RESERVE-WEIGHTED, LIKE investmentReturnRate. A rate summed across lines is
+// nonsense; the pool's next-year paydown rate is the pool's own next-year
+// payment over the pool's own reserve.
 const RECOMPUTED_RATIOS = new Set([
+  'nextYearPaydownRate',
   'marketShare', 'memberRetentionRate', 'memberSatisfaction', 'averageRiskQuality',
   'investmentReturnRate', 'expectedLossRatio', 'expectedLossRatioMemberBasis',
   'expectedExpenseRatio', 'expectedCombinedRatio', 'actualLossRatio', 'actualExpenseRatio',

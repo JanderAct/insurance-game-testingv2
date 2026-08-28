@@ -4,6 +4,7 @@
 
 import type { GameInstance, Member, MembershipHistory, PoolState, LinePoolState, StartingFinancials, ReserveCohort } from '../types/simulation';
 import { SeededRandom, deriveSubRng } from './random';
+import { seedPaidRatio } from './payoutPattern';
 import { getPredefinedMarketMembers } from '../data/memberCatalog';
 import { getMemberExposure, emptyLinePoolState } from './lineHelpers';
 import {
@@ -12,14 +13,13 @@ import {
   STARTING_CAPITAL_TO_PREMIUM,
   OPERATING_CASH_PCT_OF_PREMIUM,
   STARTING_RATE_PER_100,
-  RESERVE_PAYDOWN_PCT,
   GL_STARTING_RATE_PER_100,
   GL_EXPECTED_LOSS_RATIO,
   GL_STARTING_FINANCIALS,
   PROPERTY_STARTING_RATE_PER_100,
   PROPERTY_EXPECTED_LOSS_RATIO,
   PROPERTY_STARTING_FINANCIALS,
-  LINE_RESERVE_PAYDOWN_PCT,
+  LINE_PAYOUT_PATTERN,
   IBNER_HORIZON,
   IBNER_STEP_MIXTURE,
 } from '../data/defaultAssumptions';
@@ -114,7 +114,6 @@ function generateStartingReserveCohorts(
   rng: SeededRandom,
   line: CoverageLine,
   ibnerRng: SeededRandom,
-  paydownPct: number = RESERVE_PAYDOWN_PCT
 ): ReserveCohort[] {
   if (netUnpaidReserve <= 0) return [];
 
@@ -149,7 +148,14 @@ function generateStartingReserveCohorts(
     // Calculate how much has been paid on this cohort (older = more paid)
     // Age determines paydown: cohorts aged 1-5 years
     const age = i + 1; // 1 = most recent (1 year ago), 5 = oldest (5 years ago)
-    const paidRatio = Math.min(0.80, age * paydownPct);
+    // ⚠ THE LINE'S OWN PATTERN, NOT A FLAT RATE TIMES AN AGE. This was
+    // `Math.min(0.80, age * paydownPct)` — a linear approximation with a hard
+    // cap, which was never even the geometric pattern's own cumulative. A
+    // cohort `age` years old has paid what the pattern says it has paid, and a
+    // cumulative distribution needs no cap because it cannot exceed 1. The
+    // legacy behaviour is preserved on the geometric variant so the null test
+    // has a real control; see seedPaidRatio.
+    const paidRatio = seedPaidRatio(LINE_PAYOUT_PATTERN[line], age);
     const netUltimate = cohortNetUnpaid / (1 - paidRatio);
     const netPaid = netUltimate * paidRatio;
 
@@ -173,7 +179,6 @@ function generateStartingReserveCohorts(
       netUltimate,
       netPaid,
       netUnpaid: cohortNetUnpaid,
-      paydownPct,
       closed: false,
       registerSum: netUltimate,
       horizon,
@@ -413,7 +418,6 @@ export function generateStartingPoolState(
           rng,
           'Property',
           deriveSubRng(instance.seed, 0, 'ibner_seed_Property'),
-          LINE_RESERVE_PAYDOWN_PCT.Property,
         );
         return {
           rateLevel: 100,

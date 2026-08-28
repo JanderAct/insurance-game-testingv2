@@ -15,6 +15,7 @@ import {
 import type { CoverageLine, LineResultSet, LineView, ResultSet } from '../types/simulation';
 import { lineDisplayName } from '../utils/lineDisplay';
 import { formatCurrency, formatPct } from '../utils/formatters';
+import { unpaidShare } from '../utils/payoutPattern';
 import { deriveSubRng } from '../utils/random';
 import { simulateMarketReturns, blendInvestmentReturn } from '../utils/investmentEngine';
 import {
@@ -37,9 +38,7 @@ import {
   STARTING_RATE_PER_100,
   STARTING_FINANCIALS,
   SLIDER_RANGES,
-  RESERVE_PAYDOWN_PCT,
-  IBNER_OPEN_FRACTION,
-  LINE_RESERVE_PAYDOWN_PCT,
+  LINE_PAYOUT_PATTERN,
   OPERATING_CASH_PCT_OF_PREMIUM,
 } from '../data/defaultAssumptions';
 import { MARKET_MEMBER_COUNT, MARKET_TOTAL_EXPOSURE } from '../data/memberCatalog';
@@ -857,11 +856,17 @@ export function computeAuditChecks(
   const totalAssetsSplit = mkCheck(cashAndEquivalents + noncurrentInvestments, r.totalAssets);
 
   // Current portion = the share of each line's own net unpaid reserve expected
-  // to pay within 12 months, at that line's own paydown rate. Pool view sums
-  // each active line's own reserve x its own rate (a reserve-weighted blend).
+  // to pay within 12 months, at that line's own rate. Pool view sums each active
+  // line's own reserve x its own rate (a reserve-weighted blend).
+  //
+  // ⚠ THE RATE IS EMITTED, NOT LOOKED UP FROM A CONSTANT. This read
+  // LINE_RESERVE_PAYDOWN_PCT, which was one number per line and therefore the
+  // same for every cohort. A payout pattern makes the rate depend on each
+  // cohort's AGE, so the correct blend needs the cohorts and the page has only
+  // the result — `nextYearPaydownRate` is the engine's own weighting of them.
   const currentUnpaidPortion = isPoolView
-    ? lineKeys.reduce((s, l) => s + poolResult.byLine[l].endingNetReserve * (LINE_RESERVE_PAYDOWN_PCT[l] ?? 0), 0)
-    : r.endingNetReserve * (LINE_RESERVE_PAYDOWN_PCT[lineView as CoverageLine] ?? 0);
+    ? lineKeys.reduce((s, l) => s + poolResult.byLine[l].endingNetReserve * poolResult.byLine[l].nextYearPaydownRate, 0)
+    : r.endingNetReserve * r.nextYearPaydownRate;
   const noncurrentUnpaidPortion = r.endingNetReserve - currentUnpaidPortion;
 
   const totalLiabilitiesSplit = mkCheck(
@@ -981,7 +986,7 @@ export function computeAuditChecks(
         buildUp:
           lineKeys
             .map(l => {
-              const pct = LINE_RESERVE_PAYDOWN_PCT[l] ?? 0;
+              const pct = poolResult.byLine[l].nextYearPaydownRate;
               const res = poolResult.byLine[l].endingNetReserve;
               return `${l} ${formatCurrency(res)} x ${formatPct(pct)}`;
             })
@@ -1124,11 +1129,20 @@ function buildAssumptionRows(): AuditRow[] {
         'Prevents the pool from collapsing too quickly from a single bad year. If set too low, retention risk may feel muted.',
     },
     {
-      metric: 'Reserve Paydown Percent',
-      value: formatPct(RESERVE_PAYDOWN_PCT),
-      formula: 'Percent of open reserve cohorts paid down each year.',
+      metric: 'Payout Pattern',
+      value: (['WC', 'GL', 'Property'] as const)
+        .map(l => {
+          const pat = LINE_PAYOUT_PATTERN[l];
+          return pat.kind === 'weibull'
+            ? `${l} k=${pat.k.toFixed(2)} b=${pat.b.toFixed(3)}`
+            : `${l} geometric ${formatPct(pat.conditional, 0)}`;
+        })
+        .join('  |  '),
+      formula: 'Cumulative share of ultimate paid by age t is 1 - exp(-(t/b)^k), fitted per line.',
       note:
-        'Controls reserve runoff speed. Higher paydown means claims close faster and cash paid losses are higher sooner.',
+        'Replaces a single paydown rate per line. A flat rate is this curve with k pinned to 1, and only Property is '
+        + 'near that. Higher k means payment is deferred and then arrives quickly; lower k means fast early payment '
+        + 'and a long tail. Controls reserve runoff speed, and with it how much of the balance sheet is reserve.',
     },
     {
       metric: 'Total Market Members',
@@ -1315,6 +1329,7 @@ export function buildSupportingRows(
   lineView: LineView,
 ): { exposureRows: AuditRow[]; rateRows: AuditRow[]; lossRows: AuditRow[]; reserveRows: AuditRow[]; ratioRows: AuditRow[]; capitalRows: AuditRow[] } {
   const isPoolView = lineView === 'pool';
+  const lineKeysHere = Object.keys(poolResult.byLine) as CoverageLine[];
   const result: LineResultSet = isPoolView ? poolResult : poolResult.byLine[lineView];
   // The per-line pieces of the pool's reserve risk margin, in a stable order.
   // Mirrors simulationEngine's reserveMarginCLF dispatch: the line's own static
@@ -1508,14 +1523,22 @@ export function buildSupportingRows(
     : null;
 
   // Real engine constants behind the reserve rollforward below: the CURRENT
-  // ⚠ IMPORTED, NOT A LITERAL. This read `const currentYearUnpaidPct = 0.60` —
-  // a THIRD copy of IBNER_OPEN_FRACTION, whose own comment says it is read in
-  // exactly two places precisely so a change to one cannot drift from the other.
-  // This page was the silent third, and its explain text asserted the constant
-  // was "not shown as a named assumption anywhere" while naming a paydown rate
-  // (35%) that is now per-line and 65% on Property.
-  const currentYearUnpaidPct = IBNER_OPEN_FRACTION;
-  const currentYearPaidPct = 1 - currentYearUnpaidPct;
+  // year's booked split.
+  //
+  // ⚠ IMPORTED, NOT A LITERAL, and that history is worth keeping. This read
+  // `const currentYearUnpaidPct = 0.60` — a THIRD copy of IBNER_OPEN_FRACTION,
+  // whose own comment said it was read in exactly two places precisely so a
+  // change to one could not drift from the other. This page was the silent
+  // third.
+  //
+  // ⚠ AND NOW THERE IS NO SINGLE NUMBER TO COPY. The payout patterns give each
+  // line its own first-year unpaid share — 59.0% / 90.4% / 49.6% — so the pool
+  // row cannot show a constant at all. It shows the share the pool ACTUALLY
+  // booked, weighted by each line's own booked ultimate, which is what a reader
+  // comparing the pool row against its lines needs to see.
+  // Computed below, once bookedUltimateOf is in scope — the pool figure is a
+  // weighted blend of three per-line shares, so it needs the per-line booked
+  // ultimates rather than a constant.
 
   // ⚠ THE BOOKED ULTIMATE IS NOT THE DRAWN ULTIMATE, AND THAT WAS THE DEFECT.
   // netUltimateLoss is the register sum — what the generator drew, net of the
@@ -1548,7 +1571,19 @@ export function buildSupportingRows(
     : bookedUltimateOf(result);
   const bookingBiasHere = isPoolView ? undefined : ibnerBookingBias(result.selectedFundingCLF);
 
-  const netPaidCurrentYear = bookedUltimate * currentYearPaidPct;
+  // ⚠ SUMMED PER LINE, NOT ONE RATE ON THE POOL TOTAL. Each line reserves its
+  // own first-year unpaid share — 59.0% WC, 90.4% GL, 49.6% Property — so the
+  // pool's current-year paid loss is the sum of three products and not a single
+  // product of two pool figures. Applying any one rate to the pool's booked
+  // ultimate would mis-state it by the mix.
+  const paidShareOf = (l: CoverageLine) => 1 - unpaidShare(LINE_PAYOUT_PATTERN[l], 1);
+  const netPaidCurrentYear = isPoolView
+    ? lineKeysHere.reduce((sum, l) => sum + bookedUltimateOf(poolResult.byLine[l]) * paidShareOf(l), 0)
+    : bookedUltimateOf(result) * paidShareOf(lineView as CoverageLine);
+  // The blend the pool actually booked, for display. At line scope it is simply
+  // that line's own share.
+  const currentYearPaidPct = bookedUltimate > 0 ? netPaidCurrentYear / bookedUltimate : 0;
+  const currentYearUnpaidPct = 1 - currentYearPaidPct;
   const priorCohortPaydown = result.netPaidLosses - netPaidCurrentYear;
 
   const exposureRows: AuditRow[] = [
@@ -1883,8 +1918,8 @@ export function buildSupportingRows(
         ] },
       },
       explain: isPoolView
-        ? `IBNER_OPEN_FRACTION (${formatPct(IBNER_OPEN_FRACTION, 0)}) of the BOOKED ultimate is reserved and the rest paid within the year. The booked figure is summed per line because IBNER's optimistic booking bias is a function of each line's own selected CLF — there is no single pool bias, so no pool factor to show.`
-        : `IBNER_OPEN_FRACTION (${formatPct(IBNER_OPEN_FRACTION, 0)}) of the BOOKED ultimate is reserved, the rest paid within the year — the same named constant reserveStepSigma derives its scale from, not a literal. Distinct from LINE_RESERVE_PAYDOWN_PCT (${formatPct(LINE_RESERVE_PAYDOWN_PCT[lineView as CoverageLine] ?? 0, 0)} on this line), which governs runoff of OLDER cohorts. The booked ultimate is the drawn ultimate less IBNER's bias, which is zero whenever the line is funded at or above break-even.`,
+        ? `The payout pattern's first-year unpaid share (${formatPct(currentYearUnpaidPct, 1)} blended here) of the BOOKED ultimate is reserved and the rest paid within the year. There is no single pool figure — the three lines are ${formatPct(unpaidShare(LINE_PAYOUT_PATTERN.WC, 1), 1)} / ${formatPct(unpaidShare(LINE_PAYOUT_PATTERN.GL, 1), 1)} / ${formatPct(unpaidShare(LINE_PAYOUT_PATTERN.Property, 1), 1)} — so this is the reserve-weighted blend the pool actually booked. The booked figure is summed per line because IBNER's optimistic booking bias is a function of each line's own selected CLF.`
+        : `The payout pattern's first-year unpaid share (${formatPct(currentYearUnpaidPct, 1)} on this line) of the BOOKED ultimate is reserved, the rest paid within the year — the same pattern reserveStepSigma derives its scale from, not a literal. The pattern also governs runoff of OLDER cohorts, at a rate that falls with age on WC and rises on GL, so there is no separate constant for that any more. The booked ultimate is the drawn ultimate less IBNER's bias, which is zero whenever the line is funded at or above break-even.`,
     },
     {
       metric: 'Net Paid Losses',
@@ -2711,7 +2746,7 @@ export function buildNetPositionRows(
             terms: lineKeys.map(l => ({
               product: [
                 cur(poolResult.byLine[l].endingNetReserve),
-                { value: LINE_RESERVE_PAYDOWN_PCT[l] ?? 0, format: 'pct' as const },
+                { value: poolResult.byLine[l].nextYearPaydownRate, format: 'pct' as const },
               ],
               label: l,
             })),
@@ -2720,12 +2755,12 @@ export function buildNetPositionRows(
             kind: 'product',
             factors: [
               cur(result.endingNetReserve, 'net unpaid reserve'),
-              { value: LINE_RESERVE_PAYDOWN_PCT[lineView as CoverageLine] ?? 0, format: 'pct', label: 'paydown rate' },
+              { value: result.nextYearPaydownRate, format: 'pct', label: 'next-year paydown rate' },
             ],
           },
       explain: isPoolView
-        ? 'Each line\'s own reserve at its own paydown rate, summed — the rate the engine applies to every cohort each year.'
-        : 'The rate the engine applies to every cohort each year.',
+        ? 'Each line\'s own reserve at its own next-year paydown rate, summed. The rate is a RESERVE-WEIGHTED BLEND across the cohorts that line holds, not a constant: under the payout pattern an older cohort pays a different share of its balance than a young one.'
+        : 'A reserve-weighted blend across the cohorts this line holds. Under the payout pattern the share of a cohort\'s balance paid each year depends on its age, so there is no single rate the engine applies to every cohort.',
       indent: 1,
     },
     {

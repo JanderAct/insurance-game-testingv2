@@ -44,7 +44,7 @@ export interface ExhibitRow {
   // means IBNER has stopped developing the cohort. It does NOT mean the accident
   // year is finished: it is still open and still paying. processIbner's own
   // header says so — "runoff and development are separate clocks: the horizon
-  // governs how long the ESTIMATE is uncertain, paydownPct governs how fast it
+  // governs how long the ESTIMATE is uncertain, the payout pattern governs how fast it
   // is settled" — and the old label collapsed the two, telling a player a year
   // was done while it was still writing cheques.
   matured: boolean;

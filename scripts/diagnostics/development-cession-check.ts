@@ -53,7 +53,8 @@ import { REINSURANCE_TOWER, TOWER_TOP, type TowerLine } from '../../src/data/rei
 import { SeededRandom } from '../../src/utils/random';
 import { SLIDER_RANGES, WC_FUNDING_CONFIDENCE_RANGE, WC_SEVERITY_CAP } from '../../src/data/defaultAssumptions';
 import { wcSeverityTrend } from '../../src/utils/wcClaimEngine';
-import { IBNER_OPEN_FRACTION } from '../../src/data/defaultAssumptions';
+import { LINE_PAYOUT_PATTERN } from '../../src/data/defaultAssumptions';
+import { unpaidShare } from '../../src/utils/payoutPattern';
 import type { CoverageLine, DecisionSet, GameState, ReserveCohort } from '../../src/types/simulation';
 
 const GAMES = Number(process.env.GAMES ?? 25);
@@ -219,7 +220,9 @@ for (const arm of ARMS) {
         // OPEN fraction of it — using the reserve itself here understates the
         // inflow by 40% and reports every line-year as broken, which is what an
         // earlier version of this check did.
-        const bookedUltimate = r.currentYearNetReserve / IBNER_OPEN_FRACTION;
+        // The line's own first-year unpaid share, not one constant for all
+        // three — see LINE_PAYOUT_PATTERN.
+        const bookedUltimate = r.currentYearNetReserve / unpaidShare(LINE_PAYOUT_PATTERN[line], 1);
         const lhs = r.endingNetReserve;
         const rhs = r.beginningNetReserve + bookedUltimate - r.priorYearDevelopment - r.netPaidLosses;
         if (Math.abs(lhs - rhs) > 0.5) {

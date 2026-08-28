@@ -24,7 +24,7 @@ function mergeShockRecords(lineResults: LineResultSet[]): ShockRecord[] | undefi
   return merged.size > 0 ? [...merged.values()] : undefined;
 }
 import { SeededRandom, deriveSubRng } from './random';
-import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, IBNER_BOOKING_BIAS_COEFF, IBNER_HORIZON, IBNER_OPEN_FRACTION, IBNER_STEP_MIXTURE, IBNER_TOTAL_SD, IBNER_UNWIND_DECAY, LINE_RESERVE_PAYDOWN_PCT, MEMBER_LOSS_VOLATILITY, OPERATING_CASH_PCT_OF_PREMIUM, PROPERTY_HELD_PURE_PREMIUM_PER_100, RISK_CONTROL_PARAMS, WC_LOSS_MODEL } from '../data/defaultAssumptions';
+import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, IBNER_BOOKING_BIAS_COEFF, IBNER_HORIZON, IBNER_STEP_MIXTURE, IBNER_TOTAL_SD, IBNER_UNWIND_DECAY, LINE_PAYOUT_PATTERN, MEMBER_LOSS_VOLATILITY, OPERATING_CASH_PCT_OF_PREMIUM, PROPERTY_HELD_PURE_PREMIUM_PER_100, RISK_CONTROL_PARAMS, WC_LOSS_MODEL } from '../data/defaultAssumptions';
 import type { TowerLine } from '../data/reinsuranceTower';
 import {
   DEVELOPMENT_ALLOCATION, DEVELOPMENT_CESSION_ENABLED, STOCHASTIC_ALLOCATION_MODE,
@@ -39,6 +39,7 @@ import {
   quoteAggregate,
 } from './reinsuranceTower';
 import { simulateMarketReturns, blendInvestmentReturn } from './investmentEngine';
+import { conditionalPaydown, unpaidShare } from './payoutPattern';
 import { simulateMemberMovement } from './membershipEngine';
 import { cloneMembershipHistory, openInterval, closeInterval } from './membershipHistory';
 import { cloneMemberLossHistory, recordMemberLossYear } from './memberLossHistory';
@@ -1221,13 +1222,16 @@ export function processLineYear(
   // unchanged — which is what the null test asserts.
   const bookedUltimate = netUltimateLoss * (1 - bookingBias) - markdown.giveBack;
 
-  // ⚠ ONE CONSTANT, READ IN TWO PLACES. reserveStepSigma derives its scale from
-  // the SAME opening split, because the share of the ultimate still unpaid is
-  // exactly what sets how much leverage a reserve walk has. Writing 0.60 here
-  // and again in the derivation would let a change to one drift from the other,
-  // and the symptom would be a line quietly developing at the wrong scale.
-  const currentYearNetReserve = bookedUltimate * IBNER_OPEN_FRACTION;
-  const netPaidCurrentYear = bookedUltimate * (1 - IBNER_OPEN_FRACTION);
+  // ⚠ ONE PATTERN, READ IN TWO PLACES. reserveStepSigma derives its scale from
+  // the SAME payout pattern, because the share of the ultimate still unpaid is
+  // exactly what sets how much leverage a reserve walk has. Writing the opening
+  // split here and again in the derivation would let a change to one drift from
+  // the other, and the symptom would be a line quietly developing at the wrong
+  // scale. This was IBNER_OPEN_FRACTION, one number for all three lines; it is
+  // now each line's own, and they are 59.0% / 90.4% / 49.6%.
+  const openFraction = unpaidShare(LINE_PAYOUT_PATTERN[line], 1);
+  const currentYearNetReserve = bookedUltimate * openFraction;
+  const netPaidCurrentYear = bookedUltimate * (1 - openFraction);
 
   const currentYearCohort: ReserveCohort = {
     yearNumber,
@@ -1235,7 +1239,6 @@ export function processLineYear(
     netUltimate: bookedUltimate,
     netPaid: netPaidCurrentYear,
     netUnpaid: currentYearNetReserve,
-    paydownPct: LINE_RESERVE_PAYDOWN_PCT[line],
     closed: false,
     registerSum: netUltimateLoss,
     horizon: ibnerRng.intRange(IBNER_HORIZON[line].min, IBNER_HORIZON[line].max),
@@ -1290,6 +1293,16 @@ export function processLineYear(
   // Case cohorts only, now that IBNR is gone. Every line's reserve is the same
   // quantity again.
   const endingNetReserve = allCohorts.reduce((s, c) => s + c.netUnpaid, 0);
+
+  // Reserve-weighted across the cohorts actually held, at each one's own age.
+  // `age` has already been incremented for the cohorts that ran through
+  // processIbner and is 0 on the year's own, so `age + 2` is the pattern age of
+  // the step each will take NEXT year in both cases.
+  const nextYearPaydownRate = endingNetReserve > 0
+    ? allCohorts.reduce(
+        (s, c) => s + c.netUnpaid * conditionalPaydown(LINE_PAYOUT_PATTERN[line], c.age + 2), 0,
+      ) / endingNetReserve
+    : 0;
 
   const expectedNetUnpaidLoss = endingNetReserve;
 
@@ -1652,6 +1665,7 @@ export function processLineYear(
     underwritingIncome,
     netIncome,
     beginningCash,
+    nextYearPaydownRate,
     endingCash,
     beginningInvestments,
     endingInvestments,
@@ -2628,6 +2642,15 @@ export function aggregateLineResults(
     loanInterestAccrued: addDollars('loanInterestAccrued'),
     loanOriginatedThisYear: addDollars('loanOriginatedThisYear'),
     // Sums to zero across lines by construction — see the field comment.
+    // ⚠ RESERVE-WEIGHTED, NOT SUMMED. A rate summed across lines is nonsense;
+    // this is the pool's own next-year payment over the pool's own reserve,
+    // which is the same blend the balance sheet takes.
+    nextYearPaydownRate: (() => {
+      const res = addDollars('endingNetReserve');
+      return res > 0
+        ? lineResults.reduce((s, { result }) => s + result.endingNetReserve * result.nextYearPaydownRate, 0) / res
+        : 0;
+    })(),
     interLineTransfer: addDollars('interLineTransfer'),
     interLineCashTransfer: addDollars('interLineCashTransfer'),
     dividendBlocked: results.some(r => r.dividendBlocked),
@@ -2821,7 +2844,8 @@ function processIbner(
     .map(c => {
       // MATURED COHORTS STILL PAY, THEY JUST STOP MOVING. Runoff and
       // development are separate clocks: the horizon governs how long the
-      // ESTIMATE is uncertain, paydownPct governs how fast it is settled.
+      // ESTIMATE is uncertain, the line's payout pattern governs how fast it is
+      // settled.
       const developing = c.age < c.horizon;
       let developingClaimsOut = c.developingClaims;
       let cededToDate = c.cededDevelopmentToDate ?? 0;
@@ -2829,7 +2853,16 @@ function processIbner(
 
       // ⚠ PAY FIRST, THEN DEVELOP WHAT REMAINS. Paid is history and never moves.
       // This ordering is the whole fix — see the block comment above.
-      let paydown = c.netUnpaid * c.paydownPct;
+      // ⚠ THE RATE IS A PROPERTY OF THE LINE AND THE AGE, NOT OF THE COHORT.
+      // This read `c.paydownPct`, a per-cohort copy of a line-level constant —
+      // fine while the constant was flat, and a second description of one fact
+      // the moment it stopped being. The field is gone; the rate is looked up.
+      //
+      // `age` counts STEPS TAKEN and pattern age counts YEARS SINCE THE ACCIDENT
+      // YEAR STARTED, so they differ by one: a cohort at age `a` currently sits
+      // at pattern age a + 1, and the step about to be taken carries it to
+      // a + 2. See the age-convention note in payoutPattern.ts.
+      let paydown = c.netUnpaid * conditionalPaydown(LINE_PAYOUT_PATTERN[line], c.age + 2);
       let newUnpaid = c.netUnpaid - paydown;
       let newPaid = c.netPaid + paydown;
 
@@ -3042,7 +3075,7 @@ function processIbner(
 // stated IBNER_TOTAL_SD as the total relative SD of the ULTIMATE.
 //
 // ⚠ DERIVED AT RUNTIME FROM THE LINE'S OWN PAYOUT PATTERN, NOT STORED. It is a
-// function of paydownPct, the horizon range and the step mixture, and storing it
+// function of the payout pattern, the horizon range and the step mixture, and storing it
 // would let it drift silently the first time any of those moved — which is the
 // exact failure this file keeps finding elsewhere. Solved once per line and
 // cached; the root-find is a few dozen closed-form evaluations.
@@ -3058,9 +3091,9 @@ function processIbner(
 //   GL          0.35      5.5    0.26188   0.5117    2.3452         4.58x
 //   Property    0.65      3.0    0.05016   0.2240    1.7321         7.73x
 //
-// (r_k = openFraction x (1 - p)^k is the share of ultimate exposed to step k.
-// Property's is worst because it pays 65% a year — almost nothing is left to
-// develop by its third step.)
+// (r_k is the share of ultimate exposed to step k. Under a geometric paydown
+// that is openFraction x (1 - p)^k; under a fitted pattern it is the pattern's
+// own unpaid share at that age, and the two branches below say which is which.)
 //
 // THE CLOSED FORM, and it is exact rather than fitted. Writing R_k for the
 // balance remaining at step k and f_k for its lognormal factor,
@@ -3093,7 +3126,7 @@ function reserveStepSigma(line: CoverageLine): number {
   const key = `${line}|${target}`;
   const hit = RESERVE_STEP_SIGMA_CACHE.get(key);
   if (hit !== undefined) return hit;
-  const p = LINE_RESERVE_PAYDOWN_PCT[line];
+  const pattern = LINE_PAYOUT_PATTERN[line];
   const h = IBNER_HORIZON[line];
   // Total SD of ultimate/booked at a given sigma, averaged over the horizon
   // draw (inclusive uniform) and the step mixture — the same two dimensions a
@@ -3103,9 +3136,38 @@ function reserveStepSigma(line: CoverageLine): number {
     for (let H = h.min; H <= h.max; H++) {
       for (const b of IBNER_STEP_MIXTURE) {
         const s2 = (b.multiplier * sigma) ** 2;
-        const a = (1 - p) ** 2 * Math.exp(s2);
-        const geo = Math.abs(a - 1) < 1e-12 ? H : (Math.pow(a, H) - 1) / (a - 1);
-        v += b.weight * IBNER_OPEN_FRACTION ** 2 * (1 - p) ** 2 * (Math.exp(s2) - 1) * geo;
+        if (pattern.kind === 'geometric') {
+          // ⚠ THE CLOSED FORM, KEPT CHARACTER FOR CHARACTER AS THE NULL TEST'S
+          // CONTROL. It is the general sum below collapsed on the assumption
+          // that (1 - p) is CONSTANT in k, which is exactly what a geometric
+          // pattern is and exactly what a fitted one is not. The two agree to 12
+          // significant figures and NOT bit for bit, and a null test cannot tell
+          // a reassociation from a mechanism — the same reason
+          // DEVELOPMENT_CESSION_ENABLED's disabled path preserves its original
+          // expression. Do not "simplify" this into the branch below.
+          const openFraction = pattern.openFraction;
+          const p = pattern.conditional;
+          const a = (1 - p) ** 2 * Math.exp(s2);
+          const geo = Math.abs(a - 1) < 1e-12 ? H : (Math.pow(a, H) - 1) / (a - 1);
+          v += b.weight * openFraction ** 2 * (1 - p) ** 2 * (Math.exp(s2) - 1) * geo;
+        } else {
+          // ⚠ THE GENERAL FORM: sum the martingale increments term by term.
+          // R_k, the balance exposed to step k, is no longer OPEN x (1-p)^(k+1)
+          // because the paydown rate now varies with age — it is simply the
+          // pattern's own unpaid share after the paydown that step makes, which
+          // is `unpaidShare(pattern, k + 2)` (see the age convention). The
+          // e^{k s^2} factor is the variance the balance has already accumulated
+          // and is unchanged.
+          //
+          // This is the term-by-term sum the closed form above was originally
+          // VERIFIED AGAINST to 12 significant figures, so it is the same
+          // quantity computed the long way rather than a new approximation. H is
+          // at most 12, so summing it directly costs nothing.
+          for (let k = 0; k < H; k++) {
+            const rem = unpaidShare(pattern, k + 2);
+            v += b.weight * rem ** 2 * Math.exp(k * s2) * (Math.exp(s2) - 1);
+          }
+        }
         n += b.weight;
       }
     }

@@ -463,7 +463,11 @@ export interface ReserveCohort {
   netUltimate: number;
   netPaid: number;
   netUnpaid: number;
-  paydownPct: number;           // portion paid each year
+  // ⚠ `paydownPct` IS GONE. It stored a per-cohort copy of a line-level
+  // constant, which was harmless while that constant was flat and a second
+  // description of one fact the moment payout patterns replaced it. The rate is
+  // now looked up from the line's pattern at the cohort's own age — see
+  // payoutPattern.ts — so `age` and the line are the whole state it needs.
   closed: boolean;
 
   // --- IBNER (see defaultAssumptions.ts's IBNER_* block) -------------------
@@ -838,6 +842,22 @@ export interface ResultSet {
   // check rather than a definition — the two sides are written at different
   // places in the engine and a pool total that drifts off zero means one of them
   // is wrong.
+  // ⚠ THE SHARE OF THIS LINE'S ENDING NET RESERVE EXPECTED TO PAY WITHIN 12
+  // MONTHS, reserve-weighted across the cohorts it actually holds.
+  //
+  // It exists because the payout pattern made the old display wrong. The
+  // balance sheet's current/noncurrent split used to be `endingNetReserve x
+  // LINE_RESERVE_PAYDOWN_PCT[line]`, which worked only because that rate was the
+  // same for every cohort. Under a pattern the rate depends on each cohort's
+  // AGE — WC pays 25.5% of a one-year-old's balance and 13.9% of a nine-year-
+  // old's — so the correct current portion is a weighted blend that needs the
+  // cohorts, and the pages have only the result. The engine has both, so it
+  // emits the blend rather than the pages guessing at it.
+  //
+  // Zero when the line holds no reserve; a rate on nothing has no meaning and
+  // the alternative is a NaN on the balance sheet.
+  nextYearPaydownRate: number;
+
   interLineTransfer: number;
   // The part of `interLineTransfer` that moved through CASH rather than
   // investments. Non-zero only when a repayment exhausted the line's portfolio

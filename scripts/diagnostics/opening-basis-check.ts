@@ -17,10 +17,11 @@
 // RESERVE MARGIN (the current basis), and how many redraw attempts the band
 // costs. Run before and after the change; the numbers are compared in the commit.
 
+import { unpaidShare } from '../../src/utils/payoutPattern';
 import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import {
-  STARTING_CAPITAL_TO_PREMIUM, OPENING_SURPLUS_TO_PREMIUM_BAND, LINE_RESERVE_PAYDOWN_PCT,
+  STARTING_CAPITAL_TO_PREMIUM, OPENING_SURPLUS_TO_PREMIUM_BAND, LINE_PAYOUT_PATTERN,
 } from '../../src/data/defaultAssumptions';
 import type { CoverageLine } from '../../src/types/simulation';
 
@@ -127,16 +128,28 @@ for (const line of LINES) {
 }
 
 console.log('\n--- 5. DOES TAIL LENGTH EXPLAIN 0.70 / 0.45 / 0.18? ---');
-console.log('  The engine\'s only per-line runoff parameter is LINE_RESERVE_PAYDOWN_PCT:');
+console.log('  The engine\'s per-line runoff is now a fitted PAYOUT PATTERN, not one rate:');
 for (const line of LINES) {
-  const pd = LINE_RESERVE_PAYDOWN_PCT[line];
-  // Steady-state reserve / annual loss: this year's unpaid (60%) plus prior
-  // cohorts running off at (1 - paydown) per year.
-  const steady = 0.60 / pd;
-  console.log(`    ${line.padEnd(10)} paydown ${pd.toFixed(2)}/yr  ->  steady-state reserve ${steady.toFixed(2)}x annual loss`);
+  const pat = LINE_PAYOUT_PATTERN[line];
+  // Steady-state reserve / annual loss is the sum of the unpaid share over all
+  // ages: in equilibrium one cohort of each age is open at once. Summed to 400
+  // rather than in closed form because there is no closed form for a Weibull
+  // survival summed over integers, and 400 is far past where any line is
+  // material.
+  let steady = 0;
+  for (let t = 1; t <= 400; t++) steady += unpaidShare(pat, t);
+  const shape = pat.kind === 'weibull' ? `k ${pat.k.toFixed(2)} b ${pat.b.toFixed(3)}` : `geometric ${pat.conditional.toFixed(2)}`;
+  console.log(`    ${line.padEnd(10)} ${shape.padEnd(18)} ->  steady-state reserve ${steady.toFixed(2)}x annual loss`);
 }
-console.log('\n  ⚠ WC AND GL ARE IDENTICAL ON THIS AXIS (both 0.35), so tail length CANNOT explain');
-console.log('  WC 0.70 against GL 0.45. It explains Property being lower, and nothing else.');
+console.log('\n  ⚠ THE ARGUMENT THAT STOOD HERE IS NOW FALSE AND IS REPLACED. It read: "WC AND GL');
+console.log('  ARE IDENTICAL ON THIS AXIS (both 0.35), so tail length CANNOT explain WC 0.70');
+console.log('  against GL 0.45." That was true of a single paydown rate and is not true of a');
+console.log('  payout pattern — WC and GL are now the two MOST different lines on this axis,');
+console.log('  3.36x against 2.51x, because WC pays fast and then crawls while GL defers.');
+console.log('  Tail length is therefore a live candidate again and points the RIGHT way for');
+console.log('  the first time: the longer-tailed line does carry the larger capital multiple.');
+console.log('  Whether it explains the SIZE of the gap is a re-derivation, not a re-reading,');
+console.log('  and it belongs with the CLF work rather than here.');
 console.log('\n  What DOES separate them is the PREMIUM BASE the multiple is applied to:');
 for (const line of LINES) {
   const p = q(obs[line].map(x => x.premium), 0.5);

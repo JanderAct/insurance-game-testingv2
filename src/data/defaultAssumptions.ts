@@ -2,6 +2,7 @@
 // V2: Allow admin-editable assumptions from a backend config
 
 import type { Region, CoverageLine } from '../types/simulation';
+import type { PayoutPattern } from '../utils/payoutPattern';
 
 // Administrative expense is 15% of Pure Premium at CLF 1.000. It is added
 // after the selected CLF is applied and is not itself multiplied by the CLF.
@@ -1257,18 +1258,86 @@ export const SLIDER_RANGES = {
   riskControlPct: { min: 0, max: 0.08, step: 0.01, default: 0 },
 };
 
-// Reserve paydown percentage per year
-export const RESERVE_PAYDOWN_PCT = 0.35;
-
-// Per-line reserve paydown speed — the lightweight placeholder for each
-// line's development-pattern character until Phase 3 builds real per-line
-// accident-year triangles. WC and GL both keep the original flat rate
-// (unchanged); Property pays down much faster (short tail).
-export const LINE_RESERVE_PAYDOWN_PCT: Record<string, number> = {
-  WC: RESERVE_PAYDOWN_PCT,
-  GL: RESERVE_PAYDOWN_PCT,
-  Property: 0.65,
+// ===========================================================================
+// PER-LINE PAYOUT PATTERNS.
+//
+// ⚠ THIS RETIRES LINE_RESERVE_PAYDOWN_PCT (0.35 WC/GL, 0.65 Property) AND
+// IBNER_OPEN_FRACTION (0.60). Both were placeholders and said so: the paydown
+// constant described itself as "the lightweight placeholder for each line's
+// development-pattern character until Phase 3 builds real per-line
+// accident-year triangles." This is that, arriving by fit rather than by
+// triangle.
+//
+// ⚠ A SINGLE RATE IS A WEIBULL WITH k FIXED AT 1, AND TWO OF THE THREE LINES
+// SIT NOWHERE NEAR IT. That is the whole argument for the change. A geometric
+// paydown pays a constant share of what is left every year, which is what k = 1
+// means; the fitted shapes are k = 0.64, 1.88 and 0.96, so only Property was
+// ever close. WC pays fast then crawls, GL pays almost nothing for two years
+// and then piles in, and no single number expresses either.
+//
+// ⚠ WHERE THE PARAMETERS COME FROM, AND WHAT IS DELIBERATELY NOT HERE.
+// The shape was fitted against the pool's own real settlement experience, each
+// line fitted SEPARATELY — the differences between the three are measured, not
+// assumed. THE PARAMETERS BELOW ARE THE ENTIRE RECORD OF THAT FIT. No source
+// data is carried into this repository: no claim counts, no dollar totals, no
+// policy years, no valuation dates, no triangles. The same standing convention
+// as GL's severity constants, which cite their fit without carrying the claims
+// behind it.
+//
+// The instinct when writing a header like this is to paste the table that was
+// fitted against so a later reader can re-derive it. Do not. If the fit needs
+// revisiting, it is re-run against the source where the source lives.
+//
+// ⚠ THE TABLE BELOW IS A CHECK ON THE PARAMETERS, NOT THEIR SOURCE. It is what
+// `1 - exp(-(t/b)^k)` produces, rounded, and exists so a reader can see the
+// shape without running anything. Cumulative % of ultimate paid by age t:
+//
+//   age          1     2     3     5     8    10
+//   WC        41.0  56.0  65.5  77.2  86.4  90.0
+//   GL         9.6  31.0  54.9  87.5  99.3 100.0
+//   Property  50.4  74.4  86.6  96.3  99.4  99.8
+//
+// against what the retired constants produced:
+//
+//   WC        40.0  61.0  74.6  89.3  97.1  98.8
+//   GL        40.0  61.0  74.6  89.3  97.1  98.8
+//   Property  40.0  79.0  92.7  99.1 100.0 100.0
+//
+// ⚠ WHAT THIS DOES TO THE POOL, so nothing downstream reads as a defect. The
+// steady-state reserve goes from about 1.38 years of loss to about 2.28, call
+// it 1.66x: WC 1.90x, GL 1.46x, Property 1.93x. Invested assets rise with the
+// reserve and investment income rises with them. GL's first year goes from 40%
+// paid to 9.6%, the largest single correction, on the line carrying about 45%
+// of pool loss. That is the point of the change and not a side effect of it.
+// ===========================================================================
+export const FITTED_PAYOUT_PATTERN: Record<string, PayoutPattern> = {
+  WC: { kind: 'weibull', k: 0.64, b: 2.717 },
+  GL: { kind: 'weibull', k: 1.88, b: 3.388 },
+  Property: { kind: 'weibull', k: 0.96, b: 1.449 },
 };
+
+// ⚠ THE NULL TEST'S CONTROL, AND IT IS THE RETIRED MECHANISM RATHER THAN A
+// TIDY VERSION OF IT. openFraction is the old IBNER_OPEN_FRACTION and
+// `conditional` the old LINE_RESERVE_PAYDOWN_PCT, stored in exactly the form
+// the engine used to multiply by so the arithmetic reproduces bit for bit.
+//
+// A payout pattern spends NO RNG DRAW, so unlike the last several mechanism
+// changes this one can be null-tested against the parent baseline directly:
+//
+//   sed -i 's/= FITTED_PAYOUT_PATTERN/= LEGACY_GEOMETRIC_PATTERN/' src/data/defaultAssumptions.ts
+//   npx tsx scripts/diagnostics/value-identity-check.ts     # expect 0 values changed
+//   sed -i 's/= LEGACY_GEOMETRIC_PATTERN/= FITTED_PAYOUT_PATTERN/' src/data/defaultAssumptions.ts
+//
+// That separates the plumbing from the calibration: green means the pattern
+// machinery reproduces the old mechanism exactly, so everything that moves when
+// the fitted parameters go in is the fit and nothing else.
+export const LEGACY_GEOMETRIC_PATTERN: Record<string, PayoutPattern> = {
+  WC: { kind: 'geometric', openFraction: 0.60, conditional: 0.35 },
+  GL: { kind: 'geometric', openFraction: 0.60, conditional: 0.35 },
+  Property: { kind: 'geometric', openFraction: 0.60, conditional: 0.65 },
+};
+
+export const LINE_PAYOUT_PATTERN: Record<string, PayoutPattern> = FITTED_PAYOUT_PATTERN;
 
 // ===========================================================================
 // IBNER — INCURRED BUT NOT ENOUGH REPORTED.
@@ -1342,17 +1411,21 @@ export const IBNER_TOTAL_SD: Record<string, number> = {
 
 // Runoff horizon in years, drawn PER COHORT (inclusive), so the player cannot
 // tell how much development a given accident year has left.
-// THE SHARE OF A FRESH ACCIDENT YEAR'S BOOKED ULTIMATE THAT IS STILL UNPAID at
-// the end of its own year — the other 40% is paid within it.
+// ⚠ IBNER_OPEN_FRACTION IS RETIRED. It was the share of a fresh accident year's
+// booked ultimate still unpaid at the end of its own year — 0.60 on every line,
+// the other 40% paid within it — and it is now `unpaidShare(pattern, 1)`, which
+// is 59.0% on WC, 90.4% on GL and 49.6% on Property. ONE NUMBER FOR THREE LINES
+// WAS THE DEFECT: GL settles almost nothing in its accident year and Property
+// settles half, and the retired constant put both at 40% paid.
 //
-// ⚠ IT SETS HOW MUCH LEVERAGE DEVELOPMENT HAS, which is why it is a named
-// constant rather than a literal at the booking site. Development applies to the
-// UNPAID balance, so a cohort can only ever move the fraction of its ultimate it
-// has not yet settled. simulationEngine reads this twice — once to book the
-// cohort, once inside reserveStepSigma to derive the per-step scale that hits
-// IBNER_TOTAL_SD — and the two must be the same number or a line develops at the
-// wrong scale with no other symptom.
-export const IBNER_OPEN_FRACTION = 0.60;
+// Its own header said why it had to be a named constant rather than a literal:
+// "simulationEngine reads this twice — once to book the cohort, once inside
+// reserveStepSigma to derive the per-step scale that hits IBNER_TOTAL_SD — and
+// the two must be the same number or a line develops at the wrong scale with no
+// other symptom." That requirement is unchanged and is now carried by both
+// sites reading the same pattern. reserveStepSigma's derivation moved with it —
+// see the general-form sum there, which replaces a closed form that assumed a
+// constant paydown.
 
 export const IBNER_HORIZON: Record<string, { min: number; max: number }> = {
   WC: { min: 5, max: 12 },
