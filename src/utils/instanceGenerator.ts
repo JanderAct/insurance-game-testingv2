@@ -4,7 +4,7 @@
 
 import type { GameInstance, Member, MembershipHistory, PoolState, LinePoolState, StartingFinancials, ReserveCohort } from '../types/simulation';
 import { SeededRandom, deriveSubRng } from './random';
-import { seedPaidRatio } from './payoutPattern';
+import { seedPaidRatio, seedWeight } from './payoutPattern';
 import { getPredefinedMarketMembers } from '../data/memberCatalog';
 import { getMemberExposure, emptyLinePoolState } from './lineHelpers';
 import {
@@ -122,20 +122,59 @@ function generateStartingReserveCohorts(
   const numCohorts = rng.intRange(3, 5);
   const cohorts: ReserveCohort[] = [];
 
-  // Weight distribution for cohorts (most recent gets most weight)
-  // e.g., for 4 cohorts: [0.35, 0.30, 0.20, 0.15]
+  // ============================================================================
+  // ⚠ THE WEIGHTS ARE THE PATTERN, AND THAT MAKES THE BACK-DERIVATION STOP BEING
+  // ONE.
+  //
+  // This read `w = 1 / (i + 1)`, normalised — a decreasing sequence chosen
+  // because older cohorts should hold less, which is true and is the only thing
+  // it was ever justified by. Combined with `netUltimate = netUnpaid / (1 -
+  // paidRatio)` below, it made the seed book's IMPLIED ACCIDENT-YEAR ULTIMATES
+  // arbitrary: measured across seeds at generation, the largest was 2.10x the
+  // smallest on WC and 2.91x on Property. The pool was implicitly written as
+  // having underwritten $0.49M one year and $1.43M four years later, for no
+  // reason at all.
+  //
+  // A pool in equilibrium holds one accident year at each age, each having had
+  // roughly the same ultimate U, so the unpaid at age a is U x unpaidShare(a).
+  // Taking the weights from the pattern makes that true by construction — and
+  // the back-derivation below then returns the SAME U for every cohort, because
+  // (U x unpaidShare(a)) / (1 - cumulativePaid(a)) is U identically. The
+  // division stops inventing an ultimate and starts recovering the one the
+  // weights already implied.
+  //
+  // ⚠ IT IS FEWER LINES THAN WHAT IT REPLACES, and that is the argument for
+  // doing it now rather than as part of a larger change. It deletes a parameter
+  // instead of adding one.
+  //
+  // ⚠ AND IT IS THE SMALLER STEP TOWARD RETIRING SEEDS ALTOGETHER. The end state
+  // is a pre-game deep enough that every cohort has a real claim register, and
+  // what that produces directly is a per-accident-year ULTIMATE. `U =
+  // drawnReserve / sum(unpaidShare(a))` is the analytic stand-in for exactly
+  // that quantity, so when the deep pre-game lands this function deletes and
+  // nothing downstream changes. The 1/(i+1) weights were a stand-in for nothing
+  // and would simply have been thrown away.
+  //
+  // ⚠ WHAT THIS DOES NOT DO: make a seed indistinguishable from an old game-born
+  // cohort. A seed still has no `developingClaims`, so its development is
+  // retained entire and never cedes; its `registerSum` is its ultimate rather
+  // than a real register sum; its `bookingBias` is zero. The claim register is
+  // the whole remaining difference and it is precisely what the deep pre-game
+  // supplies. This closes the apportionment half only.
+  //
+  // NO RNG IS CONSUMED HERE — the weights are deterministic given the pattern,
+  // as they were given 1/(i+1) — so the stream position is unchanged and the
+  // null test still reads. The geometric control keeps the old weights; see
+  // seedWeight, which explains why that is the fourth and last.
+  // ============================================================================
   const weights: number[] = [];
   let weightSum = 0;
   for (let i = 0; i < numCohorts; i++) {
-    // Decreasing weight for older cohorts
-    const w = 1 / (i + 1);
+    const w = seedWeight(LINE_PAYOUT_PATTERN[line], i + 1);
     weights.push(w);
     weightSum += w;
   }
-  // Normalize
-  for (let i = 0; i < weights.length; i++) {
-    weights[i] /= weightSum;
-  }
+  for (let i = 0; i < weights.length; i++) weights[i] /= weightSum;
 
   // Distribute the net unpaid reserve across cohorts
   let remainingReserve = netUnpaidReserve;
