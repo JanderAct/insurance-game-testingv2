@@ -1,4 +1,4 @@
-# Baseline Lineage — v4 through v17
+# Baseline Lineage — v4 through v29
 
 A genealogy of the multi-line baselines: what each version represents, what change caused the jump
 to it, which numbers moved and why. Covers the multi-line-meaningful baselines (v4–v11). Earlier
@@ -1589,3 +1589,138 @@ multiplying only on display, and the stored values match the engine's own
 unrounded figures.
 
 v26 retired from the working tree; v27 kept as the immediate predecessor.
+
+---
+
+## v29 — the payout patterns, the close rule, the seed book, and the opening
+
+**Trigger:** four commits on `feature/payout-patterns`, recaptured together because none of the
+first three recaptured on its own and all four re-roll every seed.
+
+| commit | what it did |
+|---|---|
+| `3376c5f` | replaced the geometric paydown with per-line fitted Weibull payout patterns |
+| `0efd0ac` | closed cohorts on a share of their own ultimate rather than a flat $1,000 |
+| `accdadb` | weighted the seed book by the pattern's own unpaid share |
+| this one | re-translated GL's opening band and re-centred all three pre-game pins |
+
+**⚠ v28 predates all four, so a diff against it is not this commit's delta.** At `accdadb`, before
+this commit touched anything, value-identity already read **12,072 fields changed across 73** and
+all 24 export hashes moved. After this commit it reads **20,734 across 76**. The extra movement is
+every seed re-rolling, which is what changing an acceptance band does.
+
+### There is no null test, and the substitute is stated rather than implied
+
+A mechanism-off arm is unavailable by construction: the thing that changed is *which candidate
+pre-game gets accepted*, so any change to it re-rolls every seed and there is no configuration in
+which the new constants produce the old games. Reporting a green gate here would be reporting a
+gate that cannot see the change.
+
+What was verified instead is the same substitute used for `sizeWeighted` — **restore only the four
+numbers and prove nothing else moved.** With `STARTING_CAPITAL_TO_PREMIUM` back at 0.70 / 0.45 /
+0.18 and GL's band back at [1.00, 1.49], value-identity against **v28** produces output that is
+**byte-for-byte identical to the parent's** — the same 12,072 changed across the same 73 fields,
+the same 300 added `nextYearPaydownRate`, the same partial-identity warnings. So the comment
+rewrites, the new gate, the diagnostic edits and the baseline rename contribute exactly zero, and
+the whole of this commit's value delta flows through four literals.
+
+### What actually changed
+
+| line | pin | band | mean redraw attempts | opening surplus/premium | opening surplus/margin p10 | opens below its margin |
+|---|---|---|---|---|---|---|
+| WC | 0.70 → **0.47** | unchanged | 7.25 → **1.63** | 1.081 → 1.014 | 1.37 → 1.46 | 0% → 0% |
+| GL | 0.45 → **0.24** | [1.00, 1.49] → **[1.22, 1.80]** | 10.57 → **1.87** | 1.299 → 1.514 | 0.80 → **1.29** | **28.7% → 0.0%** |
+| Property | 0.18 → **0.48** | unchanged | 4.81 → **2.99** | 1.346 → 1.448 | 2.56 → 1.91 | 0% → 0% |
+
+150 solo seeds per line. Pool total 22.63 → 6.49 candidate pre-games per opening, a **71% cut** —
+which is setup time paid on every session, and fifty times over for the precomputed openings.
+
+### The defect was GL opening below its own required margin
+
+The payout patterns lengthened GL's tail; its reserve rose 61.6% and the required margin with it,
+while surplus stayed pinned to premium. The band's floor of 1.00 ended up below the margin the line
+had to hold, so the pre-game was accepting openings GL could not capitalise.
+
+### Most of that tail was the PIN, not the band
+
+Re-centring GL's pin alone, band untouched, takes the below-margin rate from **28.7% to 4.0%**. The
+old pin sat far above GL's band, so the band only ever accepted the low-surplus tail of the
+candidate distribution — and a low-surplus candidate is a heavy-loss, large-reserve, large-margin
+one. The residual 4.0% is the real defect and is structural.
+
+### And that is why the first re-translation attempted here was wrong
+
+Measured on the band-**selected** sample GL's margin/premium reads 1.119, which translates
+[1.35, 2.0] to [1.51, 2.24] — 48% above the old band, a re-tune wearing a translation's clothes.
+Measured **unfiltered** (band disabled, attempt 0 only) it is 0.900, giving [1.22, 1.80].
+
+The unfiltered figure is the correct basis for two reasons: it does not depend on the band being
+calibrated, and it is stable — across a 4x range of pin values it moves less than 1% (WC 0.5591 /
+0.5575 / 0.5532, GL 0.8944 / 0.8942 / 0.8922, Property 0.5502 / 0.5446 / 0.5446). The selected
+ratio has neither property, so translating at it is a fixed-point iteration against your own
+selection effect — the same self-reference `clfTables.ts` records three passes of.
+
+**Property's apparent case for re-translation evaporated on the same basis.** Its selected ratio
+read 0.401 against a parent 0.567, a 29% move that looked exactly like GL's. Unfiltered it is
+0.5446 against 0.567. The 29% was the old pin of 0.18 sitting far *below* Property's band, so the
+band accepted only the high-surplus — hence low-reserve, low-margin — tail.
+
+### Gate readings
+
+| gate | reading |
+|---|---|
+| value identity | **20,734 changed / 76 fields** against v28 — expected; every seed re-rolls |
+| solo export guard | **24 of 24 moved** against v28 — same cause |
+| both, against v29 | green after recapture |
+| both, mechanism-off against v28 | **byte-for-byte the parent's output** |
+| `cohort-stock-check` | pass — WC 36.3 → 37.5 cohorts yr40→yr60, poolState growth ratio 0.65 |
+| `seed-cohort-shape-check` | pass — implied ultimate spread 1.0000x on all three lines |
+| `development-sign-symmetry` | pass — GL 1.02x, Property 1.05x |
+| `cession-uplift-basis` | pass — pool uplift −0.2% |
+| typecheck | clean |
+| lint | unchanged at the pre-existing 14 errors / 7 warnings |
+
+### New gate
+
+`pin-vs-band-check.ts` asserts that the pre-game pin is a **proposal distribution and not a
+target**: doubling it moves the accepted opening 6.3–11.8% while multiplying mean redraws 4.5–30.9x,
+with no line falling back. This is the misreading that produced a whole planning round proposing to
+pin opening surplus to the reserve — a change that would have moved nothing it was meant to move —
+and the retired comment on `STARTING_CAPITAL_TO_PREMIUM` made the same mistake from the other end,
+hunting a per-line capital rationale for an ordering that was only ever the offset between each
+line's natural opening and its band.
+
+⚠ **Neither of its thresholds is the round number it was specified with, and both reasons are
+recorded in the file.** Redraws were asked for at >5x and the floor is 3x: x2.5 does put every line
+over 5x, but WC falls back in 4 of 10 seeds there, and a fallback opening is outside the band, so at
+that perturbation the opening assertion measures nothing. The opening was asked for at <10% and the
+limit is 15%: GL moves 11.8%, because doubling its pin lifts its candidate distribution above its
+band and the accepted median piles at the ceiling — a quarter of what the band alone permits and an
+eleventh of the pin's own move. Shrinking the perturbation until both round numbers held was the
+available alternative and would have been fitting the test to the headline.
+
+### Recorded, not adopted: the closed form behind any future capital rule
+
+Because the 90% CLF is a static per-line table, `margin/reserve` is an exact constant — WC 0.3294,
+GL 0.5020, Property 0.5923, zero dispersion across seeds and across both pattern arms. So `J x
+reserve` and `T x margin` are the same rule, and any per-line reserve pin carrying a capital
+rationale puts the CLF back on the opening path — the one coupling `a3d7760` removed.
+
+A reserve pin was proposed, measured and rejected: the only reserve in existence at year −2 is the
+bootstrap draw, a static dollar band (WC $4–8M, GL $1–2.5M, Property $0.3–0.9M) with Pearson r
+against seed premium of −0.014 / +0.068 / −0.008 over 200 instances, and a reserve/premium ratio
+spanning 1.94x / 2.71x / 4.17x p90-over-p10. `J x seed reserve` would make opening capital
+independent of pool size and 2–4x noisier than `K x premium`. It is also 3.6x / 16.9x / 14.8x
+smaller than the reserve at the opening.
+
+### Open, and deliberately not in this commit
+
+- **Property opens at 2.76x its required margin**, so its capital constraint may never bind and the
+  line may carry no capital *decision* for the player. A playtest question, not an arithmetic one.
+- **A basis inconsistency being lived with**: GL's band is derived on the unfiltered ratio, WC's and
+  Property's still carry `a3d7760`'s parent-selected figures. Unfiltered they would read
+  [0.75, 1.11] and [1.09, 1.63] — 9% and 4% away. Neither line misbehaves, so neither is re-rolled
+  for consistency of derivation alone.
+- GL's 97.5 and 99 CLF stops; the fixed nominal retention. Both after the playtest.
+
+v27 retired from the working tree; v28 kept as the immediate predecessor.

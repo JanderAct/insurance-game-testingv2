@@ -1047,37 +1047,76 @@ export const SIZE_WEIGHTS = [0.55, 0.30, 0.12, 0.03];
 // pre-game = this multiple x that line's own premium. Config-independent by
 // construction (depends only on the line's own premium).
 //
-// ⚠ THIS IS NOT THE YEAR-1 OPENING RATIO, and the distinction matters more than
-// it looks. These are the pre-game's INITIAL conditions at year -2; three
-// simulated years of operation then run on top, and the acceptance band below
-// selects which of those runs is kept. Measured, the year-1 opening lands at
-// 1.068x premium on WC, 1.300x on GL and 1.263x on Property — nowhere near
-// 0.70 / 0.45 / 0.18. Anyone reading these as "WC opens at 0.70x premium" will
-// be wrong by a factor of 1.5.
+// ============================================================================
+// ⚠ THIS IS A SEARCH ORIGIN, NOT A CAPITAL STANDARD. Read that sentence before
+// reasoning about these numbers at all. The obvious reading is wrong, and the
+// length of what follows is because it was reached twice in one week from
+// opposite directions — once by a plan to pin opening surplus to the reserve,
+// and once by this constant's own retired comment.
 //
-// ⚠ THE PER-LINE ORDERING HAS NO SURVIVING RATIONALE, and inventing one would be
-// worse than saying so. The comment here used to justify these by the acceptance
-// test they were tuned against, and that test has been replaced. Checked against
-// the two candidate explanations:
+// The pre-game is a reject-and-redraw search: runLinePreGame simulates a
+// candidate three-year past, tests its ending surplus against
+// OPENING_SURPLUS_TO_PREMIUM_BAND, and redraws until one lands inside. This
+// constant sets where that search STARTS. The BAND sets where it LANDS. They are
+// a proposal distribution and a target, and moving the proposal changes the
+// ACCEPTANCE RATE, not the answer.
 //
-//   TAIL LENGTH cannot separate WC from GL. The engine's only per-line runoff
-//   parameter is LINE_RESERVE_PAYDOWN_PCT, and WC and GL are IDENTICAL on it
-//   (both 0.35, steady-state reserve 1.71x annual loss). It explains Property
-//   being lower (0.65 paydown, 0.92x) and nothing else.
+// MEASURED, so it is not a story. Doubling each pin in turn and re-running the
+// solo pre-game. These are pin-vs-band-check.ts's own readings; that gate
+// asserts the PROPERTY rather than these exact figures, so re-run it rather than
+// trusting the table if a band moves:
 //
-//   RISK does not explain it either, and points the wrong way: GL's retained
-//   annual CV is about 0.78 against WC's 0.39, so GL is twice as volatile per
-//   dollar of expected loss while receiving LESS seed capital per dollar of
-//   premium.
+//   line       accepted opening surplus/premium   mean redraw attempts
+//   WC              1.034 -> 1.104   (+6.8%)          2.20 -> 67.90   (30.9x)
+//   GL              1.433 -> 1.602  (+11.8%)          1.75 ->  7.90    (4.5x)
+//   Property        1.431 -> 1.521   (+6.3%)          3.17 -> 14.55    (4.6x)
 //
-// What they are, honestly: pre-game initial conditions whose influence on the
-// year-1 opening is largely washed out by three years of operation and by the
-// acceptance band. DISPLACED BY: a real per-line capital standard, if one is
-// ever adopted. Until then the band below is what actually sets the opening.
+// A 100% MOVE IN THE PIN BUYS A 6-12% MOVE IN THE OPENING AND MULTIPLIES THE
+// REDRAW BILL. It was found the other way round, at the retired values: doubling
+// GL's old pin of 0.45 moved its opening 1.1% and took the mean attempt count
+// from 11.8 to 108.2, with a worst case of 481 against a MAX_HISTORY_ATTEMPTS of
+// 500 — within 4% of the search failing outright.
+//
+// SO THE CALIBRATION TARGET IS REDRAW COST, and nothing else. Each value is the
+// K that centres its line's UNFILTERED opening distribution on its own band's
+// midpoint, so the band accepts near the mode instead of out in a tail. Measured
+// with the band disabled, the median opening is affine in K:
+//
+//   WC        surplus/premium ~ -0.014 + 2.227 K   band midpoint 1.025  ->  0.47
+//   GL        surplus/premium ~  0.531 + 4.132 K   band midpoint 1.510  ->  0.24
+//   Property  surplus/premium ~  0.033 + 2.889 K   band midpoint 1.415  ->  0.48
+//
+// The basin is broad, not a knife edge — GL measures 2.15 / 2.21 / 2.01 / 1.91 /
+// 1.95 mean attempts at K = 0.20 / 0.22 / 0.24 / 0.26 / 0.28 — so the fitted
+// value is kept rather than the sample minimum, which would be fitting noise.
+//
+// WHY THIS IS WORTH A COMMIT: the pre-game runs at the start of every session and
+// fifty opening positions are to be precomputed, so an attempt is setup time paid
+// fifty times over. 150 solo seeds per line, mean attempts:
+//
+//   WC 7.25 -> 1.63    GL 10.57 -> 1.87    Property 4.81 -> 2.99
+//   pool total 22.63 -> 6.49 candidate pre-games per opening, a 71% cut
+//
+// ⚠ THE OLD VALUES WERE 0.70 / 0.45 / 0.18 AND THEIR COMMENT APOLOGISED FOR
+// HAVING NO RATIONALE. The apology was for the absence of a rationale this
+// constant never needed: it went looking for a per-line CAPITAL argument (tail
+// length, volatility) to justify an ordering, found none, and recorded the
+// failure. There was nothing to find, because the ordering was never carrying
+// line-specific capital information — it was carrying the OFFSET between each
+// line's natural opening and its own band. Centre the three lines on their bands
+// and the spread collapses from 3.9x to 2.0x, which is the tell.
+//
+// ⚠ NOT THE YEAR-1 OPENING RATIO EITHER. Three simulated years run on top of
+// these, so the opening lands at roughly 1.01x / 1.54x / 1.45x premium. Anyone
+// reading 0.47 as "WC opens at 0.47x premium" is wrong by a factor of two.
+//
+// DISPLACED BY: nothing. A real capital standard would displace the BAND, not
+// this. See the closed form recorded under the band below.
+// ============================================================================
 export const STARTING_CAPITAL_TO_PREMIUM: Record<string, number> = {
-  WC: 0.70,
-  GL: 0.45,
-  Property: 0.18,
+  WC: 0.47,
+  GL: 0.24,
+  Property: 0.48,
 };
 
 // Pre-game acceptance band: the line's Year-1 opening surplus must land within
@@ -1099,9 +1138,9 @@ export const STARTING_CAPITAL_TO_PREMIUM: Record<string, number> = {
 //
 // ⚠ NOT A TOLERANCE AROUND STARTING_CAPITAL_TO_PREMIUM, which would have been
 // the obvious construction and is wrong: that constant is the pre-game's year -2
-// SEED (0.70 / 0.45 / 0.18), while this band tests the YEAR-1 opening after three
-// years of operation, which measures 1.065 / 1.270 / 1.293. A tolerance around
-// 0.70 would reject essentially every WC pre-game.
+// SEED, while this band tests the opening after three years of operation. It is
+// the search's starting point and this is its target; a tolerance around the
+// start would reject essentially every pre-game. See the pin's own comment.
 //
 // ⚠ STILL PER-LINE, AND ONE SHARED BAND WAS TRIED AND REJECTED ON MEASUREMENT.
 // The argument for collapsing Property's separate band is sound as far as it
@@ -1120,17 +1159,140 @@ export const STARTING_CAPITAL_TO_PREMIUM: Record<string, number> = {
 //
 // CALIBRATED TO PRESERVE THE CURRENT DISTRIBUTION, not to re-tune it. Each band
 // is the OLD margin-basis band translated onto premium at that line's median
-// margin/premium ratio AS MEASURED AT THE PARENT (WC 0.612, GL 0.744, Property
-// 0.567 — the after-state ratios differ, which is the point):
-//   WC        [1.35, 2.0] x 0.612 = [0.83, 1.22]
-//   GL        [1.35, 2.0] x 0.744 = [1.00, 1.49]
-//   Property  [2.0,  3.0] x 0.567 = [1.13, 1.70]
+// margin/premium ratio:
+//   WC        [1.35, 2.0] x 0.612 = [0.83, 1.22]   (a3d7760, parent's ratio)
+//   GL        [1.35, 2.0] x 0.900 = [1.22, 1.80]   (re-translated — see below)
+//   Property  [2.0,  3.0] x 0.567 = [1.13, 1.70]   (a3d7760, parent's ratio)
 // so the accept/reject decision is the same one, taken against a stable basis.
+//
+// ============================================================================
+// ⚠ WHEN A BAND MAY BE RE-TRANSLATED, AND WHY THE RULE IS NARROW.
+//
+// Translating a band at the current margin/premium ratio is how a band gets its
+// number. It is NOT a standing tie to that ratio. Re-translating every time the
+// ratio moves would reinstate exactly the coupling a3d7760 removed — the opening
+// tracking the reserve margin — only at commit latency instead of automatically,
+// which is worse, because it looks deliberate.
+//
+// So the TRIGGER is an observed defect in the opening, not a stale ratio. The
+// translation is only the METHOD for choosing the replacement, used in place of
+// picking a number.
+//
+// GL MET THAT BAR. The payout patterns lengthened GL's tail, its reserve rose
+// 61.6% and its required margin rose with it, while surplus — pinned to premium
+// — did not move. The band's floor of 1.00 ended up BELOW the margin the line
+// had to hold, so the pre-game was accepting openings GL could not capitalise:
+// 28.7% of solo seeds opened below their own required margin, against 0% before.
+// Re-translated to [1.22, 1.80] that closes to 0.0%, with even the 10th
+// percentile at 1.29x margin.
+//
+// ⚠ MOST OF THAT TAIL WAS THE PIN, NOT THE BAND, and the honest attribution
+// matters because it is the reason the first re-translation attempted here was
+// wrong. Re-centring GL's pin alone, band untouched at [1.00, 1.49], already
+// takes the below-margin rate from 28.7% to 4.0%. The old pin sat so far above
+// GL's band that the band was only ever accepting the LOW-SURPLUS TAIL of the
+// candidate distribution, and a low-surplus candidate is one with heavy losses,
+// hence a large reserve and a large margin. The 29% was mostly that selection.
+// The residual 4.0% is the real defect and is structural: the floor of 1.00 sits
+// below GL's margin/premium at the upper end however the pin is placed.
+//
+// ⚠ SO THE TRANSLATION RATIO MUST BE MEASURED UNFILTERED. Measured on the
+// band-SELECTED sample, GL's ratio read 1.119 and gave [1.51, 2.24] — 48% above
+// the old band, which would have been a re-tune wearing a translation's clothes.
+// Measured on the UNFILTERED candidate distribution (band disabled, attempt 0)
+// it is 0.900. The unfiltered figure is the right basis because it is the only
+// one that does not depend on the band being calibrated, and because it is
+// stable: across a 4x range of pin values it moves less than 1%.
+//
+//   line       unfiltered median margin/premium at K x0.5 / x1 / x2
+//   WC              0.5591 / 0.5575 / 0.5532
+//   GL              0.8944 / 0.8942 / 0.8922
+//   Property        0.5502 / 0.5446 / 0.5446
+//
+// The selected ratio has no such property — it is a function of where the band
+// is, so translating at it is a fixed-point iteration against your own
+// selection effect. That is the same self-reference clfTables.ts records three
+// passes of, and it is avoidable here rather than merely survivable.
+//
+// WC AND PROPERTY WERE CHECKED AND DELIBERATELY LEFT ALONE. Neither has a
+// defect: no seed on either line opens below its required margin, at p10
+// surplus/margin 1.46 on WC and 1.91 on Property.
+//
+// ⚠ AND THE APPARENT CASE FOR MOVING PROPERTY EVAPORATED ON THE UNFILTERED
+// BASIS, which is worth recording because it nearly caused a second re-tune.
+// Property's SELECTED margin/premium read 0.401 against the parent's 0.567 — a
+// 29% move that looked like GL's case. It was almost entirely selection: the old
+// pin of 0.18 sat far BELOW Property's band, so the band accepted only the
+// HIGH-surplus tail, which is the low-loss, low-reserve, low-margin tail.
+// Unfiltered, Property's ratio is 0.5446 and the parent's figure was 0.567.
+//
+// A CONSISTENT UNFILTERED DERIVATION OF ALL THREE, for whoever touches one next:
+//
+//   line       unfiltered ratio   band it implies    band in force
+//   WC              0.5575        [0.75, 1.11]       [0.83, 1.22]   +9%
+//   GL              0.9000        [1.22, 1.80]       [1.22, 1.80]    on it
+//   Property        0.5446        [1.09, 1.63]       [1.13, 1.70]   +4%
+//
+// So GL is now derived on that basis and WC and Property are 9% and 4% above it,
+// carrying a3d7760's parent-selected figures. That is a basis inconsistency and
+// it is being lived with rather than hidden: 9% and 4% do not warrant re-rolling
+// every seed on two lines that are not misbehaving, and the numbers are written
+// down so the next change starts from the right basis instead of rediscovering
+// this the hard way, as this commit did.
+//
+// ⚠ ONE LIVE QUESTION LEFT, AND IT IS NOT AN ARITHMETIC ONE: Property opens at
+// 2.76x its required margin, so its capital constraint may never bind and the
+// line may carry no capital DECISION for the player. That is a game-design
+// finding for the playtest, to be settled by watching someone play.
+// ============================================================================
 export const OPENING_SURPLUS_TO_PREMIUM_BAND: Record<string, { min: number; max: number }> = {
   WC: { min: 0.83, max: 1.22 },
-  GL: { min: 1.00, max: 1.49 },
+  GL: { min: 1.22, max: 1.80 },
   Property: { min: 1.13, max: 1.70 },
 };
+
+// ============================================================================
+// THE ARITHMETIC BEHIND ANY FUTURE CAPITAL RULE — recorded because it is not
+// obvious, and because it is the thing to check before proposing one.
+//
+// A capital standard would replace the band above with a rule of the form
+// "hold J x reserve" or "hold T x required margin". The two are the same rule,
+// because required margin is EXACTLY a per-line multiple of the reserve:
+//
+//   reserveRiskMarginNeeded = expectedNetUnpaidLoss x (reserveMarginCLF - 1)
+//
+// and reserveMarginCLF at the 90% stop is a STATIC per-line table. So
+// margin/reserve is not an estimate with a confidence interval, it is a
+// constant, and it measures with zero dispersion across seeds and across both
+// payout-pattern arms:
+//
+//   WC 0.3294      GL 0.5020      Property 0.5923
+//
+// Therefore J_line = T x (CLF_line - 1) exactly. Which means: any per-line
+// reserve pin that carries a capital RATIONALE puts the 90% CLF back on the
+// opening path — the single coupling a3d7760 removed, and the one
+// simulationEngine.ts's margin site says in terms to keep out. A uniform J
+// avoids the CLF but then asserts the three lines should hold the same capital
+// per dollar of reserve while their CLFs differ by 1.80x, which is not a
+// standard either. If a standard is adopted, freeze the CLF-derived J as
+// literal constants at calibration time — the way a3d7760 froze this band — so
+// the CLF sets the number once and never becomes a live consumer.
+//
+// ⚠ A RESERVE PIN WAS PROPOSED AND MEASURED AND REJECTED. Not on taste: the
+// proposal was to seed surplus as J x reserve instead of K x premium, and the
+// only reserve in existence at year -2 is the bootstrap draw, which is a STATIC
+// DOLLAR BAND (WC $4-8M, GL $1-2.5M, Property $0.3-0.9M) with no link to how big
+// the pool is. Pearson r against seed premium over 200 instances:
+//
+//   WC -0.014      GL +0.068      Property -0.008
+//
+// and seed reserve/premium spans 1.94x / 2.71x / 4.17x p90-over-p10. J x seed
+// reserve would make opening capital INDEPENDENT OF POOL SIZE and 2-4x noisier
+// than K x premium. The seed reserve is also 3.6x / 16.9x / 14.8x smaller than
+// the reserve at the opening, so it is not the pool's liability in any case.
+// Whoever proposes this next should find this measurement rather than repeat the
+// proposal.
+// ============================================================================
 
 // Starting enrollment per line: each active line independently enrolls members
 // (seeded random order) until its enrolled exposure reaches this share of the

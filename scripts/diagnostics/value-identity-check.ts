@@ -344,7 +344,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // list under BOTH arms — which is the report shape that says "structurally dead"
 // rather than "inactive in this configuration". bookingGiveBack, zero in `def`
 // and live in `sqz`, is the contrast the per-arm split exists to draw.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v28.json');
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v29.json');
 
 function seedOf(id: string) {
   let h = 5381;

@@ -1438,6 +1438,17 @@ export function processLineYear(
   // the opening path at all. KEEP IT THAT WAY: if a future change wants to
   // condition the opening on reserve risk, that is a decision to argue for
   // explicitly, not a side effect to reintroduce.
+  //
+  // ⚠ THE ONE THING THAT MAY LEGITIMATELY READ THIS RATIO IS A ONE-OFF
+  // CALIBRATION. Because reserveMarginCLF is a static per-line table, the line
+  // below makes margin/reserve an EXACT constant — WC 0.3294, GL 0.5020,
+  // Property 0.5923, zero dispersion across seeds and across both payout-pattern
+  // arms. So any "hold J x reserve" capital rule is "hold T x this margin"
+  // wearing a different denominator, and adopting one puts the 90% CLF back on
+  // the opening path. The consequences are worked through beside
+  // OPENING_SURPLUS_TO_PREMIUM_BAND in defaultAssumptions.ts, together with the
+  // reserve pin that was measured and rejected. Read that before wiring anything
+  // here to the opening.
   const reserveMarginCLF = hasStaticClf(line)
     ? staticClf(line, 0.90)
     : lookupCLF(0.90);

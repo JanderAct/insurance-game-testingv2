@@ -67,7 +67,7 @@ for (let i = 0; i < SEEDS; i++) {
 console.log(`=== OPENING POSITION — ${SEEDS} seeds per line, each line SOLO ===\n`);
 
 console.log('--- 1. THE OPENING, AND WHAT IT IS A MULTIPLE OF ---');
-console.log('  line       surplus $M (p10/med/p90)      surplus/PREMIUM      surplus/MARGIN      target');
+console.log('  line       surplus $M (p10/med/p90)      surplus/PREMIUM      surplus/MARGIN      pin');
 for (const line of LINES) {
   const o = obs[line];
   const sp = o.map(x => x.surplus / Math.max(x.premium, 1));
@@ -78,8 +78,10 @@ for (const line of LINES) {
     `   ${q(sm, 0.1).toFixed(2)} / ${q(sm, 0.5).toFixed(2)} / ${q(sm, 0.9).toFixed(2)}` +
     `   ${STARTING_CAPITAL_TO_PREMIUM[line].toFixed(2)}`);
 }
-console.log('\n  ⚠ THE LAST COLUMN IS THE YEAR -2 SEED, NOT A TARGET FOR THE OPENING. Three simulated');
-console.log('  years run on top of it, so surplus/PREMIUM lands well above it and is SUPPOSED to.');
+console.log('\n  ⚠ THE LAST COLUMN IS THE PRE-GAME\'S SEARCH ORIGIN, NOT A TARGET FOR THE OPENING, and it');
+console.log('  is not commensurable with the two columns beside it. Three simulated years run on top of');
+console.log('  the pin, so surplus/PREMIUM lands well above it and is SUPPOSED to. It is printed only so');
+console.log('  a reader can see the two are unrelated — pin-vs-band-check.ts is what proves it.');
 console.log('  surplus/PREMIUM is what the band now tests; surplus/MARGIN is what it used to test,');
 console.log('  kept here so a re-run still shows both sides.');
 
@@ -127,8 +129,14 @@ for (const line of LINES) {
   console.log(`  ${line.padEnd(10)} r = ${r >= 0 ? ' ' : ''}${r.toFixed(3)}`);
 }
 
-console.log('\n--- 5. DOES TAIL LENGTH EXPLAIN 0.70 / 0.45 / 0.18? ---');
-console.log('  The engine\'s per-line runoff is now a fitted PAYOUT PATTERN, not one rate:');
+console.log('\n--- 5. WHAT SEPARATES THE THREE LINES\' TAILS (the question the pin no longer asks) ---');
+console.log('  This section used to ask whether TAIL LENGTH explains the pin\'s per-line ordering. That');
+console.log('  question is retired, not answered: the pin is a search origin, and its values are now the');
+console.log('  K that centres each line\'s unfiltered opening on its own band, which is why they collapse');
+console.log('  to roughly one number. There is no per-line capital ordering left to explain.');
+console.log('  The tails are still measured, because they are what moved the RESERVE and therefore the');
+console.log('  required margin — which is what forced GL\'s band to be re-translated.\n');
+console.log('  The engine\'s per-line runoff is a fitted PAYOUT PATTERN, not one rate:');
 for (const line of LINES) {
   const pat = LINE_PAYOUT_PATTERN[line];
   // Steady-state reserve / annual loss is the sum of the unpaid share over all
@@ -141,18 +149,19 @@ for (const line of LINES) {
   const shape = pat.kind === 'weibull' ? `k ${pat.k.toFixed(2)} b ${pat.b.toFixed(3)}` : `geometric ${pat.conditional.toFixed(2)}`;
   console.log(`    ${line.padEnd(10)} ${shape.padEnd(18)} ->  steady-state reserve ${steady.toFixed(2)}x annual loss`);
 }
-console.log('\n  ⚠ THE ARGUMENT THAT STOOD HERE IS NOW FALSE AND IS REPLACED. It read: "WC AND GL');
-console.log('  ARE IDENTICAL ON THIS AXIS (both 0.35), so tail length CANNOT explain WC 0.70');
-console.log('  against GL 0.45." That was true of a single paydown rate and is not true of a');
-console.log('  payout pattern — WC and GL are now the two MOST different lines on this axis,');
-console.log('  3.36x against 2.51x, because WC pays fast and then crawls while GL defers.');
-console.log('  Tail length is therefore a live candidate again and points the RIGHT way for');
-console.log('  the first time: the longer-tailed line does carry the larger capital multiple.');
-console.log('  Whether it explains the SIZE of the gap is a re-derivation, not a re-reading,');
-console.log('  and it belongs with the CLF work rather than here.');
-console.log('\n  What DOES separate them is the PREMIUM BASE the multiple is applied to:');
+console.log('\n  ⚠ WHERE THIS LANDS ON THE BAND, WHICH IS THE THING THE TAIL ACTUALLY REACHES. The');
+console.log('  patterns lengthened GL\'s tail most, its steady-state reserve rose with it, and the');
+console.log('  required margin — expectedNetUnpaidLoss x (CLF@90 - 1) — rose in proportion. GL\'s');
+console.log('  median margin/premium went 0.744 -> 1.119 while its band floor stayed at 1.00, so the');
+console.log('  band was admitting openings BELOW the margin the line had to hold. That is what the');
+console.log('  re-translation to [1.51, 2.24] fixed. Section 3 above is where to watch it next.');
+console.log('\n  ⚠ AND A RESERVE PIN DOES NOT FOLLOW FROM ANY OF THIS. Because CLF@90 is a static');
+console.log('  per-line table, margin/reserve is an exact constant (WC 0.3294, GL 0.5020, Property');
+console.log('  0.5923), so "hold J x reserve" IS "hold T x margin" and adopting it puts the CLF back');
+console.log('  on the opening path. See the block beside OPENING_SURPLUS_TO_PREMIUM_BAND.');
+console.log('\n  The premium base each pin is applied to, for scale:');
 for (const line of LINES) {
   const p = q(obs[line].map(x => x.premium), 0.5);
   console.log(`    ${line.padEnd(10)} median opening premium $${(p / M).toFixed(2)}M  ` +
-    `x ${STARTING_CAPITAL_TO_PREMIUM[line].toFixed(2)} = $${((p * STARTING_CAPITAL_TO_PREMIUM[line]) / M).toFixed(2)}M of capital`);
+    `x pin ${STARTING_CAPITAL_TO_PREMIUM[line].toFixed(2)} = $${((p * STARTING_CAPITAL_TO_PREMIUM[line]) / M).toFixed(2)}M seeded at year -2`);
 }
