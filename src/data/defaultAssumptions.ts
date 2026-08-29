@@ -1537,93 +1537,139 @@ export const LINE_PAYOUT_PATTERN: Record<string, PayoutPattern> = FITTED_PAYOUT_
 // closure 1.410 against payout 1.88. Genuinely different, not one number wearing
 // two names.
 //
-// ⚠ THE AGE-1 RESIDUAL DOES NOT CLOSE, AND IT IS THE OBJECTIVE RATHER THAN THE
-// BASIS OR THE FORM. On the corrected series the fit still sits +3.42 points
-// above WC's age-1 target (47.46% against 44.05%), and GL +2.33. Unweighted
-// least squares over ages 1-10 spends its accuracy at ages where everything is
-// closed and nothing is at stake. Measured alternatives on the same Weibull and
-// the same corrected data: 1/age weights cut WC's age-1 residual to +1.49
-// (RMSE 0.0257 -> 0.0304), an age-1 x8 weight to +0.64 (RMSE 0.0292). NOT taken
-// here, because this commit changes the BASIS and changing the objective in the
-// same commit would confound the re-measurement it exists to enable. It is the
-// next decision, not an oversight.
+// ⚠ FITTED ON A GAME-RANGE OBJECTIVE: ages 1-5 carry full weight, ages beyond
+// carry a fifth. The game is five years, so ages 1-5 are what a player ever sees
+// and ages 8-10 are almost never reached; the tail is kept at a fifth rather than
+// dropped so the curve still has to terminate sensibly instead of running off.
+//
+// ⚠ AND THE OBVIOUS WEIGHTINGS WERE MEASURED AND REJECTED, which is worth
+// recording because they LOOK like they serve the same purpose and do not. The
+// age-1 residual is the visible symptom, so weighting toward age 1 is the
+// tempting fix: 1/age cuts WC's age-1 residual from +3.42 to +1.49, and an
+// age-1 x8 weight to +0.64. But measured over ages 1-5 TOGETHER — the actual
+// stated goal — both make things WORSE on every line:
+//
+//   line       objective     age-1 resid   RMSE ages 1-5
+//   WC         unweighted       +3.42         0.0306
+//   WC         1/age            +1.49         0.0319
+//   WC         age-1 x8         +0.64         0.0338
+//   WC         game range       +3.02         0.0303
+//   GL         unweighted       +2.33         0.0213
+//   GL         game range       +2.18         0.0213
+//   Property   unweighted       -0.78         0.0119
+//   Property   game range       -0.75         0.0119
+//
+// So age-1 x8 overfits the front harder than 1/age, and 1/age overfits it too:
+// both buy the single age-1 point by giving away ages 2-5. On the ALL-CLAIMS
+// curves the game-range objective is therefore nearly the unweighted fit — those
+// series barely reach past the game anyway. Where it earns its place is the
+// LARGE-claim curves below, which run to ages 10 and 23.
+//
+// THE AGE-1 RESIDUAL SURVIVES, at +3.02 on WC and +2.18 on GL. It is the
+// Weibull's inability to reproduce a fast-then-crawl shape, not a calibration
+// error, and no objective tested removes it without costing more elsewhere.
 //
 // Residuals on the corrected series: WC RMSE 0.026, GL 0.018, Property 0.010.
 // ===========================================================================
 export const CLOSURE_REPORTED_DEVELOPMENT = { ageOneFactor: 0.8916, decayPerStep: 0.4421 };
 
 export const FITTED_CLOSURE_CURVE: Record<string, ClosureCurve> = {
-  WC: { k: 0.670, b: 1.930 },
-  GL: { k: 1.410, b: 2.300 },
-  Property: { k: 1.000, b: 1.550 },
+  WC: { k: 0.688, b: 1.930 },
+  GL: { k: 1.418, b: 2.300 },
+  Property: { k: 0.998, b: 1.550 },
 };
 
 // ===========================================================================
-// THE SIZE SPLIT — WC ONLY, AND THE ATTEMPT TO EXTEND IT FAILED ON MEASUREMENT.
+// THE SIZE SPLIT — PER LINE, EACH FITTED AGAINST ITS OWN EXPERIENCE.
 //
-// Closure correlates with size, and on WC it is extreme: of claims over $100k,
-// ZERO of the first year's cohort closed at age 1 and 2.5% by age 3, against
-// 49/72/77 for all claims. A size-blind rule would hold trivial files open for
-// years and let large ones close early, and both are wrong.
+// Closure correlates strongly with size. On WC, of claims over $100k, ZERO of the
+// first year's cohort closed at age 1 and 2.5% by age 3, against 49/72/77 for all
+// claims. GL's own over-$100k experience is the same shape: 0.8% at age 1 and
+// 15.8% at age 3 against 27/61/79 for all claims. A size-blind rule holds trivial
+// files open for years and lets large ones close early, and both are wrong.
 //
-// So WC's all-claims curve is treated as a MIXTURE of a large-claim curve and a
-// small-claim one, both fitted on the same no-late-reporting basis as the curves
-// above. The large curve is fitted directly; the small curve is backed out of
-// WC's own corrected all-claims curve at the mixture weight.
+// Each line's all-claims curve is therefore a MIXTURE of a large-claim curve and
+// a small-claim one. The large curve is fitted directly against that line's own
+// over-threshold experience, on the same no-late-reporting basis and the same
+// game-range objective as the curves above; the weight is MEASURED on the model's
+// own drawn claims; the small curve is then backed out of that line's own
+// all-claims curve at that weight.
 //
-// ⚠ THE WEIGHT IS MEASURED, NOT INFERRED, AND THE INFERENCE WAS WRONG. It was
-// 6.94%, derived from the pool's observation that from age 10 onward roughly half
-// of everything still open is over $100k — an indirect chain, and the only
-// estimate available at the time. Measured directly on the model's own drawn
-// claims it is 4.65% (132,040 claims; by accident year 4.2 / 4.6 / 4.1 / 4.3 /
-// 5.1%, creeping up with severity trend). The model's WC severity is fitted to
-// the same pool, so the direct measurement is the better estimate of the pool's
-// own share and the inference chain simply gave the wrong answer.
+// ⚠ THE EARLIER CONCLUSION "WC's LARGE CURVE DOES NOT TRANSPLANT" WAS MEASURED
+// CORRECTLY AND READ TOO BROADLY. It ruled out putting WC's large curve inside
+// GL's mixture, which was right — WC's reaches 43% by age 10 and cannot sit
+// inside a GL all-claims curve that reaches 100%. It was then taken to mean GL
+// and Property could have no size split at all, and that did not follow. GL's OWN
+// large curve reaches 99.7% by age 10 and sits inside its own curve without
+// strain. The cost of the over-reading was a $4M GL claim closing on GL's
+// all-claims curve at 76.7% by age 3 when its own experience says 17%.
 //
-// That matters twice over: the weight sets the mixture, AND the small-claim curve
-// is backed out USING the weight — so a wrong weight produced a wrong small
-// curve as well. Both are re-derived here at 4.65%.
+// ⚠ THE RECONCILIATION TEST IS AGAINST EACH LINE'S OWN ALL-CLAIMS CURVE, not
+// against the source data, and the distinction matters. Both the mixture and the
+// plain curve carry the same shape residual against the data, so comparing to the
+// data makes an honest split look broken — WC reads 0.041 that way, which is the
+// Weibull's age-2 problem, not the split's. Comparing to the CURVE isolates the
+// only question that matters: does splitting by size change the line's aggregate
+// closure? Measured:
 //
-// ⚠ THE MIXTURE NO LONGER REPRODUCES THE ALL-CLAIMS CURVE AS TIGHTLY: maxAbsErr
-// 0.041 against 0.007 before. That is not a regression in the split, it is the
-// same age-1 objective problem as above arriving twice — the small curve is
-// fitted by unweighted least squares to a back-out that has WC's fast-then-crawl
-// shape, and overshoots age 1 by the same ~3 points. Fixing the objective fixes
-// both.
+//   WC   maxAbsErr 0.0064      GL   maxAbsErr 0.0087
+//   GL with WC's large curve transplanted:  0.0442
 //
-// ⚠ AND IT DOES NOT TRANSPLANT TO GL OR PROPERTY. Applying the same large curve
-// and weight to their own fits misses by 0.042 and 0.039 against WC's own, and
-// the reason is arithmetic rather than tuning: both lines close 99-100% of their
-// files by age 7-10, which cannot happen if a slice of them sits on a curve that
-// has reached only 44% by age 10. Either those lines have no comparable
-// large-claim slowdown or their share is far smaller; the source cannot say
-// which, so GL and Property stay SIZE-BLIND on their own fitted curve. Their
-// measured shares over $100k are 8.25% and 37.33%, recorded for whoever fits
-// them properly.
+// The test still separates a real split from the transplant by a factor of five.
 //
-// DISPLACED BY: per-line size-conditional closure experience, if it is ever
-// fitted. Until then, do not assume WC's split onto another line.
+// ⚠ PROPERTY IS DELIBERATELY NOT SPLIT, AND THE REASON IS ITS THRESHOLD RATHER
+// THAN MISSING DATA. Property's source split is at $25k, not $100k, and on the
+// model's own severity distribution that is the 23rd PERCENTILE: 76.80% of drawn
+// Property claims exceed it, against 4.63% of WC's and 8.21% of GL's over $100k.
+// A "large claim" band containing three quarters of the book is not the same kind
+// of cut as one containing five percent, and a mixture at p = 0.768 is dominated
+// by its large component — the all-claims curve already IS approximately the
+// large curve, so the split would buy almost nothing even with the extract in
+// hand.
 //
-// ⚠ THE $100k BOUNDARY IS NOMINAL AND WILL ERODE — the third instance of this
-// trap after the $1M retention and the fixed severity cap, and the reason a
-// continuous size function is preferred to a threshold. Not resolved here: this
-// commit only READS the curves for display, so the boundary moves nothing yet.
-// The commit that makes closure drive the developing subset is where it has to
-// be settled.
+// That gap between what $25k means on the source and what it means here is
+// unresolved and is the real finding: either Property's modelled severity is
+// scaled differently from the book the threshold came from (model median claim
+// $65.4k), or $25k is a handling threshold rather than a size band. Fitting a
+// split across that gap would be inventing a reconciliation. Property stays
+// size-blind until the question is settled.
+//
+// ⚠ AND THE THRESHOLDS DIFFERING BY LINE IS ITSELF THE ARGUMENT FOR A CONTINUOUS
+// SIZE FUNCTION. $100k sits at WC's 95th percentile, GL's 92nd, and Property's
+// 8th. Three lines, three unrelated places in their own distributions, each a
+// nominal dollar boundary that erodes as severity trends — the fourth instance of
+// that trap on this branch. A function of size relative to the line's own scale
+// has none of these problems. Not resolved here: closure is still display-only,
+// so no boundary moves anything yet.
+//
+// DISPLACED BY: a continuous size function, and Property's own extract if the
+// threshold question is ever settled.
 // ===========================================================================
-export const WC_LARGE_CLAIM_THRESHOLD = 100_000;
-export const WC_LARGE_CLAIM_SHARE = 0.0465;
-export const WC_CLOSURE_BY_SIZE: { small: ClosureCurve; large: ClosureCurve } = {
-  small: { k: 0.720, b: 1.720 },
-  large: { k: 1.376, b: 14.870 },
+export const CLOSURE_SIZE_THRESHOLD = 100_000;
+
+export interface ClosureSizeSplit {
+  /** Share of the line's drawn claims at or above CLOSURE_SIZE_THRESHOLD, MEASURED. */
+  weight: number;
+  small: ClosureCurve;
+  large: ClosureCurve;
+}
+
+// ⚠ WEIGHTS MEASURED, NEVER INFERRED. WC's was 6.94% by an inference chain — half
+// the age-10 open set is large — and directly measured it is 4.63%. The inference
+// was wrong, and it was wrong twice over because the small curve is backed out
+// USING the weight. Both lines' weights here are measured on 97,184 and 60,201
+// drawn claims.
+export const CLOSURE_BY_SIZE: Record<string, ClosureSizeSplit> = {
+  WC: { weight: 0.0463, small: { k: 0.734, b: 1.720 }, large: { k: 1.604, b: 14.320 } },
+  GL: { weight: 0.0821, small: { k: 1.542, b: 2.070 }, large: { k: 2.854, b: 5.390 } },
 };
 
-// The curve a claim of this size on this line closes on.
+// The curve a claim of this size on this line closes on. A line with no split
+// falls back to its own all-claims curve — see Property above.
 export function resolveClosureCurve(line: string, grossUltimate: number): ClosureCurve {
-  if (line === 'WC') {
-    return grossUltimate >= WC_LARGE_CLAIM_THRESHOLD
-      ? WC_CLOSURE_BY_SIZE.large
-      : WC_CLOSURE_BY_SIZE.small;
+  const split = CLOSURE_BY_SIZE[line];
+  if (split) {
+    return grossUltimate >= CLOSURE_SIZE_THRESHOLD ? split.large : split.small;
   }
   return FITTED_CLOSURE_CURVE[line] ?? FITTED_CLOSURE_CURVE.GL;
 }

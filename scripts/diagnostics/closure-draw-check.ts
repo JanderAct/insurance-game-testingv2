@@ -51,7 +51,7 @@ import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { processYear } from '../../src/utils/simulationEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { claimClosureUnit, closedShare, isClaimClosed } from '../../src/utils/claimClosure';
-import { resolveClosureCurve, WC_LARGE_CLAIM_THRESHOLD } from '../../src/data/defaultAssumptions';
+import { resolveClosureCurve, CLOSURE_SIZE_THRESHOLD, CLOSURE_BY_SIZE } from '../../src/data/defaultAssumptions';
 import type { CoverageLine, GameState } from '../../src/types/simulation';
 
 const LINES: CoverageLine[] = ['WC', 'GL', 'Property'];
@@ -218,13 +218,29 @@ console.log('\n--- SEED-INDEPENDENT: two games, the ids they share ---');
   console.log('  scored 100% and r = 1.000 because the game identity was not an input.');
 }
 
-console.log('\n--- RECORDED, NOT ASSERTED: the model\'s share above the WC size threshold ---');
-console.log(`  threshold $${(WC_LARGE_CLAIM_THRESHOLD / 1000).toFixed(0)}k. WC's mixture weight is calibrated to its own figure;`);
-console.log('  GL and Property are size-blind and theirs are here for whoever fits them.');
+// ⚠ THE MIXTURE WEIGHT IS A MEASURED QUANTITY AND IT DRIFTS. Severity trends, so
+// the share above a fixed nominal threshold creeps up every year. The weight is
+// frozen in the parameters; this reports what the model actually draws so the two
+// cannot silently part company, and fails only when they part by enough to matter.
+const MAX_WEIGHT_DRIFT = 0.02;
+console.log('\n--- THE MEASURED SIZE SHARE vs THE FROZEN MIXTURE WEIGHT ---');
+console.log(`  threshold $${(CLOSURE_SIZE_THRESHOLD / 1000).toFixed(0)}k`);
+console.log('  line       measured share   frozen weight   drift    limit');
 for (const line of LINES) {
   const C = claims.filter(c => c.line === line);
   if (C.length === 0) continue;
-  console.log(`    ${line.padEnd(10)} ${(C.filter(c => c.size >= WC_LARGE_CLAIM_THRESHOLD).length / C.length * 100).toFixed(2)}%`);
+  const share = C.filter(c => c.size >= CLOSURE_SIZE_THRESHOLD).length / C.length;
+  const split = CLOSURE_BY_SIZE[line];
+  if (!split) {
+    console.log(`  ${line.padEnd(10)} ${(share * 100).toFixed(2).padStart(13)}%   size-blind — no split fitted for this line`);
+    continue;
+  }
+  const drift = Math.abs(share - split.weight);
+  if (drift > MAX_WEIGHT_DRIFT) fail(`${line}: the model draws ${(share * 100).toFixed(2)}% of claims over the `
+    + `threshold against a frozen mixture weight of ${(split.weight * 100).toFixed(2)}% — the split is being `
+    + 'applied at a weight the book no longer has, and the small curve was backed out using that weight');
+  console.log(`  ${line.padEnd(10)} ${(share * 100).toFixed(2).padStart(13)}%   ${(split.weight * 100).toFixed(2).padStart(11)}%   `
+    + `${(drift * 100).toFixed(2).padStart(5)}    ${(MAX_WEIGHT_DRIFT * 100).toFixed(0)}%  ${drift > MAX_WEIGHT_DRIFT ? 'FAIL' : 'ok'}`);
 }
 
 console.log(fails.length === 0
