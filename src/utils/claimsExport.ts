@@ -372,6 +372,8 @@ function collectLineClaims(lockedResults: ResultSet[], line: CoverageLine): Line
 // touched by this file — see the units rule on ReserveDevelopmentRow.
 // ============================================================================
 interface PaidLedgerView {
+  /** The game's identity, an input to every claim's closure draw — see claimClosure.ts. */
+  gameId: string;
   /** Cumulative GROSS paid on each accident year's cohort, at the latest valuation. */
   grossPaidByAy: Map<number, number>;
   /** Sum of every claim's gross ultimate in that accident year — the split's denominator. */
@@ -385,6 +387,7 @@ function buildPaidLedgerView(
   lockedResults: ResultSet[],
   poolState: PoolState | undefined,
   line: CoverageLine,
+  gameId: string,
 ): PaidLedgerView {
   const registerByAy = new Map<number, number>();
   for (const { claim } of rows) {
@@ -413,7 +416,7 @@ function buildPaidLedgerView(
   const valuationYear = lockedResults.length > 0
     ? lockedResults[lockedResults.length - 1].yearNumber
     : 0;
-  return { grossPaidByAy, registerByAy, valuationYear };
+  return { gameId, grossPaidByAy, registerByAy, valuationYear };
 }
 
 /** This claim's gross paid and status as at the workbook's valuation. */
@@ -425,7 +428,9 @@ function paidAndStatus(claim: Claim, view: PaidLedgerView, line: CoverageLine): 
   // ⚠ AGE CONVENTION, the same one payoutPattern.ts and claimClosure.ts use: a
   // claim written in year Y is at curve age 1 at the end of year Y.
   const curveAge = view.valuationYear - claim.accidentYear + 1;
-  const closed = isClaimClosed(resolveClosureCurve(line, claim.grossUltimate), claim.id, curveAge);
+  const closed = isClaimClosed(
+    resolveClosureCurve(line, claim.grossUltimate), view.gameId, claim.id, curveAge,
+  );
   return {
     // ⚠ BLANK, NOT ZERO, when the accident year has no ledger entry. This
     // workbook's own convention is that an empty cell is not a zero, and a claim
@@ -712,6 +717,13 @@ export function buildClaimsWorkbook(
   lockedResults: ResultSet[],
   activeLines: CoverageLine[],
   poolState?: PoolState,
+  // ⚠ THE GAME'S IDENTITY, AND IT IS REQUIRED FOR STATUS TO BE CORRECT. Every
+  // claim's closure draw hashes (gameId, claimId); without it the same claim SLOT
+  // closes at the same age in every game. Defaulted rather than made mandatory
+  // only so an existing caller cannot silently pass `undefined` in the wrong
+  // position — a caller that omits it gets one fixed pseudo-game, which
+  // closure-draw-check would catch immediately.
+  instanceId = '',
 ): XLSX.WorkBook {
   const wb = XLSX.utils.book_new();
   const orderedLines = FIXED_LINE_ORDER.filter(l => activeLines.includes(l));
@@ -742,7 +754,7 @@ export function buildClaimsWorkbook(
     if (!builder) continue;
     const rows = collectLineClaims(lockedResults, line);
     const dev = devByLine.get(line) ?? new Map<string, OccDevelopment>();
-    const view = buildPaidLedgerView(rows, lockedResults, poolState, line);
+    const view = buildPaidLedgerView(rows, lockedResults, poolState, line, instanceId);
     const ws = XLSX.utils.aoa_to_sheet(builder.rows(rows, dev, years, view));
     applyFormats(ws, builder.formats(years), builder.noteRows + 1);
     XLSX.utils.book_append_sheet(wb, ws, line);

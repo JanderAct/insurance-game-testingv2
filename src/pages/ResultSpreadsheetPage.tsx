@@ -112,7 +112,7 @@ export default function ResultSpreadsheetPage({ lockedResults, activeLines, inst
               // A SEPARATE workbook, deliberately — see claimsExport.ts. The
               // results workbook above is a per-metric summary; claim-level
               // detail is thousands of rows and does not belong bolted onto it.
-              const wb = buildClaimsWorkbook(lockedResults, activeLines, poolState);
+              const wb = buildClaimsWorkbook(lockedResults, activeLines, poolState, instanceId);
               XLSX.writeFile(wb, claimsExportFilename);
             }}
             className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"

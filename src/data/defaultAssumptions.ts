@@ -1506,72 +1506,116 @@ export const LINE_PAYOUT_PATTERN: Record<string, PayoutPattern> = FITTED_PAYOUT_
 // CLAIM CLOSURE CURVES — see claimClosure.ts for the form and the discipline.
 //
 // Fitted against the pool's own closure experience, each line separately, on the
-// share of REPORTED claims closed by age. Every line reports in its accident
-// year (no report lag anywhere in the engine), so reported is the whole
-// register and no reporting adjustment sits between the fit and the use.
+// share of REPORTED claims closed by age.
 //
-// ⚠ CLOSURE IS SLOWER THAN PAYMENT AND THE TWO ARE SEPARATE PARAMETERS. WC pays
-// 41% of a cohort's dollars in year one and closes 49% of its files; GL pays 10%
-// and closes 27%. Compare the k's against FITTED_PAYOUT_PATTERN's — WC closure
-// 0.592 against payout 0.64, GL closure 1.354 against payout 1.88 — they are
-// genuinely different fits, not one number wearing two names.
+// ⚠ CORRECTED ONTO A NO-LATE-REPORTING BASIS BEFORE FITTING, and that correction
+// is the single largest thing separating these numbers from the previous ones.
+// The source measures closed over the count REPORTED SO FAR, and that count
+// keeps growing — claims are still being reported at age 5. The model has no
+// report lag at all: every claim exists at age 0 and the count is final from the
+// start. So the source's raw share is closed over a denominator that is still
+// filling, and applying it to a full denominator closes too many claims too
+// early.
 //
-// Residuals against the fitted points: WC RMSE 0.026 (worst -0.046 at age 2),
-// GL 0.018 (worst -0.027 at age 2), Property 0.010 (worst -0.020 at age 5).
+// Each source age's closed share is therefore divided by that age's reported
+// development factor before fitting. The reported count grows 12.16% from age 1
+// to ultimate, so age 1 carries a factor of 0.8916 and the correction decays at
+// 0.4421 per step — two numbers that reproduce the whole adjustment, recorded
+// here for the same reason k and b are, and with no counts.
 //
-// ⚠ PROPERTY REACHES 1.000 IN THE SOURCE AND A WEIBULL CANNOT. The fit reads
-// 0.998 at age 10 and approaches 1 without arriving. Harmless for a closure
-// rule — nothing divides by the open share — but recorded rather than hidden,
-// because it is the same asymptote-versus-observed-100% question the cohort
-// close rule settles by fiat in payoutPattern.ts.
+// ⚠ THIS IS A CALIBRATION, NOT A MECHANIC. The alternative was to give the model
+// late reporting — a status layer, or a real report lag — and it was rejected:
+// adding a mechanic to fix a calibration is backwards, and the honest statement
+// is that this model has no late reporting and its closure curve is calibrated
+// to that. FOURTH SIGHTING of the removed report lag (a stale WC header,
+// understated workbook counts, the closure discrepancy, now this basis); if
+// there is a fifth, the assumption deserves one commit that states everywhere it
+// is load-bearing.
+//
+// ⚠ CLOSURE IS SLOWER THAN PAYMENT AND THE TWO ARE SEPARATE FITS. Compare the
+// k's against FITTED_PAYOUT_PATTERN's — WC closure 0.670 against payout 0.64, GL
+// closure 1.410 against payout 1.88. Genuinely different, not one number wearing
+// two names.
+//
+// ⚠ THE AGE-1 RESIDUAL DOES NOT CLOSE, AND IT IS THE OBJECTIVE RATHER THAN THE
+// BASIS OR THE FORM. On the corrected series the fit still sits +3.42 points
+// above WC's age-1 target (47.46% against 44.05%), and GL +2.33. Unweighted
+// least squares over ages 1-10 spends its accuracy at ages where everything is
+// closed and nothing is at stake. Measured alternatives on the same Weibull and
+// the same corrected data: 1/age weights cut WC's age-1 residual to +1.49
+// (RMSE 0.0257 -> 0.0304), an age-1 x8 weight to +0.64 (RMSE 0.0292). NOT taken
+// here, because this commit changes the BASIS and changing the objective in the
+// same commit would confound the re-measurement it exists to enable. It is the
+// next decision, not an oversight.
+//
+// Residuals on the corrected series: WC RMSE 0.026, GL 0.018, Property 0.010.
 // ===========================================================================
+export const CLOSURE_REPORTED_DEVELOPMENT = { ageOneFactor: 0.8916, decayPerStep: 0.4421 };
+
 export const FITTED_CLOSURE_CURVE: Record<string, ClosureCurve> = {
-  WC: { k: 0.592, b: 1.640 },
-  GL: { k: 1.354, b: 2.180 },
-  Property: { k: 0.912, b: 1.340 },
+  WC: { k: 0.670, b: 1.930 },
+  GL: { k: 1.410, b: 2.300 },
+  Property: { k: 1.000, b: 1.550 },
 };
 
 // ===========================================================================
 // THE SIZE SPLIT — WC ONLY, AND THE ATTEMPT TO EXTEND IT FAILED ON MEASUREMENT.
 //
 // Closure correlates with size, and on WC it is extreme: of claims over $100k,
-// ZERO of the first year's cohort closed at age 1, 0.6% at 2, 2.5% at 3, against
+// ZERO of the first year's cohort closed at age 1 and 2.5% by age 3, against
 // 49/72/77 for all claims. A size-blind rule would hold trivial files open for
 // years and let large ones close early, and both are wrong.
 //
-// So WC's all-claims curve above is treated as a MIXTURE of a large-claim curve
-// and a small-claim one. The large-claim curve is fitted directly; the mixture
-// weight comes from the pool's own observation that from age 10 onward roughly
-// half of everything still open is over $100k, which pins the large share at
-// 6.94%; the small-claim curve is then backed out of WC's own all-claims fit.
-// Recombining reproduces WC's all-claims curve to within 0.007 — a fact used
-// only to identify the split, so reproducing it is evidence the split is real.
+// So WC's all-claims curve is treated as a MIXTURE of a large-claim curve and a
+// small-claim one, both fitted on the same no-late-reporting basis as the curves
+// above. The large curve is fitted directly; the small curve is backed out of
+// WC's own corrected all-claims curve at the mixture weight.
+//
+// ⚠ THE WEIGHT IS MEASURED, NOT INFERRED, AND THE INFERENCE WAS WRONG. It was
+// 6.94%, derived from the pool's observation that from age 10 onward roughly half
+// of everything still open is over $100k — an indirect chain, and the only
+// estimate available at the time. Measured directly on the model's own drawn
+// claims it is 4.65% (132,040 claims; by accident year 4.2 / 4.6 / 4.1 / 4.3 /
+// 5.1%, creeping up with severity trend). The model's WC severity is fitted to
+// the same pool, so the direct measurement is the better estimate of the pool's
+// own share and the inference chain simply gave the wrong answer.
+//
+// That matters twice over: the weight sets the mixture, AND the small-claim curve
+// is backed out USING the weight — so a wrong weight produced a wrong small
+// curve as well. Both are re-derived here at 4.65%.
+//
+// ⚠ THE MIXTURE NO LONGER REPRODUCES THE ALL-CLAIMS CURVE AS TIGHTLY: maxAbsErr
+// 0.041 against 0.007 before. That is not a regression in the split, it is the
+// same age-1 objective problem as above arriving twice — the small curve is
+// fitted by unweighted least squares to a back-out that has WC's fast-then-crawl
+// shape, and overshoots age 1 by the same ~3 points. Fixing the objective fixes
+// both.
 //
 // ⚠ AND IT DOES NOT TRANSPLANT TO GL OR PROPERTY. Applying the same large curve
-// and the same 6.94% weight to their own all-claims fits misses those fits by
-// 0.042 and 0.039 against WC's 0.007, and the reason is arithmetic rather than
-// tuning: both lines close 99-100% of their files by age 7-10, which cannot
-// happen if 7% of them are sitting on a curve that has reached only 44% by age
-// 10. Either those lines have no comparable large-claim slowdown or their large
-// share is far smaller; the source data cannot say which, so GL and Property
-// stay SIZE-BLIND on their own fitted curve and this is recorded as the reason
-// rather than presented as a simplification.
+// and weight to their own fits misses by 0.042 and 0.039 against WC's own, and
+// the reason is arithmetic rather than tuning: both lines close 99-100% of their
+// files by age 7-10, which cannot happen if a slice of them sits on a curve that
+// has reached only 44% by age 10. Either those lines have no comparable
+// large-claim slowdown or their share is far smaller; the source cannot say
+// which, so GL and Property stay SIZE-BLIND on their own fitted curve. Their
+// measured shares over $100k are 8.25% and 37.33%, recorded for whoever fits
+// them properly.
 //
 // DISPLACED BY: per-line size-conditional closure experience, if it is ever
 // fitted. Until then, do not assume WC's split onto another line.
 //
-// ⚠ THE $100k BOUNDARY IS NOMINAL AND WILL ERODE. It is the third instance of
-// this trap on this branch, after the $1M retention and the fixed severity cap,
-// and it is the reason a continuous size function is preferred to a threshold.
-// Not resolved here: this commit only READS the curves for display, so the
-// boundary moves nothing yet. The commit that makes closure drive the developing
-// subset is where it has to be settled.
+// ⚠ THE $100k BOUNDARY IS NOMINAL AND WILL ERODE — the third instance of this
+// trap after the $1M retention and the fixed severity cap, and the reason a
+// continuous size function is preferred to a threshold. Not resolved here: this
+// commit only READS the curves for display, so the boundary moves nothing yet.
+// The commit that makes closure drive the developing subset is where it has to
+// be settled.
 // ===========================================================================
 export const WC_LARGE_CLAIM_THRESHOLD = 100_000;
-export const WC_LARGE_CLAIM_SHARE = 0.0694;
+export const WC_LARGE_CLAIM_SHARE = 0.0465;
 export const WC_CLOSURE_BY_SIZE: { small: ClosureCurve; large: ClosureCurve } = {
-  small: { k: 0.658, b: 1.360 },
-  large: { k: 1.374, b: 14.860 },
+  small: { k: 0.720, b: 1.720 },
+  large: { k: 1.376, b: 14.870 },
 };
 
 // The curve a claim of this size on this line closes on.
