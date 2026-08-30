@@ -283,7 +283,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // changed of 28,500. Recaptured in the same commit rather than deferred to the
 // next range: a guard left red for everyone is a guard people learn to skip, and
 // this file's own history has the phantom "removed 300" line as the case study.
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v29.json');
+// v30: all 24 hashes moved. The developing subset is reselected as claims close,
+// so the claim register's values change and every workbook that reads them
+// changes with it. The SHAPE is unchanged — no column added, renamed or
+// reordered — which is what this guard is for and what distinguishes this from
+// v24, where the shape moved and no value did. See VALUE_IDENTITY_v30's note for
+// the control that attributes the value change: closure forced off reproduces
+// v29 bit for bit.
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v30.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

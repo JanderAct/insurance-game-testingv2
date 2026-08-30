@@ -1724,3 +1724,180 @@ smaller than the reserve at the opening.
 - GL's 97.5 and 99 CLF stops; the fixed nominal retention. Both after the playtest.
 
 v27 retired from the working tree; v28 kept as the immediate predecessor.
+
+---
+
+## v30 — the developing subset follows closure
+
+**Trigger:** one commit on `feature/payout-patterns`. The developing subset was drawn at inception
+and frozen for the cohort's life. Claims close now, so a frozen set ends its life pointing entirely
+at settled files. It is reselected once per valuation instead: a closed occurrence stands down and
+an open one is drawn size-weighted to replace it.
+
+### The null test IS available here, and that is not what was expected
+
+Every recapture since `sizeWeighted` has carried the same caveat — a selection change spends RNG,
+which reseeds the `ibner` stream, so no line-by-line comparison against a stored baseline can
+separate the mechanism from the reseed. **That caveat does not apply to this commit**, because the
+reselection draws were deliberately routed onto their own streams, keyed on
+`(seed, valuation year, line, accident year, purpose)`. `ibner` still takes exactly ten carrier
+picks at inception, in the same order, at the same place.
+
+So there is a control, and it is stronger than the mechanism-off substitute:
+
+| control | reading against v29 |
+|---|---|
+| **closure forced off** (`isClosed` → `() => false`), mechanism ON | **29,400 fields, 0 added, 0 removed, 0 differing** |
+| mechanism OFF (`DEVELOPMENT_CESSION_ENABLED = false`), parent vs child | **29,400 fields, 0 differing** |
+
+The first is the one that matters. With no claim ever closing, reselection is a no-op that spends
+no draw, and the tree is **bit-identical to the parent's**. Every value this commit moves is
+therefore attributable to closure driving reselection, and to nothing else — not to a reseed, not
+to the bench draw, not to the new fields.
+
+### What actually changed
+
+| gate | reading |
+|---|---|
+| value identity | **11,748 of 29,400 changed / 72 fields**, 0 added, 0 removed — all attributable, see above |
+| solo export guard | 24 of 24 moved — same cause |
+| both, against v30 | green after recapture |
+| `development-cession-check` | pass — three new invariants replace the frozen-subset one |
+| `development-sign-symmetry` | pass — WC 1.07x (was 1.07x), GL 1.03x (1.03x), **Property 0.88x (1.05x)** |
+| `ibner-null-check` | pass |
+| `paid-ledger-check` | pass |
+| `closure-draw-check` | pass |
+| `claims-workbook-check` | pass — after the promoted-occurrence fix below; it caught the defect |
+| `cohort-stock-check` | pass — growth ratio 0.67 (limit 0.75), yr20 604.6 KB / yr40 762.3 KB / yr60 868.2 KB |
+| `actuarial-memo-check` | pass |
+| `cession-path-independence` | **fails, and failed at the parent too** — WC −7.3% → −8.8% |
+| typecheck | clean |
+
+### The three invariants that replace "the developing subset is frozen"
+
+Deleting an invariant and replacing it with nothing is how the free lunch got in the first time, so
+the successors landed in the same commit that retired the original. What "frozen" was protecting was
+never that the set is *fixed* — it was that the set cannot be **rearranged** between the two
+directions of a valuation, or between valuations for any reason other than closure.
+
+1. **One set per valuation, both directions.** `reselectCarriers` is called once, above the step
+   loop, and `live` starts from what it returns. Asserted directly against the allocator (both
+   modes, both signs, one array) and by signature in-game (one movement entry per valuation, no
+   occurrence recorded twice).
+2. **Membership changes only by closure.** A claim leaves the carrier set only if closed and joins
+   only if open and previously untracked; no open occurrence ever stands down; closure is monotone;
+   a valuation with no closures spends no draw and returns the same objects.
+3. **Everything at or above the retention is still tracked while open.** A closed occurrence stands
+   down but stays in the register — evicting it would push its dollars into the anonymous untracked
+   mass and lose its cession position.
+
+Plus the survivors: originals frozen for the occurrences that remain, and the set never over its cap.
+
+### `claims-workbook-check` caught a real defect on the first run
+
+A promoted occurrence has **already moved** — it sat inside `untrackedTotal` while the proportional
+unwind pushed that mass up — and none of that drift is in a `movementByStep`, because nothing was
+tracking it individually. Differencing the valuation against its promotion value left
+`Booked + Σ movements` short of `Current` on **151 rows, every one in the squeezed arm** where the
+unwind is live. Fixed by differencing a promoted occurrence against its **booked** value, so its
+whole history arrives as one entry at the valuation it becomes visible in — which is the honest
+statement of what the pool knows: it was carrying the file inside an aggregate and started tracking
+it here.
+
+### The bench, and what it costs
+
+"Draw size-weighted from the open pool" needs the pool, and by valuation time there isn't one —
+everything untracked has collapsed into one scalar, which is what keeps this mechanism inside
+Ruling 8. So the draw happens at inception and waits on the cohort. Depth 40, chosen by measurement:
+
+| bench depth | no open carrier, WC | GL | Property | poolState at yr 20 |
+|---|---|---|---|---|
+| 0 (pure shrink) | 0.40% | 11.24% | 27.53% | 505.8 KB |
+| 20 | 0.00% | 6.87% | 7.67% | 581.2 KB |
+| **40** | **0.00%** | **5.62%** | **5.21%** | **610.8 KB** |
+| 80 | 0.00% | 5.15% | 5.21% | 642.2 KB |
+
+Property is flat from 40 to 80 because its **register** is exhausted, not its bench: 39 occurrences
+per accident year, of which 2.7 are still open at curve age 4. **For Property a bench of 40 is the
+whole register** — worth saying plainly, because it weakens this file's storage argument for exactly
+one line. That argument is about WC (475 occurrences/yr) and GL (316); Property was never the case
+the scalar was protecting against.
+
+### Clamp and spill moved an order of magnitude, and almost none of it costs anything
+
+| | parent | this commit |
+|---|---|---|
+| occurrence-years at exactly zero | 396 | 3,258 |
+| distinct occurrences ever zeroed | 67 | 716 |
+| … ever at or above the retention | — | **4** |
+| … that later re-inflate above the retention | 0 | **2** (limit 25) |
+
+A thinner, smaller carrier set is wiped by a smaller favourable movement, so zeroings rose ~11x. But
+an occurrence that was never near the retention ceded nothing to lose: of 716, four were ever at or
+above it and two re-inflated. The gate is on the harm, not the event, and the harm barely moved.
+
+### ⚠ Property's sign-symmetry ratio moved from 1.05x to 0.88x, and it is closure, not the bench
+
+The falsifier's gate is one-sided at 1.20x because it exists to catch **manufactured recovery**;
+0.88x means favourable now cedes *more* than adverse, which costs the pool rather than paying it.
+It still reads `ok` and it is still a real 12-point asymmetry where there was a 5-point one.
+
+The cause is not replenishment. Sweeping the bench isolates it:
+
+| bench depth | WC | GL | Property |
+|---|---|---|---|
+| parent (closure ignored) | 1.07x | 1.03x | **1.05x** |
+| 0 (pure shrink) | 1.09x | 1.04x | **0.92x** |
+| 40 | 1.07x | 1.03x | **0.88x** |
+| 120 | 1.07x | 1.03x | **0.88x** |
+
+Property is already at 0.92x with no bench at all, so **standing closed occurrences down is what
+moves it**; the bench adds 0.04 and saturates. The mechanism: Property's retention is $5M and its
+bench is drawn from occurrences below it, so as the original large carriers settle the set fills
+with sub-retention files. Adverse development onto them cedes almost nothing (25.2% → 14.0%), while
+a favourable movement larger than what they hold **spills** proportionally over the rest of the
+register — including the large above-retention occurrences, which do give back. Favourable 15.9%
+against adverse 14.0%.
+
+**The spill was specified as a boundary condition** — "it engages only past the carriers' whole
+value, so the marginal rate at any ordinary movement is untouched". On Property that assumption no
+longer holds, because the carriers' whole value is no longer large. The `BOTH PROPORTIONAL` control
+row in the same report reads 1.05x for Property, so the asymmetry is in the routing and not in the
+tower. Recorded, not fixed: fixing it is a change to the spill rule, and putting it in the same
+commit as reselection would confound the two.
+
+The pooled dollar-weighted ratio moved the other way, from 0.86x to **0.93x** — closer to 1.
+
+### A closed occurrence takes the unwind and takes no development draw
+
+The stochastic step is real deterioration on a file that is still moving, so reselection takes
+closed occurrences out of that set. The unwind is not development — it is the reversal of a booking
+markdown taken proportionally across the whole register at inception, closed occurrences included,
+since nothing had closed yet. Excluding them would leave them permanently marked down and would make
+every open occurrence's share depend on how many have closed, which is a composition dependency of
+exactly the kind the replacement rule is chosen to avoid. The decisive argument is the untracked
+mass: closure is invisible inside a scalar, so the ~490 occurrences it stands for take their share
+whatever their status, and a closed *tracked* occurrence that did not would be behaving differently
+from a closed *untracked* one of the same size — an asymmetry created by a storage decision.
+
+### Recorded, not fixed
+
+- **The fully-closed register that is still unpaid.** A cohort can reach a valuation with every
+  claim closed while it still carries an unpaid balance and still develops — 0.59% of GL
+  cohort-valuations, 0.61% of Property's, worst case 19.2% of ultimate unpaid on a settled register.
+  Closure is monotone and there is no late reporting, so it is neither reopening nor emergence: it
+  is two clocks that never talk. Payment runs on the payout pattern in **dollars** per cohort;
+  closure runs on the closure curve in **counts** per claim. `claimClosure.ts` sets out why neither
+  may be derived from the other. What nothing enforces is that the count clock cannot reach 100%
+  while the dollar clock is short — and at the tail it occasionally laps it. Noted at the
+  reselection site, since that is where the next reader meets it.
+- **`cession-path-independence` was already failing at the parent** (WC −7.3%, CI excluding zero)
+  and reads −8.8% here. Same finding, slightly larger; not opened by this commit.
+- **Two stale unit assertions in `development-cession-check`** print `FAIL` on the two spill cases
+  and did so identically at the parent. The assertion "carriers-mode development never reaches a
+  non-carrier" predates the spill path, which reaches non-carriers by design. They do not gate.
+- **`end/DRAWN` in `cession-path-independence` is no longer apples-to-apples.** It compares the
+  tracked set's value at the end against its inception sum, and the set can now grow by promotion,
+  so the ratio moved 1.230 → 1.451 on WC largely by composition rather than by development.
+
+v28 retired from the working tree; v29 kept as the immediate predecessor.

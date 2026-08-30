@@ -24,12 +24,13 @@ function mergeShockRecords(lineResults: LineResultSet[]): ShockRecord[] | undefi
   return merged.size > 0 ? [...merged.values()] : undefined;
 }
 import { SeededRandom, deriveSubRng } from './random';
-import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, IBNER_BOOKING_BIAS_COEFF, IBNER_HORIZON, IBNER_STEP_MIXTURE, IBNER_TOTAL_SD, IBNER_UNWIND_DECAY, LINE_PAYOUT_PATTERN, MEMBER_LOSS_VOLATILITY, OPERATING_CASH_PCT_OF_PREMIUM, PROPERTY_HELD_PURE_PREMIUM_PER_100, RISK_CONTROL_PARAMS, WC_LOSS_MODEL } from '../data/defaultAssumptions';
+import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, IBNER_BOOKING_BIAS_COEFF, IBNER_HORIZON, IBNER_STEP_MIXTURE, IBNER_TOTAL_SD, IBNER_UNWIND_DECAY, LINE_PAYOUT_PATTERN, MEMBER_LOSS_VOLATILITY, OPERATING_CASH_PCT_OF_PREMIUM, PROPERTY_HELD_PURE_PREMIUM_PER_100, RISK_CONTROL_PARAMS, WC_LOSS_MODEL, resolveClosureCurve } from '../data/defaultAssumptions';
 import type { TowerLine } from '../data/reinsuranceTower';
 import {
   DEVELOPMENT_ALLOCATION, DEVELOPMENT_CESSION_ENABLED, STOCHASTIC_ALLOCATION_MODE,
-  allocateDevelopment, buildTrackedSet, cedeDevelopment, markDownForBooking,
+  allocateDevelopment, buildTrackedSet, cedeDevelopment, markDownForBooking, reselectCarriers,
 } from './developmentAllocation';
+import { isClaimClosed } from './claimClosure';
 import {
   aggregateRecovery,
   cedeOccurrences,
@@ -256,6 +257,33 @@ function projectedRcEffectiveness(
 // Every other line gets its own independent stream via a suffixed label.
 function lineRngLabel(base: string, line: CoverageLine): string {
   return line === 'WC' ? base : `${base}_${line}`;
+}
+
+// ============================================================================
+// THE RESELECTION STREAM — ITS OWN, AND THAT IS THE WHOLE POINT.
+//
+// Reselecting the developing subset draws size-weighted, and a size-weighted
+// draw consumes RNG. Taking those draws from `ibner` would move every
+// subsequent draw in that stream — the lognormal step, the horizon, the step
+// multiplier, the inception carrier picks — so a commit that changes WHICH
+// claims develop would arrive as an indistinguishable mixture of that change
+// and a reseed of everything else, and no before-and-after could separate them.
+//
+// So reselection gets streams keyed on (seed, valuation year, line, accident
+// year, purpose). `ibner` is untouched by this commit: it still takes its ten
+// carrier picks at inception, in the same order, at the same point.
+//
+// ⚠ THE ACCIDENT YEAR IS IN THE KEY, NOT JUST THE VALUATION YEAR. Every open
+// cohort reselects at the same valuation, so a key without it would hand a
+// dozen cohorts the same stream and correlate their replacements.
+// ============================================================================
+// Shared empty set — a valuation with no promotions allocates nothing.
+const EMPTY_PROMOTIONS: Set<string> = new Set();
+
+function reselectRng(
+  seed: number, line: CoverageLine, accidentYear: number, valuationYear: number, purpose: string,
+): SeededRandom {
+  return deriveSubRng(seed, valuationYear, `${lineRngLabel('reselect', line)}:ay${accidentYear}:${purpose}`);
 }
 
 // Context needed to process a single line's year. cash is this line's
@@ -1157,7 +1185,7 @@ export function processLineYear(
     netPaidThisYear,
     developmentCeded,
     unallocatedDevelopment,
-  } = processIbner(lineState.reserveCohorts, line, ibnerRng);
+  } = processIbner(lineState.reserveCohorts, line, ibnerRng, instance.instanceId, instance.seed, yearNumber);
   void unallocatedDevelopment;   // surfaced by the harness, not by the result
 
   // Current year reserve assumption: 60% unpaid, 40% paid. NET basis —
@@ -1185,6 +1213,12 @@ export function processLineYear(
     ? normalizeLayersPlaced(line as TowerLine, lineDecisions.layersPlaced)
     : undefined;
 
+  //
+  // ⚠ THE BENCH TAKES ITS PICKS FROM A DIFFERENT STREAM, and that is why this
+  // commit does not re-roll a single game. The carriers still take exactly
+  // DEVELOPMENT_ALLOCATION.claimCount draws from `ibnerRng`, in the same order,
+  // at the same point; the bench's draws come from a reselection stream. See
+  // reselectRng above and developmentAllocation.ts's RESELECTION block.
   const trackedSet = DEVELOPMENT_CESSION_ENABLED && hasTractableCeded
     ? buildTrackedSet(
         line as TowerLine,
@@ -1193,8 +1227,9 @@ export function processLineYear(
         occurrenceTotals(generatedClaims ?? [], generatedOccurrences ?? []),
         DEVELOPMENT_ALLOCATION,
         ibnerRng,
+        reselectRng(instance.seed, line, yearNumber, yearNumber, 'bench'),
       )
-    : { tracked: [], untrackedTotal: 0 };
+    : { tracked: [], untrackedTotal: 0, bench: [] };
 
   // ⚠ MARKED DOWN BY THE COHORT'S OWN BIAS DOLLARS — registerSum x bias, the
   // same amount the unwind will add back — so the unwind restores the claims TO
@@ -1203,7 +1238,7 @@ export function processLineYear(
   // the two do not cancel and the residual cedes.
   const markdown = DEVELOPMENT_CESSION_ENABLED && hasTractableCeded && placedAtInception
     ? markDownForBooking(line as TowerLine, trackedSet, netUltimateLoss * bookingBias, placedAtInception)
-    : { tracked: trackedSet.tracked, untrackedTotal: trackedSet.untrackedTotal, giveBack: 0, markedDown: 0 };
+    : { tracked: trackedSet.tracked, bench: trackedSet.bench, untrackedTotal: trackedSet.untrackedTotal, giveBack: 0, markedDown: 0 };
 
   // THE ACCIDENT YEAR'S INITIAL BOOKING. netUltimateLoss is the register sum —
   // exactly what the generator drew, net of the tower — and it is frozen as
@@ -1270,6 +1305,9 @@ export function processLineYear(
     bookingBias,
     developingClaims: markdown.tracked,
     untrackedTotal: markdown.untrackedTotal,
+    // Omitted rather than stored empty, so a cohort with no replacements to
+    // offer carries no field at all.
+    developmentBench: markdown.bench.length > 0 ? markdown.bench : undefined,
     cededDevelopmentToDate: markdown.giveBack,
     placedAtInception,
   };
@@ -2875,6 +2913,16 @@ function processIbner(
   cohorts: ReserveCohort[],
   line: CoverageLine,
   rng: SeededRandom,
+  // ⚠ THE GAME IDENTITY, NOT THE SEED, IS WHAT CLOSURE HASHES. See
+  // claimClosure.ts: the numeric seed is a pure function of the instance id, so
+  // the two carry identical information, and the id is the one the claims
+  // workbook already uses — passing it here is what makes the engine's view of
+  // "which claims are closed" and the workbook's view the SAME view rather than
+  // two derivations that agree by inspection.
+  gameId: string,
+  // The seed, separately, because the reselection streams are derived from it.
+  seed: number,
+  valuationYear: number,
 ): {
   developmentImpact: number;
   updatedCohorts: ReserveCohort[];
@@ -2900,6 +2948,69 @@ function processIbner(
       let developingClaimsOut = c.developingClaims;
       let cededToDate = c.cededDevelopmentToDate ?? 0;
       let untrackedOut = c.untrackedTotal;
+      let benchOut = c.developmentBench;
+      let promotedIds: Set<string> = EMPTY_PROMOTIONS;
+
+      // ====================================================================
+      // RESELECT THE DEVELOPING SUBSET — ONCE, HERE, BEFORE ANYTHING MOVES.
+      //
+      // ⚠ ONE SET PER VALUATION, USED BY BOTH DIRECTIONS. This is the direct
+      // successor to the retired "developing subset changed" invariant, and it
+      // is the same guard. What "frozen" was protecting was never that the set
+      // is FIXED — it was that the set cannot be REARRANGED between the
+      // stochastic step and the unwind, or between one valuation and the next
+      // for any reason other than closure. Routing the two directions through
+      // different sets is exactly the asymmetry that manufactured $48.2M of
+      // recovery on WC against a register that moved favourable; doing it with
+      // the valuation clock instead of the sign would be the same defect
+      // wearing a different hat. So this is called ONCE, above the steps, and
+      // `live` starts from what it returns.
+      //
+      // ⚠ THE AGE IS c.age + 2, THE VALUATION BEING STRUCK — the same age the
+      // paydown lookup uses two lines below, and the same age the claims
+      // workbook resolves a claim's Status at (`valuationYear - accidentYear +
+      // 1`). That agreement is the reason for the choice rather than a
+      // coincidence of conventions: a reader checking the register against the
+      // workbook must never find an occurrence marked Closed carrying a
+      // movement at the valuation that closed it.
+      //
+      // ⚠ THE CLOSURE CURVE IS RESOLVED ON `drawn`, THE OCCURRENCE TOTAL. That
+      // is the claim's own gross ultimate today, because every occurrence sums
+      // exactly one claim on all three lines (see occurrenceTotals). If a
+      // multi-claim occurrence ever returns, this resolves the size split on a
+      // sum rather than on a claim and has to be revisited — the workbook would
+      // then be resolving a different curve for the same file.
+      //
+      // ⚠ AND THE CAP IS ZERO ONCE THE COHORT HAS MATURED. A matured cohort
+      // takes no development, so there is nothing to carry and nothing to
+      // replace; its statuses are still refreshed, so the register keeps
+      // reading true, and its bench is dropped because nothing will ever draw
+      // from it again. That is what bounds the bench's storage by the horizon
+      // rather than by the length of the game.
+      if (DEVELOPMENT_CESSION_ENABLED && c.developingClaims && c.developingClaims.length > 0) {
+        const curveAge = c.age + 2;
+        const rs = reselectCarriers(
+          c.developingClaims,
+          c.developmentBench ?? [],
+          c.untrackedTotal ?? 0,
+          (claimId, drawn) => isClaimClosed(resolveClosureCurve(line, drawn), gameId, claimId, curveAge),
+          developing ? DEVELOPMENT_ALLOCATION.claimCount : 0,
+          reselectRng(seed, line, c.yearNumber, valuationYear, 'carriers'),
+        );
+        developingClaimsOut = rs.tracked;
+        untrackedOut = rs.untrackedTotal;
+        promotedIds = rs.promotedIds;
+        benchOut = developing && rs.bench.length > 0 ? rs.bench : undefined;
+        // ⚠ rs.retired / rs.promoted / rs.short ARE NOT RETURNED, deliberately.
+        // Every one of them is recoverable by differencing the cohort before
+        // and after — retired is a carrier that is now closed, promoted is a
+        // claim id present after and absent before, short is a developing
+        // cohort carrying fewer than the cap. development-cession-check
+        // already holds both sides of the step and derives them there, which
+        // keeps the engine from carrying a counter nothing in the game reads.
+      } else if (!developing) {
+        benchOut = undefined;
+      }
 
       // ⚠ PAY FIRST, THEN DEVELOP WHAT REMAINS. Paid is history and never moves.
       // This ordering is the whole fix — see the block comment above.
@@ -3017,13 +3128,21 @@ function processIbner(
         // development ENTIRE. That is the honest default rather than inventing
         // claims to cede against, and it is 0.4% of all adverse development, so
         // it does not matter much either.
-        const claims = c.developingClaims;
+        //
+        // ⚠ THE RESELECTED SET, NOT THE COHORT'S STORED ONE. Reselection ran
+        // above and may have stood carriers down and promoted replacements
+        // in; taking `c.developingClaims` here would develop the set as it was
+        // at the LAST valuation and then overwrite it with the reselected one,
+        // which is a rearrangement between the set that moves and the set that
+        // is recorded.
+        const claims = developingClaimsOut;
         const canCede = DEVELOPMENT_CESSION_ENABLED && claims !== undefined && claims.length > 0;
 
         if (canCede) {
           const placed = c.placedAtInception ?? normalizeLayersPlaced(line as TowerLine, undefined);
           let live = claims;
-          let untracked = c.untrackedTotal ?? 0;
+          let untracked = untrackedOut ?? 0;
+          const untrackedAtStep = untracked;
 
           // ⚠ TWO MOVEMENTS, TWO MODES, APPLIED SEPARATELY — and they cannot be
           // summed first. The unwind REVERSES a markdown that was applied
@@ -3044,6 +3163,31 @@ function processIbner(
           // argument, the grid that rules out every other cell, and the
           // second-order residual this does NOT close are in
           // developmentAllocation.ts's header.
+          //
+          // ⚠ A CLOSED OCCURRENCE TAKES THE UNWIND AND TAKES NO DEVELOPMENT
+          // DRAW, and the split is not an oversight in either direction.
+          //
+          // The stochastic step is real deterioration or real redundancy on a
+          // file that is still moving, so it goes to the carriers and
+          // reselection has already taken the closed ones out of that set.
+          //
+          // The unwind is not development. It is the REVERSAL OF A BOOKING
+          // MARKDOWN taken proportionally across the whole register at
+          // inception — closed occurrences included, since nothing had closed
+          // yet — so it comes back the same way. Excluding closed occurrences
+          // from it would do two things, both worse than the oddity it would
+          // remove. It would leave them permanently marked down, so the
+          // register never returns to what the generator drew. And it would
+          // make every open occurrence's share of the unwind depend on HOW
+          // MANY have closed, which is a composition dependency of exactly the
+          // kind the replacement rule is chosen to avoid.
+          //
+          // The decisive one is the untracked mass: it is a scalar, closure is
+          // invisible inside it, and the ~490 occurrences it stands for take
+          // their proportional share whatever their status. A closed TRACKED
+          // occurrence that did not would be behaving differently from a
+          // closed UNTRACKED one of the same size, which is an asymmetry
+          // created by a storage decision.
           const stochastic = newUnpaid * (factor - 1);
           const steps: { amount: number; mode: 'carriers' | 'proportional' }[] = [
             { amount: stochastic, mode: STOCHASTIC_ALLOCATION_MODE },
@@ -3080,14 +3224,42 @@ function processIbner(
           // Written at index `age` rather than pushed, for the same reason
           // recordReserveDevelopment writes at an index: a replayed year must
           // restate its own entry, not append a second one.
+          //
+          // ⚠ A PROMOTED OCCURRENCE IS DIFFERENCED AGAINST ITS BOOKED VALUE,
+          // NOT ITS PROMOTION VALUE, and that is what keeps the per-claim
+          // series reconcilable. It has been moving all along inside the
+          // untracked mass — the proportional unwind reaches every dollar of
+          // the register, tracked or not — and none of that movement is in a
+          // series, because nothing was watching it individually. Differencing
+          // against `current` would leave `original + sum(movements)` short of
+          // `current` by exactly that drift, which claims-workbook-check
+          // asserts per row and caught here on 151 rows, every one in the
+          // squeezed arm where the unwind is live.
+          //
+          // So the whole of a promoted occurrence's history arrives as one
+          // entry at the valuation it becomes visible in. That is the honest
+          // statement of what the pool knows: it was carrying this file inside
+          // an aggregate and started tracking it here.
           developingClaimsOut = live.map((d, i) => {
-            const moved = d.current - claims[i].current;
+            const base = promotedIds.has(d.claimId) ? claims[i].original : claims[i].current;
+            const moved = d.current - base;
             const series = [...(d.movementByStep ?? [])];
             while (series.length < c.age) series.push(0);
             series[c.age] = moved;
             return { ...d, movementByStep: series };
           });
           untrackedOut = untracked;
+          // ⚠ THE BENCH FOLLOWS THE UNTRACKED MASS, because that is where its
+          // dollars still are. Every allocation path gives the untracked total
+          // a share PROPORTIONAL to what it holds, so one factor carries every
+          // benched occurrence correctly — this is the same fact that lets the
+          // mass be a single scalar in the first place. Applied after the
+          // steps and after any promotion, so a promoted occurrence's dollars
+          // are counted in the tracked list and not a second time here.
+          if (benchOut && benchOut.length > 0 && untrackedAtStep > 0 && untracked !== untrackedAtStep) {
+            const f = untracked / untrackedAtStep;
+            benchOut = benchOut.map(b => ({ ...b, current: b.current * f }));
+          }
         } else {
           // ⚠ THE DISABLED PATH IS THE ORIGINAL EXPRESSION, CHARACTER FOR
           // CHARACTER, AND IT HAS TO BE. An earlier version routed both paths
@@ -3184,6 +3356,7 @@ function processIbner(
         closed: closing,
         developingClaims: developingClaimsOut,
         untrackedTotal: untrackedOut,
+        developmentBench: benchOut,
         cededDevelopmentToDate: cededToDate,
       };
     });

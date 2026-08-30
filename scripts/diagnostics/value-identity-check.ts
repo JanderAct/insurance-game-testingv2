@@ -344,7 +344,23 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // list under BOTH arms — which is the report shape that says "structurally dead"
 // rather than "inactive in this configuration". bookingGiveBack, zero in `def`
 // and live in `sqz`, is the contrast the per-arm split exists to draw.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v29.json');
+// v30: THE DEVELOPING SUBSET NOW FOLLOWS CLOSURE — 11,748 of 29,400 changed
+// across 72 fields, 0 added, 0 removed.
+//
+// ⚠ AND THIS ONE HAS A REAL CONTROL, WHICH NO CAPTURE SINCE sizeWeighted HAS
+// HAD. The standing caveat is that a selection change spends RNG and reseeds the
+// `ibner` stream, so a line-by-line diff cannot separate mechanism from reseed.
+// It does not apply here: the reselection draws were routed onto their own
+// streams keyed on (seed, valuation year, line, accident year, purpose), and
+// `ibner` still takes exactly ten carrier picks at inception in the same order.
+//
+// So the control is CLOSURE FORCED OFF rather than the mechanism switch. With
+// `isClosed` stubbed to `() => false`, reselection is a no-op that spends no
+// draw, and the mechanism-ON tree is BIT-IDENTICAL to v29: 29,400 fields, 0
+// added, 0 removed, 0 differing. Every one of the 11,748 moved values is
+// therefore closure driving reselection and nothing else. The mechanism-off
+// before-and-after was run too and is also 0 differing.
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v30.json');
 
 function seedOf(id: string) {
   let h = 5381;

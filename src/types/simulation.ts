@@ -376,11 +376,21 @@ export interface DecisionSet {
 
 // ONE OCCURRENCE CARRYING AN ACCIDENT YEAR'S DEVELOPMENT.
 //
-// The subset is chosen once at inception (see developmentAllocation.ts) and
-// fixed for the cohort's life, so the same claims keep deteriorating rather
-// than a fresh subset appearing each valuation. That is both how a real book
-// reads and what makes "which claims developed" a coherent story in the
-// register.
+// The subset is drawn at inception (see developmentAllocation.ts) and is
+// RESELECTED ONCE PER VALUATION AS CLAIMS CLOSE: a claim that has closed stops
+// carrying development and an open one takes its place. Between closures the
+// set does not move, so the same claims keep deteriorating rather than a fresh
+// subset appearing each valuation — which is both how a real book reads and
+// what makes "which claims developed" a coherent story in the register.
+//
+// ⚠ THE SET WAS FROZEN FOR ITS WHOLE LIFE UNTIL THE CLOSURE CURVES LANDED, and
+// what "frozen" was protecting was NOT that the set is fixed. It was that the
+// set cannot be REARRANGED — between the two directions of a valuation, or
+// between one valuation and the next for a reason other than closure. A set
+// that is reselected on closure alone, once, and then used for both directions
+// keeps every bit of that protection. See developmentAllocation.ts's
+// RESELECTION block and the three invariants development-cession-check now
+// asserts in place of the frozen-subset one.
 //
 // ⚠ ONLY THE SUBSET IS STORED, NOT THE WHOLE REGISTER, and that is what keeps
 // this inside Ruling 8's storage budget. Cession is per occurrence and
@@ -398,9 +408,24 @@ export interface DevelopingClaim {
   original: number;
   /** The occurrence total now, after every movement to date. GROSS. */
   current: number;
-  /** True if this occurrence carries ADVERSE development. Favourable movements
-   *  reach every tracked occurrence regardless. */
+  /** True if this occurrence is currently in the developing subset. Both
+   *  directions of the stochastic step go to it — the name predates symmetric
+   *  routing and is kept because it is the word every gate and comment uses.
+   *
+   *  ⚠ THIS MOVES NOW, AND IT MOVES ONLY ON CLOSURE. It is cleared when the
+   *  occurrence closes and set when an open occurrence is drawn to replace one
+   *  that did. It never changes for any other reason and never changes between
+   *  the two directions of a valuation. */
   carrier: boolean;
+  /** True once this occurrence's claim has closed, as at the last valuation
+   *  that reselected. Closure is a pure function of (gameId, claimId, curve,
+   *  age) — see claimClosure.ts — so this is a CACHE of a derived fact, carried
+   *  so the register can be read without re-deriving it, never a source of
+   *  truth. Monotone: a closed occurrence never reopens.
+   *
+   *  ⚠ A CLOSED OCCURRENCE STILL TAKES THE PROPORTIONAL UNWIND, and that is
+   *  deliberate — see processIbner. It takes no development draw. */
+  closed?: boolean;
   /** THIS OCCURRENCE'S MOVEMENT AT EACH VALUATION, oldest first. Index k is the
    *  step taken from age k to age k+1, so it belongs to valuation year
    *  `yearNumber + k + 1` of the cohort that holds it. The two movements a step
@@ -428,6 +453,41 @@ export interface DevelopingClaim {
    *  (scripts/diagnostics/claims-workbook-check.ts): 12.7-13.5 KB of a 389 KB
    *  serialised poolState, 3.3-3.5% of it and ~0.27% of a 5MB quota. */
   movementByStep?: number[];
+}
+
+// ============================================================================
+// A REPLACEMENT WAITING TO BE CALLED ON — an occurrence drawn size-weighted at
+// inception, sitting inside `untrackedTotal` until a carrier closes.
+//
+// ⚠ IT IS NOT TRACKED AND IT CEDES NOTHING WHILE IT SITS HERE. That is the
+// whole point of keeping it in a separate array rather than in
+// `developingClaims` with carrier: false. A benched occurrence is below the
+// retention by construction, and its dollars are still counted inside
+// `untrackedTotal`; promoting it into the tracked set moves the same dollars
+// from the scalar into the list and nothing else. If it were tracked from
+// inception it would begin to cede the moment the proportional unwind pushed
+// it over the retention — while an identical occurrence that happened not to be
+// drawn would not. Being on a storage shortlist is not a reason to cede.
+//
+// ⚠ `current` MIRRORS THE UNTRACKED MASS AND IS NOT INDEPENDENT STATE. The
+// untracked total only ever moves multiplicatively — every allocation path
+// gives it a share proportional to what it holds — so each benched occurrence's
+// value is its booked value scaled by the same factor the mass moved by.
+// processIbner applies that factor each valuation. It is carried rather than
+// recomputed because promotion removes dollars from the mass, which breaks the
+// single-ratio shortcut the moment it happens.
+// ============================================================================
+export interface BenchClaim {
+  claimId: string;
+  occurrenceId: string;
+  /** As the generator drew it, GROSS. Never moves. Also the size the closure
+   *  curve is resolved on, exactly as for a tracked occurrence. */
+  drawn: number;
+  /** As first BOOKED — `drawn` less this cohort's optimistic markdown. */
+  original: number;
+  /** Its share of the untracked mass now. Becomes the occurrence's `current` on
+   *  promotion, so no dollars are created or lost by promoting. */
+  current: number;
 }
 
 // Annual reserve cohort for simplified development. NET basis: losses enter
@@ -523,6 +583,19 @@ export interface ReserveCohort {
   // they never cede; carried so a proportional movement gets the shares right
   // without storing five hundred numbers per cohort.
   untrackedTotal?: number;
+  // ⚠ THE REPLACEMENTS, DRAWN AT INCEPTION AND HELD UNTIL NEEDED. Reselection
+  // has to draw a replacement carrier SIZE-WEIGHTED from the open register, and
+  // by valuation time the register is gone — everything not tracked has
+  // collapsed into the one scalar above, and there is no list left to draw from.
+  // So the draw happens at inception, when the register still exists, and its
+  // result waits here. See developmentAllocation.ts's RESELECTION block for why
+  // a bench and not a rule over the tracked set, and what it costs.
+  //
+  // Dropped the moment the cohort matures, because nothing reselects after
+  // that. Bounded by construction: only cohorts still inside their horizon
+  // carry one, so at most 12 WC + 8 GL + 4 Property cohorts hold a bench at any
+  // valuation however long the game runs.
+  developmentBench?: BenchClaim[];
   // ⚠ CUMULATIVE DEVELOPMENT THE TOWER HAS TAKEN OFF THIS COHORT, and it RESTATES
   // A STANDING IDENTITY. ibner-null-check asserted that a matured cohort's
   // netUltimate equals registerSum exactly — the statement that the optimistic
