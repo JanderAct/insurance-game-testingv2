@@ -17,6 +17,34 @@
 // components reveal it, so only the components are asserted.
 // ============================================================================
 //
+// ============================================================================
+// ⚠ THIS GATE WAS RED FOR 62 COMMITS AND SIX DAYS, AND THE CAUSE WAS IN THIS
+// FILE. Recorded because the shape of the miss matters more than the miss.
+//
+//   a9faf09  green, exit 0, both sections, all three lines
+//   0a465df  "Price WC on four held class rates" — red on WC, and the same
+//            failure signature it still had at b5acdaa
+//
+// 0a465df gave currentPurePremiumPer100 a members parameter so WC's pure
+// premium could blend four held class rates over the enrolled book. It updated
+// THREE OF THE FOUR CALL SITES — both engine sites and the panel — and left
+// this one. Nothing failed at compile time, because the parameter has a default
+// of `[]`, and the default silently means "the full-roster constant" rather
+// than "no book supplied".
+//
+// ⚠ AND THE FILE THIS ONE CHECKS CARRIED A WRITTEN WARNING ABOUT EXACTLY THIS.
+// fundingConsequence.ts says, at its own call: "Omitting it would put the panel
+// back on the full-market blend and reopen exactly the parity gap this file
+// exists to assert against." The warning was correct, it was aimed at the right
+// hazard, and the hazard then landed in the checker instead of the checked —
+// where the same prose was not read, because nobody was editing this file.
+//
+// A parameter whose default is a legitimate-looking value cannot be added
+// safely by updating the call sites you can think of. See also: this gate was
+// not in any sweep at the time, so nothing would have told you either way.
+// scripts/gates.ts now runs it.
+// ============================================================================
+//
 // WHAT PARITY MEANS HERE. The panel answers "what would this year cost on the
 // book as it stands" — the PRE-MOVEMENT question, since the decision is made
 // before the year runs. The engine asks the same question to build the price
@@ -103,10 +131,25 @@ console.log('  Panel vs engine, per component, at every level the slider can rea
           );
 
           // The engine's own quote, same shared function, same inputs.
-          // currentPurePremiumPer100 lost its prior/lossTrend/rcEffectiveness
+          //
+          // ⚠ `members` IS THE THIRD ARGUMENT AND OMITTING IT IS WHAT MADE THIS
+          // SECTION RED FOR 62 COMMITS. The comment that stood here said
+          // currentPurePremiumPer100 "lost its prior/lossTrend/rcEffectiveness
           // parameters when Property's pure premium was held: every line is a
-          // pure function of line and year now.
-          const pp = currentPurePremiumPer100(line, y);
+          // pure function of line and year now." That was true when it was
+          // written and stopped being true for WC at 0a465df, which gave the
+          // function a members parameter so WC's pure premium could be the
+          // exposure-weighted blend of four held class rates over the ENROLLED
+          // book. GL and Property ignore it, which is why they stayed exact and
+          // only WC diverged.
+          //
+          // With members omitted, wcBlendedRatePer100 sees an empty book, takes
+          // its `exposure > 0 ? ... : WC_HELD_PURE_PREMIUM_PER_100` fallback and
+          // returns the FULL-ROSTER constant. So this line was not comparing the
+          // panel against the engine at all — it was comparing the enrolled-book
+          // blend against the whole-market blend, and calling the difference a
+          // parity failure. 2.0% to 6.9% depending on the year.
+          const pp = currentPurePremiumPer100(line, y, members);
           const clf = hasStaticClf(line) ? staticClf(line, level) : lookupCLF(level);
           const eng = quoteLineRates({
             line, yearNumber: y, members, exposure, purePremiumPer100: pp, clf,
@@ -154,6 +197,56 @@ console.log('  Panel vs engine, per component, at every level the slider can rea
 // reuses it, then divides expected ceded by the POST-movement exposure. Feeding
 // the panel anything self-consistent would NOT reproduce the engine; feeding it
 // what the engine actually did, does.
+//
+// ============================================================================
+// ⚠ THIS SECTION IS RED ON WC AND IS LEFT RED DELIBERATELY. IT IS NOT
+// SATISFIABLE AS WRITTEN. Do not "fix" it by changing which book the panel is
+// handed — that was tried and it makes things worse. Read this first.
+//
+// THE ENGINE USES TWO BOOKS, ON PURPOSE, and says so at both sites:
+//
+//   the occurrence TOWER quote is hoisted off the PRE-movement book and reused
+//     rather than re-priced (simulationEngine, "it reads only the pre-movement
+//     book and the year, so re-quoting would be a second version of a figure
+//     that cannot legitimately differ")
+//   the pure-premium BLEND is recomputed on the POST-movement book ("the rate
+//     multiplying it has to be the post-movement blend or the two describe
+//     different books" — and the first cut of that commit got it wrong by
+//     exactly this mixture, worst error 10.8% on a line-year)
+//
+// THE PANEL HAS ONE `members` FIELD FEEDING BOTH. So on WC — the only line whose
+// pure premium reads the book at all — no single choice satisfies this section:
+//
+//   pre-movement members    expectedCeded PASSES, netPurePremium FAILS
+//   post-movement members   netPurePremium's blend is right, but expectedCeded
+//                           then breaks on ALL THREE lines, and net = pure -
+//                           ceded breaks with it
+//
+// Measured, not reasoned: feeding post-movement members takes WC's
+// netPurePremium from 6,356x the bound to 4,026x and puts GL at 10,226x and
+// Property at 122,592x, from green.
+//
+// ⚠ AND THE PANEL IS NOT WRONG. Its job is the PRE-movement quote — the question
+// a player is actually asking, before the year runs — and one book is the right
+// answer to that question. Section 1 asserts it exactly and passes. What this
+// section tried to assert is exactness between a pre-movement quote and a
+// post-movement charge, on a quantity that became book-dependent at 0a465df.
+// That claim was true while the blend was roster-blind and is not true now.
+//
+// THE RESOLUTIONS, none of them taken here because the choice is not this
+// commit's to make:
+//
+//   SPLIT THE PANEL'S BOOK into a tower book and a blend book, so it can
+//     reproduce the engine exactly. Costs: a UI-facing signature grows two
+//     fields for a diagnostic's benefit, and the panel gains the ability to
+//     express a state it should never be in.
+//   NARROW THIS SECTION'S CLAIM to the components reproducible from one book
+//     (expectedCeded, CLF, reinsuranceCost) and compare the blend separately
+//     against a post-movement call. Costs: two referents in one section.
+//   MEASURE THE RESIDUAL RATHER THAN ASSERTING IT, as section 2 already does
+//     for member movement — this is the same class of gap. Costs: WC's
+//     pre-to-post blend drift stops being gated at all.
+// ============================================================================
 console.log('\n--- 1b. PANEL vs THE ENGINE\'S STORED FIELDS ---');
 {
   const worst: Record<string, Record<string, number>> = {};
