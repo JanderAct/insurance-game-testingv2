@@ -157,6 +157,20 @@ Things that were discovered expensively and live only in conversation memory. Re
     while at 200 they were statistically indistinguishable. It had been passing on noise and failing on
     slightly less noise. Print the resolution next to the verdict — the way `closure-draw-check` prints
     its per-line resolution — so the number is visible without re-deriving it.
+- **If a quantity is booked as INCREMENTS, it telescopes, and no path explanation of it can be right.**
+  `cedeDevelopment` books `cede(next) - cede(current)` each step, so a claim's lifetime cession is
+  `cede(final) - cede(start)` and every intermediate value cancels. "The wobble lands at lower values and
+  convexity does the rest" is therefore false by construction — convexity is evaluated at two endpoints
+  only. A persistent difference means the series ENDED EARLY or the ENDPOINTS differ; those are the only
+  two options, and they are cheap to test separately. This wrong explanation was written into a gate
+  header, restated back by the reviewer, and survived four commits because it sounds like the convexity
+  argument in `developmentAllocation.ts` — which is about something else.
+- **A windowed sum of a quantity with a multi-year tail carries a truncation term, and it will look like
+  a defect.** `cession-path-independence` recognises the booking give-back in full at inception and earns
+  it back over the cohort's horizon, so every fixed window cuts its last H cohorts mid-unwind. **The tell
+  is the scaling**: the gap grew in dollars and shrank as a share across 12/25/40-year windows, with
+  `share x years` flat at 52 / 55 / 52. A fixed-size tail against a linearly growing total does that;
+  no engine mechanism does. Check the scaling before believing a windowed residual.
 - **A per-line total is a sum of components that can hide each other.** The same gate reported "WC only"
   twice, and WC was not special: the development component excludes zero on all three lines and GL's is
   the largest. WC's TOTAL crossed first only because GL's positive inception noise offset more of GL's

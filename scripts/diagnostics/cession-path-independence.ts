@@ -363,23 +363,120 @@ console.log('  defect was $27.47M on WC against a ~$2.7M tolerance, so this reso
 // ============================================================================
 // REPORTED, NOT ASSERTED — THE DEVELOPMENT COMPONENT.
 //
-// ⚠ THIS IS A KNOWN AND ACCEPTED CONSEQUENCE, NOT AN OPEN DEFECT. Ruled at
-// 5b27451 after the bisect. Squeezed cedes systematically LESS on development,
-// on all three lines, and the mechanism is inherent rather than a bug:
+// ⚠ THE MECHANISM IS UNRESOLVED. THE EXPLANATION THAT STOOD HERE WAS WRONG AND
+// IS KEPT BECAUSE IT IS A TRAP WORTH MARKING.
 //
-//   the register is marked down at inception, so under squeeze the claims spend
-//   the runoff CLIMBING BACK from a lower base. The same lognormal wobble
-//   therefore lands at lower occurrence values, and cession is convex, so it
-//   cedes less. The give-back closes the DETERMINISTIC band exactly and cannot
-//   close this, because there is no deterministic quantity to give back — it is
-//   an interaction between the marked-down level and the realised path.
+// IT SAID: "the register is marked down at inception, so under squeeze the claims
+// spend the runoff climbing back from a lower base. The same lognormal wobble
+// therefore lands at lower occurrence values, and cession is convex, so it cedes
+// less." That cannot be the mechanism, and the reason is one line of arithmetic.
 //
-// ⚠ THE ALTERNATIVE IS THE ORIGINAL DEFECT. Not marking the claims down is what
-// let the unwind inflate them PAST their drawn value, and squeezed pools then
-// EXTRACTED recovery: $27.47M more on WC, 95% CI [$21.20M, $33.74M]. Today's
-// residual is an order of magnitude smaller and signed the other way —
-// underfunding COSTS recovery rather than earning it, which is the direction the
-// game exists to teach. Accepting it is a trade, and this is the record of it.
+// ⚠ CESSION IS BOOKED AS INCREMENTS, SO IT TELESCOPES. cedeDevelopment computes
+// cedeToLayer(next) - cedeToLayer(current) at each step and sums, so over a
+// claim's whole life the development total is cede(final) - cede(start), and
+// EVERY INTERMEDIATE VALUE CANCELS. The path cannot matter. The wobble cannot
+// matter. Convexity cannot matter — it is evaluated only at the two endpoints.
+//
+// And the endpoints are handled. This gate puts bookingGiveBack in the
+// DEVELOPMENT bucket (see the Tally), so:
+//
+//   squeezed    [cede(marked) - cede(drawn)] + [cede(final) - cede(marked)]
+//   defaults                                   [cede(final) - cede(drawn)]
+//
+// which are the same expression. The give-back is exactly the term that makes
+// the marked-down start cancel. A persistent difference therefore means the
+// telescoping is BROKEN, or the two arms do not reach the same cede(final) —
+// not that convexity leaked in along the way.
+//
+// ⚠ MEASURED, AND IT IS NONE OF THE THREE OBVIOUS CANDIDATES. It is the
+// MEASUREMENT WINDOW. The development component is not reporting a property of
+// the engine at all.
+//
+//   THE GIVE-BACK IS RECOGNISED IN FULL AT INCEPTION. The unwind that earns it
+//   back is spread over the cohort's HORIZON — up to 12 years on WC. A cohort
+//   written in the last H years of the window is cut mid-unwind: its give-back
+//   is inside the sum and the recovery that offsets it is not. Every window has
+//   a fixed tail of such cohorts, so the gap is a constant number of
+//   cohort-equivalents rather than a rate.
+//
+// THE EVIDENCE IS THE SCALING. Run the same gate over longer windows and the
+// gap grows in DOLLARS while shrinking as a SHARE, with the product almost
+// exactly constant — which is what a fixed-size tail against a linearly growing
+// total looks like, and what no engine mechanism would look like:
+//
+//   window    WC dev diff   as % of total   product      GL %    product
+//   12 yrs      -$2.11M         -4.3%         51.6       -2.3%     27.6
+//   25 yrs      -$3.05M         -2.2%         55.0       -1.2%     30.0
+//   40 yrs      -$4.22M         -1.3%         52.0       -0.8%     32.0
+//
+// (The dollars grow because later cohorts are larger — wage and severity trend
+// — not because more is going wrong.)
+//
+// AND THE CORROBORATION IS ALREADY IN THE REPOSITORY. cession-uplift-basis
+// measures the same quantity OVER COMPLETE COHORT LIVES rather than over a
+// window, and it contains zero and has throughout. Two instruments, one
+// windowed and one not, disagreeing exactly as truncation predicts.
+//
+// ⚠ THE THREE CANDIDATES, ALL RULED OUT BY MEASUREMENT. Recorded because each
+// was plausible and ruling them out is most of the work:
+//
+//   1. THE CLAIM STOPS MID-PATH ON CLOSURE. Ruled out. Forcing the closure
+//      predicate to `() => false` so no claim ever closes leaves the gap where
+//      it was: WC -$2.17M against -$2.23M, GL -$3.46M against -$3.50M, Property
+//      -$1.12M against -$1.12M. Claims stopping is not what stops the sum; the
+//      window is.
+//
+//   2. THE TRACKED SET DEPENDS ON THE MARKED-DOWN VALUE. Ruled out twice, by
+//      construction and by measurement. buildTrackedSet is called on the DRAWN
+//      totals BEFORE markDownForBooking, so `totals[i] >= retention` never sees
+//      a booked value and a claim's tower position does not depend on how
+//      optimistically it was reserved. Measured over 25 paired games: of 126,950
+//      WC claims written in BOTH arms' registers, 1,043 are tracked at defaults
+//      only and 1,054 under squeeze only — 0.8%, and SYMMETRIC. The markdown
+//      mechanism would be one-sided.
+//
+//   3. THE CLAMP AND SPILL FIRE SOONER. Ruled out. Zero occurrences driven to
+//      exactly zero, in either arm, on all three lines, at GAMES=300 — see THE
+//      CLAMP section at the end of this report, which prints it every run.
+//
+// ⚠ AND A FOURTH, MINE, ALSO WRONG, kept because it is the more tempting version
+// of the convexity error. The markdown and the unwind are both proportional over
+// tracked-plus-untracked but applied at different times, so the tracked share
+// drifts in between and the tracked claims might not recover what they lost.
+// Testable: make the stochastic step proportional too, and the drift goes away.
+// It does not. The shortfall survives at -1.59% / -0.61% / -1.28% against
+// -1.79% / -0.59% / -1.18%. Subset routing is not the route.
+//
+// ⚠ DO NOT RE-ASSERT THE CONVEXITY STORY WITHOUT ANSWERING THE TELESCOPING
+// ARGUMENT FIRST. It is intuitive, it sounds like the header of
+// developmentAllocation.ts, and it is the reason this went unexamined for four
+// commits. The same argument disposes of any explanation phrased as "the path
+// differs": cession is booked as increments, so only the endpoints survive.
+//
+// ⚠ WHAT WOULD ACTUALLY CLOSE IT: measure development cession over COMPLETE
+// COHORT LIVES rather than over a fixed window, which is what
+// cession-uplift-basis does. Not done here because that is a different
+// instrument, this one is paired across arms and that one is not, and the
+// component is reported rather than gated — a reported number that is honest
+// about being window-truncated is better than a second measurement engine.
+//
+// ⚠ THE "ACCEPT IT" RULING STANDS, FOR A DIFFERENT REASON THAN IT WAS MADE FOR.
+// It was made on the belief that the gap was an inherent property of the
+// markdown. It is not a property of the engine at all — there is nothing in the
+// engine to accept or fix. What is being accepted is that a windowed measurement
+// of a quantity with a multi-year tail carries a truncation term, which is a
+// property of the instrument and is now labelled as one.
+//
+// The conditional attached to that ruling — "if it is mostly candidate 2, select
+// the tracked set on the DRAWN value and the ruling is withdrawn" — does not
+// fire. The tracked set is ALREADY selected on the drawn value.
+//
+// ⚠ THE ALTERNATIVE IS STILL THE ORIGINAL DEFECT, and that argument is unchanged
+// by the re-diagnosis. Not marking the claims down is what let the unwind
+// inflate them PAST their drawn value, and squeezed pools then EXTRACTED
+// recovery: $27.47M more on WC, 95% CI [$21.20M, $33.74M]. That was an engine
+// property. This is a measurement tail, an order of magnitude smaller and signed
+// the other way.
 //
 // ⚠ THE LINEARITY TABLE IS HERE SO A FUTURE READER CAN TELL A CHANGE IN
 // MAGNITUDE FROM A CHANGE IN KIND. Measured at GAMES=200 by moving
@@ -396,8 +493,11 @@ console.log('  defect was $27.47M on WC against a ~$2.7M tolerance, so this reso
 // coefficient, only the bias moved.
 // ============================================================================
 console.log('\n\n--- REPORTED, NOT ASSERTED: THE DEVELOPMENT COMPONENT ---');
-console.log('  Accepted consequence of the markdown, linear in the booking bias. See the block');
-console.log('  above this section in the source for the mechanism and the linearity table.\n');
+console.log(`  ⚠ THIS IS A WINDOW ARTEFACT, NOT AN ENGINE PROPERTY. The give-back is recognised in`);
+console.log(`  full at inception; the unwind that earns it back runs over the cohort's horizon, so`);
+console.log(`  cohorts written in the last few years of this ${YEARS}-year window are cut mid-unwind.`);
+console.log('  The share falls as 1/window and the product with the window length is flat. Measured');
+console.log('  over complete cohort lives instead, cession-uplift-basis contains zero. See the source.\n');
 // ⚠ SCALED AGAINST THE LINE'S TOTAL CESSION, NOT AGAINST ITS DEVELOPMENT
 // CESSION. The development base is a small difference of larger numbers — WC
 // cedes $53.46M at inception and $0.73M on development — so dividing by it
