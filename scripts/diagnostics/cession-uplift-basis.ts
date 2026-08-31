@@ -355,27 +355,33 @@ for (const line of LINES) {
 // ============================================================================
 // 6. THE GATE.
 // ============================================================================
+// The verdict is fenced so no neighbouring paragraph can be read as covering it.
+const RULE = '='.repeat(72);
 console.log('\n--- 6. GATE: LIFETIME DEVELOPMENT CESSION AGAINST INCEPTION CESSION, AT DEFAULTS ---');
 {
   let fails = 0;
+  // ⚠ NAMED, NOT COUNTED — see WORKING_PRACTICES. "N GATE FAILURE(S)" told the
+  // reader a number and left them to find which line it was.
+  const failed: string[] = [];
   const cs = cohorts.filter(c => c.matured && c.arm === 'def');
   for (const line of LINES) {
     const t = cs.filter(c => c.line === line);
     const u = sum(t, c => c.finalCededDev) / sum(t, c => c.inceptionCeded);
     const bad = Math.abs(u) > MAX_LINE_UPLIFT;
-    if (bad) fails++;
+    if (bad) { fails++; failed.push(`${line} uplift ${p1(u)} exceeds the line limit ${p1(MAX_LINE_UPLIFT)}`); }
     console.log(`  ${line.padEnd(9)} uplift ${p1(u).padStart(7)}   `
       + `${bad ? `FAIL (limit ${p1(MAX_LINE_UPLIFT)})` : 'ok'}`);
   }
   const uAll = sum(cs, c => c.finalCededDev) / sum(cs, c => c.inceptionCeded);
   const badAll = Math.abs(uAll) > MAX_POOL_UPLIFT;
-  if (badAll) fails++;
+  if (badAll) { fails++; failed.push(`POOL uplift ${p1(uAll)} exceeds the pool limit ${p1(MAX_POOL_UPLIFT)}`); }
   console.log(`  ${'POOL'.padEnd(9)} uplift ${p1(uAll).padStart(7)}   `
     + `${badAll ? `FAIL (limit ${p1(MAX_POOL_UPLIFT)})` : 'ok'}`);
   console.log(fails === 0
     ? '\nDEVELOPMENT CESSION IS NOT A FREE LUNCH. Over complete cohort lives at defaults, where the'
       + '\nbooking bias is zero and the gross walk has no drift, the reinsurer pays a small positive'
       + '\namount that is the convexity of its own treaty and nothing more.'
-    : `\n${fails} GATE FAILURE(S) — development cession is running ahead of the losses it is paid on.`);
+    : `\n${RULE}\n${fails} GATE FAILURE(S) — development cession is running ahead of the losses`
+      + `\nit is paid on:\n  ${failed.join('\n  ')}\n${RULE}`);
   process.exit(fails === 0 ? 0 : 1);
 }

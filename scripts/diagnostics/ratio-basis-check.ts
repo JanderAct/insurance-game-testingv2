@@ -48,10 +48,23 @@ const YEARS = 8;
 const LINES: CoverageLine[] = ['WC', 'GL', 'Property'];
 const EXACT = 1e-12;
 
+// ⚠ THE VERDICT NAMES WHAT FAILED. IT USED TO COUNT. A bare "N CHECK(S) FAILED"
+// at the end of a long report makes the reader scroll back for the FAIL lines,
+// and whatever prose they land on on the way gets read as the explanation. That
+// is not hypothetical: this project misdiagnosed a red gate exactly that way,
+// attributing a failure in one section to a paragraph in another that happened
+// to say "is NOT a defect". `failed` exists so the last line of output is the
+// list, not the count.
+const failed: string[] = [];
+// The verdict is fenced so no neighbouring paragraph can be read as covering it.
+const RULE = '='.repeat(72);
 let failures = 0;
 function check(ok: boolean, label: string, detail = '') {
-  if (!ok) { failures++; console.log(`  FAIL  ${label}${detail ? '  — ' + detail : ''}`); }
-  else console.log(`  OK    ${label}${detail ? '  — ' + detail : ''}`);
+  if (!ok) {
+    failures++;
+    failed.push(`${label}${detail ? '  — ' + detail : ''}`);
+    console.log(`  FAIL  ${label}${detail ? '  — ' + detail : ''}`);
+  } else console.log(`  OK    ${label}${detail ? '  — ' + detail : ''}`);
 }
 
 console.log('=== RATIO BASIS CHECK ===\n');
@@ -212,5 +225,6 @@ console.log('  could not be differenced — the gap read as pricing error when i
   console.log('  signature a basis error would leave behind.');
 }
 
-console.log(failures === 0 ? '\nALL RATIO BASIS CHECKS PASS.' : `\n${failures} CHECK(S) FAILED.`);
+console.log(failures === 0 ? '\nALL RATIO BASIS CHECKS PASS.'
+  : `\n${RULE}\n${failures} CHECK(S) FAILED:\n  ${failed.join('\n  ')}\n${RULE}`);
 if (failures > 0) process.exit(1);

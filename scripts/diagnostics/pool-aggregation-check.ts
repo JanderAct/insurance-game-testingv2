@@ -42,7 +42,14 @@ import type { CoverageLine, GameState, ResultSet } from '../../src/types/simulat
 
 const LINES: CoverageLine[] = ['WC', 'GL', 'Property'];
 let failures = 0;
-const note = (ok: boolean, msg: string) => { if (!ok) { failures++; return `FAIL — ${msg}`; } return 'OK'; };
+// ⚠ THE VERDICT NAMES WHAT FAILED. IT USED TO COUNT. A bare "N CHECK(S) FAILED"
+// at the end of a long report makes the reader scroll back for the FAIL lines,
+// and whatever prose they land on on the way gets read as the explanation. That
+// is not hypothetical: this project misdiagnosed a red gate exactly that way.
+const failed: string[] = [];
+// The verdict is fenced so no neighbouring paragraph can be read as covering it.
+const RULE = '='.repeat(72);
+const note = (ok: boolean, msg: string) => { if (!ok) { failures++; failed.push(msg); return `FAIL — ${msg}`; } return 'OK'; };
 
 // --- THE CLASSIFICATION -----------------------------------------------------
 // Every numeric field on the pooled row must appear in exactly one of these.
@@ -219,5 +226,6 @@ console.log('  With one active line every aggregation is the identity. Any drift
   }
 }
 
-console.log(failures === 0 ? '\nALL POOL AGGREGATION CHECKS PASS.' : `\n${failures} CHECK(S) FAILED.`);
+console.log(failures === 0 ? '\nALL POOL AGGREGATION CHECKS PASS.'
+  : `\n${RULE}\n${failures} CHECK(S) FAILED:\n  ${failed.join('\n  ')}\n${RULE}`);
 process.exit(failures === 0 ? 0 : 1);

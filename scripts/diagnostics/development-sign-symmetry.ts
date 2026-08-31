@@ -540,6 +540,9 @@ console.log('\n--- 6. FLOOR SWEEP: WHERE IS FAVOURABLE BOUNDED AND ADVERSE NOT? 
 // cohorts off mid-development. Gated over complete lives in cession-uplift-basis.
 // ============================================================================
 console.log('\n--- 7. REPORTED, NOT GATED: AT DEFAULTS, OVER A 10-YEAR WINDOW ---');
+// The verdict is fenced so no neighbouring paragraph can be read as covering it.
+const RULE = '='.repeat(72);
+const failedGates: string[] = [];
 let gateFail = 0;
 {
   const d = all.filter(ly => ly.arm === 'def');
@@ -606,7 +609,15 @@ console.log('\n--- 9. GATE: ADVERSE / FAVOURABLE MARGINAL CESSION RATIO, ENGINE 
     for (const p of ps) { adv += cede(p, +X); fav += -cede(p, -X); }
     const ratio = adv / fav;
     const bad = !(Math.abs(ratio - 1) < MAX_PROBE_DEVIATION);
-    if (bad) gateFail++;
+    if (bad) {
+      gateFail++;
+      // ⚠ NAMED, NOT COUNTED, AND NOT "see FAIL above" EITHER — see
+      // WORKING_PRACTICES. Pointing upward still makes the reader scroll past
+      // whatever prose sits in between.
+      failedGates.push(`${l} ratio ${ratio.toFixed(2)}x, deviation ${Math.abs(ratio - 1).toFixed(2)} `
+        + `over the ${MAX_PROBE_DEVIATION.toFixed(2)} limit (adverse ${((adv / (ps.length * X)) * 100).toFixed(1)}%, `
+        + `favourable ${((fav / (ps.length * X)) * 100).toFixed(1)}%)`);
+    }
     console.log(`  ${l.padEnd(9)} adverse ${((adv / (ps.length * X)) * 100).toFixed(1).padStart(6)}%  `
       + `favourable ${((fav / (ps.length * X)) * 100).toFixed(1).padStart(6)}%  ratio ${ratio.toFixed(2)}x  `
       + `dev ${Math.abs(ratio - 1).toFixed(2)}  `
@@ -618,5 +629,5 @@ console.log(gateFail === 0
   ? '\nDEVELOPMENT ALLOCATION IS SIGN-SYMMETRIC. Adverse and favourable movements cede at the same'
     + '\nmarginal rate under the engine\'s own routing, on identical cohort state. The dollar statement'
     + '\nover complete cohort lives is cession-uplift-basis.ts\'s gate, not this one.'
-  : `\n${gateFail} GATE FAILURE(S) — see FAIL above.`);
+  : `\n${RULE}\n${gateFail} GATE FAILURE(S):\n  ${failedGates.join('\n  ')}\n${RULE}`);
 process.exit(gateFail === 0 ? 0 : 1);

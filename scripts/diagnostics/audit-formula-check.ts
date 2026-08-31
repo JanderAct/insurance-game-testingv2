@@ -1086,11 +1086,38 @@ if (proseFindings.length === 0) {
 
 for (const c of coverageFailures) console.log(`\n⚠ COVERAGE FAILURE: ${c}`);
 
-if (coverageFailures.length === 0
-    && defects.length === 0 && handFindings.length === 0 && proseFindings.length === 0 && failures === 0) {
+// ============================================================================
+// ⚠ THE FAILING BRANCH IS THE ONE THAT WAS MISSING. The closing prose below sat
+// inside this `if` with no `else`, so a run that found defects, hand findings,
+// prose findings or an export-identity failure printed NOTHING at the end and
+// exited 1 in silence — the reader's last line of output was whatever section
+// happened to run last. This is the gate this project has leaned on hardest,
+// and it was the one with no verdict.
+//
+// The verdict now NAMES which of the five stores is non-empty and how many are
+// in it, fenced so no neighbouring paragraph reads as covering it. The detail
+// for each is already printed above by `report`; what was missing was a last
+// line that tells you to go and look, and at what.
+// ============================================================================
+const RULE = '='.repeat(72);
+const tally: [string, number][] = [
+  ['DEFECTS (formula does not produce the stated value)', defects.length],
+  ['HAND-CHECK FINDINGS (row does not reproduce from its printed operands)', handFindings.length],
+  ['PROSE FINDINGS (registered claim does not match the data)', proseFindings.length],
+  ['EXPORT IDENTITY FAILURES', failures],
+  ['COVERAGE FAILURES (a check never got to run)', coverageFailures.length],
+];
+const nonEmpty = tally.filter(([, n]) => n > 0);
+if (nonEmpty.length === 0) {
   console.log('\nALL FORMULA ROWS RECONCILE within their own derived bounds, in every arm;');
   console.log('every hand-checkable row reproduces from its printed operands; and every');
   console.log('registered prose claim matches the data.');
+} else {
+  console.log(`\n${RULE}`);
+  console.log(`AUDIT FORMULA CHECK FAILED — ${nonEmpty.reduce((a, [, n]) => a + n, 0)} finding(s):`);
+  for (const [what, n] of nonEmpty) console.log(`  ${String(n).padStart(4)}  ${what}`);
+  console.log('  (detail for each is printed in its own section above)');
+  console.log(RULE);
 }
 
 process.exitCode =

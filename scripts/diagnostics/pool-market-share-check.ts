@@ -108,8 +108,26 @@ console.log(`  defect in the new formula.`);
 // The only hard correctness bar: the weighting must not move the AVERAGE
 // figure materially at Y1, where the per-line shares are close together by
 // construction of the current calibration.
+//
+// ⚠ THE VERDICT IS FENCED AND SITS BELOW THE INFORMATIONAL BLOCK, NOT INSIDE
+// IT. Everything printed above this point explains why the per-seed and later-
+// year gaps are ordinary — and it ends on the words "not from a residual defect
+// in the new formula". A one-line FAIL printed straight after that paragraph is
+// a verdict a reader can absorb into the paragraph, which is exactly how a red
+// gate in this directory was misdiagnosed once already. The bar being asserted
+// is Y1 only; nothing above it is being asserted at all.
 const y1Ok = y1AvgGap < 2.0;
-console.log(`\n  ${y1Ok ? 'OK' : 'FAIL'}  Year 1 average gap is small (< 2.0 pts) — the new weighting reproduces the old figure where the old figure happened to be right`);
-
-if (!y1Ok) process.exit(1);
-console.log('\nALL POOL MARKET SHARE CHECKS PASS.');
+const RULE = '='.repeat(72);
+if (y1Ok) {
+  console.log(`\n  OK    Year 1 average gap ${y1AvgGap.toFixed(2)} pts is small (< 2.0) — the new weighting`);
+  console.log('        reproduces the old figure where the old figure happened to be right');
+  console.log('\nALL POOL MARKET SHARE CHECKS PASS.');
+} else {
+  console.log(`\n${RULE}`);
+  console.log('1 CHECK(S) FAILED:');
+  console.log(`  Year 1 average old-vs-new market-share gap is ${y1AvgGap.toFixed(2)} pts, over the 2.0 limit.`);
+  console.log('  This is the ONLY assertion in this file. The informational block above is not');
+  console.log('  a check and does not explain this — go to the Year 1 table.');
+  console.log(RULE);
+  process.exit(1);
+}

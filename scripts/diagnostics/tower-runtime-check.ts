@@ -50,10 +50,23 @@ const WC_FULL = ROSTER.reduce((s, m) => s + wcP(m), 0);
 const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
 const sdOf = (xs: number[]) => { const m = mean(xs); return Math.sqrt(mean(xs.map(x => (x - m) ** 2))); };
 
+// ⚠ THE VERDICT NAMES WHAT FAILED. IT USED TO COUNT. A bare "N CHECK(S) FAILED"
+// at the end of a long report makes the reader scroll back for the FAIL lines,
+// and whatever prose they land on on the way gets read as the explanation. That
+// is not hypothetical: this project misdiagnosed a red gate exactly that way,
+// attributing a failure in one section to a paragraph in another that happened
+// to say "is NOT a defect". `failed` exists so the last line of output is the
+// list, not the count.
+const failed: string[] = [];
+// The verdict is fenced so no neighbouring paragraph can be read as covering it.
+const RULE = '='.repeat(72);
 let failures = 0;
 function check(ok: boolean, label: string, detail = '') {
-  if (!ok) { failures++; console.log(`  FAIL  ${label}${detail ? '  — ' + detail : ''}`); }
-  else console.log(`  OK    ${label}${detail ? '  — ' + detail : ''}`);
+  if (!ok) {
+    failures++;
+    failed.push(`${label}${detail ? '  — ' + detail : ''}`);
+    console.log(`  FAIL  ${label}${detail ? '  — ' + detail : ''}`);
+  } else console.log(`  OK    ${label}${detail ? '  — ' + detail : ''}`);
 }
 
 function bookFor(line: 'WC' | 'GL', targetM: number): Member[] {
@@ -421,5 +434,6 @@ console.log('\n--- 7. THE FEEDBACK LOOP THE RUNTIME PRICE INTRODUCES ---');
   check(gain < 0.5, `loop gain ${gain.toFixed(3)} — damps, does not oscillate`, 'gain >= 1 would be self-reinforcing');
 }
 
-console.log(failures === 0 ? '\nALL RUNTIME TOWER CHECKS PASS.' : `\n${failures} CHECK(S) FAILED.`);
+console.log(failures === 0 ? '\nALL RUNTIME TOWER CHECKS PASS.'
+  : `\n${RULE}\n${failures} CHECK(S) FAILED:\n  ${failed.join('\n  ')}\n${RULE}`);
 if (failures > 0) process.exit(1);

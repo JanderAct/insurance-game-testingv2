@@ -42,9 +42,16 @@ function bookAt(frac: number): Member[] {
   return roster.slice(0, n);
 }
 
+// ⚠ THE VERDICT NAMES WHAT FAILED. IT USED TO COUNT. A bare "N CHECK(S) FAILED"
+// at the end of a long report makes the reader scroll back for the FAIL lines,
+// and whatever prose they land on on the way gets read as the explanation. That
+// is not hypothetical: this project misdiagnosed a red gate exactly that way.
+const failed: string[] = [];
+// The verdict is fenced so no neighbouring paragraph can be read as covering it.
+const RULE = '='.repeat(72);
 let failures = 0;
 function assert(cond: boolean, msg: string) {
-  if (!cond) { failures++; console.log(`  FAIL: ${msg}`); }
+  if (!cond) { failures++; failed.push(msg); console.log(`  FAIL: ${msg}`); }
   else console.log(`  OK: ${msg}`);
 }
 
@@ -180,5 +187,6 @@ console.log('\n--- 4. WC CLASS RATES PRICE EVERY BOOK AT ITS OWN NEUTRAL EXPECTA
     `(${blend.toFixed(8)} vs ${held.toFixed(8)})`);
 }
 
-console.log(failures === 0 ? '\nALL "EXPECTED" FUNDING CHECKS PASS.' : `\n${failures} CHECK(S) FAILED.`);
+console.log(failures === 0 ? '\nALL "EXPECTED" FUNDING CHECKS PASS.'
+  : `\n${RULE}\n${failures} CHECK(S) FAILED:\n  ${failed.join('\n  ')}\n${RULE}`);
 if (failures > 0) process.exit(1);

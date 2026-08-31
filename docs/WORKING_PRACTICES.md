@@ -17,9 +17,26 @@ Things that were discovered expensively and live only in conversation memory. Re
     (`reinsurance-tower-check`, `wc-behaviour-check`, `property-fit-check`, `loss-ratio-check` and more).
     They are in `PROBES` with a one-line reason each. Do not read a name as a verdict.
   - **A probe still has to run.** `allocation-grid` asserts nothing and was still red, because it threw.
-  - **Read a failing gate's own sections, not the nearest prose.** `panel-engine-parity-check` prints
-    "2 CHECK(S) FAILED" directly under a paragraph explaining that the thing it just measured "is NOT a
-    defect". The failures are in two earlier sections. That misreading happened on the first pass here.
+- **A gate's verdict must NAME what failed, not count it.** The manifest fixes *is it run*; this fixes
+  *is it readable when it fails*. Sixteen of thirty-five gates ended on a bare `N CHECK(S) FAILED` with
+  the per-item FAIL lines printed pages earlier — and one, `audit-formula-check`, printed **no verdict at
+  all** on failure, because its closing prose sat inside an `if (all clear)` with no `else`. That is the
+  gate this project has leaned on hardest.
+  - **The property is naming, not adjacency.** A verdict that lists the failures cannot be absorbed by a
+    neighbouring paragraph no matter what the paragraph says. A verdict that counts them sends the reader
+    scrolling, and whatever they land on on the way gets read as the explanation.
+  - **This is not hypothetical.** `panel-engine-parity-check` printed "2 CHECK(S) FAILED" directly under a
+    paragraph explaining that the residual it had just measured "is NOT a defect" — while the failures
+    were in two earlier sections, on WC only, at 6,356x the rounding bound. It was misread that way here
+    on the first pass, and the misreading survived into a written report.
+  - **The form to use** is the one nineteen gates already had:
+    `` `${n} CHECK(S) FAILED:\n  ${failed.join('\n  ')}` ``, fenced above and below with a rule so no
+    adjacent prose can run into it. Collect the label into a `failed: string[]` in the same helper that
+    prints the inline FAIL.
+  - **Four gates had prose immediately above the verdict that argued the failure away** — `roster-catalog`
+    ("this one is a readout"), `pool-market-share` ("not from a residual defect"), `panel-engine-parity`
+    ("is NOT a defect"), `ratio-basis`. Naming the failure defuses all four; `pool-market-share` also says
+    in its failing branch that the block above is not a check.
 - **`npm run typecheck` is the real command.** Root `tsc --noEmit` is a NO-OP — root tsconfig has
   `"files": []` with project references, so it checks zero files and always exits 0. Several earlier
   "typecheck clean" claims were vacuous.
