@@ -153,7 +153,7 @@ for (const arm of ARMS) {
     // PRE-GAME accident year (-2..0) has no claim row on them — while the
     // Development sheet reads poolState and does carry it. Pre-game years are
     // written at DEFAULT decisions in both arms, so they never have an unwind and
-    // are exactly where a tracked non-carrier sits out an adverse step. Counting
+    // are exactly where a tracked occurrence outside the developing set sits out an adverse step. Counting
     // only the line sheets would report zero of them in the squeezed arm and
     // attribute that to the squeeze.
     {

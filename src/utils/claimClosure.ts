@@ -59,7 +59,7 @@ export function closedShare(c: ClosureCurve, t: number): number {
 // hashing the id alone gave the same closure unit to the same SLOT in every
 // game. Measured across two games with unrelated seeds: 21.9% of WC claim ids
 // collided (GL 2.8%, Property 12.9%), and NONE of the collisions carried the
-// same claim amount. A closure-driven carrier set would then evolve partly
+// same claim amount. A closure-driven developing set would then evolve partly
 // independently of the seed, which is exactly what
 // enrolment-independence-check exists to prevent elsewhere.
 //

@@ -122,7 +122,37 @@ interface LineYear {
 // A ratio of 1.02-1.05 is the tower's own convexity at the attachment and is
 // irreducible; 1.20 is comfortably above it and far below the 1.36x of the
 // mildest line under the retired rule.
-const MAX_PROBE_RATIO = 1.20;
+//
+// ⚠ THE THRESHOLD IS NOW A DEVIATION FROM 1, NOT A CEILING, AND IT MOVED FROM
+// 0.20 TO 0.10. Two separate changes, and the first is smaller than it looks.
+//
+// THE FORM. This read `ratio > 1 / MAX_PROBE_RATIO && ratio < MAX_PROBE_RATIO`,
+// which IS two-sided — the floor was 1/1.20 = 0.833, not zero. What was wrong
+// with it is that the band was asymmetric in the quantity that matters: 20%
+// above 1 and 16.7% below. |ratio - 1| is the honest statement of "cedes at the
+// same rate in both directions" and costs nothing to read.
+//
+// ⚠ AND RE-PARAMETERISING ALONE WOULD HAVE LOOSENED THE GATE. |r - 1| < 0.20
+// puts the floor at 0.80, BELOW the 0.833 that was already there. The reselection
+// commit left Property at 0.88 — a deviation of 0.12 — and it passed the old
+// form, and would have passed the new form more comfortably. A gate cannot judge
+// a fix it could not see the defect through.
+//
+// THE LIMIT. Measured deviations, stable to +/-0.01 between 25 and 60 games:
+//
+//   line       |ratio - 1|   what it is
+//   GL            0.04       the tower's convexity, irreducible
+//   WC            0.07       the same, on the line with the most register above
+//                            its retention — the largest that is not a defect
+//   Property      0.12       THE DEFECT: a developing set too small to absorb
+//                            its own movement, so favourable spills onto the
+//                            large open claims and adverse does not
+//
+// 0.10 is above WC's irreducible 0.07 and below Property's 0.12. The headroom on
+// WC is 0.03 and that is thinner than this file likes; it is accepted because
+// the alternative is a gate that reads green on a 12-point asymmetry, and
+// because the measured values do not drift with sample size.
+const MAX_PROBE_DEVIATION = 0.10;
 
 const all: LineYear[] = [];
 
@@ -337,7 +367,7 @@ console.log('\n--- 3. OVER THE WHOLE RUN: IS CESSION A FREE LUNCH? ---');
 console.log('\n--- 4. PAIRED PROBE: +X AND -X ON IDENTICAL COHORT STATE ---');
 {
   const X = 500_000;
-  const cede = (p: Probe, amount: number, mode: 'carriers' | 'proportional') => {
+  const cede = (p: Probe, amount: number, mode: 'developing' | 'proportional') => {
     const t = p.tracked ?? [];
     const a = allocateDevelopment(t, p.untracked, amount, mode);
     return cedeDevelopment(p.line, t, a.deltas, a.untrackedDelta, p.placed).ceded;
@@ -350,7 +380,7 @@ console.log('\n--- 4. PAIRED PROBE: +X AND -X ON IDENTICAL COHORT STATE ---');
   for (const p of probes) {
     const a = byLine[p.line];
     a.n++;
-    // AS THE ENGINE ACTUALLY ROUTES THEM: adverse to the carriers, favourable
+    // AS THE ENGINE ACTUALLY ROUTES THEM: adverse to the developing set, favourable
     // proportionally across the whole register.
     a.advCeded += cede(p, +X, STOCHASTIC_ALLOCATION_MODE);
     a.favCeded += -cede(p, -X, STOCHASTIC_ALLOCATION_MODE);
@@ -386,7 +416,7 @@ console.log('\n--- 4. PAIRED PROBE: +X AND -X ON IDENTICAL COHORT STATE ---');
 console.log('\n--- 4b. PER COHORT STATE: DOES ANY SINGLE SITE TREAT THE SIGNS DIFFERENTLY? ---');
 {
   const X = 500_000;
-  const cede = (p: Probe, amount: number, mode: 'carriers' | 'proportional') => {
+  const cede = (p: Probe, amount: number, mode: 'developing' | 'proportional') => {
     const t = p.tracked ?? [];
     const a = allocateDevelopment(t, p.untracked, amount, mode);
     return cedeDevelopment(p.line, t, a.deltas, a.untrackedDelta, p.placed).ceded;
@@ -447,10 +477,10 @@ for (const l of LINES) {
 //   A  allocateDevelopment  applied = amount < 0 ? -min(-amount, pool) : amount
 //   B  cedeDevelopment      next = max(0, current + delta)
 //   C  processIbner         untracked = max(0, untracked + untrackedDelta)
-//   D  allocateDevelopment  carriers-mode pool is trackedTotal, not the register
+//   D  allocateDevelopment  developing-mode pool is trackedTotal, not the register
 //
 // A, B and C are the three the sweep can exercise directly. D cannot bite today
-// because favourable movements never take the carriers branch; it is probed by
+// because favourable movements never take the developing set branch; it is probed by
 // forcing the branch, to size what would happen if the mode rule ever changed.
 // ============================================================================
 console.log('\n--- 6. FLOOR SWEEP: WHERE IS FAVOURABLE BOUNDED AND ADVERSE NOT? ---');
@@ -474,12 +504,12 @@ console.log('\n--- 6. FLOOR SWEEP: WHERE IS FAVOURABLE BOUNDED AND ADVERSE NOT? 
       if (cClamp > 0.01) { hitC++; dollarsC += cClamp; }
       void r;
     }
-    // D: the same favourable movement routed through the carriers branch.
+    // D: the same favourable movement routed through the developing set branch.
     const trackedTotal = t.reduce((s, c) => s + c.current, 0);
     if (trackedTotal > 0 && registerTotal > trackedTotal) {
       const amt = -Math.min(registerTotal, trackedTotal * 1.4);
       const prop = allocateDevelopment(t, p.untracked, amt, 'proportional');
-      const carr = allocateDevelopment(t, p.untracked, amt, 'carriers');
+      const carr = allocateDevelopment(t, p.untracked, amt, 'developing');
       if (Math.abs(prop.applied - carr.applied) > 0.01) { dCases++; dGap += Math.abs(prop.applied - carr.applied); }
     }
   }
@@ -488,7 +518,7 @@ console.log('\n--- 6. FLOOR SWEEP: WHERE IS FAVOURABLE BOUNDED AND ADVERSE NOT? 
   console.log(`  A  unallocated remainder (movement exceeded the pool)   ${hitA} of ${trials}  ${m(dollarsA)}`);
   console.log(`  B  a tracked occurrence clamped at zero                 ${hitB} of ${trials}  ${m(dollarsB)}`);
   console.log(`  C  the untracked mass clamped at zero                   ${hitC} of ${trials}  ${m(dollarsC)}`);
-  console.log(`  D  carriers-mode pool would have truncated a favourable movement in `
+  console.log(`  D  developing-mode pool would have truncated a favourable movement in `
     + `${dCases} of ${probes.length} states, by ${m(dGap)} in total`);
 }
 
@@ -575,11 +605,12 @@ console.log('\n--- 9. GATE: ADVERSE / FAVOURABLE MARGINAL CESSION RATIO, ENGINE 
     let fav = 0;
     for (const p of ps) { adv += cede(p, +X); fav += -cede(p, -X); }
     const ratio = adv / fav;
-    const bad = !(ratio > 1 / MAX_PROBE_RATIO && ratio < MAX_PROBE_RATIO);
+    const bad = !(Math.abs(ratio - 1) < MAX_PROBE_DEVIATION);
     if (bad) gateFail++;
     console.log(`  ${l.padEnd(9)} adverse ${((adv / (ps.length * X)) * 100).toFixed(1).padStart(6)}%  `
       + `favourable ${((fav / (ps.length * X)) * 100).toFixed(1).padStart(6)}%  ratio ${ratio.toFixed(2)}x  `
-      + `${bad ? `FAIL (limit ${MAX_PROBE_RATIO.toFixed(2)}x)` : 'ok'}`);
+      + `dev ${Math.abs(ratio - 1).toFixed(2)}  `
+      + `${bad ? `FAIL (limit ${MAX_PROBE_DEVIATION.toFixed(2)})` : 'ok'}`);
   }
 }
 

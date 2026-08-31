@@ -28,7 +28,7 @@ import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDI
 import type { TowerLine } from '../data/reinsuranceTower';
 import {
   DEVELOPMENT_ALLOCATION, DEVELOPMENT_CESSION_ENABLED, STOCHASTIC_ALLOCATION_MODE,
-  allocateDevelopment, buildTrackedSet, cedeDevelopment, markDownForBooking, reselectCarriers,
+  allocateDevelopment, buildTrackedSet, cedeDevelopment, markDownForBooking, reselectDevelopingSet,
 } from './developmentAllocation';
 import { isClaimClosed } from './claimClosure';
 import {
@@ -265,13 +265,13 @@ function lineRngLabel(base: string, line: CoverageLine): string {
 // Reselecting the developing subset draws size-weighted, and a size-weighted
 // draw consumes RNG. Taking those draws from `ibner` would move every
 // subsequent draw in that stream — the lognormal step, the horizon, the step
-// multiplier, the inception carrier picks — so a commit that changes WHICH
+// multiplier, the inception developing-set picks — so a commit that changes WHICH
 // claims develop would arrive as an indistinguishable mixture of that change
 // and a reseed of everything else, and no before-and-after could separate them.
 //
 // So reselection gets streams keyed on (seed, valuation year, line, accident
 // year, purpose). `ibner` is untouched by this commit: it still takes its ten
-// carrier picks at inception, in the same order, at the same point.
+// developing-set picks at inception, in the same order, at the same point.
 //
 // ⚠ THE ACCIDENT YEAR IS IN THE KEY, NOT JUST THE VALUATION YEAR. Every open
 // cohort reselects at the same valuation, so a key without it would hand a
@@ -279,6 +279,33 @@ function lineRngLabel(base: string, line: CoverageLine): string {
 // ============================================================================
 // Shared empty set — a valuation with no promotions allocates nothing.
 const EMPTY_PROMOTIONS: Set<string> = new Set();
+
+// ============================================================================
+// HOW BIG A FAVOURABLE STEP THIS COHORT COULD TAKE, IN DOLLARS — the size the
+// developing set has to hold. See THE SIZE OF THE SET in developmentAllocation.
+//
+// One sigma down on the cohort's own lognormal step:
+//
+//     takedown = unpaid x (1 - exp(-sigma - sigma^2/2)),  sigma = mult x s(line)
+//
+// ⚠ ONE SIGMA AND NOT A PERCENTILE, so this introduces no constant. The step's
+// own scale is the only thing in the model that says how big a movement is
+// likely to be, and reading it off directly means nothing here needs tuning
+// when reserveStepSigma or IBNER_STEP_MIXTURE moves.
+//
+// ⚠ AND IT IS DRAW-BLIND, WHICH IS THE LOAD-BEARING PART. Sizing the set on the
+// REALISED movement would let the set know how big this year's step is before
+// choosing who takes it. It would still be sign-blind — magnitude only, one set
+// for both directions — but it would make the +/-X probe in
+// development-sign-symmetry measure a routing the engine would not have used,
+// because the engine would have sized the set for its own X. This depends only
+// on (line, stepMultiplier, unpaid), all of which are fixed before the draw.
+// ============================================================================
+export function ibnerOneSigmaTakedown(line: CoverageLine, stepMultiplier: number, unpaid: number): number {
+  if (!(unpaid > 0)) return 0;
+  const sigma = stepMultiplier * reserveStepSigma(line);
+  return unpaid * (1 - Math.exp(-sigma - (sigma * sigma) / 2));
+}
 
 function reselectRng(
   seed: number, line: CoverageLine, accidentYear: number, valuationYear: number, purpose: string,
@@ -1202,7 +1229,7 @@ export function processLineYear(
   // ⚠ THE REGISTER IS BUILT AND MARKED DOWN BEFORE THE RESERVE IS BOOKED, and
   // the ordering is load-bearing: bookedUltimate depends on the give-back the
   // markdown produces. Tracked occurrences are everything at or above the
-  // retention plus the carriers; the layers in force THIS year are frozen with
+  // retention plus the developing set; the layers in force THIS year are frozen with
   // them, because occurrence cover attaches to the accident year rather than the
   // valuation year.
   //
@@ -1215,7 +1242,7 @@ export function processLineYear(
 
   //
   // ⚠ THE BENCH TAKES ITS PICKS FROM A DIFFERENT STREAM, and that is why this
-  // commit does not re-roll a single game. The carriers still take exactly
+  // commit does not re-roll a single game. The developing set still take exactly
   // DEVELOPMENT_ALLOCATION.claimCount draws from `ibnerRng`, in the same order,
   // at the same point; the bench's draws come from a reselection stream. See
   // reselectRng above and developmentAllocation.ts's RESELECTION block.
@@ -2989,13 +3016,16 @@ function processIbner(
       // rather than by the length of the game.
       if (DEVELOPMENT_CESSION_ENABLED && c.developingClaims && c.developingClaims.length > 0) {
         const curveAge = c.age + 2;
-        const rs = reselectCarriers(
+        const rs = reselectDevelopingSet(
           c.developingClaims,
           c.developmentBench ?? [],
           c.untrackedTotal ?? 0,
           (claimId, drawn) => isClaimClosed(resolveClosureCurve(line, drawn), gameId, claimId, curveAge),
           developing ? DEVELOPMENT_ALLOCATION.claimCount : 0,
-          reselectRng(seed, line, c.yearNumber, valuationYear, 'carriers'),
+          // ⚠ THE SET MUST HOLD THE MOVEMENT, NOT MERELY NUMBER TEN. A matured
+          // cohort takes no step, so it needs to hold nothing.
+          developing ? ibnerOneSigmaTakedown(line, c.stepMultiplier, c.netUnpaid) : 0,
+          reselectRng(seed, line, c.yearNumber, valuationYear, 'developing'),
         );
         developingClaimsOut = rs.tracked;
         untrackedOut = rs.untrackedTotal;
@@ -3003,7 +3033,7 @@ function processIbner(
         benchOut = developing && rs.bench.length > 0 ? rs.bench : undefined;
         // ⚠ rs.retired / rs.promoted / rs.short ARE NOT RETURNED, deliberately.
         // Every one of them is recoverable by differencing the cohort before
-        // and after — retired is a carrier that is now closed, promoted is a
+        // and after — retired is a developing claim that is now closed, promoted is a
         // claim id present after and absent before, short is a developing
         // cohort carrying fewer than the cap. development-cession-check
         // already holds both sides of the step and derives them there, which
@@ -3130,7 +3160,7 @@ function processIbner(
         // it does not matter much either.
         //
         // ⚠ THE RESELECTED SET, NOT THE COHORT'S STORED ONE. Reselection ran
-        // above and may have stood carriers down and promoted replacements
+        // above and may have stood developing claims down and promoted replacements
         // in; taking `c.developingClaims` here would develop the set as it was
         // at the LAST valuation and then overwrite it with the reselected one,
         // which is a rearrangement between the set that moves and the set that
@@ -3149,12 +3179,12 @@ function processIbner(
           // proportionally across the whole register, so it has to come back the
           // same way or the claims do not return to their drawn values. The
           // stochastic step is real deterioration or real redundancy and goes to
-          // the carriers. Adding them into one number and picking a mode by the
-          // sign of the sum would send the unwind to the carriers whenever the
+          // the developing set. Adding them into one number and picking a mode by the
+          // sign of the sum would send the unwind to the developing set whenever the
           // lognormal step happened to dominate.
           //
           // ⚠ THE STOCHASTIC MODE NO LONGER DEPENDS ON THE SIGN, and that is this
-          // commit. It read `stochastic >= 0 ? 'carriers' : 'proportional'`:
+          // commit. It read `stochastic >= 0 ? 'developing' : 'proportional'`:
           // deterioration onto the largest claims, redundancy across the whole
           // register. Cession is convex in occurrence size and sign-blind, so an
           // asymmetric ROUTING through it manufactured recovery on a driftless
@@ -3168,7 +3198,7 @@ function processIbner(
           // DRAW, and the split is not an oversight in either direction.
           //
           // The stochastic step is real deterioration or real redundancy on a
-          // file that is still moving, so it goes to the carriers and
+          // file that is still moving, so it goes to the developing set and
           // reselection has already taken the closed ones out of that set.
           //
           // The unwind is not development. It is the REVERSAL OF A BOOKING
@@ -3189,7 +3219,7 @@ function processIbner(
           // closed UNTRACKED one of the same size, which is an asymmetry
           // created by a storage decision.
           const stochastic = newUnpaid * (factor - 1);
-          const steps: { amount: number; mode: 'carriers' | 'proportional' }[] = [
+          const steps: { amount: number; mode: 'developing' | 'proportional' }[] = [
             { amount: stochastic, mode: STOCHASTIC_ALLOCATION_MODE },
             { amount: unwind, mode: 'proportional' },
           ];

@@ -273,7 +273,7 @@ function devHeader(years: number[]): string[] {
 //
 // The year cells carry the same distinction one level down: blank is "this
 // occurrence did not move this year" — whether because the cohort had matured,
-// or because an adverse step went to the carriers and this is not one. A printed
+// or because an adverse step went to the developing set and this is not one. A printed
 // 0 is a real movement under a dollar, which the rounding is allowed to swallow.
 //
 // ⚠ WHAT THE CHANGE FORM GIVES UP, MEASURED. A blank cell BETWEEN two printed
@@ -282,7 +282,7 @@ function devHeader(years: number[]): string[] {
 // valued". The shape cannot tell them apart. It costs almost nothing: over 6
 // games x 10 years x 3 lines, 118 such cells out of 7,980 at defaults (1.5%) and
 // 54 out of 8,136 under squeezed funding (0.7%). They arise where an ADVERSE
-// step went to the carriers and this occurrence is a tracked non-carrier, so
+// step went to the developing set and this occurrence is a tracked occurrence outside the developing set, so
 // they thin out under squeeze — the unwind is live there, proportional, and
 // moves every tracked occurrence every year. The ones that remain in that arm
 // are pre-game accident years, which are written at default decisions in both

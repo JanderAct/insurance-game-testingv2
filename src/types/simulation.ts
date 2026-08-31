@@ -416,7 +416,7 @@ export interface DevelopingClaim {
    *  occurrence closes and set when an open occurrence is drawn to replace one
    *  that did. It never changes for any other reason and never changes between
    *  the two directions of a valuation. */
-  carrier: boolean;
+  developing: boolean;
   /** True once this occurrence's claim has closed, as at the last valuation
    *  that reselected. Closure is a pure function of (gameId, claimId, curve,
    *  age) — see claimClosure.ts — so this is a CACHE of a derived fact, carried
@@ -457,11 +457,11 @@ export interface DevelopingClaim {
 
 // ============================================================================
 // A REPLACEMENT WAITING TO BE CALLED ON — an occurrence drawn size-weighted at
-// inception, sitting inside `untrackedTotal` until a carrier closes.
+// inception, sitting inside `untrackedTotal` until a developing claim closes.
 //
 // ⚠ IT IS NOT TRACKED AND IT CEDES NOTHING WHILE IT SITS HERE. That is the
 // whole point of keeping it in a separate array rather than in
-// `developingClaims` with carrier: false. A benched occurrence is below the
+// `developingClaims` with developing: false. A benched occurrence is below the
 // retention by construction, and its dollars are still counted inside
 // `untrackedTotal`; promoting it into the tracked set moves the same dollars
 // from the scalar into the list and nothing else. If it were tracked from
@@ -575,7 +575,7 @@ export interface ReserveCohort {
   // cohort, which has no claim register behind it — its development is retained
   // entire, which is the honest default and is 0.4% of all adverse development.
   // ⚠ TRACKED OCCURRENCES, NOT JUST THE CARRIERS. Everything at or above the
-  // retention plus the carriers — the only occurrences whose value can ever
+  // retention plus the developing set — the only occurrences whose value can ever
   // change a cession. EMPTY on a seed cohort, which has no register behind it
   // and retains its development entire.
   developingClaims?: DevelopingClaim[];
@@ -584,7 +584,7 @@ export interface ReserveCohort {
   // without storing five hundred numbers per cohort.
   untrackedTotal?: number;
   // ⚠ THE REPLACEMENTS, DRAWN AT INCEPTION AND HELD UNTIL NEEDED. Reselection
-  // has to draw a replacement carrier SIZE-WEIGHTED from the open register, and
+  // has to draw a replacement SIZE-WEIGHTED from the open register, and
   // by valuation time the register is gone — everything not tracked has
   // collapsed into the one scalar above, and there is no list left to draw from.
   // So the draw happens at inception, when the register still exists, and its

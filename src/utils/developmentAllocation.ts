@@ -6,8 +6,13 @@
 // CLAIMS now, and the tower sees it.
 //
 // ============================================================================
-// ⚠ ALLOCATION IS SYMMETRIC. BOTH DIRECTIONS GO TO THE SAME TEN OCCURRENCES,
+// ⚠ ALLOCATION IS SYMMETRIC. BOTH DIRECTIONS GO TO THE SAME OCCURRENCES,
 // SIZE-WEIGHTED, AND THE SYMMETRY IS LOAD-BEARING RATHER THAN TIDY.
+//
+// (It said "THE SAME TEN" until closure arrived. Ten is a FLOOR now, not a
+// count — the set is drawn until it holds the movement it may have to absorb,
+// and it is every open claim when that is fewer than ten. See THE SIZE OF THE
+// SET, further down.)
 //
 // ⚠ THE ARGUMENT THAT STOOD HERE WAS "DETERIORATION IS CONCENTRATED, REDUNDANCY
 // IS DIFFUSE", and it sent adverse movements to the largest 3 while favourable
@@ -45,12 +50,13 @@
 //   sizeWtd-10     same-as-adverse     1.04x   1.05x    -$28.16M   <- THIS RULE
 //   proportional   proportional        1.01x   1.01x    -$28.95M
 //
-// Widening the adverse rule alone gets to 1.50x and stops: 3 -> 10 carriers buys
+// Widening the adverse rule alone gets to 1.50x and stops: 3 -> 10 developing claims buys
 // only 0.13x, because its limit is proportional adverse, which is the bottom row.
 //
-// ⚠ WHY TEN AND NOT THREE. Ten answers the old objection at the point where it
-// is actually true. "A single claim collapsing to nothing" is a real worry for
-// one claim and much less of one for ten, and the symmetric rule at ten carriers
+// ⚠ WHY TEN AND NOT THREE — a question about the FLOOR, since closure made ten
+// a floor rather than a count. Ten answers the old objection at the point where
+// it is actually true. "A single claim collapsing to nothing" is a real worry for
+// one claim and much less of one for ten, and the symmetric rule at ten developing claims
 // truncated a give-back 9 times against largest-1's 51 — the fewest in the
 // family. Three would have been 17.
 //
@@ -85,7 +91,7 @@
 //   WC   after   -0.6%  95% CI [-2.2%,  1.0%]   contains zero
 //
 // with GL and Property containing zero in both. Symmetric routing shrank it
-// below what 50 games can resolve, because the carriers' cession stopped being
+// below what 50 games can resolve, because the developing set's cession stopped being
 // sensitive to WHICH shares moved once both directions move the same ten.
 // The mechanism remains; its magnitude does not. Do not chase it without
 // re-measuring first.
@@ -118,7 +124,7 @@
 // constant. Nothing in the model anchors it.
 //
 // ⚠ SIZE-WEIGHTED IS NOW THE DEFAULT, AND ITS DEFERRED COST WAS PAID HERE. It
-// CONSUMES RNG DRAWS — one per carrier picked, before this year's horizon and
+// CONSUMES RNG DRAWS — one per developing claim picked, before this year's horizon and
 // stepMultiplier draws — so every downstream draw in the `ibner` stream reseeds
 // and a line-by-line null test against the parent baseline is unreadable. The
 // stream is derived fresh per (seed, year, line), so the shift cannot accumulate
@@ -138,7 +144,7 @@
 // register matters, and one scalar carries that.
 //
 // So the cohort stores the occurrences at or above the retention, plus the
-// carriers, plus `untrackedTotal`. Measured: 2.6 occurrences per WC accident
+// developing claims, plus `untrackedTotal`. Measured: 2.6 occurrences per WC accident
 // year reach the $1M retention, 4.8 on GL, 0.4 on Property, worst case 13.
 // A handful of records, and the cession arithmetic is EXACT rather than
 // approximated.
@@ -155,9 +161,9 @@ export type DevelopmentWeighting = 'sized' | 'flat';
 export interface DevelopmentAllocationRule {
   /** How many occurrences carry ADVERSE development. */
   claimCount: number;
-  /** How adverse development splits between the carriers. */
+  /** How adverse development splits across the developing set. */
   weighting: DevelopmentWeighting;
-  /** How the carriers are chosen at inception. */
+  /** How the developing set is first drawn, at inception. */
   selection: ClaimSelection;
 }
 
@@ -189,7 +195,7 @@ export const DEVELOPMENT_CESSION_ENABLED = true;
 // will ever pay, so it cannot be the one an accident year's deterioration lands
 // on, and a subset frozen at inception ends its life pointing entirely at
 // settled files. The alternative to replacing them — letting the set SHRINK —
-// leaves a cohort with no open carriers retaining its development ENTIRE, like
+// leaves a cohort with no open developing claims retaining its development ENTIRE, like
 // a seed cohort with no register: no cession at all on a cohort that still
 // carries an unpaid balance and still develops. Measured before this commit at
 // 0.59% of GL cohort-valuations and 0.61% of Property's. That is wrong at any
@@ -215,16 +221,16 @@ export const DEVELOPMENT_CESSION_ENABLED = true;
 // from the open pool" needs the pool, and by valuation time there isn't one:
 // everything not tracked has collapsed into `untrackedTotal`, a single scalar,
 // which is precisely what keeps this mechanism inside Ruling 8's storage
-// budget. Promoting from the tracked non-carriers instead is not an option —
-// tracked is carriers plus the occurrences at or above the retention, of which
-// there are 2.6 per WC accident year, 4.8 on GL and 0.4 on Property, and almost
-// all of those are carriers already. There is nothing to promote.
+// budget. Promoting from the tracked occurrences outside the set is not an option
+// either — tracked is the developing set plus the occurrences at or above the
+// retention, of which there are 2.6 per WC accident year, 4.8 on GL and 0.4 on
+// Property, and almost all of those are developing already. Nothing to promote.
 //
 // So the draw happens at INCEPTION, while the register still exists, and the
 // result waits on the cohort. The bench is drawn size-weighted WITHOUT
-// REPLACEMENT from the register with the carriers and the tracked occurrences
+// REPLACEMENT from the register with the developing set and the tracked occurrences
 // already removed, i.e. it is the continuation of the same successive-sampling
-// sequence that chose the carriers. Drawing size-weighted from the bench at
+// sequence that chose the developing set. Drawing size-weighted from the bench at
 // valuation time is therefore a draw from a size-weighted sample of the
 // register rather than from the register itself — the honest statement of what
 // this buys and what it does not.
@@ -233,13 +239,13 @@ export const DEVELOPMENT_CESSION_ENABLED = true;
 // MEASURABLE. sizeWeighted consumes one draw per pick. Taking the bench's picks
 // from `ibner` would move every downstream draw in that stream and re-roll
 // every game, so the whole commit would arrive as an indistinguishable mixture
-// of mechanism and reseed. The carriers still take their ten picks from `ibner`
+// of mechanism and reseed. The set still takes its ten picks from `ibner`
 // in the same order and the same place, bit for bit; the bench and every
 // reselection draw come from streams derived per (seed, accident year,
 // valuation year, purpose). The `ibner` stream is untouched by this commit.
 //
 // ⚠ THE BENCH CAN RUN OUT, AND WHEN IT DOES THE SET SHRINKS. It is a fixed
-// depth, so a cohort that closes more carriers than the bench can replace ends
+// depth, so a cohort that closes more developing claims than the bench can replace ends
 // up short — the shrink case, arriving late instead of immediately. That is a
 // bounded, measured cost rather than an argument against the bench:
 // development-cession-check counts it.
@@ -255,7 +261,7 @@ export const DEVELOPMENT_CESSION_ENABLED = true;
 //
 // Property's whole register is 39 occurrences, so a bench of 40 IS the register
 // and no deeper bench can help it. Measured over 12 games x 20 years, the share
-// of developing cohort-valuations with NO open carrier at all — the shrink
+// of developing cohort-valuations with NO open developing claim at all — the shrink
 // pathology, where a cohort that still carries an unpaid balance and still
 // develops retains its development entire and cedes nothing:
 //
@@ -319,6 +325,7 @@ export const DEVELOPMENT_CESSION_ENABLED = true;
 // ============================================================================
 export const DEVELOPMENT_BENCH_DEPTH = 40;
 
+
 export interface TrackedSet {
   tracked: DevelopingClaim[];
   /** Gross total of every occurrence NOT tracked. Below the retention by
@@ -330,7 +337,7 @@ export interface TrackedSet {
 }
 
 // Build the tracked set: every occurrence at or above the retention, plus the
-// carriers, whichever way those overlap. Then the bench, from what is left.
+// developing claims, whichever way those overlap. Then the bench, from what is left.
 export function buildTrackedSet(
   line: TowerLine,
   occurrenceIds: string[],
@@ -345,43 +352,43 @@ export function buildTrackedSet(
   if (n === 0) return { tracked: [], untrackedTotal: 0, bench: [] };
   const retention = REINSURANCE_TOWER[line][0].attachment;
 
-  // The carriers.
+  // The developing set.
   //
   // ⚠ THIS BLOCK IS UNCHANGED AND MUST STAY UNCHANGED. It takes exactly
   // `rule.claimCount` draws from `rng` in exactly the order it always did. The
   // bench below takes none of them.
   const k = Math.min(Math.max(0, rule.claimCount), n);
-  let carrierIdx: number[];
+  let developingIdx: number[];
   if (rule.selection === 'largest') {
-    carrierIdx = totals.map((t, i) => [t, i] as const).sort((a, b) => b[0] - a[0]).slice(0, k).map(([, i]) => i);
+    developingIdx = totals.map((t, i) => [t, i] as const).sort((a, b) => b[0] - a[0]).slice(0, k).map(([, i]) => i);
   } else {
     if (!rng) throw new Error('buildTrackedSet: sizeWeighted selection needs an rng');
     const pool = totals.map((t, i) => ({ t: Math.max(0, t), i }));
-    carrierIdx = [];
+    developingIdx = [];
     for (let pick = 0; pick < k && pool.length > 0; pick++) {
       const sum = pool.reduce((s, p) => s + p.t, 0);
-      if (sum <= 0) { carrierIdx.push(pool[0].i); pool.splice(0, 1); continue; }
+      if (sum <= 0) { developingIdx.push(pool[0].i); pool.splice(0, 1); continue; }
       let u = rng.next() * sum;
       let j = 0;
       for (; j < pool.length - 1; j++) { u -= pool[j].t; if (u <= 0) break; }
-      carrierIdx.push(pool[j].i);
+      developingIdx.push(pool[j].i);
       pool.splice(j, 1);
     }
   }
-  const isCarrier = new Set(carrierIdx);
+  const isDeveloping = new Set(developingIdx);
 
   const tracked: DevelopingClaim[] = [];
   let untrackedTotal = 0;
   const benchPool: { t: number; i: number }[] = [];
   for (let i = 0; i < n; i++) {
-    if (isCarrier.has(i) || totals[i] >= retention) {
+    if (isDeveloping.has(i) || totals[i] >= retention) {
       tracked.push({
         claimId: claimIds[i] ?? occurrenceIds[i],
         occurrenceId: occurrenceIds[i],
         drawn: totals[i],
         original: totals[i],
         current: totals[i],
-        carrier: isCarrier.has(i),
+        developing: isDeveloping.has(i),
         closed: false,
       });
     } else {
@@ -391,9 +398,9 @@ export function buildTrackedSet(
       if (totals[i] > 0) benchPool.push({ t: totals[i], i });
     }
   }
-  // Carriers first, largest first — the register reads better and the
+  // Developing claims first, largest first — the register reads better and the
   // proportional maths does not care about order.
-  tracked.sort((a, b) => (Number(b.carrier) - Number(a.carrier)) || (b.drawn - a.drawn));
+  tracked.sort((a, b) => (Number(b.developing) - Number(a.developing)) || (b.drawn - a.drawn));
 
   // The bench — the same successive size-weighted sampling, on the remainder,
   // from its own stream. `largest` selection gets a `largest` bench for the
@@ -432,16 +439,95 @@ export function buildTrackedSet(
   return { tracked, untrackedTotal, bench };
 }
 
+// ============================================================================
+// ⚠ THE SIZE OF THE SET: ENOUGH CLAIMS TO HOLD THE MOVEMENT, NOT TEN CLAIMS.
+//
+// THE RULE WAS NEVER "TEN". Ten was a proxy for "enough to absorb the step",
+// and it held for as long as cohorts had hundreds of claims open. Closure ended
+// that. The development step is a percentage of the COHORT's outstanding and it
+// is placed on a SUBSET holding part of the register; once the subset's share
+// falls below the size of the movement, the movement cannot fit, the subset
+// zeroes, and the remainder spills. Necessarily — it is arithmetic, not a bug
+// in the allocator.
+//
+// So the set is drawn until it HOLDS ENOUGH, with `claimCount` as a FLOOR
+// rather than a cap:
+//
+//   keep drawing while  (fewer than `floor` developing)  OR  (held < minHold)
+//   stop when either is satisfied and the other cannot be, i.e. when nothing
+//   open remains to add
+//
+// ⚠ `minHold` IS A ONE-SIGMA FAVOURABLE STEP ON THIS COHORT'S OWN OUTSTANDING,
+// AND IT IS DELIBERATELY NOT A PERCENTILE. A percentile needs a percentile
+// chosen, and nothing anchors that choice — it would be a second invented
+// constant sitting next to `claimCount`, which this file's header already calls
+// the calibration. One sigma is the scale the step distribution states about
+// itself: it is where the diagnosis was made ("its eventful step is sigma
+// 1.543, so a one-sigma favourable move is a 79% takedown") and it needs no
+// tuning. See ibnerOneSigmaTakedown in simulationEngine, which is where the
+// cohort's sigma lives.
+//
+// ⚠ THE FLOOR IS NOT LIFTED WHEN THE SET ALREADY HOLDS ENOUGH, and that is what
+// keeps this from being a recalibration in disguise. Removing the cap entirely
+// — every open claim always develops — was measured and rejected: the ratios do
+// not move (WC 1.06x, GL 1.04x, Property 1.07x, identical) but the CESSION
+// RATES do, WC's adverse falling 51.0% -> 43.5% and GL's 60.2% -> 55.1%,
+// because spreading a movement over twice as many claims puts less of it above
+// the retention. That is the `all sized` row of the header's grid, and moving
+// onto it is a calibration decision this rule has no business making.
+//
+// ⚠ THE LIFT ENGAGES ON 1.06% OF DEVELOPING COHORT-VALUATIONS, ALMOST ALL OF
+// THEM PROPERTY, and the sets it produces run to 11-16 occurrences against the
+// floor of 10. It is a live mechanism, not a bound waiting for a future that
+// never comes.
+//
+// ⚠ AND IT ENGAGES FAR MORE OFTEN THAN THE REALISED MOVEMENT OVERFLOWS, which
+// is the point of sizing on the DISTRIBUTION rather than on the draw. Measured
+// against realised movements over 4,291 developing-mode allocations (15 games x
+// 10 years x 2 arms), before this rule existed:
+//
+//   line       favourable   |mov| > set   open claims outside the set   open bench
+//   WC              1,001          0.0%                            n/a          n/a
+//   GL                740          3.5%                           0.0%        empty
+//   Property          458         20.5%                           0.0%        empty
+//
+// Read only those columns and the conclusion is that nothing can be done: the
+// set already contained every open claim the cohort could reach — median
+// set/open of 1.00 on all three lines — and the bench was empty every time.
+// That is true AT THE MOMENT OF OVERFLOW and it is not the whole picture,
+// because by then the year's draw has happened. Sizing against a one-sigma step
+// asks the question a valuation earlier, while open occurrences are still on the
+// bench to be promoted, and that is where the 1.06% comes from.
+//
+// ⚠ WHAT SURVIVES THE LIFT IS THE BIGGER FINDING. `underheld` counts it: 3.41%
+// of developing cohort-valuations hold less than a one-sigma step WITH NOTHING
+// OPEN LEFT TO ADD, worst case holding nothing at all against a step it must
+// absorb.
+// A reserve developing beyond what its open claims are worth is the two-clock
+// problem recorded below, arriving through the front door:
+// payment runs on the payout pattern in dollars per cohort, closure runs on the
+// closure curve in counts per claim, and nothing stops the count clock reaching
+// 100% while the dollar clock is short. At that point no allocation rule can
+// place the movement on open claims, because there are none left worth enough.
+// The rule here is the part that CAN be fixed by allocation; the residual is
+// not, and it is reported rather than absorbed.
+// ============================================================================
+
 export interface ReselectionResult {
   tracked: DevelopingClaim[];
   bench: BenchClaim[];
   untrackedTotal: number;
-  /** Carriers that closed at this valuation and stood down. */
+  /** Developing claims that closed at this valuation and stood down. */
   retired: number;
   /** Open occurrences promoted to replace them. */
   promoted: number;
-  /** True if the set is below its cap with nothing left open to promote. */
+  /** True if the set is below its floor with nothing left open to promote. */
   short: boolean;
+  /** True if the set holds less than `minHold` and nothing open remains to add.
+   *  The register cannot absorb its own movement — see THE SIZE OF THE SET. */
+  underheld: boolean;
+  /** What the developing set is worth, gross, after reselection. */
+  held: number;
   /** ⚠ THE CLAIM IDS THAT JOINED THE REGISTER AT THIS VALUATION, and the caller
    *  needs them for a reason that is not bookkeeping. A promoted occurrence has
    *  ALREADY MOVED — it sat inside the untracked mass while the proportional
@@ -466,7 +552,7 @@ export interface ReselectionResult {
 // asymmetric-routing defect returns with the valuation clock standing in for
 // the sign. Calling this between the two steps would be the bug.
 //
-// ⚠ MEMBERSHIP CHANGES ONLY BY CLOSURE. A carrier stands down if and only if it
+// ⚠ MEMBERSHIP CHANGES ONLY BY CLOSURE. A developing claim stands down if and only if it
 // has closed; an occurrence joins only if it is open and was not carrying
 // before. NO OPEN CARRIER EVER STANDS DOWN — there is no reshuffle, no
 // re-ranking, no "best ten now". Between two valuations with no closures the
@@ -483,12 +569,13 @@ export interface ReselectionResult {
 // on the closure curves: the rule here is about membership, not about when a
 // claim closes.
 // ============================================================================
-export function reselectCarriers(
+export function reselectDevelopingSet(
   tracked: DevelopingClaim[],
   bench: BenchClaim[],
   untrackedTotal: number,
   isClosed: (claimId: string, drawn: number) => boolean,
-  cap: number,
+  floor: number,
+  minHold: number,
   rng: SeededRandom,
   selection: ClaimSelection = DEVELOPMENT_ALLOCATION.selection,
 ): ReselectionResult {
@@ -497,31 +584,33 @@ export function reselectCarriers(
   let retired = 0;
   const next: DevelopingClaim[] = tracked.map(c => {
     const closed = c.closed === true || isClosed(c.claimId, c.drawn);
-    if (closed && c.carrier) retired++;
+    if (closed && c.developing) retired++;
     const wasFlagged = c.closed === true;
     // A closed occurrence stands down. It keeps its place in the register.
-    if (closed === wasFlagged && !(closed && c.carrier)) return c;
-    return { ...c, closed, carrier: c.carrier && !closed };
+    if (closed === wasFlagged && !(closed && c.developing)) return c;
+    return { ...c, closed, developing: c.developing && !closed };
   });
 
   // 2. The bench sheds its closed members. No dollars move — a benched
   //    occurrence's value lives inside `untrackedTotal` and stays there.
   const openBench = bench.filter(b => !isClosed(b.claimId, b.drawn));
 
-  // 3. Refill to the cap from the open pool: tracked occurrences not currently
-  //    carrying, plus the bench. One pool, one rule.
+  // 3. Refill from the open pool: tracked occurrences not currently developing,
+  //    plus the bench. One pool, one rule — see THE SIZE OF THE SET above for
+  //    what stops the refill.
   let untracked = untrackedTotal;
   let promoted = 0;
   const cands: { kind: 'tracked' | 'bench'; idx: number; w: number }[] = [];
   next.forEach((c, i) => {
-    if (!c.carrier && c.closed !== true) cands.push({ kind: 'tracked', idx: i, w: Math.max(0, c.current) });
+    if (!c.developing && c.closed !== true) cands.push({ kind: 'tracked', idx: i, w: Math.max(0, c.current) });
   });
   openBench.forEach((b, i) => cands.push({ kind: 'bench', idx: i, w: Math.max(0, b.current) }));
 
   const takenBench = new Set<number>();
   const promotedIds = new Set<string>();
-  let carrying = next.reduce((s, c) => s + (c.carrier ? 1 : 0), 0);
-  while (carrying < cap && cands.length > 0) {
+  let nDeveloping = next.reduce((s, c) => s + (c.developing ? 1 : 0), 0);
+  let held = next.reduce((s, c) => s + (c.developing ? Math.max(0, c.current) : 0), 0);
+  while (cands.length > 0 && (nDeveloping < floor || held < minHold)) {
     let pos = 0;
     if (selection === 'largest') {
       for (let j = 1; j < cands.length; j++) if (cands[j].w > cands[pos].w) pos = j;
@@ -537,7 +626,7 @@ export function reselectCarriers(
     const pick = cands[pos];
     cands.splice(pos, 1);
     if (pick.kind === 'tracked') {
-      next[pick.idx] = { ...next[pick.idx], carrier: true };
+      next[pick.idx] = { ...next[pick.idx], developing: true };
     } else {
       const b = openBench[pick.idx];
       takenBench.add(pick.idx);
@@ -552,11 +641,12 @@ export function reselectCarriers(
         drawn: b.drawn,
         original: b.original,
         current: b.current,
-        carrier: true,
+        developing: true,
         closed: false,
       });
     }
-    carrying++;
+    nDeveloping++;
+    held += Math.max(0, pick.w);
     promoted++;
   }
 
@@ -566,7 +656,12 @@ export function reselectCarriers(
     untrackedTotal: Math.max(0, untracked),
     retired,
     promoted,
-    short: carrying < cap,
+    short: nDeveloping < floor,
+    // ⚠ THE SET HOLDS LESS THAN THE MOVEMENT IT MAY HAVE TO ABSORB, AND THERE IS
+    // NOTHING OPEN LEFT TO ADD. Not a shortfall of the RULE — a shortfall of the
+    // register. See THE SIZE OF THE SET.
+    underheld: held < minHold,
+    held,
     promotedIds,
   };
 }
@@ -584,28 +679,28 @@ export interface AllocationResult {
   unallocated: number;
 }
 
-export type AllocationMode = 'carriers' | 'proportional';
+export type AllocationMode = 'developing' | 'proportional';
 
 // ⚠ THE MODE THE STOCHASTIC STEP USES, IN BOTH DIRECTIONS — exported so that
 // processIbner and the sign-symmetry gate cannot disagree about it.
 //
 // This is not decoration. The gate's whole job is to measure the adverse and
 // favourable marginal rates UNDER THE ENGINE'S OWN ROUTING, and it did that by
-// hardcoding `carriers` and `proportional`. The moment the engine's routing
+// hardcoding `developing` and `proportional`. The moment the engine's routing
 // changed, the gate went on measuring the retired one and read 1.78x for a
 // mechanism that was symmetric — a gate describing the engine from memory, which
 // is the failure mode claimsExport.ts's header already records for the export
 // layer. One constant, read in both places.
-export const STOCHASTIC_ALLOCATION_MODE: AllocationMode = 'carriers';
+export const STOCHASTIC_ALLOCATION_MODE: AllocationMode = 'developing';
 
 // Split a movement.
 //
 // ⚠ THE MODE IS CHOSEN BY THE CALLER, NOT BY THE SIGN, because processIbner has
 // two movements with different characters arriving in the same step: the
-// stochastic one (adverse -> carriers, favourable -> proportional) and the
+// stochastic one (adverse -> developing claims, favourable -> proportional) and the
 // deterministic unwind, which is ALWAYS proportional because it reverses a
 // markdown that was applied proportionally. Inferring the mode from the sign
-// here would send the unwind to the carriers and the claims would not return to
+// here would send the unwind to the developing set and the claims would not return to
 // their drawn values.
 //
 // The residual is placed on the last tracked element so the parts sum to
@@ -630,16 +725,16 @@ export function allocateDevelopment(
   // give back, so the bound cannot be computed first.
   //
   // ⚠ AND THE FALLBACK EXCLUDES CLOSED OCCURRENCES, which is the one place
-  // closure reaches this function. `carriers` mode falls back to every tracked
+  // closure reaches this function. `developing` mode falls back to every tracked
   // occurrence when a cohort has none flagged; a set that has been reselected
   // down to nothing is exactly that case, and the fallback would hand the
   // stochastic step to the settled files reselection just stood down. The
   // proportional path deliberately does NOT filter — see processIbner for why
   // the unwind still reaches closed occurrences.
-  const carrierIdx = tracked.map((c, i) => [c, i] as const).filter(([c]) => c.carrier).map(([, i]) => i);
+  const developingIdx = tracked.map((c, i) => [c, i] as const).filter(([c]) => c.developing).map(([, i]) => i);
   const openIdx = tracked.map((c, i) => [c, i] as const).filter(([c]) => c.closed !== true).map(([, i]) => i);
-  const use = mode === 'carriers'
-    ? (carrierIdx.length > 0 ? carrierIdx : (openIdx.length > 0 ? openIdx : []))
+  const use = mode === 'developing'
+    ? (developingIdx.length > 0 ? developingIdx : (openIdx.length > 0 ? openIdx : []))
     : [];
   const useTotal = use.reduce((s, i) => s + Math.max(0, tracked[i].current), 0);
 
@@ -647,16 +742,16 @@ export function allocateDevelopment(
   // ⚠ THE POOL IS THE OCCURRENCES THAT RECEIVE THE DOLLARS, NOT EVERY TRACKED ONE.
   //
   // This read `mode === 'proportional' ? wholeTotal : trackedTotal`, and in
-  // carriers mode that was wrong in both directions at once. The dollars land on
+  // developing mode that was wrong in both directions at once. The dollars land on
   // the CARRIERS, a subset of `tracked`, so bounding a favourable movement by
-  // `trackedTotal` permits one larger than the carriers hold — which drives an
-  // individual carrier negative, gets clamped to zero in cedeDevelopment, and
+  // `trackedTotal` permits one larger than the developing set holds — which drives an
+  // individual developing claim negative, gets clamped to zero in cedeDevelopment,
   // loses register dollars the reserve has already counted. Meanwhile the bound
   // is also too SMALL relative to the register, so the untracked mass can never
   // absorb the remainder in this mode.
   //
   // ⚠ IT COULD NOT FIRE BEFORE THIS COMMIT AND FIRES BECAUSE OF IT. Favourable
-  // movements never took the carriers branch, so the wrong bound was unreachable
+  // movements never took the developing set branch, so the wrong bound was unreachable
   // — measured at $15.5B latent across 4,258 cohort states, the largest
   // one-sidedness in this file. Routing favourable movements through the same
   // branch as adverse ones is exactly what wakes it, so it is fixed in the same
@@ -676,12 +771,12 @@ export function allocateDevelopment(
   // cedes NOTHING, so that tail would give back at 0% while adverse dollars cede
   // at 80%+. That is the defect this commit exists to remove, reappearing at the
   // boundary. The spill is a boundary condition and not a routing rule — it
-  // engages only past the carriers' whole value, so the marginal rate at any
+  // engages only past the developing set's whole value, so the marginal rate at any
   // ordinary movement is untouched and the +/-X probe reads the same.
   const pool = mode === 'proportional' ? wholeTotal : Math.min(wholeTotal, useTotal + Math.max(0, wholeTotal - useTotal));
   const applied = amount < 0 ? -Math.min(-amount, pool) : amount;
   if (applied === 0) return zero;
-  const spill = mode === 'carriers' && applied < 0 ? Math.max(0, -applied - useTotal) : 0;
+  const spill = mode === 'developing' && applied < 0 ? Math.max(0, -applied - useTotal) : 0;
 
   const deltas = new Array<number>(n).fill(0);
   let untrackedDelta = 0;
@@ -703,31 +798,53 @@ export function allocateDevelopment(
     // it has nothing tracked at all.
     if (use.length === 0) return { deltas, untrackedDelta: applied, applied, unallocated: amount - applied };
 
-    // The part the carriers take. Equal to `applied` unless a favourable movement
+    // The part the developing set takes. Equal to `applied` unless a favourable movement
     // has spilled past their whole value.
-    const onCarriers = applied + spill;
+    const onDeveloping = applied + spill;
 
     // ⚠ A FAVOURABLE MOVEMENT IS ALWAYS SIZE-WEIGHTED, WHATEVER `weighting` SAYS,
     // and that is a correctness requirement rather than a preference. A FLAT
-    // give-back hands every carrier the same dollars regardless of what it holds,
+    // give-back hands every developing claim the same dollars regardless of what it
     // so the smallest one goes negative while the pool bound is still satisfied —
     // the clamp in cedeDevelopment would then swallow the difference. You cannot
     // take $X off a claim holding less than $X. With the default 'sized' the two
     // branches coincide and this changes nothing.
-    const w = use.map(i => (weighting === 'sized' || onCarriers < 0 ? Math.max(0, tracked[i].current) : 1));
+    const w = use.map(i => (weighting === 'sized' || onDeveloping < 0 ? Math.max(0, tracked[i].current) : 1));
     const sw = w.reduce((a, b) => a + b, 0);
     if (sw <= 0) {
-      deltas[use[0]] = onCarriers;
+      deltas[use[0]] = onDeveloping;
     } else {
       let acc = 0;
-      for (let j = 0; j < use.length - 1; j++) { deltas[use[j]] = (onCarriers * w[j]) / sw; acc += deltas[use[j]]; }
-      deltas[use[use.length - 1]] = onCarriers - acc;   // exact
+      for (let j = 0; j < use.length - 1; j++) { deltas[use[j]] = (onDeveloping * w[j]) / sw; acc += deltas[use[j]]; }
+      deltas[use[use.length - 1]] = onDeveloping - acc;   // exact
     }
 
-    // The spill, proportionally over everything the carriers are not.
+    // ==================================================================
+    // THE SPILL, PROPORTIONALLY OVER EVERYTHING THE DEVELOPING SET IS NOT.
+    //
+    // ⚠ AND IT SKIPS CLOSED OCCURRENCES, WHICH IT DID NOT, AND THAT OMISSION
+    // WAS THE WHOLE OF PROPERTY'S SIGN ASYMMETRY. Reselection takes closed
+    // occurrences out of the developing set, so the stochastic step's PRIMARY
+    // path already refuses them — and then its OVERFLOW path handed them
+    // dollars anyway. One movement, one valuation, two rules, chosen by
+    // magnitude. That is an inconsistency inside the step rather than a design
+    // question about closure.
+    //
+    // It was not a rounding-order detail. On Property the occurrences above the
+    // $5M retention are exactly the ones that have settled, so ALL of the
+    // cession sat on closed files: adverse development landed on the small open
+    // ones and ceded 14.0%, while a favourable movement too large for them
+    // spilled onto the large closed ones and gave back 15.9%. Measured on the
+    // sign-symmetry probe, Property read 0.88x. With closed occurrences skipped
+    // here it reads 1.07x, and WC (1.06x) and GL (1.04x) do not move.
+    //
+    // The unwind is untouched by this and still reaches closed occurrences —
+    // see processIbner. It is the reversal of a booking markdown, not
+    // development.
+    // ==================================================================
     if (spill > 0) {
       const isUse = new Set(use);
-      const restTracked = tracked.map((c, i) => (isUse.has(i) ? 0 : Math.max(0, c.current)));
+      const restTracked = tracked.map((c, i) => (isUse.has(i) || c.closed === true ? 0 : Math.max(0, c.current)));
       const restTotal = restTracked.reduce((a, b) => a + b, 0) + Math.max(0, untrackedTotal);
       if (restTotal > 0) {
         let acc = 0;
@@ -828,7 +945,7 @@ export interface BookingMarkdown {
 // which carries no reference to the bias at all, in either arm.
 //
 // ⚠ THE MARKDOWN IS PROPORTIONAL ACROSS THE WHOLE REGISTER, and the unwind must
-// reverse it the same way. Sending the unwind to the carriers instead would
+// reverse it the same way. Sending the unwind to the developing set instead would
 // restore three claims past their drawn values while the rest stayed marked
 // down — the original defect with extra steps.
 // ============================================================================

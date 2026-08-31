@@ -290,7 +290,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // v24, where the shape moved and no value did. See VALUE_IDENTITY_v30's note for
 // the control that attributes the value change: closure forced off reproduces
 // v29 bit for bit.
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v30.json');
+// v31: all 24 hashes moved, shape unchanged. The claim register's values change
+// because the developing set is sized differently and the spill no longer
+// reaches settled claims; no column was added, renamed or reordered. See
+// VALUE_IDENTITY_v31's note for the three causes and how each was measured.
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v31.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

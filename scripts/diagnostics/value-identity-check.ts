@@ -352,7 +352,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // `ibner` stream, so a line-by-line diff cannot separate mechanism from reseed.
 // It does not apply here: the reselection draws were routed onto their own
 // streams keyed on (seed, valuation year, line, accident year, purpose), and
-// `ibner` still takes exactly ten carrier picks at inception in the same order.
+// `ibner` still takes exactly ten developing-set picks at inception in the same order.
 //
 // So the control is CLOSURE FORCED OFF rather than the mechanism switch. With
 // `isClosed` stubbed to `() => false`, reselection is a no-op that spends no
@@ -360,7 +360,27 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // added, 0 removed, 0 differing. Every one of the 11,748 moved values is
 // therefore closure driving reselection and nothing else. The mechanism-off
 // before-and-after was run too and is also 0 differing.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v30.json');
+// v31: the developing set is sized to hold its own movement, the spill stops
+// landing on settled claims, and "carrier" is gone. 9,367 of 29,400 changed
+// across 37 fields, 0 added, 0 removed.
+//
+// ⚠ THREE CAUSES IN ONE CAPTURE, AND THEY WERE MEASURED SEPARATELY AS THEY WENT
+// IN, because a recapture blesses whatever is in the tree:
+//   the RENAME moved values, which is not obvious — the reselection stream is
+//     keyed on a purpose string and `carriers` became `developing`, so that
+//     stream re-rolls. Sign-symmetry: WC 1.07x -> 1.06x, GL and Property
+//     unchanged.
+//   the SPILL EXCLUDING CLOSED OCCURRENCES is the behavioural fix. Property
+//     0.88x -> 1.07x, WC and GL within 0.01x.
+//   the SIZING RULE moved set sizes (11-16 against a floor of 10 on 1.06% of
+//     developing cohort-valuations) and moved no ratio and no cession level:
+//     WC 51.0%/51.0%, GL 60.2%/60.2%, Property 14.2%/14.2% before and after.
+//
+// The mechanism-off before-and-after reads 29,400 fields, 0 differing, so
+// nothing outside the mechanism moved. v30's closure-forced-off control is NOT
+// available here and would not be meaningful: the sizing rule does not depend on
+// closure, so stubbing the predicate no longer reduces the commit to a no-op.
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v31.json');
 
 function seedOf(id: string) {
   let h = 5381;

@@ -13,7 +13,7 @@
 //   ADVERSE      largest-1, largest-3 (current), sizeWeighted-3,
 //                sizeWeighted-10, proportional
 //   FAVOURABLE   proportional (current), same-as-adverse,
-//                reverse-through-carriers
+//                reverse-through-developing claims
 //
 // ============================================================================
 // HOW THE COUNTERFACTUAL IS BUILT, AND WHAT IT CANNOT SEE.
@@ -223,11 +223,11 @@ interface CellResult {
   probeAdv: number; probeFav: number; probeN: number;
   byLine: Record<string, { adv: number; fav: number; n: number }>;
   reverseFellBack: number; reverseFallbackDollars: number; reverseDollars: number;
-  favCarrierTruncated: number;
+  favDevelopingTruncated: number;
 }
 
 // A live register under replay: the tracked occurrences plus the untracked mass,
-// with the adverse stock reverse-through-carriers reads.
+// with the adverse stock reverse-through-developing claims reads.
 interface Live { tracked: DevelopingClaim[]; untracked: number; stock: number[] }
 
 function route(
@@ -252,7 +252,7 @@ function route(
       const a = allocateDevelopment(live.tracked, live.untracked, amt, mode, adverse.rule?.weighting ?? 'sized');
       deltas = a.deltas;
       untrackedDelta = a.untrackedDelta;
-      if (tally && mode === 'carriers' && amt < 0 && Math.abs(a.unallocated) > 0.01) tally.favCarrierTruncated++;
+      if (tally && mode === 'developing' && amt < 0 && Math.abs(a.unallocated) > 0.01) tally.favDevelopingTruncated++;
     }
     const res = cedeDevelopment(line, live.tracked, deltas, untrackedDelta, placed);
     live.tracked = res.moved;
@@ -264,7 +264,7 @@ function route(
   };
 
   if (amount > 0) {
-    apply(amount, adverse.rule ? 'carriers' : 'proportional');
+    apply(amount, adverse.rule ? 'developing' : 'proportional');
     return { ceded };
   }
 
@@ -272,7 +272,7 @@ function route(
   if (fav === 'proportional' || !adverse.rule) {
     apply(amount, 'proportional');
   } else if (fav === 'same-as-adverse') {
-    apply(amount, 'carriers');
+    apply(amount, 'developing');
   } else {
     const stockTotal = live.stock.reduce((s, v) => s + v, 0);
     const want = -amount;
@@ -294,7 +294,7 @@ function runCell(adverse: AdverseRule, fav: FavourableRule, armFilter?: string):
   const out: CellResult = {
     gross: 0, ceded: 0, probeAdv: 0, probeFav: 0, probeN: 0,
     byLine: Object.fromEntries(LINES.map(l => [l, { adv: 0, fav: 0, n: 0 }])),
-    reverseFellBack: 0, reverseFallbackDollars: 0, reverseDollars: 0, favCarrierTruncated: 0,
+    reverseFellBack: 0, reverseFallbackDollars: 0, reverseDollars: 0, favDevelopingTruncated: 0,
   };
 
   for (const run of runs) {
@@ -307,12 +307,22 @@ function runCell(adverse: AdverseRule, fav: FavourableRule, armFilter?: string):
       if (spec) {
         const rng = new SeededRandom(1_000_003 + y * 7919 + run.game * 104_729
           + run.line.length * 31 + (run.arm === 'def' ? 0 : 1));
+        // ⚠ BENCH DEPTH 0, AND THAT IS NOT AN OMISSION. This grid replays fixed
+        // ALLOCATION RULES over recorded cohort states to compare their cession
+        // rates; it does not run closure and never reselects, so a bench of
+        // replacements would be drawn, stored and never consulted. Passing 0
+        // also keeps the grid's draws off the reselection streams, so its cells
+        // stay comparable with the ones tabulated in developmentAllocation's
+        // header. (This threw `sizeWeighted bench needs a benchRng` from the
+        // moment the bench landed until it was next run — a script that is not
+        // in the gate sweep is a script that breaks silently.)
         const set = adverse.rule
-          ? buildTrackedSet(run.line, spec.register.occIds, spec.register.claimIds, spec.register.totals, adverse.rule, rng)
-          // Proportional adverse needs no carriers, but the tracked set still has
+          ? buildTrackedSet(run.line, spec.register.occIds, spec.register.claimIds, spec.register.totals,
+              adverse.rule, rng, undefined, 0)
+          // Proportional adverse needs no developing claims, but the tracked set still has
           // to hold everything at or above the retention or the cession is wrong.
           : buildTrackedSet(run.line, spec.register.occIds, spec.register.claimIds, spec.register.totals,
-              { claimCount: 0, weighting: 'sized', selection: 'largest' }, rng);
+              { claimCount: 0, weighting: 'sized', selection: 'largest' }, rng, undefined, 0);
         const md = markDownForBooking(run.line, set, spec.registerSum * spec.bookingBias, spec.placed);
         live.set(y, { tracked: md.tracked, untracked: md.untrackedTotal, stock: md.tracked.map(() => 0) });
       }
@@ -383,7 +393,7 @@ const rows: Row[] = [];
 for (const a of ADVERSE) {
   for (const f of FAVOURABLE) {
     // (proportional, same-as-adverse) and (proportional, reverse) both collapse
-    // onto (proportional, proportional): with no carriers there is nothing to
+    // onto (proportional, proportional): with no developing claims there is nothing to
     // route differently. Reported once.
     if (!a.rule && f !== 'proportional') continue;
     const all = runCell(a, f);
@@ -429,7 +439,7 @@ console.log('\n--- SAME-AS-ADVERSE: HOW OFTEN THE CARRIERS-MODE POOL TRUNCATES A
 for (const a of ADVERSE) {
   if (!a.rule) continue;
   const c = runCell(a, 'same-as-adverse');
-  console.log(`  ${a.name.padEnd(13)} ${c.favCarrierTruncated} favourable movements exceeded the carriers' own value`);
+  console.log(`  ${a.name.padEnd(13)} ${c.favDevelopingTruncated} favourable movements exceeded the developing set's own value`);
 }
 
 // --- OPTION 3: PRICING ON THE DEVELOPED REGISTER ----------------------------

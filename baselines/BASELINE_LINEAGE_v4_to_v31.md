@@ -1901,3 +1901,150 @@ from a closed *untracked* one of the same size — an asymmetry created by a sto
   so the ratio moved 1.230 → 1.451 on WC largely by composition rather than by development.
 
 v28 retired from the working tree; v29 kept as the immediate predecessor.
+
+---
+
+## v31 — the developing set holds its own movement, and "carrier" is gone
+
+**Trigger:** one commit on `feature/payout-patterns`, closing out the sign asymmetry v30 left on
+Property at 0.88x.
+
+### The diagnosis was half right, and the half that was wrong mattered
+
+The development step is a percentage of the **cohort's** outstanding, placed on a **subset** holding
+part of the register. When the subset's share falls below the size of the movement, the movement
+cannot fit; the subset zeroes and the remainder spills. That is arithmetic and it is real —
+measured over 4,291 developing-mode allocations, a favourable movement exceeded the developing set
+on **20.5%** of Property's, 3.5% of GL's and 0.0% of WC's.
+
+But the subset was **not** small because ten was too few. Median set/open was **1.00 on all three
+lines**: the set already contained every open claim the cohort could reach, and at every single
+overflow the open bench was empty. Raising the cap had nothing to raise into.
+
+What turned a truncation into an **asymmetry** was where the overflow went. The spill spread
+proportionally over "everything the developing set is not" — **including closed occurrences.**
+Reselection takes closed claims out of the set, so the stochastic step's primary path already
+refused them, and its overflow path handed them dollars anyway: one movement, one valuation, two
+rules, chosen by magnitude. On Property the occurrences above the $5M retention are exactly the ones
+that have settled, so all of the cession sat on closed files — adverse landed on the small open ones
+and ceded 14.0%, favourable spilled onto the large closed ones and gave back 15.9%.
+
+### The gate had to be able to see it first
+
+`development-sign-symmetry`'s threshold was `ratio > 1/1.20 && ratio < 1.20` — already two-sided,
+with a floor at **0.833**, not zero. Re-parameterising it as `|ratio − 1| < 0.20` would have put the
+floor at 0.80 and **loosened** it; Property's 0.88 passed the old form and would have passed the new
+one more comfortably. So the form changed *and* the limit moved to **0.10**:
+
+| line | \|ratio − 1\| | what it is |
+|---|---|---|
+| GL | 0.04 | the tower's convexity, irreducible |
+| WC | 0.07 | the same, on the line with the most register above its retention |
+| Property | **0.12** | the defect |
+
+Stable to ±0.01 between 25 and 60 games. The headroom over WC is 0.03 and that is thinner than this
+directory likes; it is accepted because the alternative is a gate that reads green on a 12-point
+asymmetry. The gate was changed **before** the fix and went red on Property, as intended.
+
+### The fix, and what each part did
+
+| change | WC | GL | Property |
+|---|---|---|---|
+| v30 as shipped | 1.07x | 1.03x | **0.88x** |
+| rename only (the reselection stream is keyed on a purpose string) | 1.06x | 1.03x | 0.88x |
+| **spill skips closed occurrences** | 1.06x | 1.04x | **1.07x** |
+| **+ sizing rule** | 1.06x | 1.04x | 1.07x |
+
+Cession levels across the sizing rule: WC 51.0% → 51.0%, GL 60.2% → 60.2%, Property 14.2% → 14.2%.
+
+### The rule was never "ten claims"
+
+Ten was a proxy for *enough to absorb the step*, and it held while cohorts had hundreds open. Closure
+ended that. `claimCount` is now a **floor**, and the set is drawn until it holds a **one-sigma
+favourable step on the cohort's own outstanding** — `unpaid × (1 − exp(−σ − σ²/2))`, σ from the
+cohort's own `stepMultiplier × reserveStepSigma(line)`.
+
+**One sigma and not a percentile, deliberately.** A percentile needs a percentile chosen, and nothing
+anchors that — it would be a second invented constant next to `claimCount`, which this file's header
+already calls the calibration. One sigma is the scale the step distribution states about itself, and
+it needs no tuning when `reserveStepSigma` or `IBNER_STEP_MIXTURE` moves.
+
+**Draw-blind, which is the load-bearing part.** Sizing on the *realised* movement would let the set
+know how big this year's step is before choosing who takes it. It would still be sign-blind, but it
+would make the ±X probe measure a routing the engine would not have used.
+
+**Removing the cap entirely was measured and rejected.** Every open claim always developing leaves
+the ratios identical (WC 1.06x, GL 1.04x, Property 1.07x) and moves the **cession rates**: WC's
+adverse 51.0% → 43.5%, GL's 60.2% → 55.1%, because spreading a movement over twice as many claims
+puts less of it above the retention. That is the `all sized` row of the header's grid and moving onto
+it is a calibration decision this rule has no business making.
+
+### The lift engages, and more often than the realised overflow
+
+**1.06%** of developing cohort-valuations draw above the floor, producing sets of 11–16, almost all
+Property. That is *more* often than realised movements overflow — which is the point of sizing on
+the distribution rather than the draw. At the moment of overflow the bench is empty and it is too
+late; a one-sigma target asks the question a valuation earlier, while open occurrences are still
+there to promote.
+
+### What survives it is the bigger finding
+
+**3.41%** of developing cohort-valuations hold **less than a one-sigma step with nothing open left to
+add** — worst case holding nothing at all. No allocation rule reaches this. It is the two-clock
+problem arriving through the front door: payment runs on the payout pattern in **dollars** per
+cohort, closure on the closure curve in **counts** per claim, and nothing stops the count clock
+reaching 100% while the dollar clock is short. Counted by `underheld` and reported by
+`development-cession-check` at every run.
+
+### "Carrier" means reinsurer to every insurance reader
+
+Renamed throughout the module, its constants and its gates: the field `carrier` → `developing`, the
+allocation mode `'carriers'` → `'developing'`, `reselectCarriers` → `reselectDevelopingSet`, and the
+prose with them. `defaultAssumptions.ts`'s "an excess carrier's stated capacity" is left alone — that
+one means a reinsurer and is correct.
+
+⚠ **The rename was not value-neutral**, which is worth stating because a rename normally is: the
+reselection sub-stream is keyed on `(seed, valuation year, line, accident year, purpose)` and the
+purpose string was `carriers`. Renaming it re-rolls that stream. Measured alone it moved WC from
+1.07x to 1.06x and left GL and Property unchanged.
+
+### Gate readings
+
+| gate | reading |
+|---|---|
+| value identity | 9,367 of 29,400 changed / 37 fields, 0 added, 0 removed |
+| solo export guard | 24 of 24 moved, shape unchanged |
+| both, against v31 | green after recapture |
+| both, mechanism-off parent vs child | **29,400 fields, 0 differing** |
+| `development-sign-symmetry` | pass at the tightened limit — WC 0.06, GL 0.04, Property 0.07 |
+| `development-cession-check` | pass — the cap invariant replaced by the floor invariant |
+| `allocation-grid` | **was crashing since v30** and is fixed here — see below |
+| `ibner-null-check`, `paid-ledger-check`, `closure-draw-check` | pass |
+| `claims-workbook-check`, `actuarial-memo-check`, `cohort-stock-check` | pass |
+| `seed-cohort-shape-check`, `cession-uplift-basis` | pass |
+| `cession-path-independence` | fails as it did at the parent — WC −8.8% → −8.9%, inside the CI width |
+| typecheck | clean |
+| lint | unchanged at the pre-existing 14 errors / 7 warnings |
+
+### Two gates were describing the allocator from memory
+
+- **`allocation-grid` threw** `sizeWeighted bench needs a benchRng` from the moment the bench landed
+  in v30 until it was next run. It is not in the routine sweep, so it broke silently for a whole
+  commit. Fixed by passing bench depth 0 — the grid replays fixed allocation rules over recorded
+  states and never reselects, so a bench would be drawn, stored and never read.
+- **`development-cession-check`'s "developing-mode development never reaches a claim outside the
+  set"** had been printing FAIL on the two spill cases since the spill path was added, and was
+  reported as pre-existing at v30 rather than fixed. It is fixed here, in the commit that changes the
+  spill: the rule it should state is that an *ordinary* movement never leaves the set, with the
+  boundary case asserted separately.
+
+### An invariant that had to be retired one commit after it was written
+
+v30 asserted **"the set never exceeds its cap"**. Ten is a floor now, so that is wrong. Its
+replacement is two-sided: the set is never **short** of the floor while open occurrences remain to
+add (asserted in-game), and never **over** it unless it needs the extra (asserted directly against
+`reselectDevelopingSet`, because the in-game form cannot see it — the set is sized against the
+outstanding *before* the step and every quantity the gate can read is from after. A first version
+compared them anyway and fired on 19 legitimate cohorts).
+
+v29 retired from the working tree; v30 kept as the immediate predecessor.

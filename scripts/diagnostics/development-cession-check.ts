@@ -6,7 +6,7 @@
 // comparison has nothing to compare against.
 //
 // ⚠ AND SINCE THE SELECTION WENT SIZE-WEIGHTED IT IS NOT A COMPARISON AGAINST A
-// STORED BASELINE EITHER. buildTrackedSet now spends an RNG draw per carrier,
+// STORED BASELINE EITHER. buildTrackedSet now spends an RNG draw per developing
 // which reseeds every later draw in the `ibner` stream, so the mechanism-ON tree
 // cannot be compared to ANY earlier capture — not the pre-mechanism parent, not
 // the previous baseline. What survives is that the mechanism-OFF path does not
@@ -26,7 +26,7 @@
 // THE DRAWS, NOT ABOUT SELECTION CHANGES AS SUCH. Reselection draws
 // size-weighted every valuation, which would have reseeded `ibner` many times
 // over — so it was given its own streams, keyed per (seed, valuation year, line,
-// accident year, purpose), and `ibner` still takes exactly its ten carrier picks
+// accident year, purpose), and `ibner` still takes exactly its ten developing-set picks
 // at inception in the same order. That buys back a CONTROL STRONGER THAN THE
 // MECHANISM SWITCH: stub the closure predicate to `() => false` and reselection
 // becomes a no-op that spends no draw, so the mechanism-ON tree must reproduce
@@ -55,12 +55,12 @@
 // ============================================================================
 
 import { generateGameInstance } from '../../src/utils/instanceGenerator';
-import { processYear } from '../../src/utils/simulationEngine';
+import { ibnerOneSigmaTakedown, processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import {
   DEVELOPMENT_ALLOCATION, DEVELOPMENT_BENCH_DEPTH, DEVELOPMENT_CESSION_ENABLED, allocateDevelopment,
-  buildTrackedSet, cedeDevelopment, reselectCarriers,
+  buildTrackedSet, cedeDevelopment, reselectDevelopingSet,
 } from '../../src/utils/developmentAllocation';
 import { REINSURANCE_TOWER, TOWER_TOP, type TowerLine } from '../../src/data/reinsuranceTower';
 import { SeededRandom } from '../../src/utils/random';
@@ -115,7 +115,8 @@ const cover = {
   zeroedAboveRetention: new Set<string>(),
   overTowerTop: 0, overSeverityCap: 0, maxWcOcc: 0,
   noTowerCeded: 0,
-  promoted: 0, retired: 0, developingValuations: 0, shortOfCap: 0, noOpenCarrier: 0, benchExhausted: 0,
+  promoted: 0, retired: 0, developingValuations: 0, shortOfCap: 0, noOpenDeveloping: 0, benchExhausted: 0,
+  underheld: 0, underheldWorst: 0, overFloor: 0,
 };
 const perArmCeded: Record<string, number> = {};
 for (const a of ARMS) perArmCeded[a.name] = 0;
@@ -126,26 +127,26 @@ console.log('=== CLAIM-LEVEL DEVELOPMENT CESSION CHECK ===\n');
 console.log('--- ALLOCATOR CONTRACT (direct) ---');
 {
   const mk = (vals: number[]) => vals.map((v, i) => ({
-    claimId: `c${i}`, occurrenceId: `o${i}`, drawn: v, original: v, current: v, carrier: i < 3,
+    claimId: `c${i}`, occurrenceId: `o${i}`, drawn: v, original: v, current: v, developing: i < 3,
   }));
-  const cases: { name: string; claims: number[]; untracked: number; amount: number; mode: 'carriers' | 'proportional' }[] = [
-    { name: 'adverse -> carriers', claims: [3e6, 2e6, 1e6], untracked: 5e6, amount: 6e6, mode: 'carriers' },
+  const cases: { name: string; claims: number[]; untracked: number; amount: number; mode: 'developing' | 'proportional' }[] = [
+    { name: 'adverse -> developing claims', claims: [3e6, 2e6, 1e6], untracked: 5e6, amount: 6e6, mode: 'developing' },
     { name: 'favourable -> proportional', claims: [3e6, 2e6, 1e6], untracked: 5e6, amount: -3e6, mode: 'proportional' },
     { name: 'favourable, EXCEEDS everything', claims: [1e5, 5e4, 1e4], untracked: 1e4, amount: -9e9, mode: 'proportional' },
     { name: 'favourable, exactly everything', claims: [1e6, 1e6], untracked: 0, amount: -2e6, mode: 'proportional' },
-    { name: 'zero movement', claims: [1e6], untracked: 0, amount: 0, mode: 'carriers' },
-    { name: 'all-zero claims, adverse', claims: [0, 0], untracked: 0, amount: 5e5, mode: 'carriers' },
-    { name: 'single claim', claims: [4e6], untracked: 0, amount: 2.5e6, mode: 'carriers' },
+    { name: 'zero movement', claims: [1e6], untracked: 0, amount: 0, mode: 'developing' },
+    { name: 'all-zero claims, adverse', claims: [0, 0], untracked: 0, amount: 5e5, mode: 'developing' },
+    { name: 'single claim', claims: [4e6], untracked: 0, amount: 2.5e6, mode: 'developing' },
     { name: 'untracked mass only', claims: [], untracked: 9e6, amount: -1e6, mode: 'proportional' },
     // ⚠ SITE D — THE CARRIERS-MODE POOL. These four could not fire before the
     // symmetric-routing commit, because a favourable movement never took this
     // branch. The pool must be the CARRIERS' own total, not `trackedTotal`: a
-    // give-back between the two would otherwise drive a carrier negative and be
+    // give-back between the two would otherwise drive a developing claim negative and be
     // silently clamped away in cedeDevelopment.
-    { name: 'D: favourable -> carriers, inside their own value', claims: [3e6, 2e6, 1e6, 9e6], untracked: 5e6, amount: -3e6, mode: 'carriers' },
-    { name: 'D: favourable -> carriers, EXACTLY their value', claims: [3e6, 2e6, 1e6, 9e6], untracked: 5e6, amount: -6e6, mode: 'carriers' },
-    { name: 'D: favourable -> carriers, past their value, under trackedTotal', claims: [3e6, 2e6, 1e6, 9e6], untracked: 5e6, amount: -8e6, mode: 'carriers' },
-    { name: 'D: favourable -> carriers, past the whole register', claims: [3e6, 2e6, 1e6, 9e6], untracked: 5e6, amount: -9e9, mode: 'carriers' },
+    { name: 'D: favourable -> developing claims, inside their own value', claims: [3e6, 2e6, 1e6, 9e6], untracked: 5e6, amount: -3e6, mode: 'developing' },
+    { name: 'D: favourable -> developing claims, EXACTLY their value', claims: [3e6, 2e6, 1e6, 9e6], untracked: 5e6, amount: -6e6, mode: 'developing' },
+    { name: 'D: favourable -> developing claims, past their value, under trackedTotal', claims: [3e6, 2e6, 1e6, 9e6], untracked: 5e6, amount: -8e6, mode: 'developing' },
+    { name: 'D: favourable -> developing claims, past the whole register', claims: [3e6, 2e6, 1e6, 9e6], untracked: 5e6, amount: -9e9, mode: 'developing' },
   ];
   let unitFails = 0;
   for (const cse of cases) {
@@ -164,44 +165,54 @@ console.log('--- ALLOCATOR CONTRACT (direct) ---');
     // This asserted `amount > 0` only, back when that was the only sign that
     // could reach this branch. Symmetric routing sends both here, so the
     // assertion widens with the mechanism.
-    if (cse.mode === 'carriers' && claims.some(c => c.carrier)
-        && claims.some((c, i) => !c.carrier && deltas[i] !== 0)) {
-      console.log(`  FAIL ${cse.name}: carriers-mode development reached a non-carrier`); unitFails++;
+    // ⚠ EXCEPT PAST THE SET'S OWN VALUE, WHERE THE SPILL IS THE DESIGN. This
+    // assertion was written before the spill path existed and had been printing
+    // FAIL on the two cases that exercise it ever since — a gate describing the
+    // allocator from memory, which is the failure mode this directory keeps
+    // finding. The rule it should state is that an ORDINARY movement never
+    // leaves the set; a favourable one larger than the set holds is a boundary
+    // condition with its own assertions in the reselection block below.
+    const setTotal = claims.reduce((t, c) => t + (c.developing ? Math.max(0, c.current) : 0), 0);
+    const spilled = cse.mode === 'developing' && cse.amount < 0 && -applied > setTotal;
+    if (cse.mode === 'developing' && !spilled && claims.some(c => c.developing)
+        && claims.some((c, i) => !c.developing && deltas[i] !== 0)) {
+      console.log(`  FAIL ${cse.name}: developing-mode development reached a claim outside the set`); unitFails++;
     }
-    // ⚠ SITE D, ASSERTED DIRECTLY. In carriers mode the clamp in cedeDevelopment
+    // ⚠ SITE D, ASSERTED DIRECTLY. In developing mode the clamp in cedeDevelopment
     // must never be what keeps a value non-negative — the allocator must have
     // bounded it already. `moved` above only proves the CLAMPED result is
     // non-negative; this proves the UNCLAMPED one is, which is the actual fix.
-    if (cse.mode === 'carriers' && claims.some((c, i) => c.current + deltas[i] < -1e-9)) {
+    if (cse.mode === 'developing' && claims.some((c, i) => c.current + deltas[i] < -1e-9)) {
       console.log(`  FAIL ${cse.name}: an occurrence needed the zero clamp — the pool bound is wrong`); unitFails++;
     }
   }
   console.log(unitFails === 0
     ? `  OK — ${cases.length} cases: parts sum EXACTLY to applied, ceded+retained reconciles, nothing negative,`
-      + '\n       the carriers branch never reaches a non-carrier in EITHER direction, and no occurrence'
-      + '\n       ever needs the zero clamp — the pool bound holds on its own (site D).'
+      + '\n       an ordinary developing-mode movement never reaches a claim outside the set in'
+      + '\n       EITHER direction, and no occurrence ever needs the zero clamp — the pool bound'
+      + '\n       holds on its own (site D).'
     : `  ${unitFails} unit failure(s).`);
 
-  // ⚠ THE TRACKED SET UNDER A SIZE-WEIGHTED DRAW. This asserted "carriers are the
+  // ⚠ THE TRACKED SET UNDER A SIZE-WEIGHTED DRAW. This asserted "developing claims are the
   // largest 3, with no rng argument", which was a statement about the RETIRED
   // `largest` selection and would now throw. What survives the change to
   // sizeWeighted is weaker but still exact: the count, the absence of duplicates,
   // and — the property the mechanism actually depends on — that EVERY occurrence
-  // at or above the retention is tracked whether or not it was drawn as a carrier.
+  // at or above the retention is tracked whether or not it was drawn as a developing claim.
   const totals = [5e6, 1e5, 3e6, 2e6, 1.5e6, 4e5, 2.5e6];
   const built = buildTrackedSet('WC', totals.map((_, i) => `o${i}`), totals.map((_, i) => `c${i}`),
     totals, DEVELOPMENT_ALLOCATION, new SeededRandom(20260827), new SeededRandom(20260828));
-  const carrierCount = built.tracked.filter(t => t.carrier).length;
+  const developingCount = built.tracked.filter(t => t.developing).length;
   const retention = REINSURANCE_TOWER.WC[0].attachment;
   const aboveMissing = totals.filter(t => t >= retention).length
     - built.tracked.filter(t => t.drawn >= retention).length;
   const dupes = new Set(built.tracked.map(t => t.occurrenceId)).size !== built.tracked.length;
-  const expectCarriers = Math.min(DEVELOPMENT_ALLOCATION.claimCount, totals.length);
-  console.log(carrierCount === expectCarriers && aboveMissing === 0 && !dupes
-    ? `  OK — ${carrierCount} carriers drawn size-weighted from ${totals.length} occurrences, no duplicates, and all `
+  const expectDeveloping = Math.min(DEVELOPMENT_ALLOCATION.claimCount, totals.length);
+  console.log(developingCount === expectDeveloping && aboveMissing === 0 && !dupes
+    ? `  OK — ${developingCount} developing claims drawn size-weighted from ${totals.length} occurrences, no duplicates, and all `
       + `${totals.filter(t => t >= retention).length} occurrences at or above the $${(retention / 1e6).toFixed(0)}M retention are tracked `
       + `(${built.tracked.length} total, ${(built.untrackedTotal / 1e6).toFixed(2)}M untracked).`
-    : `  FAIL — ${carrierCount} carriers (expected ${expectCarriers}), ${aboveMissing} above-retention missing, dupes ${dupes}`);
+    : `  FAIL — ${developingCount} developing claims (expected ${expectDeveloping}), ${aboveMissing} above-retention missing, dupes ${dupes}`);
 }
 
 // ---------------------------------------------------------------- reselection
@@ -215,29 +226,29 @@ console.log('\n--- RESELECTION CONTRACT (direct) ---');
   let f = 0;
   const say = (ok: boolean, msg: string) => { if (!ok) { console.log(`  FAIL ${msg}`); f++; } };
 
-  const mk = (vals: number[], carriers: number, closed: number[] = []) => vals.map((v, i) => ({
+  const mk = (vals: number[], nDeveloping: number, closed: number[] = []) => vals.map((v, i) => ({
     claimId: `c${i}`, occurrenceId: `o${i}`, drawn: v, original: v, current: v,
-    carrier: i < carriers && !closed.includes(i), closed: closed.includes(i),
+    developing: i < nDeveloping && !closed.includes(i), closed: closed.includes(i),
   }));
 
   // BOTH DIRECTIONS SEE THE SAME SET. Same array, both modes, both signs: the
-  // occurrences that receive dollars in `carriers` mode are the carriers, and
+  // occurrences that receive dollars in `developing` mode are the developing set, and
   // they are the same set whichever way the movement points.
   {
     const claims = mk([5e6, 4e6, 3e6, 2e6, 1e6], 3);
-    const up = allocateDevelopment(claims, 2e6, 5e5, 'carriers');
-    const dn = allocateDevelopment(claims, 2e6, -5e5, 'carriers');
+    const up = allocateDevelopment(claims, 2e6, 5e5, 'developing');
+    const dn = allocateDevelopment(claims, 2e6, -5e5, 'developing');
     const touched = (d: number[]) => claims.map((_, i) => (d[i] !== 0 ? i : -1)).filter(i => i >= 0).join(',');
     say(touched(up.deltas) === touched(dn.deltas),
       `the two directions reached different occurrences: [${touched(up.deltas)}] vs [${touched(dn.deltas)}]`);
-    say(touched(up.deltas) === '0,1,2', `carriers mode did not reach exactly the carriers: [${touched(up.deltas)}]`);
+    say(touched(up.deltas) === '0,1,2', `developing mode did not reach exactly the developing set: [${touched(up.deltas)}]`);
   }
 
   // A CLOSED OCCURRENCE TAKES NO DEVELOPMENT DRAW even when the whole set has
-  // closed and the allocator falls back off the carriers.
+  // closed and the allocator falls back off the developing set.
   {
     const claims = mk([5e6, 4e6, 3e6], 3, [0, 1, 2]);
-    const r = allocateDevelopment(claims, 2e6, 5e5, 'carriers');
+    const r = allocateDevelopment(claims, 2e6, 5e5, 'developing');
     say(r.deltas.every(d => d === 0), 'a fully closed set received a development draw');
     say(Math.abs(r.untrackedDelta - 5e5) < 1e-9, 'the movement did not fall through to the untracked mass');
   }
@@ -246,12 +257,12 @@ console.log('\n--- RESELECTION CONTRACT (direct) ---');
   {
     const claims = mk([5e6, 4e6, 3e6], 3);
     const bench = [4, 5, 6].map(i => ({ claimId: `c${i}`, occurrenceId: `o${i}`, drawn: 1e6, original: 1e6, current: 1e6 }));
-    const rs = reselectCarriers(claims, bench, 9e6, id => id === 'c0', 3, new SeededRandom(20260830));
+    const rs = reselectDevelopingSet(claims, bench, 9e6, id => id === 'c0', 3, 0, new SeededRandom(20260830));
     say(rs.retired === 1, `retired ${rs.retired}, expected 1`);
     say(rs.promoted === 1, `promoted ${rs.promoted}, expected 1`);
-    say(rs.tracked.find(c => c.claimId === 'c0')?.carrier === false, 'the closed occurrence is still carrying');
+    say(rs.tracked.find(c => c.claimId === 'c0')?.developing === false, 'the closed occurrence is still carrying');
     say(rs.tracked.some(c => c.claimId === 'c0'), 'the closed occurrence left the register');
-    say(rs.tracked.filter(c => c.carrier).length === 3, 'the set was not refilled to its cap');
+    say(rs.tracked.filter(c => c.developing).length === 3, 'the set was not refilled to its cap');
     say(rs.bench.length === 2, `bench ${rs.bench.length}, expected 2`);
     // ⚠ PROMOTION CONSERVES THE REGISTER. The promoted occurrence's dollars come
     // OUT of the untracked scalar and INTO the list; nothing is created.
@@ -266,24 +277,64 @@ console.log('\n--- RESELECTION CONTRACT (direct) ---');
     const claims = mk([5e6, 4e6, 3e6], 3);
     const bench = [{ claimId: 'c9', occurrenceId: 'o9', drawn: 1e6, original: 1e6, current: 1e6 }];
     const rng = new SeededRandom(20260830);
-    const rs = reselectCarriers(claims, bench, 9e6, () => false, 3, rng);
+    const rs = reselectDevelopingSet(claims, bench, 9e6, () => false, 3, 0, rng);
     say(rs.retired === 0 && rs.promoted === 0, 'a valuation with no closures changed the set');
     say(rng.next() === new SeededRandom(20260830).next(), 'a no-op reselection consumed a draw');
     say(rs.tracked.every((c, i) => c === claims[i]), 'a no-op reselection rebuilt the set');
   }
 
+  // ⚠ THE FLOOR LIFTS WHEN THE SET DOES NOT HOLD THE MOVEMENT, and this case is
+  // asserted here because THE GAME DOES NOT REACH IT. Measured over 4,291
+  // developing-mode allocations, every valuation whose movement exceeded the set
+  // had an EMPTY open bench — the set already held every open claim the cohort
+  // could reach. So the lift is a bound rather than an active mechanism, and a
+  // bound the game never exercises is a bound nothing tests. It is tested here.
+  {
+    const claims = mk([5e6, 4e6, 3e6], 3);           // floor 3, holds $12M
+    const bench = [4, 5, 6, 7].map(i => ({ claimId: `c${i}`, occurrenceId: `o${i}`, drawn: 2e6, original: 2e6, current: 2e6 }));
+    const atFloor = reselectDevelopingSet(claims, bench, 9e6, () => false, 3, 0, new SeededRandom(7));
+    say(atFloor.promoted === 0, `holding enough already, promoted ${atFloor.promoted}`);
+    say(!atFloor.underheld, 'reported underheld while holding enough');
+    // Now demand $18M: the floor is met at $12M, so only the hold condition can
+    // pull the extra three off the bench.
+    const lifted = reselectDevelopingSet(claims, bench, 9e6, () => false, 3, 18e6, new SeededRandom(7));
+    say(lifted.promoted === 3, `the floor did not lift: promoted ${lifted.promoted}, expected 3`);
+    say(lifted.held >= 18e6, `lifted to ${(lifted.held / 1e6).toFixed(1)}M, needed 18M`);
+    say(!lifted.underheld, 'reported underheld after reaching the target');
+    say(lifted.bench.length === 1, `bench ${lifted.bench.length}, expected 1 left`);
+    // And demand more than the whole register holds: it takes everything open
+    // and says so rather than pretending.
+    const capped = reselectDevelopingSet(claims, bench, 9e6, () => false, 3, 99e6, new SeededRandom(7));
+    say(capped.underheld, 'a set that cannot reach the target did not report underheld');
+    say(capped.bench.length === 0, 'a set short of its target left occurrences on the bench');
+  }
+
   // THE BENCH RUNS OUT AND THE SET SHRINKS — the shrink case, arriving late.
   {
     const claims = mk([5e6, 4e6, 3e6], 3);
-    const rs = reselectCarriers(claims, [], 9e6, id => id !== 'c2', 3, new SeededRandom(1));
+    const rs = reselectDevelopingSet(claims, [], 9e6, id => id !== 'c2', 3, 0, new SeededRandom(1));
     say(rs.short, 'an exhausted bench did not report short');
-    say(rs.tracked.filter(c => c.carrier).length === 1, 'the surviving open occurrence stopped carrying');
+    say(rs.tracked.filter(c => c.developing).length === 1, 'the surviving open occurrence stopped carrying');
+  }
+
+  // ⚠ THE SPILL SKIPS CLOSED OCCURRENCES, which is where Property's sign
+  // asymmetry lived. A favourable movement too large for the developing set
+  // overflows onto the rest of the register — and must not land on files that
+  // have settled, because the primary path already refuses them.
+  {
+    const claims = mk([1e6, 1e6], 2).concat(mk([9e6, 8e6], 0, [0, 1]).map((c, i) => ({ ...c, claimId: `z${i}`, occurrenceId: `oz${i}` })));
+    const r = allocateDevelopment(claims, 4e6, -6e6, 'developing');
+    const closedGot = claims.map((c, i) => (c.closed === true ? r.deltas[i] : 0)).reduce((a, b) => a + b, 0);
+    say(closedGot === 0, `the spill reached closed occurrences by ${closedGot.toFixed(2)}`);
+    say(r.deltas.reduce((a, b) => a + b, 0) + r.untrackedDelta === r.applied, 'the spill stopped summing exactly');
+    say(r.untrackedDelta < 0, 'the overflow did not reach the untracked mass');
   }
 
   console.log(f === 0
-    ? '  OK — one set serves both directions, closed occurrences take no draw and never leave the'
-      + '\n       register, membership moves only on closure, promotion conserves the register total,'
-      + '\n       a valuation with no closures spends no draw, and an exhausted bench shrinks the set.'
+    ? '  OK — one set serves both directions, closed occurrences take no draw in EITHER the primary'
+      + '\n       path or the spill and never leave the register, membership moves only on closure,'
+      + '\n       promotion conserves the register total, a valuation with no closures spends no draw,'
+      + '\n       the floor lifts when the set does not hold the movement and says so when it cannot.'
     : `  ${f} reselection failure(s).`);
 }
 
@@ -381,7 +432,7 @@ for (const arm of ARMS) {
             }
             // ⚠ THE SIZE OF WHAT IS BEING ZEROED, because the raw count stopped
             // being interpretable once the developing subset started following
-            // closure. A thinner, smaller carrier set is wiped by a smaller
+            // closure. A thinner, smaller developing set is wiped by a smaller
             // favourable movement, so zeroings rose an order of magnitude — but
             // an occurrence that was never near the retention ceded nothing to
             // lose. This splits the count into the part that can cost money and
@@ -397,7 +448,7 @@ for (const arm of ARMS) {
           // guarded was that the set drawn at inception is the set for the
           // cohort's whole life; claims close now, so a frozen set ends its
           // life pointing entirely at settled files and a cohort with no open
-          // carrier retains its development entire — 0.40% of developing WC
+          // developing claim retains its development entire — 0.40% of developing WC
           // cohort-valuations, 11.24% of GL's and 27.53% of Property's.
           //
           // ⚠ WHAT "FROZEN" WAS PROTECTING WAS NOT THAT THE SET IS FIXED. It
@@ -457,10 +508,10 @@ for (const arm of ARMS) {
                 continue;
               }
               // Carrying is lost only to closure and gained only by an open one.
-              if (d.carrier && !a3.carrier && a3.closed !== true) {
+              if (d.developing && !a3.developing && a3.closed !== true) {
                 fail(ctx, 'an OPEN occurrence stopped carrying', `AY ${b.yearNumber} claim ${d.claimId}`);
               }
-              if (!d.carrier && a3.carrier && a3.closed === true) {
+              if (!d.developing && a3.developing && a3.closed === true) {
                 fail(ctx, 'a CLOSED occurrence started carrying', `AY ${b.yearNumber} claim ${d.claimId}`);
               }
               // Closure is monotone — it can never un-happen.
@@ -475,13 +526,13 @@ for (const arm of ARMS) {
               if (d.closed === true) {
                 fail(ctx, 'a CLOSED occurrence joined the set', `AY ${b.yearNumber} claim ${d.claimId}`);
               }
-              if (!d.carrier) {
+              if (!d.developing) {
                 fail(ctx, 'an occurrence joined the set without carrying', `AY ${b.yearNumber} claim ${d.claimId}`);
               }
             }
             for (const d of bc) {
               const a3 = afterIds.get(d.claimId);
-              if (d.carrier && a3 && !a3.carrier) cover.retired++;
+              if (d.developing && a3 && !a3.developing) cover.retired++;
             }
           }
 
@@ -516,26 +567,76 @@ for (const arm of ARMS) {
               }
             }
           }
-          // The set never exceeds its cap.
+          // ⚠ THE SET IS AT LEAST ITS FLOOR, AND ABOVE IT ONLY ON DEMAND.
+          //
+          // This asserted "never exceeds its cap", which was right while ten was
+          // a count and is wrong now that ten is a floor. What replaces it is
+          // the two-sided statement the sizing rule actually makes: the set is
+          // never SHORT of the floor while open occurrences remain to add, and
+          // never OVER it unless it needs the extra to hold a one-sigma step.
+          // A set that is over the floor while already holding enough would mean
+          // the refill loop was not stopping, which is the failure this catches.
           {
-            const carrying = ac.filter(d => d.carrier).length;
-            if (carrying > DEVELOPMENT_ALLOCATION.claimCount) {
-              fail(ctx, 'developing subset over its cap',
-                `AY ${b.yearNumber}: ${carrying} carrying, cap ${DEVELOPMENT_ALLOCATION.claimCount}`);
-            }
+            const nDeveloping = ac.filter(d => d.developing).length;
+            const floor = DEVELOPMENT_ALLOCATION.claimCount;
+            const need = a.age < a.horizon ? ibnerOneSigmaTakedown(line, a.stepMultiplier, a.netUnpaid) : 0;
+            const holds = ac.reduce((t, d) => t + (d.developing ? Math.max(0, d.current) : 0), 0);
+            if (nDeveloping > floor) cover.overFloor++;
+            void need; void holds;
+            // ⚠ THE OTHER HALF — "over the floor only when the extra was needed"
+            // — CANNOT BE ASSERTED FROM HERE, and saying so is better than
+            // asserting it wrongly. The set is sized against the outstanding as
+            // it stands BEFORE the step, and every quantity this loop can see is
+            // from after: `netUnpaid` has already paid down and developed, so the
+            // target recomputed here is smaller than the one the engine sized
+            // against. A first version of this check compared the two anyway and
+            // fired on 19 legitimate cohorts, reading "11 developing holding
+            // $10.38M, needs $4.98M" on a set that had been sized correctly
+            // against a larger balance. The stopping condition is asserted
+            // directly against reselectDevelopingSet in the RESELECTION CONTRACT
+            // block instead, where both sides are visible at the same instant.
+            //
+            // What IS visible from here is the floor itself, below.
             // A CLOSED occurrence never carries.
             for (const d of ac) {
-              if (d.carrier && d.closed === true) {
+              if (d.developing && d.closed === true) {
                 fail(ctx, 'a closed occurrence is carrying', `AY ${b.yearNumber} claim ${d.claimId}`);
               }
             }
             // Register-less seed cohorts are not reselection sites — they have
             // nothing to stand down and nothing to promote, and counting them
             // would report the seed share as a shrink rate.
+            // ⚠ DOES THE SET HOLD WHAT IT MAY HAVE TO ABSORB? Measured on the
+            // cohort's own state rather than on the step, so it is a property of
+            // the register and not of one draw: the developing set's gross value
+            // against a one-sigma favourable move on this cohort's outstanding.
+            // Where it fails, no allocation rule can help — the reserve has moved
+            // beyond what its open claims are worth. See THE SIZE OF THE SET.
+            if (a.age < a.horizon && ac.length > 0) {
+              const need = ibnerOneSigmaTakedown(line, a.stepMultiplier, a.netUnpaid);
+              const holds = ac.reduce((t, d) => t + (d.developing ? Math.max(0, d.current) : 0), 0);
+              if (need > 0 && holds < need) {
+                cover.underheld++;
+                cover.underheldWorst = Math.max(cover.underheldWorst, need > 0 ? 1 - holds / need : 0);
+              }
+            }
+            // ⚠ NEVER SHORT OF THE FLOOR WHILE ANYTHING OPEN REMAINS. A set below
+            // `claimCount` is only legitimate when the cohort has nothing open
+            // left to add — no open tracked occurrence outside the set, and an
+            // empty bench. That is the whole of the shrink case, and it is a
+            // statement about the register rather than about the rule.
+            if (a.age < a.horizon && nDeveloping < floor) {
+              const openOutside = ac.some(d => !d.developing && d.closed !== true);
+              const benchLeft = (a.developmentBench ?? []).length;
+              if (openOutside || benchLeft > 0) {
+                fail(ctx, 'developing subset below its floor with open occurrences left over',
+                  `AY ${b.yearNumber}: ${nDeveloping} developing, ${ac.filter(d => !d.developing && d.closed !== true).length} open outside, ${benchLeft} on the bench`);
+              }
+            }
             if (b.age < b.horizon && bc.length > 0) {
               cover.developingValuations++;
-              if (carrying < DEVELOPMENT_ALLOCATION.claimCount) cover.shortOfCap++;
-              if (carrying === 0) cover.noOpenCarrier++;
+              if (nDeveloping < DEVELOPMENT_ALLOCATION.claimCount) cover.shortOfCap++;
+              if (nDeveloping === 0) cover.noOpenDeveloping++;
               if ((a.developmentBench ?? []).length === 0) cover.benchExhausted++;
             }
           }
@@ -591,13 +692,19 @@ console.log(`  ... of which were ever AT OR ABOVE the retention  ${cover.zeroedA
 console.log(`  ... that later re-inflate above the retention  ${cover.reinflatedAboveRetention.size.toLocaleString()}  <- the only case that costs anything`);
 console.log(`  occurrences above the tower top   ${cover.overTowerTop.toLocaleString()}  (exhaustion — correct, not compensated for)`);
 const pctDev = (n: number) => (cover.developingValuations > 0 ? `${(100 * n / cover.developingValuations).toFixed(2)}%` : 'n/a');
-console.log(`\n  RESELECTION (bench depth ${DEVELOPMENT_BENCH_DEPTH}, cap ${DEVELOPMENT_ALLOCATION.claimCount}):`);
+console.log(`\n  RESELECTION (bench depth ${DEVELOPMENT_BENCH_DEPTH}, floor ${DEVELOPMENT_ALLOCATION.claimCount}):`);
 console.log(`    developing cohort-valuations    ${cover.developingValuations.toLocaleString()}`);
-console.log(`    carriers stood down on closure  ${cover.retired.toLocaleString()}`);
+console.log(`    developing claims stood down on closure  ${cover.retired.toLocaleString()}`);
 console.log(`    replacements promoted           ${cover.promoted.toLocaleString()}`);
-console.log(`    ... below the cap               ${pctDev(cover.shortOfCap)}  (fewer than ${DEVELOPMENT_ALLOCATION.claimCount} open — the set is thinner, development concentrates)`);
-console.log(`    ... with NO open carrier        ${pctDev(cover.noOpenCarrier)}  <- the shrink case: development retained entire, cedes nothing`);
+console.log(`    ... below the floor             ${pctDev(cover.shortOfCap)}  (fewer than ${DEVELOPMENT_ALLOCATION.claimCount} open — the set is thinner, development concentrates)`);
+console.log(`    ... with NO open developing claim        ${pctDev(cover.noOpenDeveloping)}  <- the shrink case: development retained entire, cedes nothing`);
 console.log(`    ... with the bench exhausted    ${pctDev(cover.benchExhausted)}`);
+console.log(`    ... drawn ABOVE the floor to hold the step  ${pctDev(cover.overFloor)}  (the floor lifting — see THE SIZE OF THE SET)`);
+console.log(`    ... holding less than a one-sigma step  ${pctDev(cover.underheld)}  <- the register cannot absorb its own`);
+console.log(`        worst shortfall                     ${(cover.underheldWorst * 100).toFixed(1)}% of the step it must hold`);
+console.log('        ⚠ NOT a shortfall of the sizing rule — the set already holds every open claim');
+console.log('          the cohort can reach. It is the payment clock and the closure clock disagreeing;');
+console.log('          see RECORDED, NOT FIXED in developmentAllocation.ts.');
 console.log(`  occurrences above WC's cap        ${cover.overSeverityCap.toLocaleString()}  (permitted by ruling — the cap bounds the DRAW)`);
 console.log(`  largest developed WC occurrence   ${money(cover.maxWcOcc)}`);
 console.log('\n  ceded per arm:');
@@ -619,7 +726,7 @@ if (cover.cohortsWithoutClaims === 0) coverageErrors.push('no register-less coho
 // symmetric-routing commit. Under the retired rule favourable development went
 // proportionally across the whole register, so an occurrence could only reach
 // zero if the entire register did — it never happened, and zero was the right
-// bar. Symmetric routing sends favourable movements to the same ten carriers
+// bar. Symmetric routing sends favourable movements to the same ten developing claims
 // adverse uses, and a give-back larger than those ten hold takes them to zero by
 // construction; it is what SYMMETRY MEANS at the boundary, since adverse has no
 // matching bound. So the bar is now the HARM rather than the event: an
@@ -637,7 +744,7 @@ if (findings.length === 0 && coverageErrors.length === 0) {
   console.log('and the developing subset changes ONLY on closure: one set per valuation serving');
   console.log('both directions, no open occurrence ever standing down, no closed one ever');
   console.log('carrying or leaving the register, originals frozen for everything that remains,');
-  console.log('and the set never over its cap.');
+  console.log('and the set is never short of its floor while anything open remains to add.');
   console.log('\n⚠ THE NULL TEST IS NOT RUN HERE and cannot be: it needs a rebuild — either');
   console.log('  DEVELOPMENT_CESSION_ENABLED false, or the closure predicate stubbed off. Both');
   console.log('  procedures are in this file\'s header. At the symmetric-routing commit the');
