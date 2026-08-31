@@ -25,6 +25,86 @@
 // does not — see the coherence section below — so this is measured rather than
 // asserted.
 //
+// ============================================================================
+// ⚠ THIS GATE IS RED, AND THE BISECT SAYS SOMETHING OTHER THAN "COMMIT X BROKE
+// IT". Read this before trying to fix it. Findings recorded at 8402b33; the gate
+// itself has not changed since 932246f, so everything below is a pure engine
+// comparison against a fixed instrument.
+//
+// THE BISECT LANDS ON 995fd6f ("Re-translate GL's opening band, re-centre the
+// pre-game pins"), AND THAT IS A POWER BOUNDARY, NOT A MECHANISM BOUNDARY. That
+// commit re-centred the opening pins, which cut the mean pre-game redraws from
+// 7.25 to 1.63 on WC. Fewer redraws is a tighter opening distribution, which is
+// a smaller between-game variance, which is a narrower interval — and the
+// interval stopped straddling zero. Nothing about cession changed there.
+//
+// At GAMES=200 the "last good" parent and the current tip are statistically
+// indistinguishable:
+//
+//   accdadb (green at 60)   WC total  -$2.04M  [-$4.24M, +$0.16M]
+//   8402b33 (red at 60)     WC total  -$2.21M  [-$4.13M, -$0.29M]
+//
+// One misses zero by $0.16M and the other by $0.29M. The gate's own default of
+// GAMES=60 cannot resolve the effect it is testing; it has been passing on noise
+// and failing on slightly less noise.
+//
+// ⚠ AND IT IS NOT WC-ONLY. That is an artefact of which line's two components
+// happen to cancel. Split by recognition point at GAMES=200, the DEVELOPMENT
+// component excludes zero on ALL THREE LINES and has been stable across the
+// whole range, while the inception component is centred on zero everywhere:
+//
+//   line       inception diff (200 games)   development diff (200 games)
+//   WC          +$0.02M [-1.92, +1.95]       -$2.23M [-2.46, -1.99]
+//   GL          +$0.72M [-1.87, +3.31]       -$3.50M [-3.76, -3.24]
+//   Property    +$0.23M [-2.48, +2.93]       -$1.12M [-1.31, -0.94]
+//
+// GL's is the LARGEST. WC is simply the line whose total crosses first, because
+// GL's positive inception noise offsets more of its development gap. The
+// development figures at accdadb are -2.23 / -3.46 / -1.27 — the same numbers.
+// This has been present continuously, on every line, for the whole range.
+//
+// ⚠ THE MECHANISM IS THE BOOKING BIAS, AND IT IS LINEAR IN IT. Measured by
+// moving IBNER_BOOKING_BIAS_COEFF and re-running at GAMES=200:
+//
+//   coeff    WC dev diff   GL dev diff   Property dev diff
+//   0.00       -$0.05M       -$0.15M         -$0.01M      all contain zero
+//   0.40       -$1.13M       -$1.82M         -$0.58M
+//   0.80       -$2.23M       -$3.50M         -$1.12M      (the shipped value)
+//
+// Straight through the origin, 50.7% / 52.0% / 51.8% at half strength. With the
+// bias at zero the development gap vanishes on all three lines and every total
+// contains zero — the entire failure flows through the bias and through nothing
+// else. Not membership divergence between the arms, not the tower, not anything
+// WC-specific.
+//
+// ⚠ WHICH IS THE TIME MISMATCH developmentAllocation.ts ALREADY NAMES, resolving
+// at a sample size that file did not reach. Its header records: "The markdown
+// and the unwind are both proportional but applied at DIFFERENT TIMES ... so the
+// shares the unwind restores are not the shares the markdown took, and the tower
+// is convex", measured at 50 games as having shrunk to "-0.6% CI [-2.2%, 1.0%],
+// contains zero" and believed closed. It had not closed; 50 games could not see
+// it. The give-back closes the DETERMINISTIC band exactly — that is the
+// telescoping in markDownForBooking's header, and it holds. What no give-back
+// can close is the interaction between the marked-down level and the STOCHASTIC
+// steps: under squeeze the claims spend the runoff climbing back from a lower
+// base, so the same lognormal wobble happens at lower occurrence values and
+// cedes less through a convex tower.
+//
+// ⚠ AND THE DIRECTION IS THE INVERSE OF THE DEFECT THIS GATE WAS BUILT FOR.
+// The original finding was squeezed recovering $27.47M MORE — underfunding
+// buying cover. Every reading here is squeezed recovering LESS. The perverse
+// incentive is dead; what is left is a smaller residual pointing the other way,
+// which penalises underfunding rather than rewarding it. That is a reason to
+// rank it below the original, not a reason to call it harmless.
+//
+// NOT FIXED HERE. Three things are in scope for whoever does: whether the gate's
+// GAMES=60 default should rise, since it demonstrably cannot resolve its own
+// subject; whether a residual that is linear in the bias should be gated at all
+// or measured like section 2 of the parity check; and whether the stochastic
+// step should be applied to the UNWOUND register rather than the marked-down
+// one, which is the only change that would remove it rather than tolerate it.
+// ============================================================================
+//
 // PAIRED, SAME SEEDS. The two arms differ only in the funding decision, so the
 // difference is taken per (game, line) and the interval is on the DIFFERENCE.
 // Two means side by side would be swamped by between-game variance.
