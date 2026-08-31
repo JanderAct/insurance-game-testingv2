@@ -397,17 +397,39 @@ function FundingConsequencePanel({ c, lastLineResult, line }: { c: FundingConseq
     <div className="bg-gray-50 rounded-lg p-3 border border-gray-200 text-xs space-y-2 -mt-1">
       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
         <DataRow label="CLF Multiplier" value={`×${c.clf.toFixed(3)}`} />
-        {/* The net-funding step, shown rather than hidden inside the pool
-            premium rate: without it the panel's own numbers do not multiply
-            out, which is what made the old gross derivation so hard to spot. */}
-        <DataRow label="Pure Premium Rate / $100 (gross)" value={`$${c.purePremiumPer100.toFixed(2)}`} />
-        {c.expectedCededPer100 > 0 && (
-          <DataRow label="Less Expected Ceded / $100" value={`−$${c.expectedCededPer100.toFixed(2)}`} />
-        )}
-        {c.expectedCededPer100 > 0 && (
-          <DataRow label="Net Pure Premium Rate / $100" value={`$${c.netPurePremiumPer100.toFixed(2)}`} />
-        )}
+        {/* ⚠ THE BUILD-UP STARTS NET, AND THE GROSS DECOMPOSITION IS GONE.
+            "Pure Premium Rate / $100 (gross)" and "Less Expected Ceded / $100"
+            were removed: a funding decision does not need them, and showing the
+            gross figure at the top invites reading the pool's exposure as the
+            whole of it rather than the part it retains. The tower's price is
+            still on the panel — as the Reinsurance row below, which is what a
+            member actually pays for it.
+
+            ⚠ AND THE MIDDLE OF THE BUILD-UP IS NOW SHOWN, which is the point of
+            this change. Pool Premium $3.50 became a Total Member Charge of
+            $9.07 with nothing in between, so the $5.57 read as overhead. It is
+            not: admin is ~10% of the charge and reinsurance ~50%.
+
+            ⚠ THESE ARE THE INCOME STATEMENT'S OWN FIGURES, NOT A RATIO APPLIED
+            TO THE DISPLAY. quoteLineRates defines
+            totalMemberChargeRatePer100 = pool + admin + reins, and the engine
+            defines totalMemberCharge = (poolPremium + adminExpense) +
+            reinsuranceCost from the same three quantities — reinsurance off the
+            runtime tower quote, admin off ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM.
+            So the four rows below add up exactly rather than approximately, and
+            panel-engine-parity-check asserts both components against the engine
+            to 0.00e+0.
+
+            ⚠ ONE BASIS NOTE, now that the gross row is not on screen to show it:
+            ADMIN IS ON THE GROSS PURE PREMIUM while the pool premium rate is on
+            the NET. That is deliberate and matches the engine — the pool
+            adjusts, reserves and pays a ceded claim in full and only then
+            recovers, so ceding transfers the loss and not the handling cost.
+            See linePricing.ts. */}
+        <DataRow label="Net Pure Premium Rate / $100" value={`$${c.netPurePremiumPer100.toFixed(2)}`} />
         <DataRow label="Pool Premium Rate / $100" value={`$${c.poolPremiumRatePer100.toFixed(2)}`} />
+        <DataRow label="… Admin / $100" value={`$${c.adminRatePer100.toFixed(2)}`} />
+        <DataRow label="… Reinsurance / $100" value={`$${c.reinsRatePer100.toFixed(2)}`} />
         <DataRow label="Total Member Charge Rate / $100" value={`$${c.totalMemberChargeRatePer100.toFixed(2)}`} />
         <DataRow label="The Load (charge ÷ expected loss)" value={`${c.load.toFixed(2)}×`} />
         <DataRow label="Expected Combined Ratio" value={pct1(c.expectedCombinedRatio * 100)} />
