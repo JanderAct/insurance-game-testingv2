@@ -8,7 +8,12 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.scripts.json"
+    "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.scripts.json",
+    "gates": "npx tsx scripts/gates.ts",
+    "gates:slow": "npx tsx scripts/gates.ts --slow",
+    "gates:all": "npx tsx scripts/gates.ts --all",
+    "gates:probes": "npx tsx scripts/gates.ts --probes",
+    "gates:list": "npx tsx scripts/gates.ts --list"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",

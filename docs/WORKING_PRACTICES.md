@@ -2,6 +2,24 @@
 Things that were discovered expensively and live only in conversation memory. Read before doing engine work.
 
 ## Verification
+- **`npm run gates` is the sweep, and the sweep is the complete set.** There used to be no sweep — just a
+  dozen script names carried by hand from one commit message to the next. Two gates went red inside that
+  arrangement without anyone noticing: `allocation-grid` threw for a whole commit, and
+  `cession-path-independence` had been failing for four. Running the third one down
+  (`panel-engine-parity-check`) for the first time found it red too.
+  - `npm run gates` — 34 gates, ~2 min wall clock. Every commit.
+  - `npm run gates:slow` — `property-tower-mc`, ~10 min. Before a merge, and after any tower change.
+  - `npm run gates:all`, `npm run gates:probes`, `npm run gates:list`.
+  - **The manifest in `scripts/gates.ts` is checked against the directory on every run.** A new script in
+    `scripts/diagnostics/` that is in no list fails the runner by name. That check, not the list, is the
+    thing that keeps the sweep complete — a list alone only fixes the omission you already know about.
+  - **A script named `*-check` is not necessarily a gate.** Eleven of them print and assert nothing
+    (`reinsurance-tower-check`, `wc-behaviour-check`, `property-fit-check`, `loss-ratio-check` and more).
+    They are in `PROBES` with a one-line reason each. Do not read a name as a verdict.
+  - **A probe still has to run.** `allocation-grid` asserts nothing and was still red, because it threw.
+  - **Read a failing gate's own sections, not the nearest prose.** `panel-engine-parity-check` prints
+    "2 CHECK(S) FAILED" directly under a paragraph explaining that the thing it just measured "is NOT a
+    defect". The failures are in two earlier sections. That misreading happened on the first pass here.
 - **`npm run typecheck` is the real command.** Root `tsc --noEmit` is a NO-OP — root tsconfig has
   `"files": []` with project references, so it checks zero files and always exits 0. Several earlier
   "typecheck clean" claims were vacuous.
