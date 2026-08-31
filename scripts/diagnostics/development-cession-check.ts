@@ -494,45 +494,47 @@ for (const arm of ARMS) {
             }
           }
 
-          // --- 2. MEMBERSHIP CHANGES ONLY BY CLOSURE -------------------------
-          // A claim leaves only if closed; it joins only if open and
-          // previously untracked. NO OPEN OCCURRENCE EVER LEAVES. There is no
-          // reshuffle and no re-ranking: a valuation with no closures leaves
-          // the set bit-identical.
+          // --- 2. THE SET IS REDRAWN, THE REGISTER IS NOT ------------------
+          // ⚠ THIS REPLACES "MEMBERSHIP CHANGES ONLY BY CLOSURE", which was
+          // retired when the set began being drawn fresh at every valuation.
+          // That rule said NO OPEN OCCURRENCE EVER STANDS DOWN, and what it was
+          // protecting against was a RE-RANKING correlated with cession — "the
+          // best ten now". A size-weighted random draw on the frozen `drawn`
+          // value is not a ranking and carries no feedback from realised
+          // development, so the guard it provided is provided by invariant 1
+          // (one set per valuation, both directions) plus the draw rule itself.
+          //
+          // What must still hold, and does:
+          //   the REGISTER only ever grows — an occurrence never leaves it
+          //   nothing closed is ever in the developing set
+          //   closure is monotone
+          //   an occurrence that joins the register joins it developing
           {
             const afterIds = new Map(ac.map(d => [d.claimId, d]));
             for (const d of bc) {
               const a3 = afterIds.get(d.claimId);
               if (!a3) {
-                fail(ctx, 'a tracked occurrence left the set', `AY ${b.yearNumber} claim ${d.claimId}`);
+                fail(ctx, 'a tracked occurrence left the register', `AY ${b.yearNumber} claim ${d.claimId}`);
                 continue;
               }
-              // Carrying is lost only to closure and gained only by an open one.
-              if (d.developing && !a3.developing && a3.closed !== true) {
-                fail(ctx, 'an OPEN occurrence stopped carrying', `AY ${b.yearNumber} claim ${d.claimId}`);
-              }
-              if (!d.developing && a3.developing && a3.closed === true) {
-                fail(ctx, 'a CLOSED occurrence started carrying', `AY ${b.yearNumber} claim ${d.claimId}`);
-              }
-              // Closure is monotone — it can never un-happen.
               if (d.closed === true && a3.closed !== true) {
                 fail(ctx, 'a closed occurrence reopened', `AY ${b.yearNumber} claim ${d.claimId}`);
               }
+              if (d.developing && !a3.developing) cover.retired++;
             }
             const beforeIds = new Set(bc.map(d => d.claimId));
             for (const d of ac) {
+              if (d.closed === true && d.developing) {
+                fail(ctx, 'a CLOSED occurrence is in the developing set', `AY ${b.yearNumber} claim ${d.claimId}`);
+              }
               if (beforeIds.has(d.claimId)) continue;
               cover.promoted++;
               if (d.closed === true) {
-                fail(ctx, 'a CLOSED occurrence joined the set', `AY ${b.yearNumber} claim ${d.claimId}`);
+                fail(ctx, 'a CLOSED occurrence joined the register', `AY ${b.yearNumber} claim ${d.claimId}`);
               }
               if (!d.developing) {
-                fail(ctx, 'an occurrence joined the set without carrying', `AY ${b.yearNumber} claim ${d.claimId}`);
+                fail(ctx, 'an occurrence joined the register without developing', `AY ${b.yearNumber} claim ${d.claimId}`);
               }
-            }
-            for (const d of bc) {
-              const a3 = afterIds.get(d.claimId);
-              if (d.developing && a3 && !a3.developing) cover.retired++;
             }
           }
 
@@ -741,10 +743,10 @@ console.log('\n--- FINDINGS ---');
 if (findings.length === 0 && coverageErrors.length === 0) {
   console.log('\nCONSERVATION holds exactly, nothing developed below zero, the rollforward still');
   console.log('balances with development net of cession, a declined tower cedes exactly nothing,');
-  console.log('and the developing subset changes ONLY on closure: one set per valuation serving');
-  console.log('both directions, no open occurrence ever standing down, no closed one ever');
-  console.log('carrying or leaving the register, originals frozen for everything that remains,');
-  console.log('and the set is never short of its floor while anything open remains to add.');
+  console.log('and the developing subset is REDRAWN each valuation without disturbing the register:');
+  console.log('one set per valuation serving both directions, nothing closed ever developing, nothing');
+  console.log('ever leaving the register, closure monotone, originals frozen for everything that');
+  console.log('remains, and the set never short of its floor while anything open remains to draw.');
   console.log('\n⚠ THE NULL TEST IS NOT RUN HERE and cannot be: it needs a rebuild — either');
   console.log('  DEVELOPMENT_CESSION_ENABLED false, or the closure predicate stubbed off. Both');
   console.log('  procedures are in this file\'s header. At the symmetric-routing commit the');

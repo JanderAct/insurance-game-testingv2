@@ -294,7 +294,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // because the developing set is sized differently and the spill no longer
 // reaches settled claims; no column was added, renamed or reordered. See
 // VALUE_IDENTITY_v31's note for the three causes and how each was measured.
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v31.json');
+// v32: all 24 hashes moved. Which claims develop is redrawn every valuation, so
+// the claim register's values change and every workbook reading them changes
+// with it. Shape unchanged — no column added, renamed or reordered.
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v32.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

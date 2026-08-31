@@ -552,11 +552,17 @@ export interface ReselectionResult {
 // asymmetric-routing defect returns with the valuation clock standing in for
 // the sign. Calling this between the two steps would be the bug.
 //
-// ⚠ MEMBERSHIP CHANGES ONLY BY CLOSURE. A developing claim stands down if and only if it
-// has closed; an occurrence joins only if it is open and was not carrying
-// before. NO OPEN CARRIER EVER STANDS DOWN — there is no reshuffle, no
-// re-ranking, no "best ten now". Between two valuations with no closures the
-// set is bit-identical.
+// ⚠ THE SET IS REDRAWN EVERY VALUATION AND THE REGISTER IS NOT. Membership of
+// the DEVELOPING SET is a fresh size-weighted draw over the open occurrences;
+// membership of the REGISTER only ever grows. An occurrence that stops
+// developing keeps its place, its history and its cession position.
+//
+// This replaced "membership changes only by closure — no open claim ever stands
+// down". That rule was protecting against a RE-RANKING correlated with cession
+// ("the best ten now"), and a size-weighted random draw on the frozen `drawn`
+// value is not a ranking. The guard that matters is invariant 1 — one set per
+// valuation, both directions — which is stated and asserted entirely within a
+// valuation and never required the set to persist.
 //
 // ⚠ AND A CLOSED OCCURRENCE STAYS IN THE TRACKED SET. It stops carrying
 // development; it does not leave the register. Removing it would push its
@@ -595,21 +601,52 @@ export function reselectDevelopingSet(
   //    occurrence's value lives inside `untrackedTotal` and stays there.
   const openBench = bench.filter(b => !isClosed(b.claimId, b.drawn));
 
-  // 3. Refill from the open pool: tracked occurrences not currently developing,
-  //    plus the bench. One pool, one rule — see THE SIZE OF THE SET above for
-  //    what stops the refill.
+  // ============================================================================
+  // 3. DRAW THE WHOLE SET FRESH, size-weighted over every OPEN occurrence the
+  //    cohort can reach — tracked and benched alike. Not a refill of the
+  //    survivors: last valuation's set is cleared first and re-drawn.
+  //
+  // ⚠ WHY, AND IT IS ABOUT WHAT A CLAIM ESTIMATE DOES. A FIXED set of ten on a
+  // mean-zero walk MUST oscillate — the same ten claims take every movement the
+  // cohort makes, so up, down, up is the structure and not the draw being
+  // unlucky. Measured on the retired rule at defaults: 2.6% of WC claims ever
+  // moved and each mover moved 4.29 times, a third of them six times or more.
+  // Real estimates do not yo-yo; a claim deteriorates once on information and
+  // stays, or settles under and closes. Spreading the same movements over a
+  // fresh draw each valuation buys that shape without changing how much moves.
+  //
+  // ⚠ THE FREE-LUNCH GUARD IS UNTOUCHED, AND THIS WAS CHECKED BEFORE BUILDING.
+  // The constraint is ONE SET PER VALUATION USED FOR BOTH DIRECTIONS — see
+  // development-cession-check's invariant 1, which is stated and asserted
+  // entirely within a valuation and never refers to persistence. What the old
+  // "no open claim ever stands down" rule was protecting against was a
+  // RE-RANKING correlated with cession — "the best ten now" — which would pick
+  // claims for the property that makes them cede. A size-weighted random draw is
+  // not a ranking, and it is the same rule inception uses.
+  //
+  // ⚠ WEIGHTED BY `drawn`, NOT BY `current`, AND THAT IS A DELIBERATE REFUSAL OF
+  // A FEEDBACK PATH. Weighting by the current value would make a claim that has
+  // just deteriorated more likely to be drawn again, and one that improved less
+  // likely — realised development feeding back into future selection, biased
+  // toward the claims that are now above the retention. Sign-blind per valuation
+  // and still a drift, and precisely the shape this file keeps finding. `drawn`
+  // never moves, so the selection distribution is stationary for the cohort's
+  // whole life. The ALLOCATION still weights by `current`; only the eligibility
+  // draw is fixed.
+  // ============================================================================
   let untracked = untrackedTotal;
   let promoted = 0;
+  // Everything open, whether or not it was developing last time.
   const cands: { kind: 'tracked' | 'bench'; idx: number; w: number }[] = [];
   next.forEach((c, i) => {
-    if (!c.developing && c.closed !== true) cands.push({ kind: 'tracked', idx: i, w: Math.max(0, c.current) });
+    if (c.closed !== true) { next[i] = { ...c, developing: false }; cands.push({ kind: 'tracked', idx: i, w: Math.max(0, c.drawn) }); }
   });
-  openBench.forEach((b, i) => cands.push({ kind: 'bench', idx: i, w: Math.max(0, b.current) }));
+  openBench.forEach((b, i) => cands.push({ kind: 'bench', idx: i, w: Math.max(0, b.drawn) }));
 
   const takenBench = new Set<number>();
   const promotedIds = new Set<string>();
-  let nDeveloping = next.reduce((s, c) => s + (c.developing ? 1 : 0), 0);
-  let held = next.reduce((s, c) => s + (c.developing ? Math.max(0, c.current) : 0), 0);
+  let nDeveloping = 0;
+  let held = 0;
   while (cands.length > 0 && (nDeveloping < floor || held < minHold)) {
     let pos = 0;
     if (selection === 'largest') {
@@ -627,12 +664,15 @@ export function reselectDevelopingSet(
     cands.splice(pos, 1);
     if (pick.kind === 'tracked') {
       next[pick.idx] = { ...next[pick.idx], developing: true };
+      held += Math.max(0, next[pick.idx].current);
     } else {
       const b = openBench[pick.idx];
       takenBench.add(pick.idx);
       // ⚠ THE DOLLARS MOVE OUT OF THE SCALAR AND INTO THE LIST, EXACTLY ONCE.
       // The register total is unchanged by promotion; only where the value is
-      // recorded changes.
+      // recorded changes. A promoted occurrence stays on the register after it
+      // stops developing — it does not go back to the bench, because its
+      // movement history and its cession position are individual now.
       untracked -= b.current;
       promotedIds.add(b.claimId);
       next.push({
@@ -644,10 +684,10 @@ export function reselectDevelopingSet(
         developing: true,
         closed: false,
       });
+      held += Math.max(0, b.current);
+      promoted++;
     }
     nDeveloping++;
-    held += Math.max(0, pick.w);
-    promoted++;
   }
 
   return {

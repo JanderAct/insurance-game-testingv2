@@ -380,7 +380,17 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // nothing outside the mechanism moved. v30's closure-forced-off control is NOT
 // available here and would not be meaningful: the sizing rule does not depend on
 // closure, so stubbing the predicate no longer reduces the commit to a no-op.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v31.json');
+// v32: the developing set is DRAWN FRESH at every valuation instead of
+// persisting between them — 8,413 of 29,400 changed across 37 fields, 0 added,
+// 0 removed.
+//
+// ⚠ THE CLOSURE-FORCED-OFF CONTROL FROM v30 NO LONGER ISOLATES, and saying so is
+// the point of this note. It worked because reselection was a no-op when nothing
+// closed; a set that redraws every valuation redraws whether or not anything
+// closed, so stubbing the closure predicate leaves the mechanism running. What
+// survives is the mechanism switch: DEVELOPMENT_CESSION_ENABLED = false,
+// parent vs child, reads 29,400 fields and 0 differing.
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v32.json');
 
 function seedOf(id: string) {
   let h = 5381;

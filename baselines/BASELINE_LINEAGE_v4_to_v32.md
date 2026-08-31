@@ -2048,3 +2048,94 @@ outstanding *before* the step and every quantity the gate can read is from after
 compared them anyway and fired on 19 legitimate cohorts).
 
 v29 retired from the working tree; v30 kept as the immediate predecessor.
+
+---
+
+## v32 — the developing set is drawn fresh each valuation
+
+**Trigger:** one commit. The subset carrying an accident year's development persisted between
+valuations; it is now redrawn every valuation, size-weighted over whichever occurrences are still open.
+
+### The defect was the shape of the movements, not their size
+
+A fixed set of ten on a mean-zero walk **must** oscillate — the same ten take every movement the cohort
+makes, so up-down-up is the structure rather than an unlucky draw. Measured at defaults on the retired
+rule: **2.6% of WC claims ever moved and each mover moved 4.29 times, a third of them six or more.**
+
+### The free-lunch guard was checked before building, and survives untouched
+
+`development-cession-check`'s invariant 1 — one set per valuation, used for **both directions** — is
+stated and asserted entirely *within* a valuation and never refers to persistence. The retired rule
+("no open claim ever stands down") was protecting against a **re-ranking correlated with cession** —
+"the best ten now". A size-weighted random draw is not a ranking.
+
+⚠ **Weighted by `drawn`, not `current`, and that is a deliberate refusal of a feedback path.** Weighting
+by the current value would make a claim that just deteriorated more likely to be drawn again and one
+that improved less likely — realised development feeding back into future selection, biased toward the
+claims now above the retention. Sign-blind per valuation and still a drift. `drawn` never moves, so the
+selection distribution is stationary for the cohort's life. Allocation still weights by `current`; only
+eligibility is fixed.
+
+### What it bought, and what it did not
+
+| | share of claims that ever move | mean moves per mover | 6+ moves |
+|---|---|---|---|
+| WC before | 2.6% | 4.29 | 32% |
+| WC after | **3.6%** | **3.08** | **14%** |
+| GL before | 5.2% | 2.46 | 2% |
+| GL after | **5.8%** | **2.19** | 1% |
+| Property before | 23.4% | 1.59 | 0% |
+| Property after | 23.2% | 1.60 | 0% |
+
+The repeat-moving halved on WC. The **share** that moves barely rose, and that is the finding: it is not
+limited by persistence, by the floor, or by the bench.
+
+| lever | WC share moving | WC moves per mover |
+|---|---|---|
+| floor 10 (shipped) | 3.6% | 3.08 |
+| floor 20 | 5.1% | **3.91** |
+| floor 30 | 6.5% | **4.19** |
+| bench 40 (shipped) | 3.6% | 3.08 |
+| bench 80 | 4.0% | 2.79 |
+| bench 160 | 4.1% | 2.68 |
+
+**Raising the floor makes the repetition worse**, because a bigger set drawn from the same pool draws
+each member more often — and it moves GL's adverse cession rate 59.9% → 55.5% → 51.9%, which is a
+calibration change. **Quadrupling the bench saturates at 4.1%.** The binding constraint is
+**size-weighting on a heavy tail**: the largest handful win nearly every draw whatever the pool size.
+Changing that is changing the selection rule, and the header's own grid puts `all flat` at 0.5% cession
+against `sizeWtd-10`'s ~50%.
+
+### Watch items, both clean
+
+| | before | after |
+|---|---|---|
+| WC adverse cession | 51.0% | 50.6% |
+| GL adverse cession | 60.2% | 59.9% |
+| Property adverse cession | 14.2% | 14.2% |
+| sign-symmetry deviation | 0.06 / 0.04 / 0.07 | **0.07 / 0.04 / 0.07** |
+| `ibner-null-check` (unwind identity) | pass | **pass** |
+| poolState at yr20 | 604.6 KB | 633.5 KB (+4.8%), growth ratio 0.64 (limit 0.75) |
+
+Cession levels did not move materially, so this is not a calibration change. The unwind's completeness
+identity — `netUltimate + cededDevelopmentToDate === registerSum` at maturity — survives a fresh set each
+valuation, because the unwind is proportional over the whole register and never read the developing set.
+
+### An invariant retired and replaced in the same commit
+
+"Membership changes only by closure" is gone. Its replacement asserts what still holds: the **register**
+only ever grows, nothing closed is ever in the developing set, closure is monotone, and an occurrence
+that joins the register joins it developing.
+
+### Gate readings
+
+| gate | reading |
+|---|---|
+| value identity | 8,413 of 29,400 changed / 37 fields, 0 added, 0 removed |
+| solo export guard | 24 of 24 moved, shape unchanged |
+| both, against v32 | green after recapture |
+| **mechanism-off, parent vs child** | **29,400 fields, 0 differing** |
+| ⚠ closure-forced-off control | **no longer isolates** — a set that redraws every valuation redraws whether or not anything closed |
+| full sweep | 34/34 |
+
+v30 retired from the working tree; v31 kept as the immediate predecessor.

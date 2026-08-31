@@ -412,10 +412,11 @@ export interface DevelopingClaim {
    *  directions of the stochastic step go to it — the name predates symmetric
    *  routing and is kept because it is the word every gate and comment uses.
    *
-   *  ⚠ THIS MOVES NOW, AND IT MOVES ONLY ON CLOSURE. It is cleared when the
-   *  occurrence closes and set when an open occurrence is drawn to replace one
-   *  that did. It never changes for any other reason and never changes between
-   *  the two directions of a valuation. */
+   *  ⚠ THIS IS REDRAWN EVERY VALUATION. Cleared for every occurrence and then
+   *  set on whichever are drawn, so an open occurrence may develop one year and
+   *  not the next. What it never does is change between the two DIRECTIONS of a
+   *  single valuation — that is the free-lunch guard, and it is
+   *  within-valuation. */
   developing: boolean;
   /** True once this occurrence's claim has closed, as at the last valuation
    *  that reselected. Closure is a pure function of (gameId, claimId, curve,
