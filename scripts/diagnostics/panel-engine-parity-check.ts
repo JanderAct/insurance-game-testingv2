@@ -263,7 +263,8 @@ console.log('  Panel vs engine, per component, at every level the slider can rea
 console.log('\n--- 1b. PANEL vs THE ENGINE\'S STORED FIELDS ---');
 {
   const worst: Record<string, Record<string, number>> = {};
-  for (const l of LINES) worst[l] = {};
+  const residual: Record<string, { net: number; rate: number }[]> = {};
+  for (const l of LINES) { worst[l] = {}; residual[l] = []; }
   for (let g = 0; g < GAMES; g++) {
     const id = `PEPS${g}`;
     const inst = generateGameInstance(id, 8_800_000 + g * 4231);
@@ -313,12 +314,22 @@ console.log('\n--- 1b. PANEL vs THE ENGINE\'S STORED FIELDS ---');
           (Math.abs(a - b) / Math.max(Math.abs(b), 1e-9)) / bound;
         const cmp: Record<string, number> = {
           'expectedCededPer100 (stored)': rel(panel.expectedCededPer100, r.expectedCededPer100),
-          'netPurePremiumPer100 (stored)': rel(panel.netPurePremiumPer100, r.netPurePremiumPer100),
           'selectedFundingCLF (stored)': rel(panel.clf, r.selectedFundingCLF),
-          'pool premium rate (stored)': rel(panel.poolPremiumRatePer100, r.poolPremium / (r.activeExposure * 10_000)),
           'reinsuranceCost (stored)': rel(panel.reinsRatePer100 * r.activeExposure * 10_000, r.reinsuranceCost),
         };
         for (const [k, v] of Object.entries(cmp)) worst[line][k] = Math.max(worst[line][k] ?? 0, v);
+        // The two the panel CANNOT reproduce, measured as a plain relative gap
+        // rather than a multiple of a rounding bound — the gap is a real
+        // difference between two books, not a rounding artefact, so expressing
+        // it in rounding units would be a category error.
+        // ⚠ SIGNED, not absolute. "Is the panel off?" and "is the panel off in a
+        // PREDICTABLE DIRECTION?" are different questions and only the second
+        // decides whether a player is being systematically misquoted.
+        const sgn = (a: number, b: number) => (a - b) / Math.max(Math.abs(b), 1e-9);
+        residual[line].push({
+          net: sgn(panel.netPurePremiumPer100, r.netPurePremiumPer100),
+          rate: sgn(panel.poolPremiumRatePer100, r.poolPremium / (r.activeExposure * 10_000)),
+        });
       }
       gs = { ...gs, currentYearNumber: y + 1, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result] };
     }
@@ -328,10 +339,49 @@ console.log('\n--- 1b. PANEL vs THE ENGINE\'S STORED FIELDS ---');
     // 3x the bound: the rate carries exposure in two places (the ceded
     // deduction and the rate itself), so one rounding unit can enter twice.
     const bad = entries.filter(([, v]) => v >= 3);
-    check(bad.length === 0, `${l}: panel reproduces the engine's stored fields within the exposure-rounding floor`,
+    check(bad.length === 0, `${l}: the ${entries.length} TOWER-SIDE stored fields reproduce within the exposure-rounding floor`,
       bad.length ? bad.map(([k, v]) => `${k} ${v.toFixed(2)}x bound`).join(', ')
                  : `worst ${Math.max(...entries.map(([, v]) => v)).toFixed(2)}x the rounding bound`);
   }
+
+  // --- THE PRE/POST BLEND RESIDUAL, MEASURED ---------------------------------
+  // Reported, never asserted — see the block above for why it cannot be. This
+  // is the same treatment section 2 gives the exposure half of the same gap.
+  console.log('\n  RESIDUAL, NOT ASSERTED: the two fields the panel cannot reproduce, because they');
+  console.log('  price the pure premium and the panel prices it on the book it can see.');
+  console.log('  (panel - engine) as % of the engine\'s figure, SIGNED so a systematic lean shows:\n');
+  const q = (xs: number[], f: number) => (xs.length ? xs.slice().sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor(f * xs.length))] : 0);
+  const p1 = (v: number) => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(2)}%`;
+  console.log(`    ${'line'.padEnd(9)} ${'field'.padEnd(16)} ${'mean'.padStart(8)} ${'median'.padStart(8)} ${'p10'.padStart(8)} ${'p90'.padStart(8)}   share panel is HIGH`);
+  for (const l of LINES) {
+    const R = residual[l];
+    if (!R.length) continue;
+    for (const [name, xs] of [['netPurePremium', R.map(x => x.net)], ['pool premium rate', R.map(x => x.rate)]] as [string, number[]][]) {
+      const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
+      const high = xs.filter(v => v > 0).length / xs.length;
+      console.log(`    ${l.padEnd(9)} ${name.padEnd(16)} ${p1(mean).padStart(8)} ${p1(q(xs, 0.5)).padStart(8)} `
+        + `${p1(q(xs, 0.1)).padStart(8)} ${p1(q(xs, 0.9)).padStart(8)}   ${(high * 100).toFixed(0)}%`);
+    }
+  }
+  console.log('\n    GL and Property read ~0 by construction — their pure premium does not see the');
+  console.log('    book at all, so pre-movement and post-movement are the same number for them.');
+  // ⚠ ASKED AND ANSWERED: SHOULD THE PANEL WARN THE PLAYER THAT THIS NUMBER WILL
+  // MOVE? On this measurement, no. The gap is SYMMETRIC, not a lean — WC's signed
+  // residual is mean +0.47%, median +0.28%, p10 -1.39%, p90 +2.70%, and the panel
+  // is high on 53% of line-years against low on 47%. A player is not being quoted
+  // a rate that is systematically off in a predictable direction; they are being
+  // quoted a rate with a small two-sided uncertainty from a book that has not
+  // moved yet, and there is nothing they could do differently if told. The mean
+  // lean is real and worth keeping honest at +0.47%, but it is a fifth of the
+  // spread around it.
+  //
+  // ⚠ AND IT IS NOT THE 10.8% FROM 0a465df, which is a different quantity: that
+  // was the worst single line-year of expectedLoss computed with a post-movement
+  // exposure against a pre-movement blend — a bug, since fixed. This is the
+  // legitimate gap that remains, and it is an order of magnitude smaller.
+  //
+  // Re-read this if member movement is ever made more price-sensitive. The
+  // conclusion is about the SIZE of the response, not about its existence.
 }
 
 // A section used to live here reporting "what the old REINSURANCE_PROGRAMS

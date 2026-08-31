@@ -374,6 +374,22 @@ Established by the WC and GL builds. Property and any future line inherit these.
 - **Keyed lookups that can miss should THROW, not default.** A silent `?? 1` fallback means the factor has
   no effect and nothing signals it. Applies to region multipliers, `WC_CLASS_MIX`, `GL_RELATIVITIES`, and
   any future zone-keyed table.
+  - **SECOND FORM: a required argument with a plausible default is the same defect, and reads as more
+    legitimate.** `currentPurePremiumPer100(line, year, members = [])` — the default is not "no book
+    supplied", it is "the full-roster constant", because an empty book takes `wcBlendedRatePer100`'s
+    `exposure > 0 ? … : WC_HELD_PURE_PREMIUM_PER_100` branch. When `0a465df` added that parameter it
+    updated three of four call sites; the fourth compiled, ran, and quietly compared the enrolled-book
+    blend against the whole-market blend for **62 commits and six days**. A missing lookup key at least
+    looks like an absence. A defaulted parameter looks like an API being kind to you.
+  - **The tell is that the default is a legitimate VALUE rather than a sentinel.** `= []` reaching a
+    branch that returns a real number is indistinguishable, at every call site and in every type check,
+    from a caller that meant it. If the argument is required for correctness, make it required: no
+    default, or a sentinel that throws. `members: Member[]` with no `= []` would have failed the build
+    at the one call site that needed fixing.
+  - **And it defeated a written warning.** `fundingConsequence.ts` says at its own call: "Omitting it
+    would put the panel back on the full-market blend and reopen exactly the parity gap this file exists
+    to assert against." Correct, aimed at the right hazard — and it lived in the file being *checked*,
+    not the *checker*, so nobody editing the checker ever read it. Prose guards the file it sits in.
 - **Claude Code paste-chips arrive EMPTY in the planning chat.** Long pastes auto-collapse to a "PASTED"
   attachment that transfers as an empty document. Use screenshots or .docx/.md uploads instead.
 - **`e94387e` is a bad commit** — corrupt v9 baselines (NAN reserve rows). Superseded by `8693655`.
