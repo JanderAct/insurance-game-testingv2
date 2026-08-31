@@ -57,7 +57,7 @@ const DIAG = path.join(__dirname, 'diagnostics');
 const FAST: string[] = [
   'actuarial-memo-check',            //   5s
   'audit-formula-check',             //  18s
-  'cession-path-independence',       //  20s   RED — see the branch note below
+  'cession-path-independence',       //  77s   GAMES=300 — it cannot resolve its subject below that
   'cession-uplift-basis',            //  22s
   'claims-workbook-check',           //  17s
   'closure-draw-check',              //   3s
@@ -147,7 +147,17 @@ const PROBES: Record<string, string> = {
 // is what the previous arrangement relied on.
 //
 // 33 of 35 gates green. Two red, NEITHER of them opened by the commit that
-// built this runner, and both left standing deliberately:
+// built this runner, and both left standing deliberately at the time.
+//
+// ⚠ BOTH ARE GREEN NOW, AND NEITHER WAS FIXED BY MAKING THE ENGINE AGREE WITH
+// THEM. Kept here in full because the diagnosis is the useful part and because
+// the shape recurred: in both cases the GATE was wrong, not the engine.
+//   the parity gate was passing two arguments to a three-argument function
+//     (bcc0dcb), and its section 1b was asserting something that cannot be true
+//     (5b27451)
+//   cession-path-independence was asserting a TOTAL that is the sum of an
+//     exactly-path-independent component and an inherent one, at a sample size
+//     that could not resolve either (this commit)
 //
 //   cession-path-independence   WC -8.9%, 95% CI [-6.44M, -2.42M], excludes
 //                               zero. Failing since 858f9ba. This is the
@@ -156,6 +166,12 @@ const PROBES: Record<string, string> = {
 //                               funding means the funding decision moves total
 //                               cession. It needs bisecting across the branch
 //                               and that is its own commit.
+//
+//                               RESOLVED at 04e71ad / this commit: the bisect
+//                               landed on a POWER boundary, not a break. The
+//                               gate now asserts the inception component as an
+//                               equivalence test at GAMES=300 and reports the
+//                               development component, which is inherent.
 //
 //   panel-engine-parity-check   2 checks failed, WC ONLY — GL and Property are
 //                               exact to 0.00e+0. The panel's quoted components

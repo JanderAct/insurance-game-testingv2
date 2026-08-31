@@ -1,7 +1,9 @@
 // ============================================================================
 // DOES SQUEEZED FUNDING BUY REINSURANCE RECOVERY? — A GATE, NOT A MEASUREMENT.
 //
-// ⚠ THIS EXITS NON-ZERO IF ANY LINE'S PAIRED INTERVAL EXCLUDES ZERO. It began as
+// ⚠ WHAT THIS ASSERTS IS THE INCEPTION COMPONENT, AND IT ASSERTS IT AS AN
+// EQUIVALENCE TEST. Not the total, and not "the interval contains zero" — see
+// THE GATE section below for both reasons. It began as
 // a measurement and found that squeezed recovered $27.47M more on WC, 95% CI
 // [$21.20M, $33.74M], with all three lines diverging the same way — underfunding
 // bought cover. The fix is the claim-level markdown plus the inception
@@ -97,12 +99,17 @@
 // which penalises underfunding rather than rewarding it. That is a reason to
 // rank it below the original, not a reason to call it harmless.
 //
-// NOT FIXED HERE. Three things are in scope for whoever does: whether the gate's
-// GAMES=60 default should rise, since it demonstrably cannot resolve its own
-// subject; whether a residual that is linear in the bias should be gated at all
-// or measured like section 2 of the parity check; and whether the stochastic
-// step should be applied to the UNWOUND register rather than the marked-down
-// one, which is the only change that would remove it rather than tolerate it.
+// ⚠ ALL THREE WERE RULED ON AT THE NEXT COMMIT, and this file now implements the
+// ruling rather than describing the choice:
+//
+//   GAMES rose from 60 to 300, where every line resolves the tolerance it is
+//     asserted against. See the constant.
+//   the development residual is REPORTED, not gated — it is inherent, and the
+//     alternative is the original defect. See the block above that section.
+//   the stochastic step still applies to the marked-down register. Changing that
+//     is the only thing that would REMOVE the residual rather than tolerate it,
+//     and it was not taken: the residual is an order of magnitude smaller than
+//     the defect it replaced and signed the other way.
 // ============================================================================
 //
 // PAIRED, SAME SEEDS. The two arms differ only in the funding decision, so the
@@ -117,7 +124,32 @@ import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { SLIDER_RANGES, WC_FUNDING_CONFIDENCE_RANGE } from '../../src/data/defaultAssumptions';
 import type { CoverageLine, DecisionSet, GameState, ReserveCohort } from '../../src/types/simulation';
 
-const GAMES = Number(process.env.GAMES ?? 60);
+// ⚠ 300, NOT 60, AND THE OLD 60 IS THE DEFECT THIS COMMIT FIXES. At 60 games
+// this gate could not resolve its own subject: the two endpoints of the bisect
+// missed zero by $0.16M and $0.29M and read green and red, and at 200 they were
+// indistinguishable. It had been passing on noise and failing on slightly less
+// noise for its whole life.
+//
+// WHAT 300 BUYS, measured, per line (interval half-width against the 5%
+// tolerance the inception assertion uses):
+//
+//   games   WC              GL              Property        wall
+//      60   +/-$2.04M ok    +/-$6.12M ok    +/-$4.01M  NOT RESOLVED   21s
+//     120   +/-$1.78M       +/-$3.62M       +/-$3.01M  NOT RESOLVED   29s
+//     200   +/-$1.94M       +/-$2.59M       +/-$2.70M  NOT RESOLVED   47s
+//     300   +/-$1.58M       +/-$2.05M       +/-$1.99M  all resolve    70s
+//     400   +/-$1.44M       +/-$1.79M       +/-$1.60M  all resolve    92s
+//
+// Property is the binding line — the smallest inception base, so the tightest
+// tolerance in dollars. 300 is the first round number where all three resolve;
+// 400 buys more margin for another 22 seconds and is what to move to if the
+// variance ever rises. The gate SAYS "NOT RESOLVED" rather than passing when it
+// cannot see, so this number failing is visible rather than silent.
+//
+// 70s keeps it inside the fast tier: the tier's wall clock is ~119s at 3-way
+// concurrency and its previous longest job was 45s, so this becomes the longest
+// job without becoming the binding constraint.
+const GAMES = Number(process.env.GAMES ?? 300);
 const YEARS = Number(process.env.YEARS ?? 12);
 const LINES: CoverageLine[] = ['WC', 'GL', 'Property'];
 
@@ -264,33 +296,126 @@ for (const line of LINES) {
   }
 }
 
-console.log('\n\n--- THE GATE: PAIRED DIFFERENCE IN TOTAL CESSION (squeezed - defaults) ---');
-console.log('  If the total is path-independent this interval contains zero.\n');
-console.log('  line       mean diff        95% CI                      as % of defaults total   verdict');
-let anyDiverge = false;
-for (const line of LINES) {
-  const diffs = paired[line].map(p => (p.sq.inception + p.sq.development) - (p.def.inception + p.def.development));
-  const c = ci(diffs);
-  const baseline = paired[line].reduce((s, p) => s + p.def.inception + p.def.development, 0) / paired[line].length;
-  const excludesZero = (c.lo > 0 && c.hi > 0) || (c.lo < 0 && c.hi < 0);
-  if (excludesZero) anyDiverge = true;
-  console.log(
-    `  ${line.padEnd(10)} ${money(c.mean).padStart(11)}   [${money(c.lo)}, ${money(c.hi)}]`.padEnd(58) +
-    `${pct(c.mean / baseline).padStart(10)}              ` +
-    (excludesZero ? (c.mean > 0 ? 'DIVERGES — squeezed recovers MORE' : 'DIVERGES — squeezed recovers LESS') : 'contains zero'),
-  );
-}
+// ============================================================================
+// ⚠ THE GATE IS ON THE INCEPTION COMPONENT. THE DEVELOPMENT COMPONENT IS
+// REPORTED AND ACCEPTED. It used to assert the TOTAL, which is a sum of two
+// components with different characters, and asserting the sum was wrong in both
+// directions at once — it failed on a residual that is inherent, and it could
+// pass while the two halves moved in opposite directions and cancelled.
+//
+// INCEPTION IS WHAT SHOULD BE EXACTLY PATH-INDEPENDENT. The funding decision
+// moves cession between "recognised at inception" and "recognised on
+// development"; it must not change what is recognised at inception for a given
+// register, because the give-back is precisely the deterministic quantity that
+// makes that true. It is also what would catch the ORIGINAL defect returning:
+// remove the give-back and squeezed's inception cession jumps by the whole of
+// it, ~$30M on WC against a tolerance of ~$2.7M.
+//
+// ⚠ AND A PER-LINE TOTAL IS A SUM OF COMPONENTS THAT CAN HIDE EACH OTHER. This
+// is why the old form produced the wrong headline twice. At GAMES=60 the totals
+// read "WC only", and WC was not special: the development component excludes
+// zero on ALL THREE LINES and GL's is the LARGEST (-$3.58M against WC's -$2.30M
+// at 300 games). WC's total crossed first only because GL's positive inception
+// noise offset more of GL's development gap. Anyone reading a per-line total
+// here is reading two things added together; read the split.
+// ============================================================================
+console.log('\n\n--- THE GATE: INCEPTION CESSION MUST NOT DEPEND ON THE FUNDING DECISION ---');
+console.log('  Squeezing moves cession between recognition points. It must not change what is');
+console.log('  recognised AT INCEPTION, because the give-back is the deterministic quantity that');
+console.log('  makes that hold. This is the assertion that would catch the original defect.\n');
 
-console.log('\n  And the same difference split by recognition point, to show the reclassification:');
-console.log('  line       at inception (diff)        on development (diff)');
+// ⚠ AN EQUIVALENCE TEST, NOT A NULL TEST, AND THAT IS THE POINT OF THIS COMMIT.
+// "The 95% interval contains zero" is not evidence of absence — it is satisfied
+// by any sample too small to resolve the effect, and this gate spent its whole
+// life being satisfied that way. Two conditions now, and BOTH must hold:
+//
+//   the estimate is inside the tolerance          |mean| <= TOL
+//   and the sample could have SEEN the tolerance  half-width <= TOL
+//
+// The second is what a null test never asks. A run that cannot resolve TOL now
+// FAILS as NOT RESOLVED rather than passing quietly.
+const INCEPTION_TOL_PCT = 0.05;
+let gateFail = 0;
+const failedGates: string[] = [];
+const RULE = '='.repeat(72);
+console.log('  line       inception diff   95% CI                  tolerance   resolution   verdict');
 for (const line of LINES) {
-  const di = ci(paired[line].map(p => p.sq.inception - p.def.inception));
-  const dd = ci(paired[line].map(p => p.sq.development - p.def.development));
+  const c = ci(paired[line].map(p => p.sq.inception - p.def.inception));
+  const base = paired[line].reduce((s, p) => s + p.def.inception, 0) / paired[line].length;
+  const tol = Math.abs(base) * INCEPTION_TOL_PCT;
+  const halfWidth = 1.96 * c.se;
+  const tooBig = Math.abs(c.mean) > tol;
+  const unresolved = halfWidth > tol;
+  const verdict = tooBig ? 'DIVERGES' : unresolved ? 'NOT RESOLVED' : 'ok';
+  if (tooBig) failedGates.push(`${line}: inception diff ${money(c.mean)} exceeds the ${pct(INCEPTION_TOL_PCT)} tolerance `
+    + `${money(tol)} — squeezing changed what is recognised at inception, which is what the give-back exists to prevent`);
+  else if (unresolved) failedGates.push(`${line}: NOT RESOLVED — the interval is +/-${money(halfWidth)} against a `
+    + `${money(tol)} tolerance, so this sample could not have seen a violation. Raise GAMES (currently ${GAMES}).`);
+  if (tooBig || unresolved) gateFail++;
   console.log(
-    `  ${line.padEnd(10)} ${money(di.mean).padStart(11)} [${money(di.lo)}, ${money(di.hi)}]`.padEnd(50) +
-    `${money(dd.mean).padStart(11)} [${money(dd.lo)}, ${money(dd.hi)}]`,
+    `  ${line.padEnd(10)} ${money(c.mean).padStart(11)}   [${money(c.lo)}, ${money(c.hi)}]`.padEnd(52)
+    + `+/-${money(tol).padStart(8)}   +/-${money(halfWidth).padStart(8)}   ${verdict}`,
   );
 }
+console.log(`\n  Tolerance is ${pct(INCEPTION_TOL_PCT)} of each line's own defaults inception cession. The original`);
+console.log('  defect was $27.47M on WC against a ~$2.7M tolerance, so this resolves it ten times over.');
+
+// ============================================================================
+// REPORTED, NOT ASSERTED — THE DEVELOPMENT COMPONENT.
+//
+// ⚠ THIS IS A KNOWN AND ACCEPTED CONSEQUENCE, NOT AN OPEN DEFECT. Ruled at
+// 5b27451 after the bisect. Squeezed cedes systematically LESS on development,
+// on all three lines, and the mechanism is inherent rather than a bug:
+//
+//   the register is marked down at inception, so under squeeze the claims spend
+//   the runoff CLIMBING BACK from a lower base. The same lognormal wobble
+//   therefore lands at lower occurrence values, and cession is convex, so it
+//   cedes less. The give-back closes the DETERMINISTIC band exactly and cannot
+//   close this, because there is no deterministic quantity to give back — it is
+//   an interaction between the marked-down level and the realised path.
+//
+// ⚠ THE ALTERNATIVE IS THE ORIGINAL DEFECT. Not marking the claims down is what
+// let the unwind inflate them PAST their drawn value, and squeezed pools then
+// EXTRACTED recovery: $27.47M more on WC, 95% CI [$21.20M, $33.74M]. Today's
+// residual is an order of magnitude smaller and signed the other way —
+// underfunding COSTS recovery rather than earning it, which is the direction the
+// game exists to teach. Accepting it is a trade, and this is the record of it.
+//
+// ⚠ THE LINEARITY TABLE IS HERE SO A FUTURE READER CAN TELL A CHANGE IN
+// MAGNITUDE FROM A CHANGE IN KIND. Measured at GAMES=200 by moving
+// IBNER_BOOKING_BIAS_COEFF and re-running:
+//
+//   coeff    WC dev diff   GL dev diff   Property dev diff
+//   0.00       -$0.05M       -$0.15M         -$0.01M      all contain zero
+//   0.40       -$1.13M       -$1.82M         -$0.58M
+//   0.80       -$2.23M       -$3.50M         -$1.12M      the shipped value
+//
+// Straight through the origin: 50.7% / 52.0% / 51.8% at half strength. If a
+// future reading is off this line, something has changed in KIND and the
+// mechanism above no longer describes it. If it is on the line at a different
+// coefficient, only the bias moved.
+// ============================================================================
+console.log('\n\n--- REPORTED, NOT ASSERTED: THE DEVELOPMENT COMPONENT ---');
+console.log('  Accepted consequence of the markdown, linear in the booking bias. See the block');
+console.log('  above this section in the source for the mechanism and the linearity table.\n');
+// ⚠ SCALED AGAINST THE LINE'S TOTAL CESSION, NOT AGAINST ITS DEVELOPMENT
+// CESSION. The development base is a small difference of larger numbers — WC
+// cedes $53.46M at inception and $0.73M on development — so dividing by it
+// produces -314% for a $2.30M gap and says nothing. The total is what the line
+// actually recovers, and the gap as a share of that is the number that means
+// something.
+console.log('  line       development diff  95% CI                  as % of the line\'s TOTAL cession');
+for (const line of LINES) {
+  const dd = ci(paired[line].map(p => p.sq.development - p.def.development));
+  const total = paired[line].reduce((s, p) => s + p.def.inception + p.def.development, 0) / paired[line].length;
+  console.log(
+    `  ${line.padEnd(10)} ${money(dd.mean).padStart(12)}   [${money(dd.lo)}, ${money(dd.hi)}]`.padEnd(53)
+    + `${Math.abs(total) > 1e-9 ? pct(dd.mean / total).padStart(10) : '        n/a'}`,
+  );
+}
+console.log('\n  ⚠ ALL THREE LINES, AND GL IS THE LARGEST. "WC only" was an artefact of reading the');
+console.log('    TOTAL, where GL\'s inception noise offsets more of its development gap. A per-line');
+console.log('    total is a sum of components that can hide each other.');
 
 console.log('\n\n--- DOES THE BOOKING BIAS REACH THE CLAIM VALUES? ---');
 console.log('  YES, NOW. The register is marked down by the cohort\'s bias dollars at inception and');
@@ -325,12 +450,17 @@ for (const line of LINES) {
   console.log(`  ${line.padEnd(10)} subset driven to exactly zero:  defaults ${String(dEv).padStart(4)} (${money(dUn)} unallocated)   squeezed ${String(sEv).padStart(4)} (${money(sUn)} unallocated)`);
 }
 
-if (anyDiverge) {
-  console.log('\n\nFAIL: AT LEAST ONE LINE DIVERGES. Total cession depends on the funding decision,');
-  console.log('      which means underfunding buys cover. The decomposition above is the finding.');
+if (gateFail > 0) {
+  console.log(`\n\n${RULE}`);
+  console.log(`${gateFail} GATE FAILURE(S):`);
+  for (const f of failedGates) console.log(`  ${f}`);
+  console.log(RULE);
   process.exit(1);
 }
-console.log('\n\nTOTAL CESSION IS PATH-INDEPENDENT. Every line\'s paired 95% interval contains zero:');
-console.log('squeezing moves cession between inception and development without changing the sum,');
-console.log('so a pool cannot buy reinsurance recovery by underfunding.');
+console.log('\n\nINCEPTION CESSION IS PATH-INDEPENDENT. On every line the paired difference is inside');
+console.log('5% of that line\'s own inception cession AND the sample resolves that tolerance, so this');
+console.log('is a measured absence rather than a failure to look. A pool cannot buy reinsurance');
+console.log('recovery by underfunding: the give-back holds.');
+console.log('\nThe development component is reported above and is an accepted consequence of the');
+console.log('markdown — smaller than the defect it replaced, and signed the other way.');
 process.exit(0);

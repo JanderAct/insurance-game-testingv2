@@ -138,6 +138,30 @@ Things that were discovered expensively and live only in conversation memory. Re
   residual. This project already separates gross-error detectors from precision instruments for
   heavy-tailed gates (below); it is the same distinction, applied to a check nobody had classified either
   way.
+- **"Contains zero" at a sample too small to resolve the effect is not evidence of absence.** It is the
+  other half of the CI rule below, and it is the half that bites, because a null result looks like good
+  news. State what the sample CAN resolve before reading a null as a null.
+  - **This cost a residual being declared closed for four commits.** At `89f9508` the markdown/unwind
+    convexity residual was measured over 50 games as "WC −0.6%, CI [−2.2%, +1.0%], contains zero" and
+    written down as shrunk below resolution — correctly — and then read back as *fixed*. It was not
+    fixed. At 300 games it is −$2.30M on WC with CI [−$2.47M, −$2.12M], has always been there, and is on
+    all three lines. Nobody lied; the instrument could not see it and its output was indistinguishable
+    from an instrument that could.
+  - **The form that fixes it is an EQUIVALENCE test, not a null test.** Two conditions, both required:
+    the estimate is inside the tolerance (`|mean| ≤ TOL`), **and** the sample could have seen the
+    tolerance (`half-width ≤ TOL`). The second is the one a null test never asks. A run that cannot
+    resolve TOL must fail as NOT RESOLVED, not pass quietly. `cession-path-independence` does this per
+    line and prints both columns.
+  - **And it means a gate's sample size is part of its claim.** That gate ran GAMES=60 for its whole
+    life; at 60 the two endpoints of a bisect missed zero by $0.16M and $0.29M and read green and red,
+    while at 200 they were statistically indistinguishable. It had been passing on noise and failing on
+    slightly less noise. Print the resolution next to the verdict — the way `closure-draw-check` prints
+    its per-line resolution — so the number is visible without re-deriving it.
+- **A per-line total is a sum of components that can hide each other.** The same gate reported "WC only"
+  twice, and WC was not special: the development component excludes zero on all three lines and GL's is
+  the largest. WC's TOTAL crossed first only because GL's positive inception noise offset more of GL's
+  negative development gap. If a quantity decomposes, gate the components, not the sum — and if you must
+  report the sum, print the split beside it.
 - **Heavy-tailed lines cannot be gated on a realized mean.** Use a two-part check: HARD ASSERT the
   deterministic analytic ratio, REPORT the realized draw with its confidence interval, and flag only if
   realized falls outside its own CI of the analytic. GL's realized loss ratio swung from 0.9361× to
