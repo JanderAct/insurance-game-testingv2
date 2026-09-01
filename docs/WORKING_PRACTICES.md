@@ -17,6 +17,43 @@ Things that were discovered expensively and live only in conversation memory. Re
     (`reinsurance-tower-check`, `wc-behaviour-check`, `property-fit-check`, `loss-ratio-check` and more).
     They are in `PROBES` with a one-line reason each. Do not read a name as a verdict.
   - **A probe still has to run.** `allocation-grid` asserts nothing and was still red, because it threw.
+- **A comment describing behaviour nobody implemented reads as a guarantee.** `LineResultSet.claims` said
+  it was "deliberately NOT persisted to localStorage (~800 claims/yr × years would blow the quota)" and
+  "regenerated from seed × member × year on demand". Neither was true: `persistState` was a bare
+  `JSON.stringify` of the whole `GameState`, nothing stripped anything, no regeneration function existed,
+  and the save passed the ~5 MiB quota at **year 4** — after which every write threw `QuotaExceededError`
+  into a bare `catch {}` and the game stopped being recorded, silently, for the life of the project.
+  - **The sentence was load-bearing three times over.** It was repeated in four files, it was the stated
+    reason `enrolment-independence-check` may ignore claim ids, and it was the premise of a plan to derive
+    per-claim revision rather than store it. Each reader took it as settled because it reads as settled.
+  - **The tell: a comment that describes a MECHANISM should name the code that implements it.** "Stripped
+    on the way out by `gameSave.SAVE_STRIPPED_KEYS`" can be checked in one grep. "Is not persisted" cannot
+    be checked at all — it describes an absence, and an absence looks identical whether it was arranged or
+    merely assumed.
+- **A defect can arrive by growth, with no commit that caused it.** Nobody broke the save; the save
+  outgrew the quota as lines were added. Measured at year 10: WC-only 4.60 MiB (**never** crosses),
+  WC+GL 7.85 MiB (crosses at year 6), all three 9.05 MiB (crosses at **year 4**). Every configuration the
+  project used early was immune, so there was no bisectable moment and no arm to blame. Where a resource
+  limit exists, gate the SIZE, not the change — `save-size-check` asserts the worst case the setup slider
+  can reach rather than watching for a regression.
+- **The reload path had no coverage because every gate runs straight through.** Thirty-five scripts, one
+  process each, none touching storage — so the one thing a player does that a gate never did was the one
+  thing that was broken. `save-round-trip-check` plays a game straight through, plays it again with a
+  save/restore in the middle, and requires the years AFTER the reload to agree. Checking that the parsed
+  object equals the written one is a JSON tautology; the value is in re-running the engine from the
+  restored state.
+  - **And it had to be shown to fail.** Adding `developingClaims` to the strip list made it report 12
+    differences; the real list makes it green. A round-trip gate that cannot fail is a JSON test.
+  - **`undefined` and absent are the same thing across a round trip.** `JSON.stringify` drops keys whose
+    value is `undefined`, so every unset optional (`shockEvents`, `claimCount`, `claimCountsByClass`) is
+    present-but-undefined on one arm and missing on the other. The first run reported 24 such differences
+    and none were real. Fix the comparison, not the gate's threshold: `o.k === undefined` is true either
+    way, so no consumer can tell them apart and neither should the diff.
+- **Swallowing an error on the one thing that preserves a player's work is worse than the error.** The
+  quota was a capacity problem with a fix; `catch {}` turned it into an invisible one. But the answer is
+  not to throw either — that would unmount the React tree and destroy the in-memory game as well as the
+  stored one, which in a facilitated room of ten people is a white screen nobody can debug. Keep the
+  session alive, return the failure, and make the UI impossible to miss.
 - **A per-row quantity that is computable one row at a time will be, and that is where the incoherence
   hides.** The claim payment split was `claimPaidWeight(claimGrossUltimate, registerGrossSum)` — pro rata,
   no other input needed — so every OPEN claim was handed the cohort's *average* paid share and the claims

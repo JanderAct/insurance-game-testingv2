@@ -27,6 +27,7 @@ import { generateGameInstance } from './utils/instanceGenerator';
 import { processYear, applyLoanAuthorizations, type ProcessYearResult } from './utils/simulationEngine';
 import { runPriorHistory, toHistoricalYear } from './utils/priorHistoryEngine';
 import { defaultDecisionSet } from './utils/decisionDefaults';
+import { SAVE_KEY, writeSave, type SaveOutcome } from './utils/gameSave';
 import { getMemberExposure, selectResultView } from './utils/lineHelpers';
 import { computeFundingConsequence } from './utils/fundingConsequence';
 import { LINE_FULL_NAME } from './utils/lineDisplay';
@@ -100,20 +101,27 @@ export default function App() {
   // Stage 2.1 Pool/line view toggle. Display-only — not persisted to
   // localStorage, and not part of GameState/DecisionSet.
   const [lineViewRaw, setLineView] = useState<LineView>('pool');
+  // The last failed save, or null. Rendered as a banner that does not dismiss —
+  // see the note on persistState and gameSave.ts.
+  const [saveFailure, setSaveFailure] = useState<Extract<SaveOutcome, { ok: false }> | null>(null);
 
-  // Load persisted game from localStorage if available
+  // Load persisted game from localStorage if available.
   //
-  // THE KEY STAYS 'riskpool_gamestate_v10' ACROSS THE RIPPLE RENAME, on
-  // purpose. It is a persisted identifier, not a display string — renaming it
-  // to match the new product name would orphan every existing saved game
-  // (a fresh key means `localStorage.getItem` finds nothing, indistinguishable
-  // from never having played). The four sites using this literal (the load
-  // here, its two removeItem cleanup paths below, and persistState's setItem)
-  // must all keep using the same string. A version bump belongs to a real save
-  // schema change, not to the app's name.
+  // ⚠ THE KEY IS `SAVE_KEY` NOW, AND THE PARAGRAPH THAT STOOD HERE IS WHY. It
+  // said the key must not be renamed — true, and it now lives beside the
+  // constant in gameSave.ts — and then asked the reader to keep FOUR STRING
+  // LITERALS in step by hand: this load, its two removeItem paths, and the
+  // write. A comment requesting manual consistency across four sites is the
+  // keyed-lookup defect with extra steps. The constant is the fix.
+  //
+  // ⚠ A RESTORED GAME HAS NO PER-CLAIM DETAIL. gameSave strips `claims`,
+  // `occurrences` and `marketMemberLossResults` on the way out — see its header
+  // for why, and save-round-trip-check for what that costs. Nothing here
+  // backfills them: they are absent, and every consumer already has to handle
+  // absence because the aggregate Property path never produced them either.
   React.useEffect(() => {
     try {
-      const saved = localStorage.getItem('riskpool_gamestate_v10');
+      const saved = localStorage.getItem(SAVE_KEY);
       if (saved) {
         const { gameState: gs, startingFinancials: sf, initialMembers: im, currentDecisions: cd } = JSON.parse(saved);
 
@@ -214,29 +222,27 @@ export default function App() {
           setActiveTab('dashboard');
         } else {
           // Bad saved state - clear it
-          localStorage.removeItem('riskpool_gamestate_v10');
+          localStorage.removeItem(SAVE_KEY);
         }
       }
     } catch {
       // ignore parse errors - clear corrupted data
-      localStorage.removeItem('riskpool_gamestate_v10');
+      localStorage.removeItem(SAVE_KEY);
     }
   }, []);
 
+  // ⚠ THE WRITE LIVES IN gameSave.ts NOW, AND THE FAILURE IS SURFACED.
+  // This was a bare JSON.stringify in a bare catch {}, which meant the game
+  // silently stopped saving at year 4 once the payload passed the ~5 MiB
+  // localStorage quota. gameSave strips the per-claim flow that made up 65-70%
+  // of it and reports what happened; this turns a failure into a banner the
+  // player cannot miss. See gameSave.ts for the measurement and the budget.
   function persistState(gs: GameState, sf: StartingFinancials, im: Member[], cd: DecisionSet) {
-    try {
-      localStorage.setItem(
-        'riskpool_gamestate_v10',
-        JSON.stringify({
-          gameState: gs,
-          startingFinancials: sf,
-          initialMembers: im,
-          currentDecisions: cd,
-        })
-      );
-    } catch {
-      // ignore storage errors
-    }
+    const outcome = writeSave(
+      { gameState: gs, startingFinancials: sf, initialMembers: im, currentDecisions: cd },
+      window.localStorage,
+    );
+    setSaveFailure(outcome.ok ? null : outcome);
   }
 
   const handleStartGame = useCallback((settings: GameSetupSettings) => {
@@ -324,7 +330,7 @@ export default function App() {
     setInitialMembers([]);
     setCurrentDecisions(defaultDecisionSet(1));
     setLineView('pool');
-    localStorage.removeItem('riskpool_gamestate_v10');
+    localStorage.removeItem(SAVE_KEY);
     setActiveTab('setup');
   }, []);
 
@@ -474,6 +480,25 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/*
+        ⚠ THE SAVE-FAILURE BANNER, AND IT IS DELIBERATELY NOT DISMISSABLE.
+        The defect this replaces was a swallowed QuotaExceededError: the game
+        stopped being written at year 4 and said nothing, so the loss only
+        surfaced on reload, by which time the session was over. This sits above
+        the header, stays for the rest of the session, and names the remedy the
+        player can actually act on — finish and export, rather than reload.
+        A dismissable toast would be the same defect with a longer fuse.
+      */}
+      {saveFailure && (
+        <div role="alert" className="bg-red-700 text-white px-4 py-3 text-sm font-medium">
+          <span className="font-bold">This game is no longer being saved.</span>{' '}
+          {saveFailure.reason === 'quota'
+            ? `The browser refused a ${saveFailure.chars.toLocaleString()}-character save (storage full).`
+            : `The browser refused the save (${saveFailure.detail}).`}{' '}
+          Keep playing — the session in this tab is intact — but do NOT reload or close
+          this tab, and export your results before you finish.
+        </div>
+      )}
       <Header
         gameState={gameState}
         startingFinancials={startingFinancials}

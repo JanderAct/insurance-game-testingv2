@@ -40,9 +40,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIAG = path.join(__dirname, 'diagnostics');
 
 // ============================================================================
-// FAST — the tier that runs on every commit. 34 gates, 5.6 minutes of CPU,
-// about 2 minutes of wall clock at 3-way concurrency. Seconds are measured, not
-// estimated, on a 4-core box.
+// FAST — the tier that runs on every commit. 37 gates, about 6 minutes of CPU
+// and a little over 2 minutes of wall clock at 3-way concurrency. Seconds are
+// measured, not estimated, on a 4-core box.
 //
 // ⚠ THE SPLIT IS BY MEASURED COST, NOT BY IMPORTANCE, and nothing in SLOW is
 // less load-bearing than what is here. It is one script.
@@ -82,6 +82,8 @@ const FAST: string[] = [
   'property-claim-check',            //   3s
   'ratio-basis-check',               //   7s
   'roster-catalog-check',            //   3s
+  'save-round-trip-check',           //   3s
+  'save-size-check',                 //   4s
   'seed-cohort-shape-check',         //   1s
   'shock-check',                     //   6s
   'solo-export-guard',               //   4s

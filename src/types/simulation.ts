@@ -836,15 +836,38 @@ export interface ResultSet {
   commonLossFactor: number;
   catastropheFactor: number;
   // Claim-level detail, WC and GL (Property still draws an aggregate).
-  // IN-MEMORY FOR THE CURRENT SESSION ONLY — deliberately NOT persisted to
-  // localStorage (~800 claims/yr x years would blow the quota); results saved
-  // and reloaded carry the aggregates, and per-claim detail is regenerated
-  // from seed x member x year on demand. Optional for exactly that reason:
-  // any consumer must handle its absence.
   //
-  // The one persisted exception that used to be noted here — WC's unreported
-  // claim inventory — is gone with the report lag. Nothing per-claim is
-  // persisted now, so the rule above has no exception.
+  // IN-MEMORY FOR THE CURRENT SESSION ONLY. Dropped on the way to localStorage
+  // by gameSave.ts's `SAVE_STRIPPED_KEYS`, so a restored game has aggregates and
+  // no per-claim rows for years played before the reload. Optional for exactly
+  // that reason: any consumer must handle its absence, and after a reload every
+  // consumer will meet it.
+  //
+  // ⚠ WHAT STOOD HERE WAS FALSE IN BOTH HALVES, AND THE COST WAS REAL. It said
+  // this was "deliberately NOT persisted to localStorage (~800 claims/yr x years
+  // would blow the quota)" and that detail "is regenerated from seed x member x
+  // year on demand".
+  //
+  //   IT WAS PERSISTED. `persistState` was a bare JSON.stringify of the whole
+  //   GameState. Nothing stripped anything, because the stripping this sentence
+  //   described did not exist anywhere.
+  //
+  //   IT DID BLOW THE QUOTA. Three lines, ten years: 10.24 MiB against a
+  //   measured 5 MiB limit, first crossed at YEAR 4 — after which every save
+  //   threw QuotaExceededError into a bare catch {} and the game silently
+  //   stopped being recorded.
+  //
+  //   AND THERE IS NO REGENERATION. No function regenerates a prior year's
+  //   register; the claim was repeated in four comments and implemented in none.
+  //   It is also not achievable as stated: the register depends on the enrolled
+  //   roster, riskControlEffectiveness, k_line, gPool and any shock multipliers
+  //   — the decision PATH, not (seed, member, year). Measured: the same seed
+  //   with one pool-wide risk-control change moves GL's AY3 register from 261
+  //   claims / $12.598M to 236 / $11.863M.
+  //
+  // A comment describing behaviour nobody implemented read as a guarantee for
+  // the life of the project. save-size-check and save-round-trip-check now
+  // assert what this paragraph merely asserted in prose.
   claims?: Claim[];
   occurrences?: Occurrence[];
   claimCountsByClass?: Record<string, number>;  // WC
