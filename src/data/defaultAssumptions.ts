@@ -803,18 +803,94 @@ export const FUNDING_CLF_TABLE: Record<number, number> = {
 };
 
 // Investment return assumptions by asset class. Conservative public-entity /
-// risk-pool style portfolio assumptions, intentionally modest so investment
-// income does not dominate underwriting results. Cash and bonds essentially
-// never have a real down year; equities does, by design, to make the
-// allocation decision carry real risk/return tradeoff.
-// Single-regime model: one normal draw per class per year, minus a fee.
-// Means/SDs are GROSS of fees and are whole-period historical values that
-// already include crash years — there is deliberately NO separate downside
-// regime (that would double-count the downside; market crashes are the Phase 4
-// shock-event system's job). minReturn/maxReturn are inert sanity rails only —
-// wide enough (3.4σ+) that they essentially never fire; they exist to prevent
-// nonsense like a sub−100% draw producing negative invested assets, not to
-// shape the distribution.
+// risk-pool style portfolio assumptions. Cash and bonds essentially never have
+// a real down year; equities does, by design, to make the allocation decision
+// carry real risk/return tradeoff.
+//
+// Single-regime model: one normal draw per class per year, minus a fee. Means
+// and SDs are GROSS of fees. There is deliberately NO separate downside regime
+// — market crashes are the Phase 4 shock-event system's job, and a second
+// downside distribution here would double-count them. minReturn/maxReturn are
+// inert sanity rails only, wide enough (3.4σ+) that they essentially never
+// fire; they exist to prevent nonsense like a sub−100% draw producing negative
+// invested assets, not to shape the distribution.
+//
+// ============================================================================
+// WHAT THESE ACTUALLY DELIVER, MEASURED — 200,000 draws through the real
+// simulateMarketReturns/blendInvestmentReturn path, at the default 10/80/10:
+//
+//     net mean 5.28%      SD 3.71%      (analytic: 5.289% / 3.712%)
+//     p5 -0.83%   p25 2.78%   p75 7.79%   p95 11.37%
+//     31.4% of years land below 3.5%; 7.7% are negative
+//
+// ⚠ ONE MARKET DRAW PER YEAR, SHARED, AND THE ALLOCATION IS POOL-WIDE. Every
+// line therefore realises the IDENTICAL return rate in a given year — the
+// market is drawn once (simulateMarketReturns) and processYear projects one
+// `assetAllocation` into every line. A report showing "the same implied return
+// on all three lines" has measured that construction, not a coincidence.
+//
+// ============================================================================
+// ⚠ "INTENTIONALLY MODEST SO INVESTMENT INCOME DOES NOT DOMINATE UNDERWRITING
+// RESULTS" STOOD HERE AND IS NO LONGER TRUE. That WAS the design intent and it
+// is worth keeping on the record, because the way it broke matters more than
+// the fact that it did.
+//
+// Measured across 30 games at CLF 0.45, investment income as a multiple of
+// |underwriting income|:
+//
+//     WC 1.12x        GL 0.66x        Property 0.40x
+//
+// and the share of underwriting-NEGATIVE line-years that still grew surplus:
+//
+//     WC 52%          GL 43%          Property 14%
+//
+// On WC the float now out-earns the underwriting result outright.
+//
+// ⚠ THE RATE DID NOT MOVE. THE DENOMINATOR DID. Not one parameter below has
+// changed. The payout patterns roughly doubled the reserve, the reserve IS the
+// invested base, so the float this same rate applies to roughly doubled with
+// it. The intent broke because the thing it was set against moved underneath
+// it — nobody loosened it.
+//
+// ⚠ REVIEWED AND DELIBERATELY LEFT. 5.28% net, with bonds at 5.20% gross, is a
+// defensible short-duration investment-grade posture on its own terms, and the
+// dominance arrived through a CORRECT change to the reserve. Cutting returns to
+// restore an intent whose premise had moved would be correcting a right thing
+// with a wrong one. The dominance is also not implausible: a long-tail pool
+// with a large float genuinely can absorb underwriting losses for years, which
+// is cash-flow underwriting, and it is the mechanism that makes reserving
+// matter now that the ending-position panel shows what is still owed.
+//
+// ⚠ AND THE PARAMETERS CITE NO SOURCE. "Whole-period historical values that
+// already include crash years" names no index, no period and no study, here or
+// in the commit that introduced them (406fba9) or in the player-facing
+// investmentMemo, which restates this table downstream rather than sourcing it.
+// They are considered numbers, not sourced ones. A reader should not assume
+// there is a reference behind them, and anyone who wants to move them is
+// choosing against judgement rather than against data.
+//
+// ============================================================================
+// THE OPEN ITEM IS THE ALLOCATION, NOT THE RATE.
+//
+// AllocationBar is a free 0-100% control across the three classes, so the
+// reachable mean spans 4.15% (all cash) to 8.14% (all equities) — and NOTHING
+// PRICES THE VOLATILITY except insolvency. On a $40M float over five years:
+//
+//     default 10/80/10   E +$10.6M    SD  $3.3M
+//     all equities       E +$16.3M    SD $16.3M
+//
+// so switching buys about +$5.7M in expectation against ±$16.3M of noise. For a
+// player judged on ending surplus, with no penalty attached to the spread, that
+// is simply the correct play — at which point the allocation stops being a
+// decision and becomes a right answer.
+//
+// ⚠ THE MISSING PIECE IS ALREADY NAMED IN THE MEMO: "no liquidity requirement
+// or early-sale cost is currently applied." That is the live gap, the doubled
+// float made it bigger, and SHOCK EVENTS LAND ON TOP OF IT — a claim spike
+// against a 100% equity book with no cost to selling into it is precisely the
+// scenario a liquidity requirement exists to model. Fix that before revisiting
+// anything below.
+// ============================================================================
 export interface AssetClassAssumption {
   expectedReturn: number;      // gross annual mean
   standardDeviation: number;   // gross annual SD
