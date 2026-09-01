@@ -30,6 +30,7 @@ import { defaultDecisionSet } from './utils/decisionDefaults';
 import { SAVE_KEY, writeSave, type SaveOutcome } from './utils/gameSave';
 import { getMemberExposure, selectResultView } from './utils/lineHelpers';
 import { computeFundingConsequence } from './utils/fundingConsequence';
+import { endingPosition } from './utils/endingPosition';
 import { LINE_FULL_NAME } from './utils/lineDisplay';
 import LoanPromptModal from './components/LoanPromptModal';
 import type { LineLoanInfo } from './pages/DecisionsPage';
@@ -548,6 +549,13 @@ export default function App() {
             startingFinancials={startingFinancials}
             currentYearNumber={gameState.currentYearNumber}
             lineView={lineView}
+            // ⚠ COMPUTED FROM THE WHOLE GAME STATE, NOT FROM `viewResults`, and
+            // passed in rather than derived inside the page. The panel shows
+            // every line at once whatever the line view is set to — the contrast
+            // between a short-tail and a long-tail runoff is the lesson — and
+            // DashboardPage only ever receives the filtered slice.
+            endingPositionRows={endingPosition(gameState)}
+            gameComplete={gameState.isComplete}
           />
         )}
 

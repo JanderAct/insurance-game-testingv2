@@ -40,7 +40,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIAG = path.join(__dirname, 'diagnostics');
 
 // ============================================================================
-// FAST — the tier that runs on every commit. 37 gates, about 6 minutes of CPU
+// FAST — the tier that runs on every commit. 38 gates, about 6 minutes of CPU
 // and a little over 2 minutes of wall clock at 3-way concurrency. Seconds are
 // measured, not estimated, on a 4-core box.
 //
@@ -64,6 +64,7 @@ const FAST: string[] = [
   'cohort-stock-check',              //   4s   (sixty years, four games)
   'development-cession-check',       //  14s
   'development-sign-symmetry',       //  11s
+  'ending-position-check',           //   6s
   'enrolment-independence-check',    //   2s
   'export-number-format-check',      //  12s
   'funding-basis-check',             //  10s
@@ -121,6 +122,7 @@ const PROBES: Record<string, string> = {
   'gl-claim-check': 'GL generator shape report [10s]',
   'gl-clf-grid-derive': 'derives GL\'s CLF grid by Monte Carlo — a generator. Asserts monotonicity on what it produces, not on what ships. STILL RUNNING at 55 minutes when the timing pass was cut — do not put it in a tier',
   'gl-cutover-check': 'before/after report for the GL cutover; historical [6s]',
+  'investment-dominance-report': 'underwriting against investment income, per line, with the implied return. A design reading with no threshold — see its header [12s]',
   'ibner-clf-basis-check': 'reports the IBNER/CLF basis pairing; no threshold [17s]',
   'ibner-pregame-report': 'pre-game IBNER state report [64s]',
   'ibner-report': 'IBNER behaviour report [15s]',

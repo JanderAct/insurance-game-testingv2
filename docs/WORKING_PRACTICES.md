@@ -17,6 +17,26 @@ Things that were discovered expensively and live only in conversation memory. Re
     (`reinsurance-tower-check`, `wc-behaviour-check`, `property-fit-check`, `loss-ratio-check` and more).
     They are in `PROBES` with a one-line reason each. Do not read a name as a verdict.
   - **A probe still has to run.** `allocation-grid` asserts nothing and was still red, because it threw.
+- **A truncated game reports performance the runoff has not had a chance to take back.** A five-year GL
+  game ends with a median actual/expected loss ratio of 0.868; over complete cohort lives it is 0.964.
+  **Ten of those thirteen points are truncation, not skill.** At year five roughly half of everything the
+  casualty lines booked is still unpaid. Any figure that closes the game — ending surplus above all — is
+  measuring an unfinished position, and a player who underpriced reads it as vindication.
+  - **Show both the raw figure and what it nets to; never replace one with the other.** The surplus is
+    what the balance sheet says and the net figure is what it means. A player has to watch them disagree.
+  - **A ratio with a decision in its denominator measures the decision, not the thing.** Outstanding ÷
+    premium reads WC 2.43x / GL 1.87x / Property 0.86x at defaults and 3.81x / 2.67x / 1.79x under a
+    squeeze — the *player* moved, not the line. Outstanding ÷ everything-booked reads 50% / 50% / 22%
+    either way. When a measure is meant to characterise the model, check whether a player's choice can
+    move it.
+  - **A panel that teaches a comparison must assert the comparison still holds.** `ending-position-check`
+    fails if Property ever stops settling faster than the casualty lines. Without that the exhibit would
+    keep rendering and would quietly teach the opposite of what it was built for.
+- **A disclosure that changes what it discloses is not a disclosure, and the failure is invisible.** The
+  un-emerged deficiency reads live cohort state. If computing it mutated anything, the number would still
+  be self-consistent — just wrong, with nothing on screen to say so. The gate runs one seed twice, calling
+  the disclosure every year on one arm and never on the other, and requires the two games to be identical.
+  Any read-only claim about live state deserves that shape of test rather than an inspection.
 - **Two views of one fact, built from different sources, will disagree — and neither looks wrong.** The
   claims workbook's line sheets read `lockedResults`, which starts at year 1. Its Development sheet reads
   `poolState`, whose cohorts include the pre-game years. So accident years -2, -1 and 0 had development

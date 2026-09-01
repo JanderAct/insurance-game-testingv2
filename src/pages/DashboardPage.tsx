@@ -3,6 +3,8 @@ import type { LineResultSet, StartingFinancials, HistoricalYear, LineView } from
 import StatCard from '../components/StatCard';
 import { formatCurrency, formatMillions, formatPct, colorForRatio, colorForSurplus } from '../utils/formatters';
 import { lineDisplayName } from '../utils/lineDisplay';
+import EndingPositionPanel from '../components/EndingPositionPanel';
+import type { EndingPositionRow } from '../utils/endingPosition';
 
 interface DashboardPageProps {
   lockedResults: LineResultSet[];
@@ -10,9 +12,12 @@ interface DashboardPageProps {
   startingFinancials: StartingFinancials;
   currentYearNumber: number;
   lineView: LineView;
+  // Every line plus the pool, unfiltered by lineView — see EndingPositionPanel.
+  endingPositionRows: EndingPositionRow[];
+  gameComplete: boolean;
 }
 
-export default function DashboardPage({ lockedResults, historicalYears, startingFinancials, currentYearNumber, lineView }: DashboardPageProps) {
+export default function DashboardPage({ lockedResults, historicalYears, startingFinancials, currentYearNumber, lineView, endingPositionRows, gameComplete }: DashboardPageProps) {
   // Stage 2.10: the last historical entry is the real year 0 — the simulated
   // pre-game year whose ending position IS the Year 1 opening. It renders as
   // the highlighted Year 0 row; earlier entries (-2, -1) render above it.
@@ -115,6 +120,12 @@ export default function DashboardPage({ lockedResults, historicalYears, starting
           sub={`Market total: ${formatMillions(startingFinancials.totalMarketExposure)}`}
         />
       </div>
+
+      {/* ⚠ ABOVE THE ANNUAL SUMMARY, NOT BELOW IT. Ending surplus is the last
+          figure a player reads and the one they carry away; the reserve standing
+          against it has to be in the same eyeline, not underneath a table they
+          have already stopped scrolling through. */}
+      <EndingPositionPanel rows={endingPositionRows} complete={gameComplete} />
 
       {/* Locked Year Summary Table */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
