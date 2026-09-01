@@ -28,9 +28,10 @@
 //   PRE-GAME       accident years -2, -1 and 0 have claim rows on every line
 //                  sheet, and the line sheets and Development sheet agree on
 //                  which accident years exist.
-//   RELOAD MARKER  a game whose earlier detail was not retained says so, names
-//                  the first year present, and does not warn when the detail is
-//                  simply absent because there were no pre-game years.
+//   RELOAD         a game whose earlier claim detail was stripped from the save
+//                  comes back WHOLE through claimRegeneration — same accident
+//                  years and row counts as straight through, and no warning —
+//                  and a game with no pre-game years does not warn either.
 //   OPEN AND PAID  no row marked `open` has paid its whole Gross Incurred, and
 //                  the headroom quantiles on open rows are printed beside it.
 //                  This is the ONLY gate on the Gross Paid column — see the note
@@ -98,7 +99,7 @@ function runGame(arm: Arm, g: number): GameState {
 // when they are supplied (the live call) and when a game genuinely has none.
 // Passing gs.priorHistory unconditionally would leave the second case untested.
 function roundTrip(gs: GameState, prior = gs.priorHistory): Record<string, unknown[][]> {
-  const wb = buildClaimsWorkbook(gs.lockedResults, prior, LINES, gs.poolState);
+  const wb = buildClaimsWorkbook(gs.lockedResults, prior, gs.instance, LINES, gs.poolState);
   const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
   const back = XLSX.read(buf, { type: 'buffer' });
   const out: Record<string, unknown[][]> = {};
@@ -377,40 +378,38 @@ for (const arm of ARMS) {
   console.log(`  pre-game years on the line sheets   -2/-1/0 present on all ${LINES.length} lines`);
   console.log(`  accident years, Development sheet   [${[...devYears].sort((a, b) => a - b).join(', ')}]`);
 
-  // --- CASE 2: a reload. Detail dropped for years 1..4, marker must fire and
-  // must name 5 as the first year present. This is the failure the gate exists
-  // to catch, so it is exercised rather than assumed reachable.
+  // --- CASE 2: a reload. Detail dropped for years 1..4 AND the pre-game, and
+  // the workbook must come back WHOLE — every accident year, the same row count
+  // as the straight-through arm, and NO warning. Before claimRegeneration this
+  // case asserted that a marker fired and named year 5 as the first present;
+  // that marker is now reserved for a result that cannot be redrawn at all, so
+  // firing here would mean regeneration silently failed for a stripped year.
   const LOST_THROUGH = 4;
+  const strip = (r: GameState['lockedResults'][number]) => ({
+    ...r, byLine: Object.fromEntries(Object.entries(r.byLine).map(([l, lr]) =>
+      [l, { ...lr, claims: undefined, occurrences: undefined }])) as never,
+  });
   const reloaded: GameState = {
     ...gs,
-    priorHistory: gs.priorHistory.map(r => ({
-      ...r, byLine: Object.fromEntries(Object.entries(r.byLine).map(([l, lr]) =>
-        [l, { ...lr, claims: undefined, occurrences: undefined }])) as never,
-    })),
-    lockedResults: gs.lockedResults.map(r => (r.yearNumber > LOST_THROUGH ? r : {
-      ...r, byLine: Object.fromEntries(Object.entries(r.byLine).map(([l, lr]) =>
-        [l, { ...lr, claims: undefined, occurrences: undefined }])) as never,
-    })),
+    priorHistory: gs.priorHistory.map(strip),
+    lockedResults: gs.lockedResults.map(r => (r.yearNumber > LOST_THROUGH ? r : strip(r))),
   };
-  const short = roundTrip(reloaded, reloaded.priorHistory);
+  const rebuilt = roundTrip(reloaded, reloaded.priorHistory);
   for (const line of LINES) {
-    const note = noteOf(short, line);
-    const ys = yearsOf(short, line);
-    if (!note.includes(WARN)) fail(`reload marker: ${line} lost years 1-${LOST_THROUGH} and says nothing`);
-    if (!note.includes(`present from accident year ${LOST_THROUGH + 1} onward`)) {
-      fail(`reload marker: ${line} does not name ${LOST_THROUGH + 1} as the first year present`);
+    const note = noteOf(rebuilt, line);
+    if (note.includes(WARN)) fail(`reload: ${line} warns about missing detail although every year is regenerable`);
+    const a = yearsOf(full, line), b = yearsOf(rebuilt, line);
+    if ([...a].sort().join() !== [...b].sort().join()) {
+      fail(`reload: ${line} accident years differ after regeneration — straight [${[...a].sort((x, y) => x - y)}] vs rebuilt [${[...b].sort((x, y) => x - y)}]`);
     }
-    if (ys.has(LOST_THROUGH)) fail(`reload marker: ${line} still has rows for accident year ${LOST_THROUGH}`);
-    if (!ys.has(LOST_THROUGH + 1)) fail(`reload marker: ${line} lost accident year ${LOST_THROUGH + 1}, which was retained`);
+    const hdrIdx = line === 'Property' ? 2 : 1;
+    const rowsA = full[line].length - hdrIdx - 1, rowsB = rebuilt[line].length - hdrIdx - 1;
+    if (rowsA !== rowsB) fail(`reload: ${line} has ${rowsB} rows after regeneration against ${rowsA} straight through`);
   }
-  const devNote = String(short.Development[0][0] ?? '');
-  if (!devNote.includes('THIS SHEET IS COMPLETE AND THE LINE SHEETS ARE NOT')) {
-    fail('reload marker: the Development sheet does not say it is complete while the line sheets are short');
+  if (yearsOf(rebuilt, 'Development').size !== devYears.size) {
+    fail('reload: the Development sheet lost rows across the simulated reload');
   }
-  if (yearsOf(short, 'Development').size !== devYears.size) {
-    fail('reload marker: the Development sheet lost rows across the simulated reload');
-  }
-  console.log(`  reload marker fires, names year ${LOST_THROUGH + 1}, Development still complete`);
+  console.log(`  reload with years -2..${LOST_THROUGH} stripped   regenerated whole, row counts equal, no warning`);
 
   // --- CASE 3: no pre-game years at all. Legitimate, must NOT warn. ---------
   const noPrior = roundTrip(gs, []);

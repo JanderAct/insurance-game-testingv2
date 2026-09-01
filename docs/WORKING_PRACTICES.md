@@ -17,6 +17,33 @@ Things that were discovered expensively and live only in conversation memory. Re
     (`reinsurance-tower-check`, `wc-behaviour-check`, `property-fit-check`, `loss-ratio-check` and more).
     They are in `PROBES` with a one-line reason each. Do not read a name as a verdict.
   - **A probe still has to run.** `allocation-grid` asserts nothing and was still red, because it threw.
+- **"Store the inputs, not the output" — and check whether the inputs are already stored before adding
+  any.** Claim regeneration was briefed as persisting five scalars per line-year against the ~7 MB of claim
+  objects they replace. Tracing each one: the roster (`memberList`) and `kLineApplied` were already on the
+  `LineResultSet`; `gPool` is `deriveSubRng(seed, year, 'wc_gpool')`, a pure function of two things already
+  stored; the shock effects come from `resolveShocks(instance, year)`, which consumes no randomness and
+  reads an `instance` field never mutated after creation. **One input was genuinely missing** — the
+  rc-effectiveness applied to the year's draw existed only as the line state's rolling *current* value, so
+  a past year's was recorded nowhere. It became `rcEffectivenessApplied`, one number per line-year. And a
+  third stored input only showed up when the gate failed: pre-game years run on `(seed + attempt × 997)`,
+  and `priorHistoryEngine` had already stamped `pregameAttempt` on each pre-game result *for this exact
+  purpose* — the first run reproduced all 156 game line-years and got all 24 pre-game ones wrong by
+  hundreds of claims. Three stored, one added, two derived; the save grew by about 3.4 KB.
+  - **And the first draft of this paragraph said nothing needed adding.** The field named
+    `riskControlEffectiveness` was visible on a result-shaped object in the engine and read as the per-year
+    value; it was the line state. Typecheck caught it, not the tracing. When an input "is already stored",
+    confirm it is stored *per period*, not merely *currently*.
+  - **A derivable value stored is a second copy of one fact.** `gPool` was extracted from an inline
+    expression into `poolYearFactor(seed, year)` so the engine and the regenerator call the same function,
+    rather than storing the number or duplicating the expression. Same for the shock effects.
+  - **The gate has to compare the register, not its totals — and it has to carry its own positive
+    control.** `save-round-trip-check` regenerates every line-year of a restored game and compares it to the
+    straight-through arm claim by claim on every field, ids included. It then regenerates once more with
+    one input perturbed and asserts the result DIFFERS. A reproduction gate whose comparison could not
+    fail would be a JSON tautology, and last time that had to be proved by hand.
+  - **A regenerator that cannot reproduce must throw, not guess.** A save written before `kLineApplied`
+    existed has no k to redraw with. Defaulting to 1 would produce plausible claims that were never drawn,
+    silently — the exact failure the gate exists to catch, reintroduced as a fallback.
 - **A comment that excuses a gap is only as good as the day it was written, and nothing re-reads it when
   the gap acquires a consumer.** Third instance of the shape, after `cededByLayer`. `enrolment-independence-
   check` excluded claim ids from its comparison with a paragraph saying the exclusion was safe because "no

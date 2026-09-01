@@ -601,6 +601,7 @@ export default function App() {
           <ResultSpreadsheetPage
             lockedResults={gameState.lockedResults}
             priorHistory={gameState.priorHistory}
+            instance={gameState.instance}
             activeLines={gameState.setup.activeLines}
             instanceId={gameState.setup.instanceId}
             poolState={gameState.poolState}

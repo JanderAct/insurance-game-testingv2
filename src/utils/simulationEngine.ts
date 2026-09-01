@@ -24,13 +24,14 @@ function mergeShockRecords(lineResults: LineResultSet[]): ShockRecord[] | undefi
   return merged.size > 0 ? [...merged.values()] : undefined;
 }
 import { SeededRandom, deriveSubRng } from './random';
-import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, IBNER_BOOKING_BIAS_COEFF, IBNER_HORIZON, IBNER_STEP_MIXTURE, IBNER_TOTAL_SD, IBNER_UNWIND_DECAY, LINE_PAYOUT_PATTERN, MEMBER_LOSS_VOLATILITY, OPERATING_CASH_PCT_OF_PREMIUM, PROPERTY_HELD_PURE_PREMIUM_PER_100, RISK_CONTROL_PARAMS, WC_LOSS_MODEL, resolveClosureCurve } from '../data/defaultAssumptions';
+import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, IBNER_BOOKING_BIAS_COEFF, IBNER_HORIZON, IBNER_STEP_MIXTURE, IBNER_TOTAL_SD, IBNER_UNWIND_DECAY, LINE_PAYOUT_PATTERN, MEMBER_LOSS_VOLATILITY, OPERATING_CASH_PCT_OF_PREMIUM, PROPERTY_HELD_PURE_PREMIUM_PER_100, RISK_CONTROL_PARAMS, resolveClosureCurve } from '../data/defaultAssumptions';
 import type { TowerLine } from '../data/reinsuranceTower';
 import {
   DEVELOPMENT_ALLOCATION, DEVELOPMENT_CESSION_ENABLED, STOCHASTIC_ALLOCATION_MODE,
   allocateDevelopment, buildTrackedSet, cedeDevelopment, markDownForBooking, reselectDevelopingSet,
 } from './developmentAllocation';
 import { isClaimClosed } from './claimClosure';
+import { poolYearFactor, wcGenerationInputs, glGenerationInputs, propertyGenerationInputs } from './claimGeneration';
 import {
   aggregateRecovery,
   cedeOccurrences,
@@ -875,28 +876,19 @@ export function processLineYear(
     // would drive k_line to ~1 permanently and silently disable the correction.
     const kLine = computeKLine(memberResult.activeMembers);
 
-    const generated = generateWcClaims({
-      members: memberResult.activeMembers,
-      yearNumber,
-      calendarYear,
-      instanceSeed: instance.seed,
-      kLine,
-      // Current-horizon component arrival-rate multipliers, DRAW ONLY like risk
-      // control.
-      //
-      // ⚠ THEY DO NOT REACH PREMIUM, AND THAT IS THE POINT (ruled). The priced
-      // expectedLoss is activeExposure x the HELD purePremiumPer100, not this
-      // generator's analytic, so a legislative change raises realized losses
-      // while premium stands still. The player must re-rate or bleed — a law
-      // that makes claims more expensive does not politely raise your rates
-      // for you. Do not "fix" this.
-      componentFreqMultipliers: ctx.shock?.componentFreqMultipliers,
-      // Risk control acts on the DRAW ONLY (finding 17): it reduces realized
-      // frequency without touching the pricing expectation, so it genuinely
-      // moves the loss ratio instead of cancelling out.
-      riskControlEffectiveness: newRCEffectiveness,
-      injections: ctx.shock?.injections,
-    });
+    // ⚠ THE ARGUMENTS COME FROM claimGeneration.ts's SHARED MAPPING, the same
+    // one claimRegeneration uses to redraw this year later. Two inline literals
+    // would be two descriptions of one fact. The comments that stood on the
+    // literal's fields still hold and live on the mapper:
+    //   - component arrival-rate multipliers are DRAW ONLY and DO NOT REACH
+    //     PREMIUM (ruled): a law that makes claims dearer does not raise your
+    //     rates for you; the player must re-rate or bleed. Do not "fix" this.
+    //   - risk control acts on the DRAW ONLY (finding 17), so it moves the loss
+    //     ratio instead of cancelling out of it.
+    const generated = generateWcClaims(wcGenerationInputs({
+      members: memberResult.activeMembers, yearNumber, calendarYear, instanceSeed: instance.seed,
+      k: kLine, riskControlEffectiveness: newRCEffectiveness, gPool: ctx.gPool, shock: ctx.shock,
+    }));
     // PROSPECTS: the rest of the 200-member marketplace, generated at kLine = 1
     // and rc = 0. See the marketplaceProspects note above for why those two are
     // withheld and why this is a SECOND CALL rather than one call over 200.
@@ -965,20 +957,13 @@ export function processLineYear(
     // is held (step 6b) rather than chasing enrollment.
     // ⚠ ENROLLED BOOK, NOT THE FULL ROSTER — same trap as WC's k_line above.
     const kGl = computeKGl(memberResult.activeMembers, yearNumber);
-    const generated = generateGlClaims({
-      members: memberResult.activeMembers,
-      yearNumber,
-      calendarYear,
-      instanceSeed: instance.seed,
-      kGl,
-      gPool: ctx.gPool,
-      // Risk control acts on the DRAW ONLY (finding 17), as in WC.
-      riskControlEffectiveness: newRCEffectiveness,
-      // Shock frequency multipliers, also DRAW ONLY and for the same reason: a
-      // shock is a realized event, not a repricing.
-      freqMultipliers: ctx.shock?.freqMultipliers,
-      sevMultipliers: ctx.shock?.sevMultipliers,
-    });
+    // Shared mapping — see the WC call above and claimGeneration.ts. Risk
+    // control and the shock multipliers are DRAW ONLY (finding 17): a shock is
+    // a realized event, not a repricing.
+    const generated = generateGlClaims(glGenerationInputs({
+      members: memberResult.activeMembers, yearNumber, calendarYear, instanceSeed: instance.seed,
+      k: kGl, riskControlEffectiveness: newRCEffectiveness, gPool: ctx.gPool, shock: ctx.shock,
+    }));
     // PROSPECTS at kGl = 1, rc = 0 — see the marketplaceProspects note above.
     const prospectGenerated = marketplaceProspects.length > 0
       ? generateGlClaims({
@@ -1042,15 +1027,13 @@ export function processLineYear(
     // the ENROLLED book — not the full roster, which is the trap both other
     // lines carry a warning about.
     const kPr = computeKPr(memberResult.activeMembers);
-    const generated = generatePropertyClaims({
-      members: memberResult.activeMembers,
-      yearNumber,
-      calendarYear,
-      instanceSeed: instance.seed,
-      kPr,
-      // Risk control acts on the DRAW ONLY (finding 17), as in WC and GL.
-      riskControlEffectiveness: newRCEffectiveness,
-    });
+    // Shared mapping — see claimGeneration.ts. Property reads no shock channel
+    // and no gPool; the mapper drops both, exactly as this literal always did.
+    // Risk control acts on the DRAW ONLY (finding 17), as in WC and GL.
+    const generated = generatePropertyClaims(propertyGenerationInputs({
+      members: memberResult.activeMembers, yearNumber, calendarYear, instanceSeed: instance.seed,
+      k: kPr, riskControlEffectiveness: newRCEffectiveness, gPool: ctx.gPool, shock: ctx.shock,
+    }));
     generatedClaims = generated.claims;
     generatedOccurrences = generated.occurrences;
     memberLossResults = generated.memberLossResults;
@@ -1680,6 +1663,7 @@ export function processLineYear(
     dividends,
 
     kLineApplied,
+    rcEffectivenessApplied: newRCEffectiveness,
     memberLossResults,
     aggregateMemberLoss,
     marketMemberLossResults,
@@ -1999,8 +1983,7 @@ export function processYear(
   // It has to live here rather than inside processLineYear because a per-line
   // deriveSubRng cannot express a draw common to all lines. Its own purpose
   // label means it consumes nothing from any existing stream.
-  const gPool = deriveSubRng(instance.seed, yearNumber, 'wc_gpool')
-    .gamma(WC_LOSS_MODEL.poolYearFactor.shape, WC_LOSS_MODEL.poolYearFactor.scale);
+  const gPool = poolYearFactor(instance.seed, yearNumber);
 
   // Shock resolution — pool level, for the same reason gPool is drawn here: a
   // per-line deriveSubRng cannot express something common to all lines, and a

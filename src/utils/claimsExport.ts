@@ -54,6 +54,8 @@ import { resolveClosureCurve } from '../data/defaultAssumptions';
 // ⚠ IMPORTED, NOT RESTATED. The exhibit and this workbook must agree on which
 // accident years can carry claims; a second copy of -2 would be two facts.
 import { PRIOR_BOUNDARY } from './actuarialMemo';
+import { regenerateLineYearClaims, ClaimRegenerationError } from './claimRegeneration';
+import type { GameInstance } from '../types/simulation';
 
 type Row = (string | number)[];
 
@@ -357,9 +359,42 @@ interface LineClaimRow {
 // behind them at all. They can never appear on a claim sheet, and that is the
 // exhibit's collapsed Prior row.
 // ============================================================================
+// ============================================================================
+// THE REGISTER FOR A LINE-YEAR: what the result carries, or what it can redraw.
+//
+// ⚠ THIS IS WHERE RULING 8 STOPS BEING A STRIP AND BECOMES A DESIGN. A restored
+// game has no `claims` on any year played before the reload — gameSave dropped
+// them so the save fits — and until claimRegeneration existed this workbook
+// simply exported the years it could see, with the Development sheet full
+// beside them and a marker saying so. Now the missing years are REDRAWN from the
+// roster, k and rc the result kept, exactly (save-round-trip-check, field by
+// field), and the sheets are whole.
+//
+// The one case left is a result that CANNOT be redrawn — a save from before
+// `kLineApplied` was recorded. That throws a ClaimRegenerationError, which is
+// caught here and surfaced on the sheet by claimCoverage rather than swallowed:
+// a sheet short for a reason it names is honest, a sheet short in silence is the
+// defect one layer out.
+// ============================================================================
+type Register = { claims: Claim[]; occurrences: import('../types/simulation').Occurrence[] };
+
+function registerFor(instance: GameInstance, r: ResultSet, line: CoverageLine): Register | ClaimRegenerationError | undefined {
+  const lr = r.byLine[line];
+  if (!lr) return undefined;
+  if (lr.claims !== undefined) return { claims: lr.claims, occurrences: lr.occurrences ?? [] };
+  try {
+    const g = regenerateLineYearClaims(instance, r, line);
+    return { claims: g.claims, occurrences: g.occurrences };
+  } catch (e) {
+    if (e instanceof ClaimRegenerationError) return e;
+    throw e;
+  }
+}
+
 function collectLineClaims(
   lockedResults: ResultSet[],
   priorHistory: ResultSet[],
+  instance: GameInstance,
   line: CoverageLine,
 ): LineClaimRow[] {
   const out: LineClaimRow[] = [];
@@ -367,7 +402,9 @@ function collectLineClaims(
   // orders on accidentYear anyway, so this only fixes the collection order.
   for (const r of [...priorHistory, ...lockedResults]) {
     const lr = r.byLine[line];
-    if (!lr?.claims?.length) continue;
+    if (!lr) continue;
+    const reg = registerFor(instance, r, line);
+    if (!reg || reg instanceof ClaimRegenerationError || reg.claims.length === 0) continue;
     // memberLossResults is ENROLLED MEMBERS ONLY (see the type comment on
     // ResultSet) — exactly the check this column needs, computed fresh per
     // year since who is enrolled changes year to year.
@@ -381,7 +418,7 @@ function collectLineClaims(
     // or invented. Nothing here is a placeholder.
     const enrolledIds = new Set(lr.memberLossResults.map(m => m.memberId));
     const memberById = new Map(lr.memberList.map(m => [m.id, m]));
-    for (const claim of lr.claims) {
+    for (const claim of reg.claims) {
       out.push({ claim, member: memberById.get(claim.memberId), enrolled: enrolledIds.has(claim.memberId) });
     }
   }
@@ -413,30 +450,32 @@ function collectLineClaims(
 // workbook tells the truth about being short; it does not stop being short.
 // ============================================================================
 interface ClaimCoverage {
-  /** Accident years whose claim detail is in hand, ascending. */
+  /** Accident years whose claim detail is in hand — stored or regenerated. */
   present: number[];
-  /** Years that were played but whose detail is absent — the session gap. */
-  missing: number[];
+  /** Years whose detail is absent AND could not be regenerated, with the reason. */
+  missing: { yearNumber: number; reason: string }[];
   /** True when this line produced no claim detail in any year (aggregate path). */
   neverProduced: boolean;
 }
 
+// ⚠ "MISSING" NARROWED FROM "NOT IN THE SAVE" TO "CANNOT BE REDRAWN". Before
+// regeneration existed this branch fired on every restored game, and the sheet
+// carried a marker naming the years a reload had lost. Regeneration removes that
+// cause: a stripped year is redrawn and counts as present. What is left is a
+// result that cannot be redrawn at all — one written before `kLineApplied` was
+// recorded — and that is rare, permanent for that save, and named by reason.
 function claimCoverage(
   lockedResults: ResultSet[],
   priorHistory: ResultSet[],
+  instance: GameInstance,
   line: CoverageLine,
 ): ClaimCoverage {
   const present: number[] = [];
-  const missing: number[] = [];
+  const missing: { yearNumber: number; reason: string }[] = [];
   for (const r of [...priorHistory, ...lockedResults]) {
-    const lr = r.byLine[line];
-    if (!lr) continue;
-    // ⚠ `undefined` AND `[]` ARE DIFFERENT ANSWERS HERE, and the distinction is
-    // the whole check. A year that genuinely drew no claims carries an EMPTY
-    // ARRAY; a year whose detail was dropped on the way through localStorage
-    // carries nothing at all, because JSON.stringify omits an undefined value.
-    // Treating them alike would report a quiet year as a lost one.
-    if (lr.claims === undefined) missing.push(r.yearNumber);
+    const reg = registerFor(instance, r, line);
+    if (reg === undefined) continue;
+    if (reg instanceof ClaimRegenerationError) missing.push({ yearNumber: r.yearNumber, reason: reg.message });
     else present.push(r.yearNumber);
   }
   return { present, missing, neverProduced: present.length === 0 && missing.length === 0 };
@@ -452,21 +491,19 @@ function coverageNote(cov: ClaimCoverage): string {
     + 'permanent rather than a gap.';
   if (cov.missing.length === 0) {
     const from = Math.min(...cov.present), to = Math.max(...cov.present);
-    return `Claim detail covers accident years ${from} to ${to}, pre-game years included. ${seedNote}`;
+    return `Claim detail covers accident years ${from} to ${to}, pre-game years included. Years not kept in `
+      + 'the save are redrawn exactly from the roster and rates recorded for them, so a reloaded game shows '
+      + `the same rows as one played straight through. ${seedNote}`;
   }
-  const firstPresent = cov.present.length > 0 ? Math.min(...cov.present) : null;
-  const lostFrom = Math.min(...cov.missing), lostTo = Math.max(...cov.missing);
+  const years = cov.missing.map(m => m.yearNumber);
+  const reasons = [...new Set(cov.missing.map(m => m.reason))];
   return (
-    '⚠ CLAIM DETAIL IS INCOMPLETE AND THIS SHEET IS SHORT. '
-    + (firstPresent === null
-      ? 'No accident year on this sheet has its claim detail. '
-      : `Detail is present from accident year ${firstPresent} onward. `)
-    + `Accident years ${lostFrom} to ${lostTo} were played but their claim detail was NOT RETAINED: it `
-    + 'is stripped on the way to browser storage and there is no way to rebuild it, so a game that was '
-    + 'saved and reloaded can only show the years played since. That is an artefact of this session, '
-    + 'not a property of those years — the losses happened and are in every aggregate figure; only the '
-    + 'per-claim rows are gone. Export before reloading if you need them. '
-    + seedNote
+    '⚠ CLAIM DETAIL COULD NOT BE REBUILT FOR SOME YEARS AND THIS SHEET IS SHORT. '
+    + `Accident years ${Math.min(...years)} to ${Math.max(...years)} were played but their claim rows are `
+    + 'absent and could not be regenerated from what the save recorded. Reason: '
+    + reasons.join(' / ')
+    + '. This is a property of the save, not of those years — the losses happened and are in every '
+    + `aggregate figure; only the per-claim rows are unavailable. ${seedNote}`
   );
 }
 
@@ -480,8 +517,11 @@ function coverageNote(cov: ClaimCoverage): string {
 // reader that nothing had ever been paid on anything.
 //
 // ⚠ AND THEY STAY DERIVED, BECAUSE RULING 8 SAYS SO. `LineResultSet.claims` is
-// in-memory only and per-claim detail regenerates from seed x member x year on
-// demand, so a claim cannot ACCUMULATE paid or status across valuations. Both
+// in-memory only — stripped from the save and, when absent, REGENERATED by
+// claimRegeneration.ts from the roster, k, rc and year the result already
+// carries (this sentence used to claim that and nothing implemented it; it does
+// now, and save-round-trip-check proves the redraw exact). So a claim cannot
+// ACCUMULATE paid or status across valuations. Both
 // are pure functions of what the claim already carries plus its cohort's ledger:
 // paid is the claim's share of the cohort's cumulative gross paid, status is its
 // own closure draw against its own curve. Nothing here writes to a claim and
@@ -890,6 +930,10 @@ export function buildClaimsWorkbook(
   // required and putting it before the optional arguments turns a forgotten
   // pre-game into a type error instead of three silently missing accident years.
   priorHistory: ResultSet[],
+  // ⚠ REQUIRED FOR THE SAME REASON. The seed and the scheduled shocks are what
+  // let a year the save dropped be redrawn; without them a restored game is
+  // back to exporting half its rows. There is no legitimate "no instance".
+  instance: GameInstance,
   activeLines: CoverageLine[],
   poolState?: PoolState,
   // ⚠ THE GAME'S IDENTITY, AND IT IS REQUIRED FOR STATUS TO BE CORRECT. Every
@@ -927,10 +971,10 @@ export function buildClaimsWorkbook(
   for (const line of orderedLines) {
     const builder = sheetBuilders[line];
     if (!builder) continue;
-    const rows = collectLineClaims(lockedResults, priorHistory, line);
+    const rows = collectLineClaims(lockedResults, priorHistory, instance, line);
     const dev = devByLine.get(line) ?? new Map<string, OccDevelopment>();
     const view = buildPaidLedgerView(rows, lockedResults, priorHistory, poolState, line, instanceId);
-    const coverage = coverageNote(claimCoverage(lockedResults, priorHistory, line));
+    const coverage = coverageNote(claimCoverage(lockedResults, priorHistory, instance, line));
     const ws = XLSX.utils.aoa_to_sheet(builder.rows(rows, dev, years, view, coverage));
     applyFormats(ws, builder.formats(years), builder.noteRows + 1);
     XLSX.utils.book_append_sheet(wb, ws, line);
@@ -945,15 +989,15 @@ export function buildClaimsWorkbook(
     // rows for some reason internal to the register. The marker is taken across
     // every active line, since this sheet is not per-line.
     const devCoverage = orderedLines
-      .map(l => claimCoverage(lockedResults, priorHistory, l))
+      .map(l => claimCoverage(lockedResults, priorHistory, instance, l))
       .filter(c => c.missing.length > 0);
+    const devYears = devCoverage.flatMap(c => c.missing.map(m => m.yearNumber));
     const devNote = devCoverage.length === 0 ? '' : (
       '⚠ THIS SHEET IS COMPLETE AND THE LINE SHEETS ARE NOT. Development is read from the reserve '
       + 'cohorts, which survive a save/restore, so every developed occurrence is listed here — '
-      + `including occurrences from accident years ${Math.min(...devCoverage.flatMap(c => c.missing))} to `
-      + `${Math.max(...devCoverage.flatMap(c => c.missing))}, whose claim rows were not retained and are `
-      + 'absent from the line sheets. The two sheets disagree for that reason and no other; see the '
-      + 'note on any line sheet.'
+      + `including occurrences from accident years ${Math.min(...devYears)} to ${Math.max(...devYears)}, `
+      + 'whose claim rows could not be regenerated from the save and are absent from the line sheets. '
+      + 'The two sheets disagree for that reason and no other; see the note on any line sheet.'
     );
     const ws = XLSX.utils.aoa_to_sheet(buildDevelopmentRows(poolState, activeLines, years, devNote));
     applyFormats(ws, DEVELOPMENT_FORMATS(years), 2);

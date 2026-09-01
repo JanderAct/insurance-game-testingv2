@@ -24,11 +24,17 @@
 // divergence appears in years SAVE_AT+1..N and nowhere earlier. So arm B is
 // driven through the real processYear from the restored state.
 //
-// ⚠ AND IT IS THE GATE THAT WILL RULE ON THE PER-CLAIM REVISION WORK. Stage 1's
-// register strategy has an option — read the claim register out of
-// lockedResults — that is only safe if the register survives a reload. It does
-// not: this gate is where that shows up as a failure rather than as a quiet
-// difference between a game played straight through and one resumed after lunch.
+// ⚠ AND IT IS THE GATE FOR CLAIM REGENERATION, WHICH IS THE WHOLE OF THAT
+// COMMIT'S RISK. A restored game has no claims on the years before the reload;
+// claimRegeneration redraws them from the roster, k, rc and year the result
+// kept. A redraw that is not EXACT is worse than none, because every consumer
+// would read plausible claims that were never drawn — silently. So the third
+// section below regenerates EVERY line-year of the restored arm and compares it
+// to the straight-through arm's in-memory register CLAIM BY CLAIM ON EVERY
+// FIELD — ids, amounts, components, occurrence grouping — never on totals, which
+// this project has seen agree while the register underneath differed. It then
+// perturbs one input and requires the redraw to DIFFER, so the comparison is
+// known to have teeth rather than assumed to.
 //
 // WHAT IT CANNOT SEE, STATED SO IT IS NOT ASSUMED AWAY:
 //   - App.tsx's LOAD-SIDE MIGRATIONS. The effect that reads the save also
@@ -47,6 +53,7 @@ import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { serialiseSave, SAVE_STRIPPED_KEYS } from '../../src/utils/gameSave';
+import { regenerateLineYearClaims } from '../../src/utils/claimRegeneration';
 import type { CoverageLine, GameState } from '../../src/types/simulation';
 
 const LINES: CoverageLine[] = ['WC', 'GL', 'Property'];
@@ -181,6 +188,90 @@ for (let g = 0; g < GAMES; g++) {
 }
 
 // ============================================================================
+// REGENERATION — every line-year of the RESTORED arm, redrawn and compared to
+// the straight-through arm's original objects, field by field.
+// ============================================================================
+let regenClaims = 0, regenOccs = 0, regenYears = 0;
+const regenFail: string[] = [];
+const canon = (o: unknown) => JSON.stringify(o, (_k, v) => (typeof v === 'number' ? Number(v.toPrecision(15)) : v));
+const sortById = <T extends { id: string }>(xs: T[]) => [...xs].sort((x, y) => x.id.localeCompare(y.id));
+
+for (let g = 0; g < GAMES; g++) {
+  const id = `RT${g}`;
+  const seed = 3_300_000 + g * 6421;
+  let a = start(id, seed);
+  for (let y = 1; y <= YEARS; y++) a = advance(a, y);
+  let b = start(id, seed);
+  for (let y = 1; y <= SAVE_AT; y++) b = advance(b, y);
+  const restored = JSON.parse(serialiseSave({
+    gameState: b, startingFinancials: {}, initialMembers: [], currentDecisions: b.currentDecisions,
+  })).gameState as GameState;
+  let c = restored;
+  for (let y = SAVE_AT + 1; y <= YEARS; y++) c = advance(c, y);
+
+  // Pre-game and game years alike, indexed by yearNumber on both arms.
+  const originals = new Map([...a.priorHistory, ...a.lockedResults].map(r => [r.yearNumber, r]));
+  for (const r of [...c.priorHistory, ...c.lockedResults]) {
+    const orig = originals.get(r.yearNumber);
+    if (!orig) { regenFail.push(`g${g} y${r.yearNumber}: no straight-through result to compare against`); continue; }
+    for (const line of LINES) {
+      const lrA = orig.byLine[line];
+      if (!lrA?.claims) continue;
+      let regen;
+      try { regen = regenerateLineYearClaims(c.instance, r, line); }
+      catch (e) { regenFail.push(`g${g} y${r.yearNumber} ${line}: regeneration THREW — ${(e as Error).message}`); continue; }
+      regenYears++;
+      const ca = sortById(lrA.claims), cb = sortById(regen.claims);
+      if (ca.length !== cb.length) {
+        regenFail.push(`g${g} y${r.yearNumber} ${line}: ${cb.length} regenerated claims vs ${ca.length} drawn`);
+        continue;
+      }
+      for (let i = 0; i < ca.length; i++) {
+        regenClaims++;
+        if (canon(ca[i]) !== canon(cb[i])) {
+          regenFail.push(`g${g} y${r.yearNumber} ${line} claim ${ca[i].id}: regenerated object differs from the drawn one`);
+          break;
+        }
+      }
+      const oa = sortById(lrA.occurrences ?? []), ob = sortById(regen.occurrences);
+      if (canon(oa) !== canon(ob)) {
+        regenFail.push(`g${g} y${r.yearNumber} ${line}: occurrence grouping differs (${oa.length} vs ${ob.length})`);
+      } else regenOccs += oa.length;
+    }
+  }
+
+  // ⚠ THE POSITIVE CONTROL. Perturb ONE stored input at a time and require the
+  // redraw to differ from the original. If any of these still matches, the
+  // comparison above cannot detect a changed input and everything it "proved"
+  // is a JSON tautology. Three inputs, three separate perturbations.
+  if (g === 0) {
+    const r = c.lockedResults[0];
+    const orig = originals.get(r.yearNumber)!;
+    const control = (label: string, mutate: (lr: (typeof r.byLine)['GL']) => (typeof r.byLine)['GL']) => {
+      const pr = { ...r, byLine: { ...r.byLine, GL: mutate(r.byLine.GL) } } as typeof r;
+      const regen = regenerateLineYearClaims(c.instance, pr, 'GL');
+      const same = canon(sortById(regen.claims)) === canon(sortById(orig.byLine.GL.claims ?? []));
+      if (same) regenFail.push(`POSITIVE CONTROL FAILED: perturbing ${label} did not change the regenerated GL register — the comparison has no teeth`);
+      return !same;
+    };
+    const c1 = control('rcEffectivenessApplied (+0.01)', lr => ({ ...lr, rcEffectivenessApplied: (lr.rcEffectivenessApplied ?? 0) + 0.01 }));
+    const c2 = control('kLineApplied (x1.01)', lr => ({ ...lr, kLineApplied: (lr.kLineApplied ?? 1) * 1.01 }));
+    const c3 = control('roster (first member removed)', lr => ({ ...lr, memberList: lr.memberList.slice(1) }));
+    console.log(`  positive controls: rc ${c1 ? 'DIFFERS' : 'same!'}, k ${c2 ? 'DIFFERS' : 'same!'}, roster ${c3 ? 'DIFFERS' : 'same!'}`);
+    // And the loud path: a result with no k must THROW, not redraw at k = 1.
+    try {
+      regenerateLineYearClaims(c.instance, { ...r, byLine: { ...r.byLine, GL: { ...r.byLine.GL, kLineApplied: undefined } } } as typeof r, 'GL');
+      regenFail.push('a result without kLineApplied was regenerated instead of throwing');
+    } catch { /* expected */ }
+  }
+}
+for (const f of regenFail) fail(f);
+console.log('');
+console.log('REGENERATION, FIELD BY FIELD:');
+console.log(`  line-years redrawn ${regenYears}, claims compared ${regenClaims}, occurrences compared ${regenOccs}`);
+console.log(`  ${regenFail.length === 0 ? 'every regenerated claim and occurrence is identical to the one originally drawn' : `${regenFail.length} difference(s) — see FAILED`}`);
+
+// ============================================================================
 console.log('');
 console.log('THE STRIP, CONFIRMED RATHER THAN TRUSTED:');
 console.log(`  line-results carrying claims, straight through : ${strippedPresentA}  (expected > 0)`);
@@ -189,38 +280,18 @@ if (strippedPresentA === 0) fail('the straight-through arm has no claims either 
 if (strippedPresentB !== 0) fail(`${strippedPresentB} restored line-results still carry claims — the strip did not fire`);
 
 console.log('');
-console.log('WHAT A RESTORED GAME LOSES, AND WHETHER IT SAYS SO — MEASURED, NOT ASSUMED:');
-console.log('  claims / occurrences / marketMemberLossResults are absent for every accident');
-console.log('  year played BEFORE the reload. An 8-year game saved at year 4, workbook built');
-console.log('  and parsed back on both arms:');
-console.log('');
-console.log('                        straight through      reloaded');
-console.log('    WC sheet                 5,433 rows        1,963 rows');
-console.log('    GL sheet                 2,978 rows        1,101 rows');
-console.log('    Property sheet             432 rows          153 rows');
-console.log('    Development sheet          549 rows          549 rows   <- unaffected');
-console.log('    accident years          -2 .. 8            5 .. 8');
-console.log('');
-console.log('  ⚠ IT IS MARKED NOW, AND THAT IS A STATEMENT OF THE GAP RATHER THAN A FIX. Each');
-console.log('  line sheet names the first accident year whose detail is present and says the');
-console.log('  earlier ones were played but not retained — distinct from the seed cohorts older');
-console.log('  than the prior boundary, whose absence is permanent. Before the marker it');
-console.log('  degraded silently and worse than an empty sheet would: nothing threw, no sheet');
-console.log('  was blank, and a half-populated workbook read as complete.');
-console.log('  REGENERATION IS THE FIX and it does not exist. Rebuilding a prior year register');
-console.log('  from the seed would remove this cause entirely; until then the workbook tells');
-console.log('  the truth about being short without ceasing to be short.');
-console.log('');
-console.log('  The Development sheet survives because it reads developingClaims off the');
-console.log('  COHORTS, which persist, so it lists developed occurrences whose line-sheet rows');
-console.log('  are gone. It carries the marker too, for that reason: it is the sheet that looks');
-console.log('  complete beside ones that are not.');
-console.log('  ResultSpreadsheetPage is unaffected — memberLossResults is deliberately kept.');
-console.log('');
-console.log('  ⚠ NOT FIXED HERE, AND IT IS THE DEFECT ONE LAYER OUT. The fix is a marker on the');
-console.log('  workbook naming the first year whose detail was retained, so a reader can tell');
-console.log('  "no claims" from "not kept". That is a claims-export change, not a save change,');
-console.log('  and it is recorded rather than smuggled into this commit.');
+console.log('WHAT A RESTORED GAME LOSES NOW: NOTHING A READER CAN SEE.');
+console.log('  claims / occurrences / marketMemberLossResults are still absent from the save for');
+console.log('  every year played before the reload — the strip is unchanged. The save grew by one');
+console.log('  number per line-year (rcEffectivenessApplied, ~3.4 KB at year 10) and nothing else.');
+console.log('  The claims workbook redraws those years through claimRegeneration and comes');
+console.log('  back with the same accident years and row counts as a game played straight through');
+console.log('  (claims-workbook-check asserts this). The reload marker that 5c3d9cc added is now');
+console.log('  reserved for a result that CANNOT be redrawn — a save from before kLineApplied was');
+console.log('  recorded — and names the reason when it fires.');
+console.log('  marketMemberLossResults is the one thing not rebuilt: the prospect view is a');
+console.log('  second generator call over the 200-member roster whose claims the engine discards,');
+console.log('  and nothing exported reads it.');
 
 console.log('');
 console.log(RULE);

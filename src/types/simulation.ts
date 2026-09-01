@@ -815,6 +815,18 @@ export interface ResultSet {
   // far too little to notice in any downstream figure. Asserted in
   // scripts/diagnostics/marketplace-generation-check.ts.
   kLineApplied?: number;
+  // The risk-control effectiveness APPLIED TO THIS YEAR'S DRAW — the value
+  // processLineYear projected for the year and handed to the generator.
+  //
+  // ⚠ DISTINCT FROM LinePoolState.riskControlEffectiveness, which is the rolling
+  // CURRENT value and is overwritten every year. Regenerating a past year's
+  // claims needs the value that year saw, and until this field existed only the
+  // latest year's was anywhere. It is the one of claim regeneration's inputs
+  // that was genuinely missing: roster (memberList) and k (kLineApplied) were
+  // already here, gPool and the shock effects are derivable. Optional only for
+  // results written before it existed; claimRegeneration THROWS on those rather
+  // than guess.
+  rcEffectivenessApplied?: number;
   // ENROLLED MEMBERS ONLY. This is the pool-accounting list: aggregateMemberLoss,
   // grossUltimateLoss, reserves and reinsurance all derive from it.
   memberLossResults: MemberLossResult[];
@@ -857,17 +869,29 @@ export interface ResultSet {
   //   threw QuotaExceededError into a bare catch {} and the game silently
   //   stopped being recorded.
   //
-  //   AND THERE IS NO REGENERATION. No function regenerates a prior year's
-  //   register; the claim was repeated in four comments and implemented in none.
-  //   It is also not achievable as stated: the register depends on the enrolled
-  //   roster, riskControlEffectiveness, k_line, gPool and any shock multipliers
-  //   — the decision PATH, not (seed, member, year). Measured: the same seed
-  //   with one pool-wide risk-control change moves GL's AY3 register from 261
-  //   claims / $12.598M to 236 / $11.863M.
+  //   AND FOR A LONG TIME THERE WAS NO REGENERATION. The claim was repeated in
+  //   four comments and implemented in none, and it was not achievable as
+  //   stated: the register depends on the enrolled roster,
+  //   riskControlEffectiveness, k_line, gPool and any shock multipliers — the
+  //   decision PATH, not (seed, member, year). Measured: the same seed with one
+  //   pool-wide risk-control change moves GL's AY3 register from 261 claims /
+  //   $12.598M to 236 / $11.863M.
+  //
+  // ⚠ IT IS TRUE NOW, AND HERE IS WHAT MAKES IT TRUE. claimRegeneration.ts's
+  // regenerateLineYearClaims redraws a line-year from what this ResultSet
+  // carries — `memberList` (the roster the generator saw), `kLineApplied`,
+  // `rcEffectivenessApplied` (added for this; see its note), `calendarYear`,
+  // `yearNumber` — plus two values that are pure functions of persisted state:
+  // gPool from (seed, year) and the shock effects from (instance, year). One
+  // number per line-year was added and nothing else. The per-member
+  // RNG streams (enrolment-independence-check) make the redraw exact, and
+  // save-round-trip-check asserts it FIELD BY FIELD against a straight-through
+  // game, ids included. A ResultSet from before `kLineApplied` existed cannot be
+  // regenerated and the function THROWS rather than guessing k = 1.
   //
   // A comment describing behaviour nobody implemented read as a guarantee for
-  // the life of the project. save-size-check and save-round-trip-check now
-  // assert what this paragraph merely asserted in prose.
+  // the life of the project. It describes a real function now, and the function
+  // has a gate.
   claims?: Claim[];
   occurrences?: Occurrence[];
   claimCountsByClass?: Record<string, number>;  // WC

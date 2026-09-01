@@ -48,7 +48,10 @@
 // columns — READ THE ID. Nothing in this file changed; the thing it was
 // excusing acquired a consumer somewhere else, and the excuse kept standing
 // because nobody re-reads a comment that describes an absence. (The
-// regeneration clause was never true, separately: no such code path existed.)
+// regeneration clause was ALSO false for most of the project — no such code
+// path existed. It is true now: claimRegeneration.ts redraws a line-year from
+// persisted inputs, and it depends on exactly the per-member keying this file
+// guards, which is why the two gates cite each other.)
 //
 // ONLY GL WAS AFFECTED, and it is fixed rather than excused. Its occurrence id
 // embedded a counter incremented across the WHOLE member loop — "the fifteenth
