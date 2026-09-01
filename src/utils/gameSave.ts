@@ -76,6 +76,16 @@ export const SAVE_KEY = 'riskpool_gamestate_v10';
  * item at 1.08 MiB. ResultSpreadsheetPage reads it for whichever result year the
  * player selects, so dropping it would blank a visible page on reloaded games —
  * silent degradation, which is the same defect one layer out. It stays.
+ *
+ * ⚠ THE REPLACER MATCHES ON KEY NAME AT ANY DEPTH, SO THIS COVERS priorHistory
+ * TOO, and that is worth stating because it is invisible from the key list.
+ * `priorHistory` is a `ResultSet[]` like `lockedResults`, so the pre-game
+ * accident years -2..0 carry their own claim registers — measured at 1.29 MiB of
+ * a 1.86 MiB priorHistory, roughly 1,300 claims across three years and three
+ * lines. They are stripped on the same terms as the game years. Had they not
+ * been, the save would have been keeping the pre-game detail while discarding
+ * the game's own, which is backwards, and it would have been inside the figure
+ * save-size-check asserts against.
  */
 export const SAVE_STRIPPED_KEYS: readonly string[] = ['claims', 'occurrences', 'marketMemberLossResults'];
 

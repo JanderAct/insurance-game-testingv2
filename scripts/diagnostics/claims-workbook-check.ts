@@ -25,6 +25,12 @@
 //                  Development sheet with the same figures.
 //   GEOMETRY       column count and the per-claim series length, so the "does it
 //                  need capping at year 20" question is answered with a number.
+//   PRE-GAME       accident years -2, -1 and 0 have claim rows on every line
+//                  sheet, and the line sheets and Development sheet agree on
+//                  which accident years exist.
+//   RELOAD MARKER  a game whose earlier detail was not retained says so, names
+//                  the first year present, and does not warn when the detail is
+//                  simply absent because there were no pre-game years.
 //   OPEN AND PAID  no row marked `open` has paid its whole Gross Incurred, and
 //                  the headroom quantiles on open rows are printed beside it.
 //                  This is the ONLY gate on the Gross Paid column — see the note
@@ -86,8 +92,13 @@ function runGame(arm: Arm, g: number): GameState {
 }
 
 // Build, serialise, parse back — the round trip, not the in-memory arrays.
-function roundTrip(gs: GameState): Record<string, unknown[][]> {
-  const wb = buildClaimsWorkbook(gs.lockedResults, LINES, gs.poolState);
+//
+// ⚠ `prior` IS A PARAMETER SO A CASE CAN WITHHOLD IT. The pre-game years are a
+// second source for the line sheets, and the assertions below have to hold both
+// when they are supplied (the live call) and when a game genuinely has none.
+// Passing gs.priorHistory unconditionally would leave the second case untested.
+function roundTrip(gs: GameState, prior = gs.priorHistory): Record<string, unknown[][]> {
+  const wb = buildClaimsWorkbook(gs.lockedResults, prior, LINES, gs.poolState);
   const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
   const back = XLSX.read(buf, { type: 'buffer' });
   const out: Record<string, unknown[][]> = {};
@@ -316,6 +327,102 @@ for (const arm of ARMS) {
   }
 }
 
+// ============================================================================
+// PRE-GAME COVERAGE AND THE RELOAD MARKER.
+//
+// ⚠ THE LINE SHEETS AND THE DEVELOPMENT SHEET MUST AGREE ON WHICH YEARS EXIST.
+// They did not: the line sheets read lockedResults, which starts at year 1,
+// while Development reads pool state, which carries the pre-game cohorts. So
+// accident years -2, -1 and 0 had development listed on one sheet and no claim
+// rows on any other, and nothing in the workbook said why. The line sheets take
+// priorHistory as a second source now, and this asserts the agreement rather
+// than leaving it to a reader to notice.
+//
+// ⚠ AND THE MARKER MUST NOT CRY WOLF. A game with no pre-game years is a
+// legitimate shape, not a lost one, so the third case below withholds
+// priorHistory and requires the ⚠ to stay OFF. Without that case a marker that
+// fired unconditionally would pass every other assertion here.
+// ============================================================================
+{
+  const gs = runGame(ARMS[0], 0);
+  const WARN = '⚠ CLAIM DETAIL IS INCOMPLETE';
+  const noteOf = (sheets: Record<string, unknown[][]>, line: string) =>
+    String(sheets[line][line === 'Property' ? 1 : 0][0] ?? '');
+  const yearsOf = (sheets: Record<string, unknown[][]>, line: string) => {
+    const hdrIdx = line === 'Property' ? 2 : 1;
+    const col = line === 'Development' ? 1 : 5;   // Accident Year
+    const out = new Set<number>();
+    for (const r of sheets[line].slice(hdrIdx + 1)) {
+      const v = r?.[col];
+      if (typeof v === 'number') out.add(v);
+    }
+    return out;
+  };
+
+  // --- CASE 1: the live call. Pre-game years present, no warning. -----------
+  const full = roundTrip(gs);
+  const devYears = yearsOf(full, 'Development');
+  for (const line of LINES) {
+    const ys = yearsOf(full, line);
+    for (const pre of [-2, -1, 0]) {
+      if (!ys.has(pre)) fail(`pre-game: ${line} has no accident year ${pre} — priorHistory is not reaching the line sheets`);
+    }
+    for (const y of devYears) {
+      if (!ys.has(y)) fail(`pre-game: Development lists accident year ${y} on ${line} but the line sheet has no rows for it`);
+    }
+    if (noteOf(full, line).includes(WARN)) {
+      fail(`pre-game: ${line} carries the incomplete-detail warning on a straight-through game`);
+    }
+  }
+  console.log(`  pre-game years on the line sheets   -2/-1/0 present on all ${LINES.length} lines`);
+  console.log(`  accident years, Development sheet   [${[...devYears].sort((a, b) => a - b).join(', ')}]`);
+
+  // --- CASE 2: a reload. Detail dropped for years 1..4, marker must fire and
+  // must name 5 as the first year present. This is the failure the gate exists
+  // to catch, so it is exercised rather than assumed reachable.
+  const LOST_THROUGH = 4;
+  const reloaded: GameState = {
+    ...gs,
+    priorHistory: gs.priorHistory.map(r => ({
+      ...r, byLine: Object.fromEntries(Object.entries(r.byLine).map(([l, lr]) =>
+        [l, { ...lr, claims: undefined, occurrences: undefined }])) as never,
+    })),
+    lockedResults: gs.lockedResults.map(r => (r.yearNumber > LOST_THROUGH ? r : {
+      ...r, byLine: Object.fromEntries(Object.entries(r.byLine).map(([l, lr]) =>
+        [l, { ...lr, claims: undefined, occurrences: undefined }])) as never,
+    })),
+  };
+  const short = roundTrip(reloaded, reloaded.priorHistory);
+  for (const line of LINES) {
+    const note = noteOf(short, line);
+    const ys = yearsOf(short, line);
+    if (!note.includes(WARN)) fail(`reload marker: ${line} lost years 1-${LOST_THROUGH} and says nothing`);
+    if (!note.includes(`present from accident year ${LOST_THROUGH + 1} onward`)) {
+      fail(`reload marker: ${line} does not name ${LOST_THROUGH + 1} as the first year present`);
+    }
+    if (ys.has(LOST_THROUGH)) fail(`reload marker: ${line} still has rows for accident year ${LOST_THROUGH}`);
+    if (!ys.has(LOST_THROUGH + 1)) fail(`reload marker: ${line} lost accident year ${LOST_THROUGH + 1}, which was retained`);
+  }
+  const devNote = String(short.Development[0][0] ?? '');
+  if (!devNote.includes('THIS SHEET IS COMPLETE AND THE LINE SHEETS ARE NOT')) {
+    fail('reload marker: the Development sheet does not say it is complete while the line sheets are short');
+  }
+  if (yearsOf(short, 'Development').size !== devYears.size) {
+    fail('reload marker: the Development sheet lost rows across the simulated reload');
+  }
+  console.log(`  reload marker fires, names year ${LOST_THROUGH + 1}, Development still complete`);
+
+  // --- CASE 3: no pre-game years at all. Legitimate, must NOT warn. ---------
+  const noPrior = roundTrip(gs, []);
+  for (const line of LINES) {
+    if (noteOf(noPrior, line).includes(WARN)) {
+      fail(`no-pre-game: ${line} warns about incomplete detail on a game that simply has no pre-game years`);
+    }
+    if (yearsOf(noPrior, line).has(-1)) fail(`no-pre-game: ${line} has pre-game rows with priorHistory withheld`);
+  }
+  console.log('  no-pre-game game                    no warning, no pre-game rows');
+}
+
 // ---------------------------------------------------------------- report
 const hq = (a: number[], p: number): string => {
   if (a.length === 0) return '  -  ';
@@ -345,14 +452,26 @@ for (const arm of ARMS) {
 }
 
 // The markdown check is the one that cannot run at defaults.
+//
+// ⚠ `Drawn === Booked` UNDER SQUEEZE IS NOT ZERO AND MUST NOT BE. It was, until
+// the pre-game years joined the line sheets. Pre-game cohorts carry
+// `bookingBias: 0` by construction — the player made no funding decision for
+// accident years -2, -1 and 0, so there is nothing for a squeeze to bias — and
+// their rows correctly show no markdown on both arms. So the squeezed arm now
+// reports a mix, and the assertion is on the PRESENCE of marked-down rows rather
+// than on their being all of them. A reader seeing a few hundred unmarked rows
+// under squeeze is looking at the pre-game, not at a regression.
 const def = stats['defaults'];
 const sqz = stats['squeezed'];
 if (def.drawnGtBooked !== 0) fail(`DEFAULTS produced ${def.drawnGtBooked} marked-down rows; bookingBias should be 0 there`);
 if (sqz.drawnGtBooked === 0) fail('SQUEEZED produced NO marked-down rows; the arm is not exercising the booking bias');
+if (sqz.drawnEqBooked === 0) fail('SQUEEZED produced no unmarked rows at all; the pre-game years should supply some');
 
 console.log(fails.length === 0
   ? `OK — ${fails.length} failures. Occurrences gone; the row identity holds on every developed row read`
-    + '\n     back out of the parsed file; all three cell states occur; Drawn === Booked at defaults and'
+    + '\n     back out of the parsed file; all three cell states occur; pre-game years -2..0 are on'
+    + '\n     the line sheets and agree with Development; the reload marker fires only when detail is'
+    + '\n     actually missing; Drawn === Booked at defaults and'
     + '\n     Drawn > Booked under squeeze; line sheets and Development agree occurrence by occurrence.'
   : `${fails.length} FAILURE(S):\n` + fails.slice(0, 40).map(f => '  ' + f).join('\n'));
 process.exit(fails.length === 0 ? 0 : 1);

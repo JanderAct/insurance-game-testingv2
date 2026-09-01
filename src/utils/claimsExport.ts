@@ -51,6 +51,9 @@ import type { Claim, CoverageLine, Member, PoolState, ResultSet } from '../types
 import { FIXED_LINE_ORDER, LINE_ABBREV } from './resultsExport';
 import { claimPaidSplit, isClaimClosed } from './claimClosure';
 import { resolveClosureCurve } from '../data/defaultAssumptions';
+// ⚠ IMPORTED, NOT RESTATED. The exhibit and this workbook must agree on which
+// accident years can carry claims; a second copy of -2 would be two facts.
+import { PRIOR_BOUNDARY } from './actuarialMemo';
 
 type Row = (string | number)[];
 
@@ -335,14 +338,47 @@ interface LineClaimRow {
   enrolled: boolean;
 }
 
-function collectLineClaims(lockedResults: ResultSet[], line: CoverageLine): LineClaimRow[] {
+// ============================================================================
+// ⚠ THE PRE-GAME YEARS BELONG HERE AND WERE NEVER IN IT. Accident years -2, -1
+// and 0 are run through the real processLineYear during the bootstrap, have real
+// claim registers, and develop like any other cohort — the Development sheet has
+// always listed their occurrences. The line sheets read `lockedResults`, which
+// starts at year 1, so the two sheets disagreed about which years exist and
+// nothing said so. `priorHistory` is the register for those three years and it
+// is now a second source rather than a missing one.
+//
+// ⚠ AND THE BOUNDARY IS THE EXHIBIT'S, NOT A NEW ONE. actuarialMemo's
+// PRIOR_BOUNDARY is -2, and its header says why: it "is exactly the line between
+// cohorts that have a claim register and cohorts that do not". So the years this
+// can show and the years the exhibit shows individually are the same set, by
+// construction rather than by inspection — which is why the constant is imported
+// rather than restated. Cohorts older than it (measured: -4 through -8) are SEED
+// cohorts, apportioned from a drawn reserve total at generation with no claims
+// behind them at all. They can never appear on a claim sheet, and that is the
+// exhibit's collapsed Prior row.
+// ============================================================================
+function collectLineClaims(
+  lockedResults: ResultSet[],
+  priorHistory: ResultSet[],
+  line: CoverageLine,
+): LineClaimRow[] {
   const out: LineClaimRow[] = [];
-  for (const r of lockedResults) {
+  // Pre-game first: accident years -2..0 sort ahead of 1..N, and sortClaimRows
+  // orders on accidentYear anyway, so this only fixes the collection order.
+  for (const r of [...priorHistory, ...lockedResults]) {
     const lr = r.byLine[line];
     if (!lr?.claims?.length) continue;
     // memberLossResults is ENROLLED MEMBERS ONLY (see the type comment on
     // ResultSet) — exactly the check this column needs, computed fresh per
     // year since who is enrolled changes year to year.
+    //
+    // ⚠ PRE-GAME ROWS FILL EVERY COLUMN THE GAME YEARS DO, INCLUDING THE TWO
+    // THAT LOOKED DOUBTFUL. `Enrolled` is real: the bootstrap runs a live
+    // membership book, so those years have their own enrolled set (measured:
+    // 54, 56, 58 members on GL) and the flag is computed the same way. `Calendar
+    // Year` is real too — the pre-game years carry 2023/2024/2025 against a 2026
+    // start, so the column is continuous across the boundary rather than blank
+    // or invented. Nothing here is a placeholder.
     const enrolledIds = new Set(lr.memberLossResults.map(m => m.memberId));
     const memberById = new Map(lr.memberList.map(m => [m.id, m]));
     for (const claim of lr.claims) {
@@ -350,6 +386,88 @@ function collectLineClaims(lockedResults: ResultSet[], line: CoverageLine): Line
     }
   }
   return out;
+}
+
+// ============================================================================
+// WHICH ACCIDENT YEARS HAVE CLAIM DETAIL, AND WHY THE OTHERS DO NOT.
+//
+// Two different absences, and a reader must be able to tell them apart:
+//
+//   PERMANENT   a seed cohort older than PRIOR_BOUNDARY has no register and
+//               never will. Nothing to act on.
+//   SESSION     a year that WAS played but whose detail did not survive a
+//               save/restore. gameSave strips `claims` and `occurrences` on the
+//               way to localStorage, and there is no regeneration path, so a
+//               reloaded game shows only the years played since the reload.
+//               A player may well want to act on that — it is the difference
+//               between "this workbook is complete" and "this workbook is the
+//               back half of a game".
+//
+// ⚠ THE MARKER IS A STATEMENT OF THE GAP, NOT ITS FIX. Regeneration — rebuilding
+// a prior year's register from the seed on demand — removes the SESSION cause
+// entirely and makes this branch dead code. It does not exist yet: the phrase
+// "regenerated from seed x member x year on demand" was in four comments and no
+// code path, and it is not achievable as written because the register depends on
+// the decision path (enrolled roster, riskControlEffectiveness, k_line, gPool,
+// shock multipliers) rather than on the seed alone. Until that lands this
+// workbook tells the truth about being short; it does not stop being short.
+// ============================================================================
+interface ClaimCoverage {
+  /** Accident years whose claim detail is in hand, ascending. */
+  present: number[];
+  /** Years that were played but whose detail is absent — the session gap. */
+  missing: number[];
+  /** True when this line produced no claim detail in any year (aggregate path). */
+  neverProduced: boolean;
+}
+
+function claimCoverage(
+  lockedResults: ResultSet[],
+  priorHistory: ResultSet[],
+  line: CoverageLine,
+): ClaimCoverage {
+  const present: number[] = [];
+  const missing: number[] = [];
+  for (const r of [...priorHistory, ...lockedResults]) {
+    const lr = r.byLine[line];
+    if (!lr) continue;
+    // ⚠ `undefined` AND `[]` ARE DIFFERENT ANSWERS HERE, and the distinction is
+    // the whole check. A year that genuinely drew no claims carries an EMPTY
+    // ARRAY; a year whose detail was dropped on the way through localStorage
+    // carries nothing at all, because JSON.stringify omits an undefined value.
+    // Treating them alike would report a quiet year as a lost one.
+    if (lr.claims === undefined) missing.push(r.yearNumber);
+    else present.push(r.yearNumber);
+  }
+  return { present, missing, neverProduced: present.length === 0 && missing.length === 0 };
+}
+
+/** The sheet note describing that coverage. Empty when there is nothing to say. */
+function coverageNote(cov: ClaimCoverage): string {
+  if (cov.neverProduced) return '';
+  const seedNote =
+    `Cohorts older than accident year ${PRIOR_BOUNDARY} are SEED cohorts — apportioned from a drawn `
+    + 'reserve total at generation, with no claim register behind them — so they can never appear on '
+    + 'this sheet. They are the Actuarial exhibit\'s collapsed Prior row, and their absence is '
+    + 'permanent rather than a gap.';
+  if (cov.missing.length === 0) {
+    const from = Math.min(...cov.present), to = Math.max(...cov.present);
+    return `Claim detail covers accident years ${from} to ${to}, pre-game years included. ${seedNote}`;
+  }
+  const firstPresent = cov.present.length > 0 ? Math.min(...cov.present) : null;
+  const lostFrom = Math.min(...cov.missing), lostTo = Math.max(...cov.missing);
+  return (
+    '⚠ CLAIM DETAIL IS INCOMPLETE AND THIS SHEET IS SHORT. '
+    + (firstPresent === null
+      ? 'No accident year on this sheet has its claim detail. '
+      : `Detail is present from accident year ${firstPresent} onward. `)
+    + `Accident years ${lostFrom} to ${lostTo} were played but their claim detail was NOT RETAINED: it `
+    + 'is stripped on the way to browser storage and there is no way to rebuild it, so a game that was '
+    + 'saved and reloaded can only show the years played since. That is an artefact of this session, '
+    + 'not a property of those years — the losses happened and are in every aggregate figure; only the '
+    + 'per-claim rows are gone. Export before reloading if you need them. '
+    + seedNote
+  );
 }
 
 // ============================================================================
@@ -403,6 +521,7 @@ interface PaidLedgerView {
 function buildPaidLedgerView(
   rows: LineClaimRow[],
   lockedResults: ResultSet[],
+  priorHistory: ResultSet[],
   poolState: PoolState | undefined,
   line: CoverageLine,
   gameId: string,
@@ -426,9 +545,15 @@ function buildPaidLedgerView(
     if (c.grossPaid !== undefined) grossPaidByAy.set(c.yearNumber, c.grossPaid);
   }
 
+  // ⚠ THE VALUATION IS THE LATEST LOCKED YEAR, AND A PRE-GAME-ONLY WORKBOOK
+  // STRIKES AT ITS LAST PRE-GAME YEAR RATHER THAN AT 0. Before year 1 is played
+  // there are no locked results, and defaulting to 0 would resolve every
+  // pre-game claim's closure at a curve age of `0 - accidentYear + 1` — ages 3,
+  // 2 and 1 for years -2, -1 and 0, which is right by luck for the last one and
+  // wrong for the others. priorHistory's own last year is the actual valuation.
   const valuationYear = lockedResults.length > 0
     ? lockedResults[lockedResults.length - 1].yearNumber
-    : 0;
+    : (priorHistory.length > 0 ? priorHistory[priorHistory.length - 1].yearNumber : 0);
 
   // Group the register by accident year and split each one whole. The closure
   // draw resolved here is the SAME call paidAndStatus used to make per row, at
@@ -542,7 +667,7 @@ const WC_FORMATS = (years: number[]): (NumFmt | undefined)[] => [
   ...devFormats(years),
 ];
 
-function buildWcSheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelopment>, years: number[], view: PaidLedgerView): Row[] {
+function buildWcSheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelopment>, years: number[], view: PaidLedgerView, coverage: string): Row[] {
   const header = [
     ...SHARED_HEADER, 'Rating Group', 'Component', 'Status', 'Gross Incurred',
     'Gross Paid', 'Reported Year', 'Enrolled', ...devHeader(years),
@@ -557,7 +682,7 @@ function buildWcSheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelopment>
       ...devCells(dev.get(row.claim.occurrenceId), years),
     ];
   });
-  return [[`WC claims. ${WC_COMPONENT_NOTE} ${DEV_NOTE} ${ENROLLED_NOTE} ${PAID_NOTE}`], header, ...body];
+  return [[`WC claims. ${WC_COMPONENT_NOTE} ${DEV_NOTE} ${ENROLLED_NOTE} ${PAID_NOTE} ${coverage}`], header, ...body];
 }
 
 // ⚠ THE SUB-COVERAGE / LEGAL BASIS / LITIGATION STAGE / INDEMNITY / ALAE /
@@ -590,7 +715,7 @@ const GL_FORMATS = (years: number[]): (NumFmt | undefined)[] => [
   ...devFormats(years),
 ];
 
-function buildGlSheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelopment>, years: number[], view: PaidLedgerView): Row[] {
+function buildGlSheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelopment>, years: number[], view: PaidLedgerView, coverage: string): Row[] {
   const header = [
     ...SHARED_HEADER, 'Component', 'Status', 'Gross Incurred',
     'Gross Paid', 'Reported Year', 'Enrolled', ...devHeader(years),
@@ -605,7 +730,7 @@ function buildGlSheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelopment>
       ...devCells(dev.get(row.claim.occurrenceId), years),
     ];
   });
-  return [[`GL claims. ${GL_COMPONENT_NOTE} ${DEV_NOTE} ${ENROLLED_NOTE} ${PAID_NOTE}`], header, ...body];
+  return [[`GL claims. ${GL_COMPONENT_NOTE} ${DEV_NOTE} ${ENROLLED_NOTE} ${PAID_NOTE} ${coverage}`], header, ...body];
 }
 
 const PROPERTY_FORMATS = (years: number[]): (NumFmt | undefined)[] => [
@@ -619,7 +744,7 @@ const PROPERTY_FORMATS = (years: number[]): (NumFmt | undefined)[] => [
   ...devFormats(years),
 ];
 
-function buildPropertySheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelopment>, years: number[], view: PaidLedgerView): Row[] {
+function buildPropertySheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelopment>, years: number[], view: PaidLedgerView, coverage: string): Row[] {
   const header = [
     ...SHARED_HEADER, 'Band',
     // Damage Ratio and Location TIV are GONE with Property's rebuild. They were
@@ -640,7 +765,7 @@ function buildPropertySheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelo
       ...devCells(dev.get(claim.occurrenceId), years),
     ];
   });
-  return [[PROPERTY_NOTE], [`${DEV_NOTE} ${ENROLLED_NOTE} ${PAID_NOTE}`], header, ...body];
+  return [[PROPERTY_NOTE], [`${DEV_NOTE} ${ENROLLED_NOTE} ${PAID_NOTE} ${coverage}`], header, ...body];
 }
 
 // ============================================================================
@@ -683,7 +808,7 @@ const DEVELOPMENT_FORMATS = (years: number[]): (NumFmt | undefined)[] => [
   PLAIN,     // Development %
 ];
 
-function buildDevelopmentRows(poolState: PoolState, activeLines: CoverageLine[], years: number[]): Row[] {
+function buildDevelopmentRows(poolState: PoolState, activeLines: CoverageLine[], years: number[], coverage: string): Row[] {
   const header = [
     'Line', 'Accident Year', 'Occurrence ID', ...devHeader(years), 'Development %',
   ];
@@ -713,12 +838,15 @@ function buildDevelopmentRows(poolState: PoolState, activeLines: CoverageLine[],
     'was retired (see the block comment above buildDevelopmentRows) — though it is pooled over ' +
     'DEVELOPED occurrences only, which is a smaller set than Occurrences carried and is not a ' +
     'replacement for it. ' +
-    '⚠ IT ALSO CARRIES ROWS NO LINE SHEET CAN. The line sheets are built from locked results, which ' +
-    'start at year 1; this one reads pool state, so the PRE-GAME accident years (-2 to 0) and their ' +
-    'development appear here and nowhere else in this workbook. That alone stops it being a filtered ' +
-    'duplicate of the line sheets. ' +
+    '⚠ THE PRE-GAME YEARS ARE ON THE LINE SHEETS NOW, and the sentence that stood here saying they ' +
+    'appear "here and nowhere else in this workbook" was true when written and is not any more. The ' +
+    'line sheets read priorHistory as well as lockedResults, so accident years -2 to 0 have claim ' +
+    'rows like any other year. What this sheet still carries alone is development on SEED cohorts ' +
+    'older than -2 — apportioned from a reserve total with no claim register, so there is no row for ' +
+    'them to have. ' +
     'The Claim ID column was DROPPED: it held the occurrence\'s FIRST claim beside an occurrence-level ' +
-    'amount, which is a misattribution waiting for the first multi-claim event.';
+    'amount, which is a misattribution waiting for the first multi-claim event.' +
+    (coverage ? ' ' + coverage : '');
   return [[note], header, ...body];
 }
 
@@ -755,6 +883,13 @@ function applyFormats(ws: XLSX.WorkSheet, formats: (NumFmt | undefined)[], first
 
 export function buildClaimsWorkbook(
   lockedResults: ResultSet[],
+  // ⚠ REQUIRED, AND SECOND, SO NO CALLER CAN OMIT IT BY ACCIDENT. Accident years
+  // -2..0 have real registers and belong on the line sheets; passing `[]` means
+  // "this game has no pre-game years", which is a legitimate value and therefore
+  // exactly the defaulted-parameter defect WORKING_PRACTICES records. Making it
+  // required and putting it before the optional arguments turns a forgotten
+  // pre-game into a type error instead of three silently missing accident years.
+  priorHistory: ResultSet[],
   activeLines: CoverageLine[],
   poolState?: PoolState,
   // ⚠ THE GAME'S IDENTITY, AND IT IS REQUIRED FOR STATUS TO BE CORRECT. Every
@@ -773,7 +908,7 @@ export function buildClaimsWorkbook(
   // `noteRows` is how many leading note rows precede the header — Property
   // carries two, the others one — which is also where the data starts.
   const sheetBuilders: Partial<Record<CoverageLine, {
-    rows: (rows: LineClaimRow[], dev: Map<string, OccDevelopment>, years: number[], view: PaidLedgerView) => Row[];
+    rows: (rows: LineClaimRow[], dev: Map<string, OccDevelopment>, years: number[], view: PaidLedgerView, coverage: string) => Row[];
     formats: (years: number[]) => (NumFmt | undefined)[];
     noteRows: number;
   }>> = {
@@ -792,16 +927,35 @@ export function buildClaimsWorkbook(
   for (const line of orderedLines) {
     const builder = sheetBuilders[line];
     if (!builder) continue;
-    const rows = collectLineClaims(lockedResults, line);
+    const rows = collectLineClaims(lockedResults, priorHistory, line);
     const dev = devByLine.get(line) ?? new Map<string, OccDevelopment>();
-    const view = buildPaidLedgerView(rows, lockedResults, poolState, line, instanceId);
-    const ws = XLSX.utils.aoa_to_sheet(builder.rows(rows, dev, years, view));
+    const view = buildPaidLedgerView(rows, lockedResults, priorHistory, poolState, line, instanceId);
+    const coverage = coverageNote(claimCoverage(lockedResults, priorHistory, line));
+    const ws = XLSX.utils.aoa_to_sheet(builder.rows(rows, dev, years, view, coverage));
     applyFormats(ws, builder.formats(years), builder.noteRows + 1);
     XLSX.utils.book_append_sheet(wb, ws, line);
   }
 
   if (poolState) {
-    const ws = XLSX.utils.aoa_to_sheet(buildDevelopmentRows(poolState, activeLines, years));
+    // ⚠ THE DEVELOPMENT SHEET CARRIES THE MARKER TOO, and it is the sheet that
+    // most needs it. It reads the COHORTS, which persist, so it is complete on a
+    // reloaded game while the line sheets beside it are short — it lists
+    // occurrences whose claim rows no longer exist anywhere in the workbook. A
+    // reader cross-referencing the two would conclude the line sheets had lost
+    // rows for some reason internal to the register. The marker is taken across
+    // every active line, since this sheet is not per-line.
+    const devCoverage = orderedLines
+      .map(l => claimCoverage(lockedResults, priorHistory, l))
+      .filter(c => c.missing.length > 0);
+    const devNote = devCoverage.length === 0 ? '' : (
+      '⚠ THIS SHEET IS COMPLETE AND THE LINE SHEETS ARE NOT. Development is read from the reserve '
+      + 'cohorts, which survive a save/restore, so every developed occurrence is listed here — '
+      + `including occurrences from accident years ${Math.min(...devCoverage.flatMap(c => c.missing))} to `
+      + `${Math.max(...devCoverage.flatMap(c => c.missing))}, whose claim rows were not retained and are `
+      + 'absent from the line sheets. The two sheets disagree for that reason and no other; see the '
+      + 'note on any line sheet.'
+    );
+    const ws = XLSX.utils.aoa_to_sheet(buildDevelopmentRows(poolState, activeLines, years, devNote));
     applyFormats(ws, DEVELOPMENT_FORMATS(years), 2);
     XLSX.utils.book_append_sheet(wb, ws, 'Development');
   }

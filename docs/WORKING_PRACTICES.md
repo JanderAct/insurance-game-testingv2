@@ -17,6 +17,25 @@ Things that were discovered expensively and live only in conversation memory. Re
     (`reinsurance-tower-check`, `wc-behaviour-check`, `property-fit-check`, `loss-ratio-check` and more).
     They are in `PROBES` with a one-line reason each. Do not read a name as a verdict.
   - **A probe still has to run.** `allocation-grid` asserts nothing and was still red, because it threw.
+- **Two views of one fact, built from different sources, will disagree — and neither looks wrong.** The
+  claims workbook's line sheets read `lockedResults`, which starts at year 1. Its Development sheet reads
+  `poolState`, whose cohorts include the pre-game years. So accident years -2, -1 and 0 had development
+  listed on one sheet and no claim rows on any other, in the same file, for as long as both sheets have
+  existed. Each was correct against its own source, which is exactly why neither read as a defect.
+  - **The fix is one source or an assertion, not care.** The line sheets take `priorHistory` as a second
+    source now, and `claims-workbook-check` asserts the two sheets' accident-year sets agree. Where a
+    single source is not available, the cross-check has to be written down — "the sheets should match" in
+    a header is not a check.
+  - **Boundary constants belong to whichever module owns the concept, and get imported.** `PRIOR_BOUNDARY`
+    is -2 because that is exactly the line between cohorts with a claim register and cohorts without.
+    The workbook imports it from `actuarialMemo` rather than restating -2, so the exhibit's Prior row and
+    the workbook's "cannot appear here" are one fact rather than two that happen to agree today.
+- **A marker is a statement of a gap, not its resolution — say which at the site.** A reloaded game's
+  claim sheets now name the first accident year whose detail survives and distinguish the two causes:
+  a seed cohort with no register (permanent, nothing to act on) versus detail not retained across a
+  save/restore (a session artefact a player may want to act on). That is worth having, and it is not the
+  fix. Regeneration removes the second cause entirely and makes the branch dead code. Recorded at the
+  marker so the next reader does not close the item on seeing it.
 - **A comment describing behaviour nobody implemented reads as a guarantee.** `LineResultSet.claims` said
   it was "deliberately NOT persisted to localStorage (~800 claims/yr × years would blow the quota)" and
   "regenerated from seed × member × year on demand". Neither was true: `persistState` was a bare

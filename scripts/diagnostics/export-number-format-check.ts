@@ -83,7 +83,7 @@ for (let g = 0; g < GAMES; g++) {
 
   for (const [book, wb] of [
     ['results', buildResultsWorkbook(gs.lockedResults, LINES, RESULT_METRICS)],
-    ['claims', buildClaimsWorkbook(gs.lockedResults, LINES, gs.poolState)],
+    ['claims', buildClaimsWorkbook(gs.lockedResults, gs.priorHistory, LINES, gs.poolState)],
   ] as const) {
     const back = roundTrip(wb);
     for (const name of back.SheetNames) {

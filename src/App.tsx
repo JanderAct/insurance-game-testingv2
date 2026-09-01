@@ -592,6 +592,7 @@ export default function App() {
         {activeTab === SPREADSHEET_TAB && gameState && (
           <ResultSpreadsheetPage
             lockedResults={gameState.lockedResults}
+            priorHistory={gameState.priorHistory}
             activeLines={gameState.setup.activeLines}
             instanceId={gameState.setup.instanceId}
             poolState={gameState.poolState}

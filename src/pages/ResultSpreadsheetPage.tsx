@@ -10,6 +10,11 @@ import { RESULT_METRICS } from '../utils/resultMetrics';
 
 interface ResultSpreadsheetPageProps {
   lockedResults: ResultSet[];
+  // The pre-game bootstrap's three years. Accident years -2, -1 and 0 have real
+  // claim registers and belong on the claims workbook's line sheets; without
+  // this they were absent from the sheets while their development sat on the
+  // Development sheet, and the workbook disagreed with itself.
+  priorHistory: ResultSet[];
   activeLines: CoverageLine[];
   instanceId: string;
   // Current pool state, for the claims workbook's Development sheet. The
@@ -17,7 +22,7 @@ interface ResultSpreadsheetPageProps {
   poolState: PoolState;
 }
 
-export default function ResultSpreadsheetPage({ lockedResults, activeLines, instanceId, poolState }: ResultSpreadsheetPageProps) {
+export default function ResultSpreadsheetPage({ lockedResults, priorHistory, activeLines, instanceId, poolState }: ResultSpreadsheetPageProps) {
   const [selectedYear, setSelectedYear] = useState<number>(
     lockedResults.length > 0 ? lockedResults[lockedResults.length - 1].yearNumber : 1
   );
@@ -112,7 +117,7 @@ export default function ResultSpreadsheetPage({ lockedResults, activeLines, inst
               // A SEPARATE workbook, deliberately — see claimsExport.ts. The
               // results workbook above is a per-metric summary; claim-level
               // detail is thousands of rows and does not belong bolted onto it.
-              const wb = buildClaimsWorkbook(lockedResults, activeLines, poolState, instanceId);
+              const wb = buildClaimsWorkbook(lockedResults, priorHistory, activeLines, poolState, instanceId);
               XLSX.writeFile(wb, claimsExportFilename);
             }}
             className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"

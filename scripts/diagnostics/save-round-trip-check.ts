@@ -166,6 +166,12 @@ for (let g = 0; g < GAMES; g++) {
   const out: string[] = [];
   diff(a.poolState, c.poolState, `g${g}.poolState`, out);
   diff(a.lockedResults, c.lockedResults, `g${g}.lockedResults`, out);
+  // ⚠ priorHistory IS COMPARED TOO, and it was not before. The pre-game years
+  // are ResultSets like any other and carry their own claim registers, so the
+  // strip empties them exactly as it empties the game years — which matters now
+  // that the claims workbook reads them. This asserts the ENGINE still does not
+  // care: everything on those three years except the per-claim flow survives.
+  diff(a.priorHistory, c.priorHistory, `g${g}.priorHistory`, out);
   if (a.currentYearNumber !== c.currentYearNumber) {
     out.push(`g${g}.currentYearNumber: ${a.currentYearNumber} !== ${c.currentYearNumber}`);
   }
@@ -189,22 +195,26 @@ console.log('  year played BEFORE the reload. An 8-year game saved at year 4, wo
 console.log('  and parsed back on both arms:');
 console.log('');
 console.log('                        straight through      reloaded');
-console.log('    WC sheet                 3,816 rows        1,963 rows');
-console.log('    GL sheet                 2,142 rows        1,101 rows');
-console.log('    Property sheet             323 rows          154 rows');
+console.log('    WC sheet                 5,433 rows        1,963 rows');
+console.log('    GL sheet                 2,978 rows        1,101 rows');
+console.log('    Property sheet             432 rows          153 rows');
 console.log('    Development sheet          549 rows          549 rows   <- unaffected');
+console.log('    accident years          -2 .. 8            5 .. 8');
 console.log('');
-console.log('  ⚠ IT DEGRADES SILENTLY, AND WORSE THAN AN EMPTY SHEET WOULD. Nothing throws and');
-console.log('  no sheet is blank: the workbook opens with the right headers, a full Development');
-console.log('  sheet and thousands of rows, and simply omits the first half of the claim');
-console.log('  history. An empty sheet would at least be noticeable. A half-populated one reads');
-console.log('  as complete, and the missing years are indistinguishable from years with no');
-console.log('  claims.');
+console.log('  ⚠ IT IS MARKED NOW, AND THAT IS A STATEMENT OF THE GAP RATHER THAN A FIX. Each');
+console.log('  line sheet names the first accident year whose detail is present and says the');
+console.log('  earlier ones were played but not retained — distinct from the seed cohorts older');
+console.log('  than the prior boundary, whose absence is permanent. Before the marker it');
+console.log('  degraded silently and worse than an empty sheet would: nothing threw, no sheet');
+console.log('  was blank, and a half-populated workbook read as complete.');
+console.log('  REGENERATION IS THE FIX and it does not exist. Rebuilding a prior year register');
+console.log('  from the seed would remove this cause entirely; until then the workbook tells');
+console.log('  the truth about being short without ceasing to be short.');
 console.log('');
 console.log('  The Development sheet survives because it reads developingClaims off the');
-console.log('  COHORTS, which persist. That makes it worse, not better: it lists developed');
-console.log('  occurrences whose line-sheet rows are gone, so the two sheets disagree about');
-console.log('  which claims exist and only one of them is short.');
+console.log('  COHORTS, which persist, so it lists developed occurrences whose line-sheet rows');
+console.log('  are gone. It carries the marker too, for that reason: it is the sheet that looks');
+console.log('  complete beside ones that are not.');
 console.log('  ResultSpreadsheetPage is unaffected — memberLossResults is deliberately kept.');
 console.log('');
 console.log('  ⚠ NOT FIXED HERE, AND IT IS THE DEFECT ONE LAYER OUT. The fix is a marker on the');
