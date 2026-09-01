@@ -141,29 +141,201 @@ export function isClaimClosed(curve: ClosureCurve, gameId: string, claimId: stri
 // cohort total stops being the pattern's, the development base moves, and the
 // free-lunch surface reopens somewhere nothing is watching.
 //
-// So: this returns a WEIGHT that sums to one over the register. The dollars come
-// from the cohort's own gross paydown, which the pattern already set.
+// So: the dollars come from the cohort's own gross paydown, which the pattern
+// already set, and this function only decides WHO GETS THEM.
 // paid-ledger-check.ts asserts the sum to the cent at every valuation.
 //
-// ⚠ PRO RATA BY THE CLAIM'S OWN GROSS ULTIMATE, and the alternative is DEFERRED
-// RATHER THAN REJECTED. A size-differentiated split — large claims paying slower,
-// as they demonstrably close slower — would also sum to one and would also be
-// cession-neutral. It is not done here because there is no fitted per-claim
-// PAYMENT-by-size curve to do it with: the size-conditional experience this
-// project has is about CLOSURE, and reusing a closure curve as a payment curve
-// is exactly the collapse the header of this file refuses. When a payment-by-size
-// fit exists, this weight is where it goes.
 // ============================================================================
-export function claimPaidWeight(claimGrossUltimate: number, registerGrossSum: number): number {
-  if (!(registerGrossSum > 0)) return 0;
-  return Math.max(0, claimGrossUltimate) / registerGrossSum;
+// ⚠ THE SPLIT IS A PROPERTY OF THE REGISTER, NOT OF A CLAIM, AND THAT IS WHY
+// THIS TAKES THE WHOLE COHORT.
+//
+// It used to be `claimPaidWeight(claimGrossUltimate, registerGrossSum)` — pro
+// rata by gross ultimate, computable one claim at a time, and knowing nothing
+// about closure. That gave EVERY OPEN CLAIM THE COHORT'S AVERAGE PAID SHARE,
+// which is incoherent on its own terms: the workbook printed GL claims that were
+// open and 99.8% paid, and a GL claim open at age 5 was booked 94.7% paid. A
+// file that has paid 94.7% of itself and is still open is not a claim any
+// adjuster would recognise.
+//
+// It is also load-bearing for what comes next. A per-claim revision law floored
+// at paid-to-date cannot go below what has already been paid, so with headroom
+// that thin the floor binds on essentially every large open claim and the
+// truncation injects a systematic UPWARD drift — measured at +18.8% of the
+// cohort ultimate on WC, +6.7% on GL, +2.3% on Property. That is not a rounding
+// error; WC's is three quarters of the line's whole development SD. And "a claim
+// closes at zero", which real settlement data shows for 19% of claims, is
+// arithmetically impossible for a file already booked 94.7% paid.
+//
+// ============================================================================
+// THE RULE, AND IT IS TWO TIERS RATHER THAN A WEIGHTING.
+//
+//   1. A CLOSED CLAIM HAS PAID EVERYTHING IT WILL EVER PAY.  Its paid is its own
+//      gross ultimate. This is a DEFINITION, not a curve — see the boundary note
+//      below, because it is the whole of what this file borrows from closure.
+//   2. THE OPEN CLAIMS SHARE WHAT IS LEFT, pro rata by gross ultimate — the old
+//      rule exactly, applied to the residual instead of to the whole.
+//
+// If the cohort has not paid enough to settle even its closed files, tier 1 is
+// scaled down pro rata and the open claims get nothing; they then carry 100%
+// headroom, which is the right answer rather than a degenerate one.
+//
+// ⚠ WHY THIS NEEDS NO ITERATION, AND THE ONE CASE WHERE THE CAP STILL BREAKS.
+//
+// The open tier's residual is `cohortGrossPaid - closedTotal`. WHILE THE COHORT
+// HAS PAID NO MORE THAN ITS REGISTER SUMS TO, that residual is at most
+// `registerGrossSum - closedTotal`, which IS the open total, so the open tier's
+// scale factor cannot exceed one and no claim can pass its own ultimate. A
+// general cap-respecting waterfall would iterate; under that condition this one
+// provably finishes in two passes, so it does not.
+//
+// THE CONDITION IS NOT GUARANTEED. `registerGrossSum` is frozen at inception and
+// the cohort's gross ultimate DEVELOPS above it, so an adversely developed
+// cohort late in its runoff can have paid more than its register sums to. The
+// scale factor then exceeds one and the open claims are booked above their drawn
+// ultimates.
+//
+// THAT IS PRE-EXISTING AND IT IS NOT MADE WORSE HERE. The old pro-rata rule did
+// the same thing to every claim in the cohort at once, for the same reason. It
+// is not fixed in this commit because the fix is not a payment rule: the drawn
+// value is stale, and Stage 1's per-claim revision is what makes a claim's
+// carried value track its cohort. paid-headroom-check MEASURES the frequency
+// rather than asserting it away, and the number is in its output.
+//
+// ⚠ THE TIE WINS OVER THE CAP where the two conflict. Clamping the open tier
+// would silently drop dollars and break "the split sums to the cohort's paydown
+// to the cent", which is the invariant the whole paid ledger rests on. A visible
+// paid-over-incurred on a developed cohort is a worse-looking, better-behaved
+// answer than a ledger that does not add up.
+//
+// ============================================================================
+// ⚠ THE NAIVE REWEIGHT WAS TRIED AND IT FAILS. DO NOT RETRY IT.
+//
+// The obvious fix is to weight each claim by how far it is through its own
+// closure — `w_i = v_i x progress_i`, normalised over the register, where
+// progress is `closedShare(t) / u_i` against the claim's own closure unit. It is
+// one line and it is worse than what it replaces. MEASURED: it left 78.2% of
+// open WC claims at ZERO headroom at age 1, against 0.0% under the old pro-rata
+// rule.
+//
+// The reason is the normaliser. A closed claim is capped at its own ultimate and
+// cannot absorb more, but a normaliser that only sees weights does not know
+// that, so the dollars a closed claim cannot take are handed to open claims
+// instead of being withheld — the allocation OVER-pays exactly the files that
+// most need headroom. Any scheme that normalises weights without enforcing the
+// cap has this defect regardless of the weight's shape, which is why the fix is
+// a tiered allocation and not a better weight.
+//
+// ============================================================================
+// ⚠ THE BOUNDARY WITH THE CLOSURE CURVE, WHICH THIS FILE'S OWN HEADER POLICES.
+//
+// The header above says the two curves are independent and that "reusing a
+// closure curve as a payment curve is exactly the collapse the header of this
+// file refuses". That prohibition stands and this does not breach it, but the
+// line is fine enough to be worth drawing exactly:
+//
+//   WHAT IS REFUSED: deriving how much a claim has PAID from how far through
+//   CLOSURE it is. A progress-shaped payment curve — tier 2 weighted by
+//   progress rather than flat — would be that, and it is not done here. There is
+//   still no fitted per-claim payment curve, by size or by progress, and when
+//   one exists tier 2's flat pro rata is where it goes.
+//
+//   WHAT IS USED: the BINARY closed/open state, and only through the definition
+//   that a closed file has finished paying. No shape, no rate, no schedule.
+//
+// THE COST IS REAL AND IS ACCEPTED: the Paid column now moves when the closure
+// parameters move, which it did not before. That coupling is new, it is named
+// here so it is not discovered later, and it buys coherence between two columns
+// that previously contradicted each other on the same row.
+//
+// ⚠ AND THE TOTAL IS UNTOUCHED, which is the only thing cession-neutrality ever
+// depended on. `cohortGrossPaid` is the pattern's, this function never computes
+// it, and the split still ties to the cent. Nothing in the loss path reads any
+// of this — the only consumers are the claims workbook and paid-ledger-check.
+//
+// ============================================================================
+// ⚠ THIS DOES NOT MAKE A PAID-TO-DATE FLOOR SAFE, AND MUST NOT BE READ AS
+// HAVING DONE SO. MEASURED, in paid-headroom-check's own output:
+//
+//   truncation drift on the cohort ultimate    OLD split -> NEW split
+//     WC        55.4% -> 42.5%      GL  21.0% -> 15.3%     Property 9.2% -> 4.5%
+//   (at the revision law's ruled scale; the fall is 23-51% and it is real)
+//
+// Against a martingale tolerance of about 1% of booked ultimate, 42.5% is not a
+// near miss. The reason is structural rather than a residual defect in the
+// allocation: at the ruled scale a large claim's annual revision SD is around
+// 50% of its own value, which is the same order as the headroom ANY coherent
+// payment schedule can leave on a file that has been paying for years. No split
+// closes that gap, so the choice at Stage 1 is between grading this tier-2 pro
+// rata by closure progress — which is the payment-curve collapse the boundary
+// note above refuses, and would need a fit that does not exist — or revising the
+// CASE RESERVE rather than the incurred, which has no floor and keeps the
+// martingale by construction. That is a ruling, not a code change, and it is
+// open.
+//
+// What this commit does buy is real and is the precondition either way: the
+// columns stop contradicting each other, "closes at zero" becomes arithmetically
+// possible, and the drift that remains is a smaller number to argue about.
+// ============================================================================
+
+/** One register entry, as the split needs to see it. */
+export interface PaidSplitClaim {
+  /** The claim's own gross ultimate. */
+  grossUltimate: number;
+  /** Closed as at the valuation being struck — `isClaimClosed` at that same age. */
+  closed: boolean;
 }
 
-/** This claim's share of the cohort's cumulative gross paid, in dollars. */
-export function claimPaidToDate(
+/**
+ * Split a cohort's cumulative gross paid across its register.
+ *
+ * Returns dollars per claim, in the order given, summing to `cohortGrossPaid`
+ * (to float precision) whenever the register is non-empty and carries value.
+ *
+ * ⚠ RETURNS DOLLARS RATHER THAN WEIGHTS, deliberately. The tier boundary depends
+ * on how the paid total compares with the closed total, so a "weight" here would
+ * be a function of the dollars it was about to be multiplied by — a weight in
+ * name only. Callers wanting shares divide by the total themselves.
+ */
+export function claimPaidSplit(
+  claims: readonly PaidSplitClaim[],
   cohortGrossPaid: number,
-  claimGrossUltimate: number,
-  registerGrossSum: number,
-): number {
-  return cohortGrossPaid * claimPaidWeight(claimGrossUltimate, registerGrossSum);
+): number[] {
+  const out = new Array<number>(claims.length).fill(0);
+  if (!(cohortGrossPaid > 0) || claims.length === 0) return out;
+
+  let closedTotal = 0;
+  let openTotal = 0;
+  for (const c of claims) {
+    const v = Math.max(0, c.grossUltimate);
+    if (c.closed) closedTotal += v; else openTotal += v;
+  }
+  if (closedTotal + openTotal <= 0) return out;
+
+  if (cohortGrossPaid <= closedTotal) {
+    // Short of settling even the closed files: scale tier 1, open claims wait.
+    const f = cohortGrossPaid / closedTotal;
+    claims.forEach((c, i) => { if (c.closed) out[i] = Math.max(0, c.grossUltimate) * f; });
+    return out;
+  }
+
+  const residual = cohortGrossPaid - closedTotal;
+  const f = openTotal > 0 ? residual / openTotal : 0;
+  claims.forEach((c, i) => {
+    const v = Math.max(0, c.grossUltimate);
+    out[i] = c.closed ? v : v * f;
+  });
+
+  // ⚠ THE REMAINDER WHEN NO OPEN CLAIM IS LEFT TO TAKE IT. A fully closed
+  // register whose cohort has paid more than the register sums to — an adversely
+  // developed cohort, see the cap note above — would otherwise drop those
+  // dollars and break the tie. They go back onto the closed files pro rata,
+  // which is where a developed cohort's extra payments belong. Without this the
+  // split silently stops summing to the cohort's paydown on exactly the oldest
+  // accident years, which is where nobody re-checks it.
+  if (openTotal <= 0 && residual > 0 && closedTotal > 0) {
+    claims.forEach((c, i) => {
+      if (c.closed) out[i] += Math.max(0, c.grossUltimate) * (residual / closedTotal);
+    });
+  }
+  return out;
 }

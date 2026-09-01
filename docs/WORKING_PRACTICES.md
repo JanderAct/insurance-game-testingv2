@@ -17,6 +17,34 @@ Things that were discovered expensively and live only in conversation memory. Re
     (`reinsurance-tower-check`, `wc-behaviour-check`, `property-fit-check`, `loss-ratio-check` and more).
     They are in `PROBES` with a one-line reason each. Do not read a name as a verdict.
   - **A probe still has to run.** `allocation-grid` asserts nothing and was still red, because it threw.
+- **A per-row quantity that is computable one row at a time will be, and that is where the incoherence
+  hides.** The claim payment split was `claimPaidWeight(claimGrossUltimate, registerGrossSum)` — pro rata,
+  no other input needed — so every OPEN claim was handed the cohort's *average* paid share and the claims
+  workbook printed GL files marked `open` at **99.8% paid**. Nothing was wrong with the arithmetic; the
+  function simply could not see the fact that would have made it wrong, because a claim's cohort-mates
+  were not in its signature.
+  - **The fix was a signature change before it was a rule change.** A closed file has paid everything it
+    will ever pay, so what is left for the open ones depends on which of them are closed. That is a
+    property of the register, and `claimPaidSplit(claims[], cohortGrossPaid)` can express it while the
+    per-claim form cannot. When a quantity keeps coming out incoherent, check whether its inputs can even
+    represent the constraint before tuning the formula.
+  - **Normalising weights without enforcing the cap over-pays exactly the wrong rows.** The obvious fix —
+    weight each claim by its own closure progress — was measured and is *worse*: it left **78.2% of open WC
+    claims at zero headroom** against 0.0% under the rule it replaced. A closed claim cannot absorb more
+    than its own ultimate, but a normaliser that only sees weights does not know that, so the dollars it
+    cannot take are handed to the open claims instead of withheld. This is independent of the weight's
+    shape, so no better weight fixes it. Tiered allocation, not cleverer weighting.
+- **A green standing gate proves nothing outside its own scope, and the scope is narrower than the name.**
+  This change moved every Gross Paid cell in the claims workbook. `value-identity-check` passed — it keys
+  on `RESULT_METRICS` field names and the split is not a metric. `solo-export-guard` passed — it SHA-256s
+  the *summary* workbook and this is the *claims* workbook. Both were right to pass. The Paid column had
+  no baseline and no assertion at all, which is why the visible contradiction survived: the gates that
+  would have caught it were not looking at it, and their green was quoted as though they were.
+  - **The check now lives where the defect was visible** (`claims-workbook-check`), not where it was
+    convenient. And it is written down there that the assertion it carries — open files must not have paid
+    their whole incurred — **would not have caught the original defect**, because 99.8% is under 100%. The
+    quantiles printed beside it are what a reader compares. An assertion that cannot catch the bug it was
+    written for is worth having only if it says so.
 - **A gate's verdict must NAME what failed, not count it.** The manifest fixes *is it run*; this fixes
   *is it readable when it fails*. Sixteen of thirty-five gates ended on a bare `N CHECK(S) FAILED` with
   the per-item FAIL lines printed pages earlier — and one, `audit-formula-check`, printed **no verdict at

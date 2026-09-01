@@ -25,6 +25,10 @@
 //                  Development sheet with the same figures.
 //   GEOMETRY       column count and the per-claim series length, so the "does it
 //                  need capping at year 20" question is answered with a number.
+//   OPEN AND PAID  no row marked `open` has paid its whole Gross Incurred, and
+//                  the headroom quantiles on open rows are printed beside it.
+//                  This is the ONLY gate on the Gross Paid column — see the note
+//                  at the check itself for what it can and cannot catch.
 // ============================================================================
 
 import * as XLSX from 'xlsx';
@@ -106,6 +110,7 @@ interface Stat {
   zeroPrinted: number; drawnEqGross: number; drawnGtBooked: number; drawnEqBooked: number;
   maxSeriesLen: number; yrCols: number; totalCols: number;
   interiorBlank: number; stateBytes: number; seriesBytes: number;
+  openRows: number; openFullyPaid: number; openWithHeadroom: number; openHeadroom: number[];
 }
 const stats: Record<string, Stat> = {};
 
@@ -114,6 +119,7 @@ for (const arm of ARMS) {
     rows: 0, developed: 0, blankBlock: 0, blankYrCell: 0, printedYrCell: 0, zeroPrinted: 0,
     drawnEqGross: 0, drawnGtBooked: 0, drawnEqBooked: 0, maxSeriesLen: 0, yrCols: 0, totalCols: 0,
     interiorBlank: 0, stateBytes: 0, seriesBytes: 0,
+    openRows: 0, openFullyPaid: 0, openWithHeadroom: 0, openHeadroom: [],
   };
   stats[arm.name] = s;
 
@@ -182,7 +188,12 @@ for (const arm of ARMS) {
       const iCurrent = header.indexOf('Current Occurrence');
       const iTotal = header.indexOf('Total Development');
       const iGross = header.indexOf('Gross Incurred');
+      const iPaid = header.indexOf('Gross Paid');
+      const iStatus = header.indexOf('Status');
       const iOcc = header.indexOf('Occurrence ID');
+      if (iPaid < 0 || iStatus < 0) {
+        fail(`${arm.name} g${g} ${line}: Gross Paid / Status missing from header [${header}]`);
+      }
       if ([iDrawn, iBooked, iCurrent, iTotal, iGross, iOcc].some(i => i < 0)) {
         fail(`${arm.name} g${g} ${line}: development block missing from header [${header}]`);
         continue;
@@ -199,6 +210,45 @@ for (const arm of ARMS) {
         const r = sheet[i];
         if (!r || r[0] === '' || r[0] === undefined) continue;
         s.rows++;
+
+        // --- OPEN AND PAID ---------------------------------------------------
+        // ⚠ THIS IS THE ONLY GATE ON THE GROSS PAID COLUMN, AND IT SITS HERE
+        // BECAUSE NOTHING ELSE CAN SEE IT. value-identity keys on RESULT_METRICS
+        // field names and the paid split is not a metric; solo-export-guard
+        // hashes the SUMMARY workbook and this is the claims workbook. Both ran
+        // green through the split change that produced these very numbers, which
+        // is correct of them and is exactly why the assertion belongs here.
+        //
+        // The defect it fixes was visible on the sheet and nothing was watching:
+        // pro rata by gross ultimate gave every open claim the cohort's AVERAGE
+        // paid share, so this workbook printed GL files marked `open` at 99.8%
+        // paid. A file that has paid itself out is not open.
+        //
+        // ⚠ AND THE ASSERTION BELOW WOULD NOT HAVE CAUGHT THAT, WHICH IS WHY THE
+        // DISTRIBUTION IS PRINTED BESIDE IT. 99.8% is under 100%, so a
+        // paid-over-incurred test passes on the very rows that motivated this
+        // change. The only thing assertable here without inventing a threshold
+        // is the arithmetic impossibility — an open file that has paid its whole
+        // incurred — so that is what is asserted, and the headroom quantiles
+        // underneath it are what a reader compares against the previous run.
+        // paid-headroom-check is the gate that measures this properly, age by
+        // age and against the revision law's own magnitudes; this one exists so
+        // the WORKBOOK's own cells cannot drift away from it unnoticed.
+        //
+        // The developed-cohort residual — a cohort that has paid more than its
+        // frozen register sums to, see claimClosure.ts's cap note — is the one
+        // case that breaches the impossibility legitimately, so it is counted
+        // and reported rather than failed.
+        if (iStatus >= 0 && iPaid >= 0 && iGross >= 0 && String(r[iStatus]) === 'open') {
+          const paid = num(r[iPaid]);
+          const inc = num(r[iGross]);
+          if (paid !== null && inc !== null && inc > 0) {
+            s.openRows++;
+            if (paid >= inc - 1e-6) s.openFullyPaid++;
+            else s.openWithHeadroom++;
+            s.openHeadroom.push(1 - paid / inc);
+          }
+        }
 
         const drawn = num(r[iDrawn]);
         if (drawn === null) {
@@ -267,6 +317,11 @@ for (const arm of ARMS) {
 }
 
 // ---------------------------------------------------------------- report
+const hq = (a: number[], p: number): string => {
+  if (a.length === 0) return '  -  ';
+  const t = [...a].sort((x, y) => x - y);
+  return `${(100 * t[Math.min(t.length - 1, Math.floor(p * t.length))]).toFixed(1)}%`;
+};
 for (const arm of ARMS) {
   const s = stats[arm.name];
   console.log(`--- ${arm.name.toUpperCase()} ---`);
@@ -283,6 +338,9 @@ for (const arm of ARMS) {
   console.log(`  longest per-claim series    ${s.maxSeriesLen} valuations`);
   console.log(`  poolState JSON              ${(s.stateBytes / 1024).toFixed(1)} KB, of which movementByStep `
     + `${(s.seriesBytes / 1024).toFixed(1)} KB (${((s.seriesBytes / s.stateBytes) * 100).toFixed(2)}%)`);
+  console.log(`  OPEN rows with a paid figure ${s.openRows}`);
+  console.log(`    headroom p10/med/p90       ${hq(s.openHeadroom, .10)} / ${hq(s.openHeadroom, .50)} / ${hq(s.openHeadroom, .90)}`);
+  console.log(`    paid >= incurred           ${s.openFullyPaid}   <- developed-cohort residual; asserted-against elsewhere`);
   console.log('');
 }
 

@@ -59,8 +59,8 @@ import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { processYear } from '../../src/utils/simulationEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
-import { claimPaidToDate, claimPaidWeight } from '../../src/utils/claimClosure';
-import { LINE_PAYOUT_PATTERN } from '../../src/data/defaultAssumptions';
+import { claimPaidSplit, isClaimClosed } from '../../src/utils/claimClosure';
+import { LINE_PAYOUT_PATTERN, resolveClosureCurve } from '../../src/data/defaultAssumptions';
 import { conditionalPaydown } from '../../src/utils/payoutPattern';
 import type { CoverageLine, GameState, ReserveCohort } from '../../src/types/simulation';
 
@@ -116,7 +116,9 @@ for (let g = 0; g < GAMES; g++) {
           yearNumber: number; paidByValuation?: number[];
           firstValuationYear: number }[] }>
       }).lines[l];
-      const claims = (p.result.byLine[l] as never as { claims?: { accidentYear: number; grossUltimate: number }[] }).claims ?? [];
+      const claims = (p.result.byLine[l] as never as {
+        claims?: { id: string; accidentYear: number; grossUltimate: number }[]
+      }).claims ?? [];
 
       // The register for THIS year's accident year, which is the only one whose
       // claims are in hand at this valuation.
@@ -159,9 +161,20 @@ for (let g = 0; g < GAMES; g++) {
         // Only this year's own accident year has its register in hand.
         if (c.yearNumber === y && register > 0 && claims.length > 0) {
           splits++;
-          const summed = claims
-            .filter(cl => cl.accidentYear === y)
-            .reduce((s, cl) => s + claimPaidToDate(gp, cl.grossUltimate, register), 0);
+          // ⚠ THE SPLIT IS RESOLVED OVER THE WHOLE REGISTER, not claim by claim,
+          // because claimPaidSplit is a two-tier allocation and a claim's share
+          // depends on which of its cohort-mates are closed. The per-claim
+          // reconstruction this used to do is no longer a meaningful call.
+          // AY y is at curve age 1 at the valuation struck in year y.
+          const mine = claims.filter(cl => cl.accidentYear === y);
+          const split = claimPaidSplit(
+            mine.map(cl => ({
+              grossUltimate: cl.grossUltimate,
+              closed: isClaimClosed(resolveClosureCurve(l, cl.grossUltimate), id, cl.id, 1),
+            })),
+            gp,
+          );
+          const summed = split.reduce((s, v) => s + v, 0);
           const err = Math.abs(summed - gp);
           worstSplit = Math.max(worstSplit, err);
           if (err > CENT) {
@@ -169,10 +182,13 @@ for (let g = 0; g < GAMES; g++) {
               + `gross paid ${gp.toFixed(4)}, off by ${err.toFixed(4)} — a claim is not taking a pure `
               + `share of the paydown the pattern set`);
           }
-          const wsum = claims.filter(cl => cl.accidentYear === y)
-            .reduce((s, cl) => s + claimPaidWeight(cl.grossUltimate, register), 0);
-          if (Math.abs(wsum - 1) > 1e-9) {
-            fail(`${l} AY${y}: split weights sum to ${wsum} rather than 1`);
+          // ⚠ NO CLAIM MAY TAKE A NEGATIVE PAYMENT. The old weight-sums-to-one
+          // check is gone with the weights; this is what replaces it, and it is
+          // the half that could ever have caught anything — a tier that went
+          // negative would still sum correctly against a compensating tier.
+          const neg = split.findIndex(v => v < -CENT);
+          if (neg >= 0) {
+            fail(`${l} AY${y}: claim ${mine[neg].id} takes a NEGATIVE payment ${split[neg].toFixed(4)}`);
           }
         }
 

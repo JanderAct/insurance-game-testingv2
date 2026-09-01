@@ -73,8 +73,9 @@ const FAST: string[] = [
   'marketplace-generation-check',    //   7s
   'member-loss-history-check',       //   2s
   'net-funding-fields-check',        //   6s
+  'paid-headroom-check',             //   7s
   'paid-ledger-check',               //   4s
-  'panel-engine-parity-check',       //   4s   RED — see the branch note below
+  'panel-engine-parity-check',       //   4s
   'pin-vs-band-check',               //  27s
   'pool-aggregation-check',          //   2s
   'pool-market-share-check',         //   6s

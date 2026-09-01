@@ -49,7 +49,7 @@
 import * as XLSX from 'xlsx';
 import type { Claim, CoverageLine, Member, PoolState, ResultSet } from '../types/simulation';
 import { FIXED_LINE_ORDER, LINE_ABBREV } from './resultsExport';
-import { claimPaidToDate, isClaimClosed } from './claimClosure';
+import { claimPaidSplit, isClaimClosed } from './claimClosure';
 import { resolveClosureCurve } from '../data/defaultAssumptions';
 
 type Row = (string | number)[];
@@ -63,18 +63,21 @@ const ENROLLED_NOTE =
   'documentation and so this stays correct if that ever changes.';
 
 const PAID_NOTE =
-  'Gross Paid is this claim\'s share of its accident year\'s cumulative GROSS paid, split pro rata by ' +
-  'the claim\'s own gross incurred — a split of the paydown the line\'s payout pattern already set, ' +
-  'never a schedule the claim draws for itself. Status is the claim\'s own closure draw against a ' +
-  'curve fitted to the pool\'s closure experience, and closure is SLOWER than payment: money leaves ' +
-  'before files close, so a claim can be well paid and still open. Both are derived at read time and ' +
-  'neither is stored. Gross Paid and Gross Incurred are both GROSS, so they are subtractable — but ' +
-  'they are NOT the same VINTAGE, and their ratio is not this claim\'s paid-to-incurred. Gross ' +
-  'Incurred is the claim AS DRAWN and never develops; Gross Paid is a share of the accident year\'s ' +
-  'paid to date, and that year\'s register HAS developed. On a year that deteriorated the ratio can ' +
-  'exceed 100% (measured: a Property year at 102%), which is not an error — it is a claim\'s share ' +
-  'of payments on a register larger than the one it was drawn into. For a real paid-to-incurred ' +
-  'ratio use the Actuarial exhibit, where both terms come from the same ledger at the same valuation.';
+  'Gross Paid is this claim\'s share of its accident year\'s cumulative GROSS paid — a split of the ' +
+  'paydown the line\'s payout pattern already set, never a schedule the claim draws for itself. The ' +
+  'split is in two tiers: a CLOSED file has paid everything it will ever pay, so it takes its own ' +
+  'gross incurred, and the OPEN files share what is left pro rata. Status is the claim\'s own closure ' +
+  'draw against a curve fitted to the pool\'s closure experience. Both are derived at read time and ' +
+  'neither is stored. Closure is SLOWER than payment, so an open claim can still be substantially ' +
+  'paid — but it will not have paid itself out, which the previous flat pro-rata split allowed and ' +
+  'which is the reason for the tiers. Gross Paid and Gross Incurred are both GROSS, so they are ' +
+  'subtractable — but they are NOT the same VINTAGE, and their ratio is not this claim\'s ' +
+  'paid-to-incurred. Gross Incurred is the claim AS DRAWN and never develops; Gross Paid is a share ' +
+  'of the accident year\'s paid to date, and that year\'s register HAS developed. On a year that ' +
+  'deteriorated enough to have paid more than its register sums to, the ratio can exceed 100%, which ' +
+  'is not an error — it is a claim\'s share of payments on a register larger than the one it was ' +
+  'drawn into. For a real paid-to-incurred ratio use the Actuarial exhibit, where both terms come ' +
+  'from the same ledger at the same valuation.';
 
 const PROPERTY_NOTE =
   'Property claims are drawn from a mixture fitted to the pool\'s own nine years of claims. Band is ' +
@@ -371,13 +374,28 @@ function collectLineClaims(lockedResults: ResultSet[], line: CoverageLine): Line
 // ratio is a gross paid-to-incurred. The NET figures on the same cohort are not
 // touched by this file — see the units rule on ReserveDevelopmentRow.
 // ============================================================================
+// ⚠ THE SPLIT IS RESOLVED OVER THE WHOLE ACCIDENT YEAR, NOT PER ROW, AND IT HAS
+// TO BE. claimPaidSplit is a two-tier allocation — closed files take their own
+// ultimate, the open ones share what is left — so a claim's paid is not
+// computable without its cohort-mates. The old rule WAS computable per row, and
+// that was the defect rather than a convenience: pro rata by gross ultimate gave
+// every open claim the cohort's average paid share, and this workbook printed
+// files that were open and 99.8% paid. See claimClosure.ts's split header.
 interface PaidLedgerView {
   /** The game's identity, an input to every claim's closure draw — see claimClosure.ts. */
   gameId: string;
-  /** Cumulative GROSS paid on each accident year's cohort, at the latest valuation. */
-  grossPaidByAy: Map<number, number>;
-  /** Sum of every claim's gross ultimate in that accident year — the split's denominator. */
-  registerByAy: Map<number, number>;
+  /**
+   * Resolved gross paid, per claim id, for every accident year with a ledger
+   * entry. An id absent from this map has no ledger entry for its accident
+   * year, which the workbook prints BLANK — see paidAndStatus.
+   *
+   * ⚠ THE COHORT TOTALS ARE NOT CARRIED. `grossPaidByAy` used to be a field
+   * here and became write-only the moment the split moved off the row: it is
+   * consumed inside buildPaidLedgerView and nothing downstream reads it. Same
+   * shape as `developmentFactor` and `paydownPct` before they were deleted, so
+   * it is a local now.
+   */
+  paidByClaimId: Map<string, number>;
   /** The valuation the workbook is being written at. */
   valuationYear: number;
 }
@@ -389,11 +407,6 @@ function buildPaidLedgerView(
   line: CoverageLine,
   gameId: string,
 ): PaidLedgerView {
-  const registerByAy = new Map<number, number>();
-  for (const { claim } of rows) {
-    registerByAy.set(claim.accidentYear, (registerByAy.get(claim.accidentYear) ?? 0) + claim.grossUltimate);
-  }
-
   const grossPaidByAy = new Map<number, number>();
   const ls = poolState?.lines?.[line];
   // ⚠ THE LIVE COHORT ONLY, AND reserveDevelopment IS DELIBERATELY NOT READ.
@@ -416,29 +429,56 @@ function buildPaidLedgerView(
   const valuationYear = lockedResults.length > 0
     ? lockedResults[lockedResults.length - 1].yearNumber
     : 0;
-  return { gameId, grossPaidByAy, registerByAy, valuationYear };
+
+  // Group the register by accident year and split each one whole. The closure
+  // draw resolved here is the SAME call paidAndStatus used to make per row, at
+  // the same age and against the same curve, so Status and Gross Paid cannot
+  // disagree about whether a file is open — which is the coherence this change
+  // exists to buy.
+  const byAy = new Map<number, LineClaimRow[]>();
+  for (const row of rows) {
+    const list = byAy.get(row.claim.accidentYear);
+    if (list) list.push(row); else byAy.set(row.claim.accidentYear, [row]);
+  }
+  const paidByClaimId = new Map<string, number>();
+  for (const [ay, ayRows] of byAy) {
+    const cohortPaid = grossPaidByAy.get(ay);
+    if (cohortPaid === undefined) continue;   // blank, not zero — see below
+    const split = claimPaidSplit(
+      ayRows.map(({ claim }) => ({
+        grossUltimate: claim.grossUltimate,
+        closed: isClaimClosed(
+          resolveClosureCurve(line, claim.grossUltimate),
+          gameId, claim.id, valuationYear - ay + 1,
+        ),
+      })),
+      cohortPaid,
+    );
+    ayRows.forEach(({ claim }, i) => paidByClaimId.set(claim.id, split[i]));
+  }
+
+  return { gameId, paidByClaimId, valuationYear };
 }
 
 /** This claim's gross paid and status as at the workbook's valuation. */
 function paidAndStatus(claim: Claim, view: PaidLedgerView, line: CoverageLine): {
   paid: number | string; status: string;
 } {
-  const cohortPaid = view.grossPaidByAy.get(claim.accidentYear);
-  const register = view.registerByAy.get(claim.accidentYear) ?? 0;
   // ⚠ AGE CONVENTION, the same one payoutPattern.ts and claimClosure.ts use: a
   // claim written in year Y is at curve age 1 at the end of year Y.
   const curveAge = view.valuationYear - claim.accidentYear + 1;
   const closed = isClaimClosed(
     resolveClosureCurve(line, claim.grossUltimate), view.gameId, claim.id, curveAge,
   );
+  const paid = view.paidByClaimId.get(claim.id);
   return {
     // ⚠ BLANK, NOT ZERO, when the accident year has no ledger entry. This
     // workbook's own convention is that an empty cell is not a zero, and a claim
     // whose cohort predates the ledger has not been paid nothing — it is unknown.
     // Writing 0 here would recreate the defect these columns are being fixed for.
-    paid: cohortPaid === undefined
-      ? ''
-      : numOrBlank(claimPaidToDate(cohortPaid, claim.grossUltimate, register)),
+    // buildPaidLedgerView leaves such a claim out of paidByClaimId entirely, so
+    // the blank comes from the same test that produced it there.
+    paid: paid === undefined ? '' : numOrBlank(paid),
     status: closed ? 'closed' : 'open',
   };
 }
