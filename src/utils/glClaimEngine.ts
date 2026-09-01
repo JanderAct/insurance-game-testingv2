@@ -542,7 +542,6 @@ export function generateGlClaims(inputs: GlGenerationInputs): GlGenerationResult
   const memberLossResults: MemberLossResult[] = [];
   let claimCount = 0;
   let maxOccurrenceGross = 0;
-  let sequence = 0;
 
   for (const member of members) {
     // PER-MEMBER STREAMS, keyed on member.id — a pure function of
@@ -572,7 +571,6 @@ export function generateGlClaims(inputs: GlGenerationInputs): GlGenerationResult
           // constant within a member-year.
           const weights = tiltedGlWeights(rq);
           for (let i = 0; i < count; i++) {
-            sequence++;
             const componentIdx = sevRng.categorical(weights);
             const component = GL_SEVERITY_COMPONENTS[componentIdx];
             // TRENDED TO THE ACCIDENT YEAR AND FROZEN. GL has no report lag, so
@@ -597,7 +595,28 @@ export function generateGlClaims(inputs: GlGenerationInputs): GlGenerationResult
               sevRng.lognormal(trendedMuGl(component.mu, yearNumber, severityShock), component.sigma),
               glSeverityCap(yearNumber));
 
-            const occurrenceId = `gl-${yearNumber}-${member.id}-${sequence}`;
+            // ⚠ THE INDEX IS THIS MEMBER'S OWN, NOT A COUNTER ACROSS THE LOOP.
+            // It used to be `sequence`, incremented once per claim over the
+            // WHOLE member list, so an id meant "the fifteenth claim of the
+            // year" rather than "member 042's third claim". WC
+            // (`wc-${y}-${id}-${component}-${n}`) and Property
+            // (`PR-${y}-${id}-${i}`) were both already per-member; GL was the
+            // odd one out.
+            //
+            // WHY IT MATTERED. The per-member RNG streams mean member 007 draws
+            // the same claims with the same values whoever else enrolled — that
+            // is enrolment-independence-check's guarantee. But the COUNT of
+            // claims drawn before them was not stable, so a roster change
+            // renamed every later member's claims without touching a value.
+            //
+            // AND SOMETHING DOWNSTREAM KEYS ON THE NAME NOW. isClaimClosed
+            // hashes (gameId, claimId), so GL's closure draw — and through it
+            // the payment split, paid-to-date and the workbook's Status column —
+            // moved with the roster through the id alone. The check's own
+            // comment used to excuse ids on the grounds that "no downstream
+            // consumer keys on them across runs"; that stopped being true at
+            // Stage 0 and this is what makes it true again.
+            const occurrenceId = `gl-${yearNumber}-${member.id}-${i}`;
             const claimId = `${occurrenceId}-c1`;
             claims.push({
               id: claimId,

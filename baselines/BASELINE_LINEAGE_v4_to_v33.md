@@ -2139,3 +2139,51 @@ that joins the register joins it developing.
 | full sweep | 34/34 |
 
 v30 retired from the working tree; v31 kept as the immediate predecessor.
+
+---
+
+## v33 — GL's claim id becomes per-member
+
+GL's occurrence id was `gl-${year}-${memberId}-${sequence}`, with `sequence` a counter across the **whole
+member loop** — "the fifteenth claim of the year" rather than "member 042's third claim". WC and Property
+were already per-member. GL now matches: `gl-${year}-${memberId}-${i}`.
+
+The per-member RNG never read the id, so this could not move a draw. What it could move is anything that
+hashes the id, and one thing does: `isClaimClosed(gameId, claimId)`. Closure feeds two consumers — Stage 0's
+payment split (export) and, older, `reselectDevelopingSet`'s open/closed predicate in `processIbner`
+(engine). A new closure draw picks a different developing set, development lands on different claims,
+different amounts pierce the retention, and `priorYearDevelopmentCeded` moves — dragging the net reserve
+and everything downstream of it.
+
+### Two assertions, kept apart
+
+**No GL claim amount moved.** Established three ways. A six-seed value-only fingerprint of every GL claim
+was byte-identical across the change. On seven of eight further seeds with an unchanged roster,
+`grossUltimateLoss` and `poolPremium` moved in 0 of 42 GL line-years. On the eighth seed — which re-rolled
+onto a different opening-band attempt and shared only ~19–24 of ~58 members per year with the other arm —
+the 96 member-years present in both arms differed in 4, **every one a claim-count change** (2→3, 17→18,
+4→5, 1→2) from a Poisson draw on a roster-rescaled lambda, and **none by amount at the same count**. WC and
+Property: 0 of 48 line-years moved on any field.
+
+**Closure moved, as expected.** On the seven unchanged-roster seeds, GL `priorYearDevelopmentCeded` moved
+in 42 of 42 line-years (median 13.2%, max 154%); `endingNetReserve` median 0.38% / max 1.65%;
+`endingSurplus` median 0.56% / max 7.5%.
+
+### What the movement is NOT
+
+The expected shape was "the paid family and nothing else". Thirty-eight fields moved, including reserves,
+surplus, loss ratios and investment income. That is closure reaching the engine through reselection, which
+predates Stage 0 (`858f9ba`/`dd2af19`) — not the id reaching further than closure. Every moved field is on
+the development → cession → reserve → surplus chain; no gross, premium, count, exposure or inception-cession
+field is among them.
+
+### Gate readings
+
+| gate | reading |
+|---|---|
+| value identity | 38 fields moved, 0 added, 0 removed; none draw-side |
+| solo export guard | 12 of 24 moved — every GL-solo and every tri; **all 6 WC-solo and all 6 PR-solo byte-identical** |
+| enrolment-independence-check | now compares ids on all three lines; restoring GL's counter fails every GL probe, WC/PR unaffected |
+| both guards, against v33 | green after recapture |
+
+v31 retired from the working tree; v32 kept as the immediate predecessor.

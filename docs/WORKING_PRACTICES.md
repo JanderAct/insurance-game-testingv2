@@ -17,6 +17,37 @@ Things that were discovered expensively and live only in conversation memory. Re
     (`reinsurance-tower-check`, `wc-behaviour-check`, `property-fit-check`, `loss-ratio-check` and more).
     They are in `PROBES` with a one-line reason each. Do not read a name as a verdict.
   - **A probe still has to run.** `allocation-grid` asserts nothing and was still red, because it threw.
+- **A comment that excuses a gap is only as good as the day it was written, and nothing re-reads it when
+  the gap acquires a consumer.** Third instance of the shape, after `cededByLayer`. `enrolment-independence-
+  check` excluded claim ids from its comparison with a paragraph saying the exclusion was safe because "no
+  downstream consumer keys on them across runs". Every clause was true on the day. Then Stage 0's payment
+  split started calling `isClaimClosed(gameId, claimId)`, and from that commit a claim's closure status,
+  paid-to-date and the workbook's Status column all read the id. Nothing in the check changed; the thing
+  it was excusing acquired a consumer elsewhere, and the excuse kept standing.
+  - **GL was the only line where it bit** — its id embedded a counter across the whole member loop, so a
+    roster change renamed every later member's claims without touching a value. WC and Property were
+    already per-member. Fixed by matching them, and the check now COMPARES ids rather than excusing them:
+    a note explaining why a gap is harmless became an assertion that it is closed, and restoring the
+    counter turns every GL probe red.
+  - **The tell for this shape: an exclusion justified by an absence.** "Nothing reads X" is a claim about
+    the whole codebase at one moment. It cannot be checked from inside the file that makes it, and it
+    silently expires the first time anything anywhere starts reading X. Prefer asserting the property to
+    excusing its absence; where you must excuse, grep for the consumer at every commit that touches the
+    thing excused.
+- **"No value moved" needs the right fingerprint AND enough seeds — and the two failures look
+  identical.** A six-seed value-only hash of every GL claim was byte-identical across the id change. An
+  eight-seed probe on different seeds then showed GL gross loss moving 30–90% in six line-years. Both were
+  correct: one seed had re-rolled onto a different opening-band attempt (finding 8 — the redraw is chaotic
+  and any reserve change re-rolls some seeds), and from year 1 its roster shared only ~19–24 of ~58 members
+  with the other arm — not "two fewer", a different pool. Its claims differed because its *members* did.
+  - **The proof had to separate count from amount.** Of 96 member-years present in both arms, 4 differed —
+    and every one was a claim *count* change (2→3, 17→18, 4→5, 1→2), a Poisson draw flipping on a lambda
+    rescaled by the roster-dependent `k_line`, which `enrolment-independence-check` holds fixed for exactly
+    this reason. **Zero differed by amount at the same count** — the shape an id reaching the severity draw
+    would have. "No value moved" was true, but the first version of this paragraph said "identical in every
+    member-year" before the probe had run, and that was false. Check a "nothing moved" result against a
+    different seed set before writing it down; when something then moves, ask whether the roster moved
+    first; and when common members differ, ask whether it is the count or the amount.
 - **A truncated game reports performance the runoff has not had a chance to take back.** A five-year GL
   game ends with a median actual/expected loss ratio of 0.868; over complete cohort lives it is 0.964.
   **Ten of those thirteen points are truncation, not skill.** At year five roughly half of everything the

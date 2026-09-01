@@ -390,7 +390,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // closed, so stubbing the closure predicate leaves the mechanism running. What
 // survives is the mechanism switch: DEVELOPMENT_CESSION_ENABLED = false,
 // parent vs child, reads 29,400 fields and 0 differing.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v32.json');
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v33.json');
 
 function seedOf(id: string) {
   let h = 5381;

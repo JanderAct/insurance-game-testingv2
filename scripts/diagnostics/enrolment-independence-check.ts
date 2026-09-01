@@ -31,12 +31,37 @@
 // isolates the stream keying, the thing under test. Varying them here would
 // conflate a real pricing effect with a stream bug.
 //
-// IDS ARE EXCLUDED FROM THE COMPARISON, DELIBERATELY. `id` and `occurrenceId`
-// embed a per-CALL sequence counter, so they still carry call-order
-// information. That is harmless and is not part of a member's loss history:
-// claims are explicitly NOT persisted (see the note on ResultSet.claims) and
-// are regenerated from seed x member x year on demand, so no downstream
-// consumer keys on them across runs. Every VALUE field is compared.
+// ⚠ IDS ARE COMPARED NOW. THE PARAGRAPH THAT EXCLUDED THEM WAS CORRECT WHEN
+// WRITTEN AND BECAME WRONG THROUGH A CHANGE ELSEWHERE — the third instance of
+// that shape in this project, after cededByLayer. It is worth reading what it
+// said:
+//
+//   "`id` and `occurrenceId` embed a per-CALL sequence counter, so they still
+//   carry call-order information. That is harmless and is not part of a
+//   member's loss history: claims are explicitly NOT persisted and are
+//   regenerated from seed x member x year on demand, so no downstream consumer
+//   keys on them across runs."
+//
+// Every clause was true on the day. Then Stage 0's payment split started calling
+// isClaimClosed(gameId, claimId), and from that commit a claim's closure status
+// — and through it its paid-to-date and the workbook's Status and Gross Paid
+// columns — READ THE ID. Nothing in this file changed; the thing it was
+// excusing acquired a consumer somewhere else, and the excuse kept standing
+// because nobody re-reads a comment that describes an absence. (The
+// regeneration clause was never true, separately: no such code path existed.)
+//
+// ONLY GL WAS AFFECTED, and it is fixed rather than excused. Its occurrence id
+// embedded a counter incremented across the WHOLE member loop — "the fifteenth
+// claim of the year" instead of "member 042's third claim" — so every later
+// member's ids shifted when the roster changed, while their values did not. WC
+// (`-${componentKey}-${n}`) and Property (`-${i}`) were already per-member and
+// would always have passed. With GL matching them the exclusion has no reason
+// left, so `project()` includes ids and this file ASSERTS the property instead
+// of explaining the gap.
+//
+// ⚠ AND THE ASSERTION BITES. Restoring GL's counter turns every probe on every
+// seed to `GL FAIL` while WC and Property stay OK — verified in both directions,
+// not assumed. Every VALUE field is still compared alongside the ids.
 // ============================================================================
 
 import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
@@ -55,11 +80,25 @@ const YEAR = 3;
 const CALENDAR = 2028;
 const SEEDS = [8675309, 1, 4294967295, 123456789];
 
-// Value fields only — see the header on why id/occurrenceId are excluded.
-// Anything that carries a dollar amount, a date, a tier or a class is here.
+// ⚠ IDS ARE COMPARED NOW, AND THAT IS THE POINT OF THIS PASS. They used to be
+// excluded, with a header paragraph explaining that the exclusion was safe
+// because "no downstream consumer keys on them across runs". That justification
+// expired: Stage 0's payment split calls isClaimClosed(gameId, claimId), so a
+// claim's closure status — and through it its paid-to-date and the workbook's
+// Status column — reads the id. An id that moved with the roster moved those
+// with it.
+//
+// GL was the line that could not have passed this. Its occurrence id embedded a
+// counter incremented across the WHOLE member loop, so it meant "the fifteenth
+// claim of the year" rather than "member 042's third claim" and every later
+// member's ids shifted when the roster did. WC and Property were already
+// per-member. GL now matches them, so the exclusion is no longer needed and a
+// note explaining why a gap is harmless becomes an assertion that it is closed.
 function project(claims: Claim[]): string {
   return JSON.stringify(
     claims.map(c => ({
+      id: c.id,
+      occurrenceId: c.occurrenceId,
       memberId: c.memberId,
       line: c.line,
       tier: c.tier,
