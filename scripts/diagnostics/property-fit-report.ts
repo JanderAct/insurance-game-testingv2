@@ -1,6 +1,6 @@
 // PROPERTY'S FITTED LOSS MODEL — the numbers the rebuild rests on.
 //
-// Run: npx tsx scripts/diagnostics/property-fit-check.ts
+// Run: npx tsx scripts/diagnostics/property-fit-report.ts
 //
 // ⚠ THE ANNUAL AGGREGATE CV IS THE HEADLINE, and it is a SCALE fact rather
 // than a fit fact. The mixture was fitted to a book generating ~200 claims a

@@ -722,7 +722,7 @@ question than they appear to.
 below-paid-to-date count that read 9.04% of WC cohorts before `8351395` is now exactly 0 on all three
 lines, matured cohorts land on `registerSum` to 0.0000%, and the martingale means sit inside 3 SE
 (WC 1.01277 ± 0.01910, GL 1.00553 ± 0.01219, Property 1.01147 ± 0.01662). `wc-cap-check`,
-`wc-cap-stability-check`, `wc-severity-rebuild-check`, `gl-claim-check`, `property-claim-check`,
+`wc-cap-stability-report`, `wc-severity-rebuild-check`, `gl-claim-check`, `property-claim-check`,
 `tower-runtime-check` and `shock-check` all pass. Typecheck and build clean; lint unchanged at 14 errors,
 every one of them present at the merge base `0a465df`.
 

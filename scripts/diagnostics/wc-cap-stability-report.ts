@@ -1,6 +1,6 @@
 // IS WC'S CALENDAR CV MEASURABLE NOW THAT SEVERITY IS CAPPED?
 //
-//   npx tsx scripts/diagnostics/wc-cap-stability-check.ts
+//   npx tsx scripts/diagnostics/wc-cap-stability-report.ts
 //
 // ============================================================================
 // THE TEST, AND WHY IT IS THIS ONE.

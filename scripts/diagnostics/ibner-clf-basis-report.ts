@@ -1,7 +1,7 @@
 // CALENDAR-YEAR CV, MATCHED-SEED, EITHER SIDE OF THE IBNER CUTOVER.
 //
-//   npx tsx scripts/diagnostics/ibner-clf-basis-check.ts
-//   GAMES=50 npx tsx scripts/diagnostics/ibner-clf-basis-check.ts
+//   npx tsx scripts/diagnostics/ibner-clf-basis-report.ts
+//   GAMES=50 npx tsx scripts/diagnostics/ibner-clf-basis-report.ts
 //
 // REPORTS. Gates nothing.
 //

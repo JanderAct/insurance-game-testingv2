@@ -710,7 +710,11 @@ export const BASE_NEW_MEMBERS_PER_YEAR = 1.0;
 // was calibrated from, well inside seed noise (the per-seed starting book spans
 // 45 to 88). It does not iterate away: the measured ten-year trajectory holds
 // flat from wherever it opens, which is the property that actually matters and
-// is verified directly in scripts/diagnostics/membership-equilibrium-check.ts.
+// is measured in scripts/diagnostics/membership-equilibrium-report.ts.
+//
+// ⚠ "VERIFIED" WAS THE WRONG WORD AND THE FILE'S OLD NAME (-check) IS WHY. That
+// script prints the trajectory and exits 0 either way, so the flatness is a
+// RECORDED READING and nothing gates it. Nothing else asserts it either.
 //
 //     k = (63 x 0.0445 - 0.5852) / (200 - 63) = 2.2183 / 137 = 0.016192
 export const MEMBERSHIP_EQUILIBRIUM_ENROLLMENT = 63;
@@ -2038,8 +2042,9 @@ export const PROPERTY_LOSS_MODEL = {
   // sample's 4.46. Capped here it is 4.78 — still above the sample, correctly,
   // since a nine-year sample does not contain its own worst case.
   //
-  // Measured by property-fit-check.ts from these parameters rather than taken
-  // on trust: the cap removes 1.9% of the mean and binds once in 6,610 claims,
+  // Measured by property-fit-report.ts from these parameters rather than taken
+  // on trust — MEASURED, not gated: that script prints and exits 0, so this is
+  // a recorded reading. The cap removes 1.9% of the mean and binds once in 6,610 claims,
   // which at the enrolled book is about once per 700 years. It disciplines the
   // second moment, which is its job; it is not a loss limit.
   severityCap: 75_000_000,
@@ -2080,8 +2085,12 @@ export const PROPERTY_LOSS_MODEL = {
 //
 // = frequencyPer1mTiv x the capped mixture mean ($435,256), i.e. the
 // generator's own analytic expectation over the 1,822 fitted claims. Asserted
-// against the generator by property-fit-check.ts and property-claim-check.ts,
-// so the price and the draw cannot drift apart.
+// against the generator by property-claim-check.ts ALONE, so the price and the
+// draw cannot drift apart.
+//
+// ⚠ THIS ALSO NAMED property-fit-check, WHICH ASSERTS NOTHING (now
+// property-fit-report — it prints the scale analysis and exits 0 either way).
+// One asserting script and one reading script read as two guards.
 //
 // ⚠ AN ASSERTED CAT LOAD OF 0.0247 WAS REMOVED FROM THIS CONSTANT, taking it
 // from 0.1209 to 0.0962. Recorded in full so it can be restored correctly

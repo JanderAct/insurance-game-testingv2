@@ -245,7 +245,7 @@ factor (~1.34×) — which fully accounts for the apparent gap. This is a displa
 not a loss outcome.
 
 `E[commonLossFactor]` was measured directly (30 seeds × 5 years × 3 lines, 450 line-years,
-`scripts/diagnostics/loss-ratio-check.ts`): **mean 1.0171** (WC 1.0079, GL 1.0268, Property 1.0165),
+`scripts/diagnostics/loss-ratio-report.ts`): **mean 1.0171** (WC 1.0079, GL 1.0268, Property 1.0165),
 consistent with the `AGGREGATE_LOSS_DISTRIBUTION` design comment (theoretical ≈0.998). The earlier
 prediction in finding 17 that `E[commonLossFactor] ≈ 0.69` was **wrong** — it assumed the 46%/66.8%
 gap was real. It was not. There is no mis-centering to fix.

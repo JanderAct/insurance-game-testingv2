@@ -1,7 +1,7 @@
 // THE OPENING POSITION — what sets it, and what the acceptance band is measured
 // against.
 //
-// Run: npx tsx scripts/diagnostics/opening-basis-check.ts
+// Run: npx tsx scripts/diagnostics/opening-basis-report.ts
 //
 // STARTING_CAPITAL_TO_PREMIUM seeds each line's PRE-GAME surplus as a multiple
 // of its own premium, which is config-independent by construction. But the

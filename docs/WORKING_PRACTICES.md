@@ -7,16 +7,28 @@ Things that were discovered expensively and live only in conversation memory. Re
   arrangement without anyone noticing: `allocation-grid` threw for a whole commit, and
   `cession-path-independence` had been failing for four. Running the third one down
   (`panel-engine-parity-check`) for the first time found it red too.
-  - `npm run gates` — 34 gates, ~2 min wall clock. Every commit.
+  - `npm run gates` — 39 gates, ~2 min wall clock. Every commit.
   - `npm run gates:slow` — `property-tower-mc`, ~10 min. Before a merge, and after any tower change.
   - `npm run gates:all`, `npm run gates:probes`, `npm run gates:list`.
   - **The manifest in `scripts/gates.ts` is checked against the directory on every run.** A new script in
     `scripts/diagnostics/` that is in no list fails the runner by name. That check, not the list, is the
     thing that keeps the sweep complete — a list alone only fixes the omission you already know about.
-  - **A script named `*-check` is not necessarily a gate.** Eleven of them print and assert nothing
-    (`reinsurance-tower-check`, `wc-behaviour-check`, `property-fit-check`, `loss-ratio-check` and more).
-    They are in `PROBES` with a one-line reason each. Do not read a name as a verdict.
+  - **A script named `*-check` is not necessarily a gate, and there are TWO different ways that goes
+    wrong.** This bullet used to say "eleven of them print and assert nothing", which straddled the two
+    and hid the worse one. Measured: **nine** asserted nothing at all — renamed to `*-report`
+    (`loss-ratio`, `membership-equilibrium`, `opening-basis`, `property-fit`, `reinsurance-layer`,
+    `tower-downside`, `wc-behaviour`, `wc-cap-stability`, `ibner-clf-basis`) — and **five** assert, print
+    `FAIL` per row, and then **exit 0** (`clf-downside-check`, `gl-claim-check`, `gl-cutover-check`,
+    `reinsurance-tower-check`, `wc-cutover-check`). The second five are worse: the runner prints `ok`
+    beside a script that just printed FAIL. They are not renamed, because `-report` would cement the
+    wrong half; promote-or-drop is a decision. Do not read a name as a verdict, and do not read a green
+    runner line as one either.
   - **A probe still has to run.** `allocation-grid` asserts nothing and was still red, because it threw.
+  - **A gate's NAME can become a coverage argument, and then the coverage is imaginary.** Three comments
+    in the engine credited `property-fit-check` with asserting the Property mean severity and the derived
+    held pure premium — one of them saying it was "the check that would otherwise be missing". That script
+    asserts nothing. The assertions were real but lived in `property-claim-check`; the name alone carried
+    them for months. When a comment says a script asserts something, open the script.
 - **"Store the inputs, not the output" — and check whether the inputs are already stored before adding
   any.** Claim regeneration was briefed as persisting five scalars per line-year against the ~7 MB of claim
   objects they replace. Tracing each one: the roster (`memberList`) and `kLineApplied` were already on the

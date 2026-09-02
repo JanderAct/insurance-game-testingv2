@@ -95,7 +95,7 @@ console.log('  BOTH sides are neutral at default decisions. Neither is: the join
 console.log('  +0.60 members/yr at defaults, and the realised departure rate is 4.2%, not the nominal');
 console.log('  5.0%, because the retention ladder is also net-positive there. The shipped derivation');
 console.log('  corrects both — see MEMBERSHIP_EQUILIBRIUM_ENROLLMENT in defaultAssumptions.ts and the');
-console.log('  measurements in membership-equilibrium-check.ts. The per-line SPREAD below is still');
+console.log('  measurements in membership-equilibrium-report.ts. The per-line SPREAD below is still');
 console.log('  the useful output here: it is what says one k serves all three lines.\n');
 console.log('  line       enrolled(median)  prospects  leave/yr  implied k');
 const impliedK: Record<string, number> = {};

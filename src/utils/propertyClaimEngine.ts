@@ -193,7 +193,13 @@ export function propertySeverityMoment(k: number, severityScale = 1, yearNumber 
 }
 
 // Mean claim size at neutral risk quality — the figure the held pure premium
-// is built from. Asserted against the brief's $435,254 by property-fit-check.
+// is built from. Asserted against the brief's $435,254 by property-claim-check
+// (`|PROPERTY_MEAN_SEVERITY - 435_254| < 500`).
+//
+// ⚠ THIS NAMED property-fit-check, WHICH ASSERTS NOTHING — it prints a scale
+// analysis and exits 0 either way, and is now property-fit-report. The
+// assertion is real and always was; it just lives in the other script. The
+// name alone was enough to make three comments in this engine credit it.
 export const PROPERTY_MEAN_SEVERITY = propertySeverityMoment(1, 1);
 
 // --- analytic expectation (invariant 1) -------------------------------------

@@ -1,6 +1,6 @@
 // DOES THE REINSURANCE TOWER HAVE A DOWNSIDE NOW?
 //
-// Run: npx tsx scripts/diagnostics/tower-downside-check.ts
+// Run: npx tsx scripts/diagnostics/tower-downside-report.ts
 //
 // THE PROBLEM THIS TESTS. Buying GL's full occurrence tower raises the total
 // member charge rate about 65%, from ~7.01 to ~11.57 per $100. Before the price

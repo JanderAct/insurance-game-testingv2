@@ -144,8 +144,16 @@ const WC_HELD_PURE_PREMIUM_PER_100 = deriveNeutralPurePremiumPer100(getPredefine
 // two parts with different provenance — a derived non-cat component and an
 // ASSERTED cat load no generator produces — so deriving it here would silently
 // drop the asserted half. See PROPERTY_HELD_PURE_PREMIUM_PER_100's own comment.
-// property-fit-check.ts asserts the derived half against the generator's
-// analytic expectation, which is the check that would otherwise be missing.
+// property-claim-check.ts asserts the derived half against the generator's
+// analytic expectation, which is the check that would otherwise be missing —
+// `|derived - PROPERTY_HELD_PURE_PREMIUM_PER_100| < 0.0005`, plus a companion
+// assertion that the held figure is NOT the derived half plus the retired cat
+// load, so the two halves cannot be silently recombined.
+//
+// ⚠ THIS NAMED property-fit-check, WHICH ASSERTS NOTHING (now
+// property-fit-report). The coverage this sentence claims is real; it was
+// credited to the wrong script, and the claim "the check that would otherwise
+// be missing" made a name into a coverage argument.
 const GL_HELD_PURE_PREMIUM_PER_100 = deriveNeutralGlPurePremiumPer100(getPredefinedMarketMembers());
 
 // THIS YEAR'S GROSS PURE PREMIUM PER $100 — exported because the Decisions

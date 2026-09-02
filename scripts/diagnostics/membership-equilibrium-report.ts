@@ -1,6 +1,6 @@
 // MEMBERSHIP EQUILIBRIUM — does the enrolled book hold flat at all defaults?
 //
-// Run: npx tsx scripts/diagnostics/membership-equilibrium-check.ts
+// Run: npx tsx scripts/diagnostics/membership-equilibrium-report.ts
 //
 // THE CLAIM UNDER TEST. Joins now scale with the remaining marketplace
 // (k x (roster - enrolled), k pinned so joins == departures at the measured

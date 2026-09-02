@@ -45,7 +45,8 @@ const DIAG = path.join(__dirname, 'diagnostics');
 // measured, not estimated, on a 4-core box.
 //
 // ⚠ THE SPLIT IS BY MEASURED COST, NOT BY IMPORTANCE, and nothing in SLOW is
-// less load-bearing than what is here. It is one script.
+// less load-bearing than what is here. It is three scripts — see SLOW's note
+// for why it was one, which was an unfinished measurement rather than a finding.
 //
 // ⚠ AND THE COST WAS NOT WHERE IT WAS EXPECTED. cohort-stock-check runs SIXTY
 // YEARS and was assumed to be one of the expensive ones; it takes 4 seconds,
@@ -97,54 +98,106 @@ const FAST: string[] = [
 ];
 
 // ============================================================================
-// SLOW — one script, and it is a named runnable set rather than a directory
-// nobody walks. Run before a merge, and after any change to the tower, the
-// severity distributions or the layer structure.
+// SLOW — a named runnable set rather than a directory nobody walks. Run before
+// a merge, and after any change to the tower, the severity distributions, the
+// layer structure, or GL's frequency, severity or cap.
 //
-// ⚠ ONE ENTRY IS NOT A MISTAKE. The measurement said what it said: everything
-// else is under 45 seconds, and property-tower-mc is 571. Padding this list to
-// look like a tier would mean moving fast gates out of the per-commit sweep for
-// the sake of symmetry.
+// ⚠ THE TIER WAS ONE SCRIPT AND THAT WAS AN ARTEFACT OF AN UNFINISHED
+// MEASUREMENT, NOT A FINDING. It said "everything else is under 45 seconds and
+// property-tower-mc is 571", which was true of everything that had been TIMED.
+// The two CLF grid derivers had not been: gl-clf-grid-derive was killed at 55
+// minutes during that same concurrent timing pass and left in PROBES with a
+// note saying "do not put it in a tier", so its cost was never established and
+// nothing ever ran it. An unmeasured script is worse than a retirable one —
+// nobody knew what it said.
+//
+// MEASURED, STANDALONE ON AN IDLE BOX: gl-clf-grid-derive 702s (11m42s), exit
+// 0, "All monotonicity checks pass". That is a seventh of the 55-minute figure,
+// which is not a contradiction — 55 minutes was three-way concurrent against
+// property-tower-mc's Monte Carlo — but the standalone number is the one a tier
+// should be sized on, and at 12 minutes it tiers cleanly.
+//
+// ⚠ BOTH DERIVERS BELONG HERE, AND "IT IS A GENERATOR" WAS NEVER THE REASON TO
+// EXCLUDE THEM. Each ends in `process.exitCode = anyNonMonotonic ? 1 : 0` and
+// prints "*** NON-MONOTONICITY DETECTED — DO NOT SHIP ***", so both have
+// pass/fail semantics — the only test in this repo of whether a derived CLF
+// grid is monotonic in percentile. The caveat that survives is one of SCOPE,
+// not of kind: they assert monotonicity on the grid they PRODUCE, not on
+// STATIC_CLF_TABLE, which is what the engine actually prices off. Keep that
+// distinction; it is the reason these are not in FAST beyond their cost.
+// (Checked while moving them: the early `exitCode = 1` stratification stop sits
+// in an if/else-if/else chain, so the monotonicity branch cannot reach it and
+// reset a real failure to 0.)
 // ============================================================================
 const SLOW: string[] = [
   'property-tower-mc',               // 571s — Monte Carlo over the tower
+  'gl-clf-grid-derive',              // 702s — derives GL's CLF grid; asserts monotonicity on it
+  'wc-clf-grid-derive',              // 166s — the same, for WC, with the same exit semantics
 ];
 
 // ============================================================================
 // PROBES — measurement, not pass/fail. Every one of these has a reason to be
 // here, and the reason is written down. A probe still has to RUN: allocation-grid
 // was a probe and it was throwing, which is why the runner offers --probes.
+//
+// ============================================================================
+// ⚠ NINE OF THESE WERE NAMED `*-check` AND ASSERTED NOTHING. THEY ARE NOW
+// NAMED `*-report`, AND THE RENAME IS THE POINT RATHER THAN THE TIDYING.
+//
+// The habitual sweep list this runner replaced was built by reading names. A
+// file called `reinsurance-tower-check` gets carried into a "gates run" line in
+// a commit message and nobody re-opens it to find out that it prints a table
+// and exits 0 either way. Renamed here: ibner-clf-basis, loss-ratio,
+// membership-equilibrium, opening-basis, property-fit, reinsurance-layer,
+// tower-downside, wc-behaviour, wc-cap-stability — all `-check` -> `-report`.
+// Old names appear in commit messages and in one lineage entry; they are the
+// same scripts.
+//
+// ⚠ AND THE NAMING WAS THE SMALLER HALF. FIVE MORE ASSERT AND CANNOT SAY SO.
+// clf-downside-check, gl-claim-check, gl-cutover-check, reinsurance-tower-check
+// and wc-cutover-check each collect a `problems[]` and print `FAIL` per row —
+// and then exit 0. So the sweep prints `ok` beside a script that just printed
+// FAIL, which is strictly worse than a probe that asserts nothing: the reader
+// is told green by the runner and would have to read the body to learn
+// otherwise. THEY ARE NOT RENAMED, deliberately — calling them `-report` would
+// cement the wrong half of the problem. Their assertions are real and at least
+// two are load-bearing (962ef60 and cb00971 both turned on gl-supplied-clf and
+// gl-claim trend assertions), so the open question is PROMOTE OR DROP, which is
+// a decision and not a rename. All five print no FAIL as of 2a051bb — measured,
+// so nothing is silently red today.
+//
+// WORKING_PRACTICES said "eleven of them print and assert nothing". Measured,
+// it is nine that assert nothing and five that assert without exiting; the
+// eleven straddled the two and hid the five. Corrected there too.
 // ============================================================================
 const PROBES: Record<string, string> = {
   'allocation-grid': 'compares allocation rules cell by cell; the table it prints is quoted in developmentAllocation.ts [9s]',
-  'clf-downside-check': 'reports the downside of the CLF tables; no threshold [6s]',
+  'clf-downside-check': '⚠ ASSERTS BUT EXITS 0 — prints "FAIL — formula has drifted" on CLF-table drift and the runner still reads ok. Promote or drop [6s]',
   'clf-table-derive': 'derives the static CLF tables — a generator, not a check [240s]',
   'development-cession-size': 'the cession rate by allocation rule; the calibration table [20s]',
-  'gl-claim-check': 'GL generator shape report [10s]',
-  'gl-clf-grid-derive': 'derives GL\'s CLF grid by Monte Carlo — a generator. Asserts monotonicity on what it produces, not on what ships. STILL RUNNING at 55 minutes when the timing pass was cut — do not put it in a tier',
-  'gl-cutover-check': 'before/after report for the GL cutover; historical [6s]',
+  'gl-claim-check': '⚠ ASSERTS BUT EXITS 0 — collects problems[] and prints FAIL per row; its trend assertions were deliberately strengthened at cb00971 and the runner cannot see them. Promote or drop [10s]',
+  'gl-cutover-check': '⚠ ASSERTS BUT EXITS 0 — collects problems[] and prints FAIL per row; it printed -12.75% FAIL in a commit message once. Promote or drop [6s]',
   'investment-dominance-report': 'underwriting against investment income, per line, with the implied return. A design reading with no threshold — see its header [12s]',
-  'ibner-clf-basis-check': 'reports the IBNER/CLF basis pairing; no threshold [17s]',
+  'ibner-clf-basis-report': 'reports the IBNER/CLF basis pairing; no threshold. Renamed from -check [17s]',
   'ibner-pregame-report': 'pre-game IBNER state report [64s]',
   'ibner-report': 'IBNER behaviour report [15s]',
   'ibnr-removal-impact': 'one-off impact report for the IBNR removal; historical [14s]',
   'loss-level-diagnostic': 'loss level by line and year; a reading [20s]',
-  'loss-ratio-check': 'loss ratio report despite the name — prints, asserts nothing [5s]',
-  'membership-equilibrium-check': 'membership equilibrium report despite the name — prints, asserts nothing [7s]',
+  'loss-ratio-report': 'loss ratio reading; asserts nothing. Renamed from -check [5s]',
+  'membership-equilibrium-report': 'membership equilibrium reading; asserts nothing. Renamed from -check [7s]',
   'membership-equilibrium-facts': 'membership facts table [5s]',
   'membership-recalibrate': 'recalibration helper — a generator [7s]',
-  'opening-basis-check': 'opening-surplus basis report despite the name — prints, asserts nothing [10s]',
+  'opening-basis-report': 'opening-surplus basis reading; asserts nothing. Renamed from -check [10s]',
   'price-channel-facts': 'price channel facts table [10s]',
   'property-clf-basis-report': 'Property CLF basis report [21s]',
-  'property-fit-check': 'Property fit report despite the name — prints, asserts nothing [4s]',
-  'reinsurance-layer-check': 'layer report despite the name — prints, asserts nothing [41s]',
-  'reinsurance-tower-check': 'tower report despite the name — prints, asserts nothing [2s]',
-  'tower-downside-check': 'tower downside report despite the name — prints, asserts nothing [8s]',
+  'property-fit-report': 'Property fit reading; asserts nothing. Renamed from -check — and three engine comments claimed it ASSERTED the fit, now corrected [4s]',
+  'reinsurance-layer-report': 'layer reading; asserts nothing. Renamed from -check [41s]',
+  'reinsurance-tower-check': '⚠ ASSERTS BUT EXITS 0 — collects problems[] and prints FAIL per row. Promote or drop [2s]',
+  'tower-downside-report': 'tower downside reading; asserts nothing. Renamed from -check [8s]',
   'wc-above-tower-report': 'WC above-tower report [109s]',
-  'wc-behaviour-check': 'WC behaviour report despite the name — prints, asserts nothing [5s]',
-  'wc-cap-stability-check': 'WC cap stability report despite the name — prints, asserts nothing [21s]',
-  'wc-clf-grid-derive': 'derives WC\'s CLF grid by Monte Carlo — a generator, same as GL\'s [166s]',
-  'wc-cutover-check': 'before/after report for the WC cutover; historical [6s]',
+  'wc-behaviour-report': 'WC behaviour reading; asserts nothing. Renamed from -check [5s]',
+  'wc-cap-stability-report': 'WC cap stability reading; asserts nothing. Renamed from -check [21s]',
+  'wc-cutover-check': '⚠ ASSERTS BUT EXITS 0 — collects problems[] and prints FAIL per row; it was red at 19d04e7 and aa0838a and only found by hand. Promote or drop [6s]',
 };
 
 // ============================================================================
@@ -211,12 +264,32 @@ const PROBES: Record<string, string> = {
 // a script can be run without being written about — but "no gate in this
 // directory has NEVER run" is now true by construction rather than by hope.
 //
-// 27 of the 28 probes run clean. The 28th, gl-clf-grid-derive, was still
-// running after 55 minutes and the timing pass was cut rather than waited out —
-// so it is neither green nor red here, it is UNMEASURED, and that is the honest
-// word for it. It is a Monte Carlo generator that produces the GL CLF grid; it
-// is in no tier because a tier containing it would never be run, which is the
-// failure this whole file exists to prevent.
+// ⚠ AND "RUN" IS NOT "EXERCISED" — RESOLVED FOR THOSE THREE AT 2a051bb. Whether
+// a gate has been TESTED is a question about whether the code it watches ever
+// MOVED under it, and that is answerable from history rather than from commit
+// prose. Measured, against each one's actual subject rather than its whole
+// import graph:
+//
+//   export-number-format-check   EXERCISED. Six commits since 8723bd8 touched
+//                                claimsExport/resultsExport, including a new
+//                                sheet section (5c3d9cc) and the paid split
+//                                (3ee8ba8). Green across real column changes.
+//   trend-memoization-check      BARELY. One commit (cb00971) touched
+//                                memoizeByYear; none of the five trend
+//                                functions it guards has been edited since.
+//   pool-market-share-check      NOT EXERCISED. The pool marketShare formula
+//                                has not been touched since f0a43c7 added the
+//                                gate for it. 35 commits of green on a subject
+//                                that never moved is not evidence.
+//
+// ============================================================================
+// gl-clf-grid-derive IS NO LONGER UNMEASURED. It ran to completion at 2a051bb:
+// 702s standalone, exit 0, "All monotonicity checks pass", with the analytic CV
+// inside the bootstrap CI and the denominator identity at 8.88e-16. It has moved
+// to SLOW with that runtime stated — see SLOW's note. The old text here said it
+// was "in no tier because a tier containing it would never be run"; a script in
+// no tier is one that never runs at all, which is strictly worse, and the
+// 55-minute figure it was excluded on turned out to be concurrency.
 // ============================================================================
 
 // ---------------------------------------------------------------- manifest

@@ -1,6 +1,6 @@
 // REINSURANCE LAYER TABLES — built from the actual claim generators.
 //
-//   npx tsx scripts/diagnostics/reinsurance-layer-check.ts
+//   npx tsx scripts/diagnostics/reinsurance-layer-report.ts
 //
 // DIAGNOSTIC ONLY. Reads the generators; changes no engine, parameter or
 // pricing code. Nothing here is wired into processYear — the retention

@@ -1,6 +1,6 @@
 // WC BEHAVIOUR OVER A FULL GAME — what a player actually experiences.
 //
-// Run: npx tsx scripts/diagnostics/wc-behaviour-check.ts
+// Run: npx tsx scripts/diagnostics/wc-behaviour-report.ts
 //
 // CONFIGURATION, fixed: WC only, 10-year games, NO reinsurance (every layer
 // declined, no aggregate), CLF 1.000, 50 games at default decisions otherwise.

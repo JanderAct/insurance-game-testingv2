@@ -141,7 +141,7 @@ const csvLines = rows.map(r => [
   r.expectedLossRatio, r.actualLossRatio,
 ].join(','));
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const outPath = path.join(__dirname, 'loss-ratio-check-output.csv');
+const outPath = path.join(__dirname, 'loss-ratio-report-output.csv');
 fs.writeFileSync(outPath, [csvHeader, ...csvLines].join('\n') + '\n');
 
 // --- Summary stats ---
