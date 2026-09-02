@@ -2185,6 +2185,43 @@ export const CLAIM_REVISION_PHI = 0.63;
 // a validated result for those lines. Say so wherever those figures are quoted.
 export const CLAIM_SETTLED_LOG_SD_ANCHOR = 2.29;
 
+// THE MOVEMENT-BY-AGE TARGET — the pool's own GL cohort movement as a share of
+// cohort incurred, by DATA age. Fitted figures, recorded the way the payout
+// curves are; the underlying experience stays out of the repo.
+//
+// Data age 1 is excluded for the reason recorded at
+// CLAIM_REVISION_MAGNITUDE_NUMERATOR — it is the placeholder-correction stage
+// the model has no analogue for. So MODEL age = DATA age - 1 and the five
+// figures below are model ages 1 through 5. Data age 7+ is noise and is not a
+// target.
+export const CLAIM_MOVEMENT_BY_AGE_TARGET: readonly number[] = [1.10, 0.65, 0.42, 0.17, 0.06];
+
+// ⚠ AND THE OPEN-SHARE HALF OF THE COMPOSITION IS SOURCE EXPERIENCE, NOT A
+// MODEL QUANTITY. THIS IS THE FINDING composition-table-check EXISTS TO CARRY.
+//
+// The composition that validates the law's FORM is
+//     movement(age) = magnitude(age) x open share(age)
+// and it was checked against the pool's own open-claim development:
+export const CLAIM_OPEN_SHARE_SOURCE: readonly number[] = [0.901, 0.794, 0.630, 0.409, 0.192];
+//
+// MEASURED, and the model does not reproduce that series. The model's own
+// value-weighted open share at the end of each model age runs
+//   97.3%  91.2%  78.5%  60.8%  42.7%   against the source's
+//   90.1%  79.4%  63.0%  40.9%  19.2%
+// — a ratio of 1.08 / 1.15 / 1.25 / 1.49 / 2.22, widening monotonically. Its
+// COUNT-weighted open share runs the other way at 74.6 / 43.7 / 22.9 / 11.6 /
+// 5.8%, so the source figure sits between the model's two weightings and the
+// gap is a real difference in how fast claims close, not a weighting artefact.
+//
+// SO THE COMPOSITION CANNOT BE ASSERTED END TO END AGAINST THE MODEL, and
+// pretending otherwise would be gating the closure curves through a revision
+// test. What IS asserted is the half that is the law's own: that the realised
+// magnitude reproduces 200/(age+1). The movement comparison is REPORTED beside
+// it with the open-share gap named, so the next reader sees which term is
+// short. Re-deriving GL's closure curves against this series is its own
+// commit and its own ruling.
+
+
 // ===========================================================================
 // ⚠ IBNER_TOTAL_SD RETIRES AS A TARGET WHEN THIS FLAG FLIPS — ALL THREE LINES.
 //

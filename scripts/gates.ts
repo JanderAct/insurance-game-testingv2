@@ -40,7 +40,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIAG = path.join(__dirname, 'diagnostics');
 
 // ============================================================================
-// FAST — the tier that runs on every commit. 43 gates, about 9 minutes of CPU
+// FAST — the tier that runs on every commit. 44 gates, about 9 minutes of CPU
 // and a little over 2 minutes of wall clock at 3-way concurrency. Seconds are
 // measured, not estimated, on a 4-core box.
 //
@@ -72,6 +72,7 @@ const FAST: string[] = [
   'claims-workbook-check',           //  17s
   'closure-draw-check',              //   3s
   'cohort-stock-check',              //   4s   (sixty years, four games)
+  'composition-table-check',         //  17s   STAGE 1 — the magnitude law against 200/(age+1); GL only
   'development-cession-check',       //  14s
   'development-sign-symmetry',       //  11s
   'ending-position-check',           //   6s
@@ -100,8 +101,8 @@ const FAST: string[] = [
   'save-size-check',                 //   4s
   'seed-cohort-shape-check',         //   1s
   'shock-check',                     //   6s
-  'terminal-severity-check',         //  30s   STAGE 1 — derives phi against the pool's settled log-SD
   'solo-export-guard',               //   4s
+  'terminal-severity-check',         //  30s   STAGE 1 — derives phi against the pool's settled log-SD
   'tower-runtime-check',             //  13s
   'trend-memoization-check',         //   2s
   'value-identity-check',            //   3s
