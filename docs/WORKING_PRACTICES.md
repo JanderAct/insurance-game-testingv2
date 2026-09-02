@@ -7,7 +7,7 @@ Things that were discovered expensively and live only in conversation memory. Re
   arrangement without anyone noticing: `allocation-grid` threw for a whole commit, and
   `cession-path-independence` had been failing for four. Running the third one down
   (`panel-engine-parity-check`) for the first time found it red too.
-  - `npm run gates` — 42 gates, ~2 min wall clock. Every commit.
+  - `npm run gates` — 44 gates, ~2 min wall clock. Every commit.
   - `npm run gates:slow` — `property-tower-mc` (~21 min) plus both CLF grid derivers. Before a merge, and after any tower, severity or GL cap change.
   - `npm run gates:all`, `npm run gates:probes`, `npm run gates:list`.
   - **The manifest in `scripts/gates.ts` is checked against the directory on every run.** A new script in
@@ -55,6 +55,28 @@ Things that were discovered expensively and live only in conversation memory. Re
     `pool-aggregation-check` fails and names `marketShare` by field on the same zeroing that left the
     deleted gate green. Where the coverage went is written into `scripts/gates.ts`, so the name cannot be
     re-added on the strength of the name.
+  - **A number presented as an EXTERNAL ANCHOR must name where it came from, in the constant, or the label
+    is unfalsifiable.** `CLAIM_OPEN_SHARE_SOURCE` was named `_SOURCE` and described as the pool's own claim
+    development. It was this model's own value-weighted open register, read one age later. On that label a
+    whole finding was published — "GL's closure curves hold value open 2.3x longer than the pool's book" —
+    and retracted at the next commit. **The durable fix is not "check your labels".** It is that an anchor
+    should carry the file, extract or run it came from, so a reader can go and look; a provenance claim
+    nobody can check is a claim resting on recall, and recall is what failed here. Two descriptions of the
+    same column were in front of me and I propagated the wrong one without reconciling them. Where the
+    source genuinely cannot be in the repo, say what it is and say what would falsify the label — here,
+    that the model reproduces the series at age a+1 with an RMS error of 2.23pp against 16.66pp unshifted,
+    which settles it in one run.
+  - **An unconditionally-true condition is invisible to lint, and this is the sixteenth instance of the
+    family.** `if (a + 1 <= closureAge - 1 + 1 && a + 1 <= closureAge)` — `closureAge - 1 + 1` is
+    `closureAge`, so both conjuncts are the loop guard four lines above. TESTED, so the next reader does not
+    reach for the wrong tool: `no-constant-binary-expression` and `no-constant-condition` both return **zero
+    messages** on that exact expression, because neither operand is constant and the two sides are not
+    textually identical. There is no rule to switch on. **Catch it with a runtime identity instead, and
+    prefer an EXACT one.** `openEnd[a] === openStart[a+1]` needs no tolerance, no sample size and no noise
+    budget — a claim open at the end of a year is a claim open at the start of the next — and a
+    reintroduced tautology collapses the two series and breaks it at every age at once. Measured: the
+    restored defect produces 9 failures. An exact identity is the cheapest assertion there is; reach for one
+    before reaching for a threshold.
 - **"Store the inputs, not the output" — and check whether the inputs are already stored before adding
   any.** Claim regeneration was briefed as persisting five scalars per line-year against the ~7 MB of claim
   objects they replace. Tracing each one: the roster (`memberList`) and `kLineApplied` were already on the

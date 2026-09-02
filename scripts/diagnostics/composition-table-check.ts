@@ -1,6 +1,6 @@
 // ============================================================================
-// THE COMPOSITION TABLE — magnitude x open share against the pool's movement.
-// A GATE, AND IT ASSERTS LESS THAN THE BRIEF ASKED FOR. READ WHY BEFORE WIDENING IT.
+// THE COMPOSITION TABLE — the magnitude law, and the two open-share series.
+// A GATE. IT CARRIES A RETRACTION: READ THE SECOND BLOCK BEFORE THE NUMBERS.
 //
 // ⚠ THIS EXITS NON-ZERO. Run:
 //   npx tsx scripts/diagnostics/composition-table-check.ts
@@ -14,35 +14,54 @@
 // product are needed, and only ONE of them is the revision law's.
 //
 // ============================================================================
-// ⚠ WHAT THIS FILE DOES NOT ASSERT, AND WHY THAT IS THE FINDING RATHER THAN A
-// GAP IN THE GATE.
+// ⚠ THIS FILE SHIPPED A FINDING THAT WAS AN ARITHMETIC ARTEFACT. RETRACTED HERE.
 //
-// THE OPEN-SHARE TERM IS SOURCE EXPERIENCE AND THE MODEL DOES NOT REPRODUCE IT.
-// Measured, value-weighted at the end of each model age:
+// b206cc6's header said the open-share term was source experience, that the
+// model reproduced it at a ratio widening to 2.28x, and that "GL's closure
+// curves hold value open far longer than the pool's own claim development did".
+// THE MODEL'S CLOSURE CURVES ARE NOT IMPLICATED. There is no closure-curve
+// finding and there never was one.
 //
-//   model   97.2%  90.0%  78.7%  62.2%  43.7%
-//   source  90.1%  79.4%  63.0%  40.9%  19.2%
-//   ratio    1.08   1.13   1.25   1.52   2.28
+// WHAT ACTUALLY HAPPENED. The open-share accumulator read
 //
-// The ratio widens monotonically: GL's closure curves hold value open far
-// longer than the pool's own claim development did. It is not a weighting
-// artefact — the model's COUNT-weighted open share runs 74.6 / 43.7 / 22.9 /
-// 11.6 / 5.8%, so the source figure sits BETWEEN the model's two weightings and
-// the disagreement survives either choice.
+//     if (a + 1 <= closureAge - 1 + 1 && a + 1 <= closureAge) openEnd[a] += ...
 //
-// So asserting the full composition against the target would be gating GL's
-// CLOSURE CURVES through a revision test. A red light there would send the next
-// reader to claimRevision.ts, where nothing is wrong. Re-deriving those curves
-// against this series is its own commit and its own ruling; this file names the
-// gap and reports the number, which is what makes that commit possible.
+// in which `closureAge - 1 + 1` is `closureAge`, so both conjuncts are
+// `a + 1 <= closureAge` — which for integers is `a < closureAge`, the loop guard
+// four lines above. The branch was unconditionally true wherever it was reached.
+// `openEnd` was labelled END-of-age and held the START-of-age share, and it was
+// then compared against a series measured at the end of each age. The entire
+// "widening ratio" was that one-age offset. Corrected, it reads
+// 1.00 / 0.99 / 0.99 / 1.07 / 1.27.
 //
-// ⚠ AND THE REALISED MOVEMENT IS AN ORDER BELOW THE TARGET, WHICH IS THE SAME
-// FINDING SEEN FROM THE OTHER END. At the shipped phi the model's value-weighted
-// movement reads 9.8 / 8.4 / 6.8 / 4.9 / 3.2% against a target of 110 / 65 / 42
-// / 17 / 6%. Raising phi does not fix it: the target decays 18.3x across the
-// five ages while the model's movement decays 3.0x at the shipped phi and 3.8x
-// at phi = 2, so it is a SHAPE mismatch and no single scale reaches it. That is reported below at three phi values so the
-// non-convergence is visible rather than asserted.
+// AND THE SERIES WAS MIS-LABELLED TOO — it is this model's own earlier reading,
+// not the pool's. It is now CLAIM_OPEN_SHARE_MODEL_RECORDED, and its note
+// carries how that was settled.
+//
+// ⚠ WHAT SURVIVES, BECAUSE THE MEASUREMENTS WERE NOT WRONG — THE EXPLANATION WAS.
+// Arm 1 and the control arm never read `openEnd`, so the magnitude assertion and
+// its resolution statement stand unchanged. The realised-movement numbers stand:
+// at the shipped phi the model's value-weighted movement is 9.8 / 8.4 / 6.8 /
+// 4.9 / 3.2% against a target of 110 / 65 / 42 / 17 / 6%, and no single phi
+// reaches it because the target decays 18.3x across the five ages while the
+// model decays 3.0x. What changes is the diagnosis: that gap is NOT the exposure
+// term being short.
+//
+// ============================================================================
+// WHAT IS OPEN, STATED SO IT IS NOT RE-DISCOVERED AS A SURPRISE.
+//
+// With the ages aligned, the composition tracks the way it was briefed to:
+// count-weighted magnitude x leaving open share gives 84 / 50 / 30 / 17 / 8
+// against the target's 110 / 65 / 42 / 17 / 6 — about a quarter low at ages 1-3
+// and on target after.
+//
+// THE REMAINING GAP IS BETWEEN THAT COMPOSITION AND THE LAW'S REALISED MOVEMENT:
+// 84% against 9.8% at age 1. The composition is a statement about the law's
+// PARAMETERS; the realised movement is what the law actually does, and between
+// them sit the frequency q = 0.70, phi = 0.63, the fact that E|X-1| for a
+// mean-one lognormal is below its log-sigma, and the count-versus-value
+// weighting. That stack is the next question after the engine wiring. It is NOT
+// what this file asserts and nothing here fails on it.
 //
 // ============================================================================
 // WHAT IS ASSERTED: THE HALF THAT IS THE LAW'S OWN.
@@ -81,7 +100,7 @@ import { closedShare, claimClosureUnit } from '../../src/utils/claimClosure';
 import { cumulativePaid } from '../../src/utils/payoutPattern';
 import { reviseOnce, revisionMagnitudeOnIncurred, type RevisionState } from '../../src/utils/claimRevision';
 import {
-  CLAIM_MOVEMENT_BY_AGE_TARGET, CLAIM_OPEN_SHARE_SOURCE, CLAIM_REVISION_MAGNITUDE_NUMERATOR,
+  CLAIM_MOVEMENT_BY_AGE_TARGET, CLAIM_OPEN_SHARE_MODEL_RECORDED, CLAIM_REVISION_MAGNITUDE_NUMERATOR,
   CLAIM_REVISION_PHI, CLAIM_REVISION_SIZE_TREND, LINE_PAYOUT_PATTERN, resolveClosureCurve,
 } from '../../src/data/defaultAssumptions';
 import type { CoverageLine } from '../../src/types/simulation';
@@ -129,7 +148,10 @@ function register(line: CoverageLine, seed: number): Entry[] {
 interface Reading {
   /** Count-weighted realised magnitude at each age — the law's own term. */
   magnitude: number[];
-  /** Value-weighted open share at the END of each age — the exposure term. */
+  /** Value-weighted open share ENTERING age a — open at the start of the year. */
+  openStart: number[];
+  /** Value-weighted open share LEAVING age a — still open at the start of a+1.
+   *  openEnd[a] === openStart[a+1] identically, and the gate asserts it. */
   openEnd: number[];
   /** Value-weighted |movement| / cohort incurred at each age. */
   movement: number[];
@@ -143,7 +165,8 @@ function walk(line: CoverageLine, reg: Entry[], gameId: string, phi: number, siz
   const paidShareAt = (a: number) => Math.min(0.999, cumulativePaid(pattern, a));
   const total = reg.reduce((a, c) => a + c.value, 0);
   const mag = new Array(AGES + 1).fill(0), cnt = new Array(AGES + 1).fill(0);
-  const openEnd = new Array(AGES + 1).fill(0), move = new Array(AGES + 1).fill(0);
+  const openStart = new Array(AGES + 2).fill(0), openEnd = new Array(AGES + 2).fill(0);
+  const move = new Array(AGES + 1).fill(0);
   const moveCw = new Array(AGES + 1).fill(0);
 
   for (const c of reg) {
@@ -161,16 +184,25 @@ function walk(line: CoverageLine, reg: Entry[], gameId: string, phi: number, siz
         ? CLAIM_REVISION_SIZE_TREND.scale * Math.pow(Math.max(1, st.value), CLAIM_REVISION_SIZE_TREND.exponent)
         : revisionMagnitudeOnIncurred(a, st.value);
       mag[a] += m; cnt[a] += 1;
+      openStart[a] += c.value;
       const before = st.value;
       st = { ...st, paidShare: paidShareAt(a) };
       st = reviseOnce(gameId, c.id, a, st, phi);
       move[a] += Math.abs(st.value - before);
       moveCw[a] += Math.abs(st.value - before) / Math.max(1, before);
-      if (a + 1 <= closureAge - 1 + 1 && a + 1 <= closureAge) openEnd[a] += c.value;
+      // ⚠ `a + 1 < closureAge`, AND THE STRICT INEQUALITY IS THE WHOLE FIX.
+      // This read `a + 1 <= closureAge - 1 + 1 && a + 1 <= closureAge`, in which
+      // `closureAge - 1 + 1` is `closureAge`, so both conjuncts were
+      // `a + 1 <= closureAge` — which for integers is `a < closureAge`, the loop
+      // guard four lines up. The branch was unconditionally true wherever it was
+      // reached, so `openEnd` was labelled end-of-age and held the START-of-age
+      // share. See the retraction in this file's header.
+      if (a + 1 < closureAge) openEnd[a] += c.value;
     }
   }
   return {
     magnitude: mag.map((v, i) => (cnt[i] ? v / cnt[i] : 0)),
+    openStart: openStart.map(v => v / total),
     openEnd: openEnd.map(v => v / total),
     movement: move.map(v => v / total),
     movementCw: moveCw.map((v, i) => (cnt[i] ? v / cnt[i] : 0)),
@@ -256,23 +288,72 @@ if (controlBroke === 0) {
     + 'pass with no age curve in force and asserts nothing. Tighten TOL_SHAPE or the arm is decorative.');
 }
 
+// ------------------------------------------------- the two open-share series
+//
+// ⚠ THIS ARM EXISTS BECAUSE NEITHER A COMMENT NOR LINT WOULD HAVE CAUGHT THE
+// DEFECT IT REPLACES. The condition behind b206cc6's retracted finding was
+// `a + 1 <= closureAge - 1 + 1 && a + 1 <= closureAge` — two textually different
+// conjuncts that both reduce to the loop guard. TESTED, so the next reader does
+// not reach for the wrong tool: `no-constant-binary-expression` and
+// `no-constant-condition` both return ZERO messages on that exact expression,
+// because neither operand is constant and the two sides are not textually
+// identical. There is no rule to switch on.
+//
+// THE PROPERTY IS AN EXACT IDENTITY, WHICH IS WHY IT IS CHEAPER THAN ANY
+// THRESHOLD. A claim open at the END of age a is exactly a claim open at the
+// START of age a+1, so openEnd[a] === openStart[a+1] to the cent — no tolerance,
+// no sample size, no noise budget. A reintroduced tautology collapses openEnd
+// onto openStart and breaks it at every age at once.
+//
+// The strict-decrease arm sits beside it because the identity alone would still
+// hold if BOTH series were computed wrongly in the same way. Claims close during
+// a year, so the share leaving must be strictly below the share entering. Two
+// cheap assertions covering the two ways this can go wrong.
+//
+// CAN-FAIL, MEASURED: restoring the b206cc6 condition produces 9 FAILURES —
+// both arms, at every age.
+console.log('');
+console.log('--- 3. THE TWO OPEN-SHARE SERIES, AND THE IDENTITY BETWEEN THEM [ASSERTED] ---');
+console.log('  age   entering (vw)   leaving (vw)   leaving[a] vs entering[a+1]');
+for (let a = 1; a <= AGES; a++) {
+  const os = mean(gl.at(r => r.openStart, a));
+  const oe = mean(gl.at(r => r.openEnd, a));
+  const nextStart = mean(gl.at(r => r.openStart, a + 1));
+  const gap = Math.abs(oe - nextStart);
+  console.log(`   ${a}       ${(100 * os).toFixed(1).padStart(5)}%         ${(100 * oe).toFixed(1).padStart(5)}%          `
+    + `${a < AGES ? `${(100 * nextStart).toFixed(1).padStart(5)}%   diff ${(100 * gap).toFixed(4)}pp` : '— (a+1 beyond the window)'}`);
+  if (!(oe < os)) {
+    failed.push(`age ${a}: the LEAVING open share ${(100 * oe).toFixed(1)}% is not strictly below the ENTERING `
+      + `share ${(100 * os).toFixed(1)}%. Claims close during a year, so it must be. Equality is the signature of `
+      + 'the b206cc6 defect — an end-of-age condition that reduces to the loop guard.');
+  }
+  if (a < AGES && gap > 1e-9) {
+    failed.push(`age ${a}: openEnd[${a}] = ${(100 * oe).toFixed(4)}% but openStart[${a + 1}] = `
+      + `${(100 * nextStart).toFixed(4)}%, differing by ${(100 * gap).toFixed(6)}pp. These are the same set of `
+      + 'claims by definition and must agree exactly; a gap means one of the two conditions is wrong.');
+  }
+}
+
 // ---------------------------------------------------------------- the target
 console.log('');
-console.log('--- 3. THE MOVEMENT TARGET [GL, REPORTED — see this file\'s header] ---');
-console.log('  age   model open (vw)   source open   ratio      model movement (vw)   target');
+console.log('--- 4. THE MOVEMENT TARGET [GL, REPORTED — see this file\'s header] ---');
+console.log('  age   model leaving (vw)   recorded model   ratio      model movement (vw)   target');
 for (let a = 1; a <= AGES; a++) {
   const oe = mean(gl.at(r => r.openEnd, a));
   const mv = mean(gl.at(r => r.movement, a));
-  const src = CLAIM_OPEN_SHARE_SOURCE[a - 1];
-  console.log(`   ${a}        ${(100 * oe).toFixed(1).padStart(5)}%          ${(100 * src).toFixed(1).padStart(5)}%      ${(oe / src).toFixed(2)}          `
+  const rec = CLAIM_OPEN_SHARE_MODEL_RECORDED[a - 1];
+  console.log(`   ${a}        ${(100 * oe).toFixed(1).padStart(5)}%             ${(100 * rec).toFixed(1).padStart(5)}%      ${(oe / rec).toFixed(2)}          `
     + `${(100 * mv).toFixed(1).padStart(5)}%           ${(100 * CLAIM_MOVEMENT_BY_AGE_TARGET[a - 1]).toFixed(0).padStart(4)}%`);
 }
 console.log('');
-console.log('  ⚠ NOT ASSERTED. The open-share ratio widens monotonically, so the exposure term');
-console.log('    is the short one and it belongs to GL\'s closure curves, not to the revision law.');
+console.log('  ⚠ THE MIDDLE COLUMN IS A REGRESSION REFERENCE, NOT AN EXTERNAL ANCHOR. It is');
+console.log('    this model\'s own earlier reading of the same quantity — see the constant\'s');
+console.log('    note. A ratio near 1 says the model has not moved; it says nothing about the');
+console.log('    pool. b206cc6 read this column as source data and published a closure-curve');
+console.log('    finding that does not exist.');
 
 console.log('');
-console.log('--- 4. NO SINGLE phi REACHES THE TARGET — a shape mismatch, not a level one ---');
+console.log('--- 5. NO SINGLE phi REACHES THE TARGET — a shape mismatch, not a level one ---');
 console.log('   phi    model movement by age (vw)                target decay   model decay');
 for (const phi of [CLAIM_REVISION_PHI, 1.0, 2.0]) {
   const g = aggregate('GL', phi);
@@ -283,7 +364,7 @@ for (const phi of [CLAIM_REVISION_PHI, 1.0, 2.0]) {
 
 // ---------------------------------------------------------------- other lines
 console.log('');
-console.log('--- 5. WC AND PROPERTY [REPORTED, NOT GATED — the target is GL experience] ---');
+console.log('--- 6. WC AND PROPERTY [REPORTED, NOT GATED — the target is GL experience] ---');
 console.log('  line       realised magnitude by age (count-wtd)         movement by age (vw)');
 for (const line of ['WC', 'Property'] as CoverageLine[]) {
   const L = aggregate(line, CLAIM_REVISION_PHI);

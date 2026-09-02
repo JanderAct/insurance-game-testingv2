@@ -2196,30 +2196,36 @@ export const CLAIM_SETTLED_LOG_SD_ANCHOR = 2.29;
 // target.
 export const CLAIM_MOVEMENT_BY_AGE_TARGET: readonly number[] = [1.10, 0.65, 0.42, 0.17, 0.06];
 
-// ⚠ AND THE OPEN-SHARE HALF OF THE COMPOSITION IS SOURCE EXPERIENCE, NOT A
-// MODEL QUANTITY. THIS IS THE FINDING composition-table-check EXISTS TO CARRY.
+// ⚠ RETRACTED AT THIS COMMIT — THIS IS THE MODEL'S OWN READING, NOT SOURCE DATA.
+// THE NAME SAID `_SOURCE` AND THAT WAS WRONG. Read this before using the series.
 //
 // The composition that validates the law's FORM is
 //     movement(age) = magnitude(age) x open share(age)
-// and it was checked against the pool's own open-claim development:
-export const CLAIM_OPEN_SHARE_SOURCE: readonly number[] = [0.901, 0.794, 0.630, 0.409, 0.192];
+// and the series below is the open-share term. b206cc6 recorded it as
+// CLAIM_OPEN_SHARE_SOURCE, described it as the pool's own claim development, and
+// published a finding that the model's closure curves hold value open 2.3x
+// longer than the pool's book.
 //
-// MEASURED, and the model does not reproduce that series. The model's own
-// value-weighted open share at the end of each model age runs
-//   97.3%  91.2%  78.5%  60.8%  42.7%   against the source's
-//   90.1%  79.4%  63.0%  40.9%  19.2%
-// — a ratio of 1.08 / 1.15 / 1.25 / 1.49 / 2.22, widening monotonically. Its
-// COUNT-weighted open share runs the other way at 74.6 / 43.7 / 22.9 / 11.6 /
-// 5.8%, so the source figure sits between the model's two weightings and the
-// gap is a real difference in how fast claims close, not a weighting artefact.
+// THAT FINDING DOES NOT EXIST. The series is this model's own value-weighted
+// open register, measured at the END of each model age. b206cc6's gate compared
+// it against a START-of-age measurement, and the whole "widening ratio" was that
+// one-age offset. Aligned correctly the ratio is 1.00 / 0.99 / 0.99 / 1.07 / 1.27
+// rather than 1.08 / 1.13 / 1.25 / 1.52 / 2.28.
 //
-// SO THE COMPOSITION CANNOT BE ASSERTED END TO END AGAINST THE MODEL, and
-// pretending otherwise would be gating the closure curves through a revision
-// test. What IS asserted is the half that is the law's own: that the realised
-// magnitude reproduces 200/(age+1). The movement comparison is REPORTED beside
-// it with the open-share gap named, so the next reader sees which term is
-// short. Re-deriving GL's closure curves against this series is its own
-// commit and its own ruling.
+// HOW IT WAS SETTLED, since a label is worth nothing without a check. Measured
+// at 12 independent registers x 40 replicates: the model's value-weighted open
+// share at model age a+1 reproduces this series with an RMS error of 2.23pp
+// against 16.66pp unshifted, exact at the first entry and 0.3 across-register sd
+// at the fourth. And the regression hypothesis is excluded on both candidates —
+// the revision law cannot touch it (the gate resolves the closure curve from the
+// DRAWN value and accumulates the DRAWN value, so the law is not in that path),
+// and 858f9ba moved the model TOWARD this series, not away: before it GL had a
+// single size-independent curve reading 73.5 / 44.0 / 23.4 / 11.3 / 5.0.
+//
+// SO IT IS A REGRESSION REFERENCE AND NOTHING MORE. Comparing the model to it
+// says whether the model has moved. It says nothing about the pool, and any
+// future reader reaching for it as an external anchor is repeating b206cc6.
+export const CLAIM_OPEN_SHARE_MODEL_RECORDED: readonly number[] = [0.901, 0.794, 0.630, 0.409, 0.192];
 
 
 // ===========================================================================
@@ -2270,6 +2276,21 @@ export const PER_CLAIM_REVISION_ENABLED = false;
 //   already cover. It becomes measurable in the commit that wires the engine,
 //   and it is the blocker that commit must clear FIRST: WC is the fragile line,
 //   and if the search starts failing, no game generates at all.
+//
+// ⚠ THE OPEN ITEM AFTER THE WIRING, RECORDED SO IT IS NOT RE-DISCOVERED. With
+// the composition table's ages aligned (see the retraction at
+// CLAIM_OPEN_SHARE_MODEL_RECORDED), the composition tracks as briefed:
+// count-weighted magnitude x leaving open share gives 84 / 50 / 30 / 17 / 8
+// against the target's 110 / 65 / 42 / 17 / 6, about a quarter low at ages 1-3
+// and on target after.
+//
+// WHAT DOES NOT TRACK is the law's REALISED movement against that composition —
+// 9.8% at age 1 against the composition's 84%. The composition is a statement
+// about the law's PARAMETERS; the realised movement is what the law does. Between
+// them sit the frequency q = 0.70, phi = 0.63, the fact that E|X-1| for a mean-one
+// lognormal sits below its log-sigma, and count-versus-value weighting. That
+// stack is the next question after the engine wiring, and it is NOT the closure
+// curves — that diagnosis was the retracted one.
 //
 // WHAT IS BUILT AND GREEN: terminal-severity-check (FAST, 29s) derives phi
 // against the anchor and carries the phi = 0 control arm;
