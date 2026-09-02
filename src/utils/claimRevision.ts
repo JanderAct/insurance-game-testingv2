@@ -1,9 +1,11 @@
 // ============================================================================
 // THE PER-CLAIM REVISION LAW — MECHANISM. STAGE 1, FLAG-GATED AND OFF.
 //
-// ⚠ NOTHING HERE IS WIRED INTO THE ENGINE. PER_CLAIM_REVISION_ENABLED is false,
-// the cohort IBNER path is untouched, and this module has no caller in src/.
-// Its callers today are the four Stage 1 gates. The fitted parameters and the
+// ⚠ THE FLAG IS OFF AND THE COHORT PATH IS UNTOUCHED. PER_CLAIM_REVISION.enabled
+// is false, so processIbner never reaches reviseDevelopingSet below and the
+// engine develops cohorts exactly as it did before Stage 1 — bit-identically, on
+// both standing gates. This module IS now wired: simulationEngine imports
+// reviseDevelopingSet, behind that one flag. The fitted parameters and the
 // reasoning behind each component live at CLAIM_REVISION_* in
 // defaultAssumptions.ts; this file is only how they are applied.
 //
@@ -253,4 +255,120 @@ export function claimTerminalValue(
     state = reviseOnce(gameId, claimId, age, state, phi);
   }
   return state.value * settlementFactor(gameId, claimId, nonZeroScale);
+}
+
+// ============================================================================
+// THE ENGINE WIRING — one cohort step, bottom-up.
+//
+// ⚠ THIS IS THE ONLY FUNCTION IN THIS MODULE THE ENGINE CALLS, and it is called
+// only when PER_CLAIM_REVISION.enabled is true. With the flag false
+// processIbner never reaches it and the cohort path above is untouched.
+//
+// It returns allocateDevelopment's shape deliberately, so processIbner's
+// existing cession machinery consumes it unchanged: the deltas go straight to
+// cedeDevelopment, which is what puts a developed occurrence through the tower.
+// Producing the same shape is what makes this a WIRING rather than a rebuild of
+// the allocation path.
+//
+// ============================================================================
+// ⚠ TWO BOUNDARIES OF THIS WIRING, BOTH OF WHICH THE FLIP MUST CLOSE.
+//
+// 1. THE UNTRACKED MASS KEEPS THE COHORT FACTOR. It is a single scalar standing
+//    for ~490 sub-retention occurrences, and the law needs a per-claim value it
+//    does not have. Giving the blob one claim's revision would overstate its
+//    movement by the diversification it actually has (490 independent draws
+//    average out; one does not), and giving it none would understate the
+//    cohort's total movement badly, since most of the COUNT lives there. So it
+//    keeps exactly what it gets today — `untracked * (factor - 1)` from the
+//    cohort lognormal, passed in — and the law reaches the tracked set, which
+//    is every occurrence that can ever cede. Named here rather than discovered
+//    at the flip.
+//
+// 2. SEED COHORTS ARE UNCHANGED. A cohort with no register has nothing to
+//    revise; processIbner's no-register branch keeps the cohort factor whether
+//    the flag is on or off. That is the same honest default as today, where a
+//    seed cohort retains its development entire.
+// ============================================================================
+
+/** allocateDevelopment's result shape, reproduced so the engine's cession path
+ *  consumes this identically. `unallocated` is always 0: a per-claim delta is
+ *  applied to the claim that produced it, so nothing can fail to land. */
+export interface RevisionAllocation {
+  deltas: number[];
+  untrackedDelta: number;
+  applied: number;
+  unallocated: number;
+}
+
+/** One tracked occurrence, as this function needs to see it. */
+export interface RevisableClaim {
+  claimId: string;
+  /** The occurrence total now, gross — DevelopingClaim.current. */
+  current: number;
+}
+
+/**
+ * Revise every tracked occurrence of one cohort by one annual step.
+ *
+ * `modelAge` is the step about to be taken, 1-based — the cohort's `age + 1`,
+ * matching the unwind's own convention at the call site.
+ *
+ * `paidShare` is the cohort's, not each claim's: claimClosure.ts's prohibition
+ * stands and no claim draws its own payment schedule.
+ */
+export function reviseDevelopingSet(
+  gameId: string,
+  tracked: RevisableClaim[],
+  untrackedDelta: number,
+  modelAge: number,
+  paidShare: number,
+  phi: number = CLAIM_REVISION_PHI,
+): RevisionAllocation {
+  const deltas: number[] = [];
+  let applied = 0;
+  for (const t of tracked) {
+    const before = t.current;
+    const after = reviseOnce(gameId, t.claimId, modelAge, {
+      value: before, paidShare, lastSign: signBefore(gameId, t.claimId, modelAge),
+    }, phi).value;
+    const d = after - before;
+    deltas.push(d);
+    applied += d;
+  }
+  return { deltas, untrackedDelta, applied: applied + untrackedDelta, unallocated: 0 };
+}
+
+/**
+ * The sign the persistence chain is carrying when it ENTERS `modelAge`.
+ *
+ * ⚠ DERIVED BY REPLAY, NOT STORED, AND THE ALTERNATIVE WAS A SILENT BUG. The
+ * engine sees one cohort step at a time and has no `lastSign` to hand it. The
+ * first cut of reviseDevelopingSet passed `lastSign: 0`, which makes every step
+ * draw a FAIR sign — i.e. it sets rho to zero at every step while
+ * CLAIM_REVISION_PERSISTENCE_RHO still reads 0.18, and nothing in the totals
+ * would have shown it. The whole path is a pure function of
+ * (gameId, claimId, age), so the chain is replayed from age 1 instead.
+ *
+ * ⚠ THE CHAIN ADVANCES ONLY ON STEPS THAT ACTUALLY REVISED. reviseOnce returns
+ * the state untouched when the frequency draw does not fire, so a quiet year
+ * carries the previous sign forward rather than resetting it. This replay has to
+ * make the same frequency test, in the same order, or the two disagree about
+ * which sign a claim is carrying — so it calls the same unit with the same
+ * purpose label rather than re-deriving the condition.
+ *
+ * Cost is O(age) hashes per claim per step, and ages are bounded by the runoff
+ * horizon (12 on WC, 8 on GL, 4 on Property), so it is a handful of integer
+ * multiplies on a path that already walks the whole register.
+ */
+export function signBefore(gameId: string, claimId: string, modelAge: number): 0 | 1 | -1 {
+  let sign: 0 | 1 | -1 = 0;
+  const stay = (1 + CLAIM_REVISION_PERSISTENCE_RHO) / 2;
+  for (let a = 1; a < modelAge; a++) {
+    if (claimRevisionUnit(gameId, claimId, a, 'rev_freq') >= CLAIM_REVISION_FREQUENCY) continue;
+    const u = claimRevisionUnit(gameId, claimId, a, 'rev_sign');
+    sign = sign === 0
+      ? (u < 0.5 ? 1 : -1)
+      : (u < stay ? sign : (-sign as 1 | -1));
+  }
+  return sign;
 }

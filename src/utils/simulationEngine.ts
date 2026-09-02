@@ -24,13 +24,14 @@ function mergeShockRecords(lineResults: LineResultSet[]): ShockRecord[] | undefi
   return merged.size > 0 ? [...merged.values()] : undefined;
 }
 import { SeededRandom, deriveSubRng } from './random';
-import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, IBNER_BOOKING_BIAS_COEFF, IBNER_HORIZON, IBNER_STEP_MIXTURE, IBNER_TOTAL_SD, IBNER_UNWIND_DECAY, LINE_PAYOUT_PATTERN, MEMBER_LOSS_VOLATILITY, OPERATING_CASH_PCT_OF_PREMIUM, PROPERTY_HELD_PURE_PREMIUM_PER_100, RISK_CONTROL_PARAMS, resolveClosureCurve } from '../data/defaultAssumptions';
+import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, IBNER_BOOKING_BIAS_COEFF, IBNER_HORIZON, IBNER_STEP_MIXTURE, IBNER_TOTAL_SD, IBNER_UNWIND_DECAY, LINE_PAYOUT_PATTERN, PER_CLAIM_REVISION, MEMBER_LOSS_VOLATILITY, OPERATING_CASH_PCT_OF_PREMIUM, PROPERTY_HELD_PURE_PREMIUM_PER_100, RISK_CONTROL_PARAMS, resolveClosureCurve } from '../data/defaultAssumptions';
 import type { TowerLine } from '../data/reinsuranceTower';
 import {
   DEVELOPMENT_ALLOCATION, DEVELOPMENT_CESSION_ENABLED, STOCHASTIC_ALLOCATION_MODE,
   allocateDevelopment, buildTrackedSet, cedeDevelopment, markDownForBooking, reselectDevelopingSet,
 } from './developmentAllocation';
 import { isClaimClosed } from './claimClosure';
+import { reviseDevelopingSet } from './claimRevision';
 import { poolYearFactor, wcGenerationInputs, glGenerationInputs, propertyGenerationInputs } from './claimGeneration';
 import {
   aggregateRecovery,
@@ -41,7 +42,7 @@ import {
   quoteAggregate,
 } from './reinsuranceTower';
 import { simulateMarketReturns, blendInvestmentReturn } from './investmentEngine';
-import { cohortCloseBelow, conditionalPaydown, unpaidShare } from './payoutPattern';
+import { cohortCloseBelow, conditionalPaydown, cumulativePaid, unpaidShare } from './payoutPattern';
 import { simulateMemberMovement } from './membershipEngine';
 import { cloneMembershipHistory, openInterval, closeInterval } from './membershipHistory';
 import { cloneMemberLossHistory, recordMemberLossYear } from './memberLossHistory';
@@ -3225,14 +3226,48 @@ function processIbner(
           // closed UNTRACKED one of the same size, which is an asymmetry
           // created by a storage decision.
           const stochastic = newUnpaid * (factor - 1);
-          const steps: { amount: number; mode: 'developing' | 'proportional' }[] = [
-            { amount: stochastic, mode: STOCHASTIC_ALLOCATION_MODE },
-            { amount: unwind, mode: 'proportional' },
+          const steps: { amount: number; mode: 'developing' | 'proportional'; stochasticStep: boolean }[] = [
+            { amount: stochastic, mode: STOCHASTIC_ALLOCATION_MODE, stochasticStep: true },
+            { amount: unwind, mode: 'proportional', stochasticStep: false },
           ];
 
           for (const step of steps) {
-            if (step.amount === 0) continue;
-            const alloc = allocateDevelopment(live, untracked, step.amount, step.mode);
+            // ⚠ STAGE 1'S ONLY REACH INTO THIS FUNCTION, AND IT IS ONE BRANCH.
+            // With PER_CLAIM_REVISION.enabled false the else arm below is
+            // `allocateDevelopment(live, untracked, step.amount, step.mode)`
+            // CHARACTER FOR CHARACTER, with the same arguments in the same
+            // order, so the disabled path is not merely equivalent — it is the
+            // original expression. cc9d8ac is why that matters and not a
+            // stylistic preference: routing both arms through a shared
+            // rearrangement of the same arithmetic moved 325 values at ~1e-12
+            // with nothing behaviourally different, and a null test cannot tell
+            // a reassociation from a mechanism. Do not merge these two arms.
+            //
+            // WHAT THE ENABLED ARM CHANGES. The cohort's stochastic movement
+            // stops being a top-down lognormal on the reserve and becomes the
+            // SUM of per-claim revisions — the deltas go to cedeDevelopment
+            // directly, so an occurrence that deteriorates cedes its own
+            // deterioration rather than a share of the cohort's. The unwind is
+            // untouched in both arms: it is the reversal of a booking markdown
+            // taken proportionally across the whole register, not development,
+            // and the reasoning above this loop applies unchanged.
+            //
+            // ⚠ `factor` IS STILL DRAWN IN BOTH ARMS. rng.normal is consumed
+            // above whether or not the enabled arm uses the result, so the RNG
+            // stream does not shift on the flag alone. The enabled arm re-rolls
+            // the game through the movements themselves, which is expected and
+            // is why there is no line-by-line control on that side; leaving the
+            // draw in place at least keeps the difference attributable to the
+            // mechanism rather than to a stream offset.
+            const usePerClaim = PER_CLAIM_REVISION.enabled && step.stochasticStep;
+            // The skip has to be flag-aware: `stochastic` being exactly zero
+            // says nothing about whether the LAW moves this cohort, and the
+            // enabled arm does not read step.amount at all.
+            if (!usePerClaim && step.amount === 0) continue;
+            const alloc = usePerClaim
+              ? reviseDevelopingSet(gameId, live, untracked * (factor - 1), c.age + 1,
+                  cumulativePaid(LINE_PAYOUT_PATTERN[line], c.age + 1))
+              : allocateDevelopment(live, untracked, step.amount, step.mode);
             const res = cedeDevelopment(line as TowerLine, live, alloc.deltas, alloc.untrackedDelta, placed);
             live = res.moved;
             untracked = Math.max(0, untracked + alloc.untrackedDelta);

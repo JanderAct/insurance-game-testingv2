@@ -1983,7 +1983,7 @@ export const IBNER_UNWIND_DECAY: number = 0.5;
 // ===========================================================================
 // THE PER-CLAIM REVISION LAW — STAGE 1, FLAG-GATED AND OFF.
 //
-// ⚠ NOTHING BELOW IS LIVE. PER_CLAIM_REVISION_ENABLED is false and the cohort
+// ⚠ NOTHING BELOW IS LIVE. PER_CLAIM_REVISION.enabled is false and the cohort
 // IBNER path above is untouched. This block is the fitted record; claimRevision.ts
 // is the mechanism; terminal-severity-check.ts derives the one free parameter.
 //
@@ -2136,33 +2136,45 @@ export const CLAIM_SETTLEMENT_FACTOR = {
 // 2.14 wide would count the same widening twice and put the model's terminal
 // severity far past anything the pool has seen.
 //
-// ⚠ AND THE RESIDUAL IS SMALLER THAN "2.14 vs 2.29" MAKES IT LOOK. THE BRIEFED
-// phi ~ 1.9 WAS DERIVED FROM AN INCOMPLETE BUDGET AND IS ABOUT 3x TOO BIG.
-// MEASURED, terminal-severity-check, 98k-309k GL claims over five sample sizes:
+// ⚠ AND phi HERE IS NOT THE ADDENDUM'S phi. THE PARAMETERISATION CHANGED AT THE
+// ANCHOR SOLVE, AND A NOTE THAT STOOD HERE COMPARED THE TWO AS IF IT HAD NOT.
 //
-//   Var[ln terminal] = Var[ln drawn] + Var[accumulated ln revision] + Var[ln settle | non-zero]
+// In claimRevision.ts, phi is a STRAIGHT MULTIPLIER on the magnitude:
+//     s = phi x magnitude / headroom,   factor = exp(sign.s.|Z| - s^2/2)
+// so `s` is the log-SD of the mean-one factor and phi is dimensionless. The
+// addendum's phi is e^(s^2) — an SD-to-median ratio, bounded below by 1 by
+// construction. THE TWO NUMBERS ARE NOT COMPARABLE.
 //
-// The 2.14-vs-2.29 argument nets out the FIRST term and stops. It does not net
-// out the THIRD — the settlement factor's own fitted log-sigma of 0.5297, which
-// contributes 0.2806 of log-variance and is not phi's to spend. Measured: at
-// phi = 0 the settlement shape ALONE takes the model from a drawn 2.1668 to
-// 2.2304, which is over half of the 2.1668 -> 2.29 gap consumed before the
-// revision law contributes anything. Netting out both terms leaves a residual
-// log-variance of about 0.275, and phi ~ 0.63 is what fills it.
+// Converting at GL age 1 (count-weighted magnitude 0.934, headroom 0.904):
+//     phi_here 0.63  ->  s = 0.651  ->  e^(s^2) = 1.53 in the addendum's units
+//     addendum 1.9   ->  s = 0.801
+//     addendum 4.2   ->  s = 1.198
+//
+// ⚠ SO THE EARLIER NOTE'S "ABOUT 3x TOO BIG" WAS A UNITS ERROR OF MINE, and it
+// is corrected here rather than left to mislead the next investigation. On a
+// like-for-like basis the anchor solve lands at 1.53 against the briefed
+// residual of 1.9 — about 19% lower in s, not a factor of three.
+//
+// WHAT THE VARIANCE-BUDGET ARGUMENT STILL SHOWS, because it is unaffected by the
+// units. The 2.14-vs-2.29 derivation nets out the severity fit's own spread and
+// stops; it does not net out the settlement factor's fitted log-sigma of 0.5297,
+// worth 0.2806 of log-variance and not phi's to spend. Measured: at phi = 0 the
+// settlement shape ALONE carries the model from a drawn 2.1668 to 2.2304, over
+// half of the 2.1668 -> 2.29 gap consumed before the revision law contributes
+// anything. That is what accounts for landing at 1.53 rather than 1.9.
 //
 // ⚠ IT IS THE SAME DOUBLE-COUNT THE COMBINE RULE ALREADY REJECTS, one level up.
 // CLAIM_REVISION_COMBINE takes the minimum of age and size "because both were
 // fitted on the same experience, so multiplying double-counts". The settlement
-// factor was fitted on that same experience too, so ADDING its variance to a
-// full revision variance double-counts in exactly the parallel way. The brief's
-// argument was right; it was applied to two of the three terms.
+// factor was fitted on that same experience too.
 //
 // SOLVED, not asserted: 0.6252 / 0.6273 / 0.6285 on the three largest samples
 // (309k / 98k / 147k claims), 0.5492 and 0.5665 on the two others. The spread
 // tracks the drawn log-SD — a wider draw leaves less residual — and the value
 // below is taken from the configuration that matches a real game's year range.
 //
-// ⚠ AND THE LAW SATURATES, SO phi IS NOT IDENTIFIABLE ABOVE ABOUT 3. Measured
+// ⚠ AND THE LAW SATURATES, SO phi IS NOT IDENTIFIABLE ABOVE ABOUT 3 — IN THE
+// UNITS OF THIS FILE, i.e. phi as a multiplier. Measured
 // terminal log-SD against phi: 2.4540 at 1.4, 2.5431 at 1.9, 2.6028 at 2.5,
 // 2.6211 at 3.2, and 2.6017 at 4.2 — it turns DOWN. The mean-one factor
 // exp(s.sign.|Z| - s^2/2) has median exp(-s^2/2), so at large s the drift term
@@ -2253,7 +2265,17 @@ export const CLAIM_OPEN_SHARE_MODEL_RECORDED: readonly number[] = [0.901, 0.794,
 // as corroboration would be reading a coincidence as a validation — and WC's
 // 35.1% against 25% is the same kind of number in the other direction, which is
 // the tell.
-export const PER_CLAIM_REVISION_ENABLED = false;
+// ⚠ AN OBJECT AND NOT A BARE BOOLEAN, FOR THE SAME REASON IBNER_TOTAL_SD IS A
+// RECORD. A gate cannot toggle a `const x = false`, and a flag whose two arms
+// cannot be run side by side in one process has no A/B test — which is exactly
+// what pregame-acceptance-check needs, since the blocker question is what the
+// pre-game search does ON the new path against the old one. reserveStepSigma's
+// cache note records the same requirement from the other direction: it is keyed
+// on the target precisely so ibner-null-check's runtime mutation works.
+//
+// ⚠ MUTATE IT ONLY IN A GATE, AND PUT IT BACK. The shipped value is false and
+// nothing in src/ writes to it.
+export const PER_CLAIM_REVISION = { enabled: false };
 // ===========================================================================
 // ⚠ TWO OF THE FOUR STAGE 1 GATES ARE NOT BUILT, AND NEITHER IS AN OVERSIGHT.
 // Recorded here rather than only in a commit message, because the flag must not
@@ -2268,14 +2290,43 @@ export const PER_CLAIM_REVISION_ENABLED = false;
 //   which is precisely what the last two commits deleted two files for. Supply
 //   the target series and it becomes a real gate.
 //
-// PRE-GAME ACCEPTANCE — mean and p99 redraw attempts and failures against the
-//   500 cap, on the NEW path. BLOCKED ON THE FLAG. The pre-game search calls
-//   processYear, which develops cohorts through the OLD top-down IBNER path
-//   while PER_CLAIM_REVISION_ENABLED is false, so measuring acceptance today
-//   measures the old path — which opening-centring-check and pin-vs-band-check
-//   already cover. It becomes measurable in the commit that wires the engine,
-//   and it is the blocker that commit must clear FIRST: WC is the fragile line,
-//   and if the search starts failing, no game generates at all.
+// PRE-GAME ACCEPTANCE — BUILT AT THE WIRING COMMIT (pregame-acceptance-check).
+//   It could not exist before: the search calls processYear, which developed
+//   through the old cohort path while the law had no caller in src/.
+//
+// ⚠ AND THE FLIP COSTS THE SEARCH NOTHING, WHICH IS NOT WHAT WAS EXPECTED.
+// Measured, flag ON against flag OFF, 150 seeds per line:
+//
+//   line       mean attempts    p99        fallbacks against the 500 cap
+//   WC         2.93 -> 2.93     12 -> 10   0 -> 0
+//   GL         3.06 -> 3.11     12 -> 13   0 -> 0
+//   Property   3.97 -> 3.97     19 -> 15   0 -> 0
+//
+// WC — the fragile line, the one that would fail first — is unchanged to two
+// decimal places, and no seed on either arm exhausted the cap.
+//
+// THE OPENING BAND DOES NOT NEED RE-TRANSLATING EITHER. Measured on the
+// UNFILTERED ratio (attempt 0 only, no rejection), per 995f6f9's rule that the
+// band-selected sample is a fixed-point iteration against your own selection
+// effect — 300 seeds per line:
+//
+//   line       SD ratio ON/OFF    unfiltered in-band share OFF -> ON
+//   WC             1.069             34.3% -> 32.3%
+//   GL             0.980             33.3% -> 36.7%
+//   Property       1.007             28.0% -> 26.0%
+//
+// GL's spread NARROWS. Every difference above sits inside about one standard
+// error at this sample, so the honest reading is no measurable change rather
+// than a small one.
+//
+// ⚠ AND THE REASON IS THE OPEN ITEM BELOW, SEEN FROM A THIRD DIRECTION — SO THIS
+// ANSWER IS CONDITIONAL. The law was expected to widen the pre-game because
+// widening is what it is for. It does not, because at the shipped phi its
+// realised movement is SMALLER than the cohort path it replaces (9.8% of cohort
+// incurred at age 1, against IBNER_TOTAL_SD's 20-25% of ultimate) and a 3-year
+// pre-game runs only two or three revision steps. If the 84%-versus-9.8%
+// investigation raises the law's realised movement, the band question REOPENS
+// and both measurements above must be redone. Settled at this phi, not for good.
 //
 // ⚠ THE OPEN ITEM AFTER THE WIRING, RECORDED SO IT IS NOT RE-DISCOVERED. With
 // the composition table's ages aligned (see the retraction at
