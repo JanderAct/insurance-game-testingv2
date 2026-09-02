@@ -157,4 +157,21 @@ console.log(`  GL       gross ${fmt$(mean(glGross)).padStart(9)}   pool premium 
 console.log(`  Property gross ${fmt$(mean(prGross)).padStart(9)}   pool premium ${fmt$(mean(prPrem)).padStart(9)}`);
 console.log(`  WC / GL premium ratio: ${(mean(wcPremium) / mean(glPrem)).toFixed(2)}x   WC / Property: ${(mean(wcPremium) / mean(prPrem)).toFixed(2)}x`);
 
-console.log(problems.length === 0 ? '\nALL CUTOVER CHECKS PASS.' : `\n${problems.length} PROBLEMS:\n  ${problems.slice(0, 12).join('\n  ')}`);
+// ============================================================================
+// ⚠ THE EXIT PATH. THIS SCRIPT ASSERTED FOR MONTHS AND COULD NOT SAY SO.
+//
+// It collects `problems[]` and prints `FAIL` beside every failing row, then
+// used to end on a console.log and exit 0 — so `npm run gates` printed `ok`
+// beside a script that had just printed FAIL. That is worse than a probe which
+// asserts nothing: the runner actively reports green, and only someone reading
+// the body would learn otherwise. Ruled at 153980b's audit: promote, do not
+// rename. The assertions are real and were built and used as gates.
+//
+// The verdict names what failed, per 8402b33's rule, and the count is printed
+// even when the list is truncated so a reader knows there is more.
+// ============================================================================
+console.log(problems.length === 0
+  ? '\nALL CUTOVER CHECKS PASS.'
+  : `\n${problems.length} PROBLEM(S):\n  ${problems.slice(0, 12).join('\n  ')}`
+    + (problems.length > 12 ? `\n  ... and ${problems.length - 12} more not listed` : ''));
+process.exitCode = problems.length === 0 ? 0 : 1;

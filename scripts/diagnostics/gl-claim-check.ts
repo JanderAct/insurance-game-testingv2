@@ -612,4 +612,18 @@ console.log('\n--- 6. determinism, integrity, shock signal, held pure premium --
   console.log(`  implied full-market expected GL loss = ${fmt$(pp * TOTAL_PAYROLL_M * 10_000)}`);
 }
 
-console.log(problems.length === 0 ? '\nALL GL GENERATOR CHECKS PASS.' : `\n${problems.length} PROBLEMS:\n  ${problems.join('\n  ')}`);
+// ============================================================================
+// ⚠ THE EXIT PATH. THIS SCRIPT ASSERTED FOR MONTHS AND COULD NOT SAY SO.
+//
+// It collects `problems[]` and prints `FAIL` beside every failing row, then
+// used to end on a console.log and exit 0 — so `npm run gates` printed `ok`
+// beside a script that had just printed FAIL. That is worse than a probe which
+// asserts nothing: the runner actively reports green, and only someone reading
+// the body would learn otherwise. Ruled at 153980b's audit: promote, do not
+// rename. The assertions are real and were built and used as gates.
+//
+// The verdict names what failed, per 8402b33's rule, and the count is printed
+// even when the list is truncated so a reader knows there is more.
+// ============================================================================
+console.log(problems.length === 0 ? '\nALL GL GENERATOR CHECKS PASS.' : `\n${problems.length} PROBLEM(S):\n  ${problems.join('\n  ')}`);
+process.exitCode = problems.length === 0 ? 0 : 1;

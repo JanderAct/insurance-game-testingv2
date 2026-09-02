@@ -40,9 +40,18 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIAG = path.join(__dirname, 'diagnostics');
 
 // ============================================================================
-// FAST — the tier that runs on every commit. 39 gates, about 7 minutes of CPU
+// FAST — the tier that runs on every commit. 43 gates, about 9 minutes of CPU
 // and a little over 2 minutes of wall clock at 3-way concurrency. Seconds are
 // measured, not estimated, on a 4-core box.
+//
+// ⚠ FOUR OF THESE WERE SITTING IN PROBES WITH A BROKEN EXIT PATH, not with
+// nothing to say. gl-claim-check, gl-cutover-check, reinsurance-tower-check and
+// wc-cutover-check each collect a problems[] and print FAIL per row, and each
+// used to end on a console.log and exit 0 — so this runner printed `ok` beside a
+// script that had just printed FAIL. Promoted here rather than renamed: two of
+// them had their assertions deliberately STRENGTHENED while in PROBES (962ef60,
+// cb00971) and one printed "-12.75% FAIL" into a commit message, so they were
+// built and used as gates throughout.
 //
 // ⚠ THE SPLIT IS BY MEASURED COST, NOT BY IMPORTANCE, and nothing in SLOW is
 // less load-bearing than what is here. It is three scripts — see SLOW's note
@@ -70,6 +79,8 @@ const FAST: string[] = [
   'export-number-format-check',      //  12s
   'funding-basis-check',             //  10s
   'funding-expected-check',          //   2s
+  'gl-claim-check',                  //  12s   PROMOTED at this commit — it always asserted; it could not exit
+  'gl-cutover-check',                //   6s   PROMOTED at this commit
   'gl-supplied-clf-check',           //  44s
   'ibner-null-check',                //  40s
   'marketplace-generation-check',    //   7s
@@ -84,6 +95,7 @@ const FAST: string[] = [
   'pool-market-share-check',         //   6s
   'property-claim-check',            //   3s
   'ratio-basis-check',               //   7s
+  'reinsurance-tower-check',         //   2s   PROMOTED at this commit
   'roster-catalog-check',            //   3s
   'save-round-trip-check',           //   3s
   'save-size-check',                 //   4s
@@ -94,6 +106,7 @@ const FAST: string[] = [
   'trend-memoization-check',         //   2s
   'value-identity-check',            //   3s
   'wc-cap-check',                    //   4s
+  'wc-cutover-check',                //   6s   PROMOTED at this commit
   'wc-severity-rebuild-check',       //   3s
 ];
 
@@ -175,8 +188,6 @@ const PROBES: Record<string, string> = {
   'clf-downside-check': '⚠ ASSERTS BUT EXITS 0 — prints "FAIL — formula has drifted" on CLF-table drift and the runner still reads ok. Promote or drop [6s]',
   'clf-table-derive': 'derives the static CLF tables — a generator, not a check [240s]',
   'development-cession-size': 'the cession rate by allocation rule; the calibration table [20s]',
-  'gl-claim-check': '⚠ ASSERTS BUT EXITS 0 — collects problems[] and prints FAIL per row; its trend assertions were deliberately strengthened at cb00971 and the runner cannot see them. Promote or drop [10s]',
-  'gl-cutover-check': '⚠ ASSERTS BUT EXITS 0 — collects problems[] and prints FAIL per row; it printed -12.75% FAIL in a commit message once. Promote or drop [6s]',
   'investment-dominance-report': 'underwriting against investment income, per line, with the implied return. A design reading with no threshold — see its header [12s]',
   'ibner-clf-basis-report': 'reports the IBNER/CLF basis pairing; no threshold. Renamed from -check [17s]',
   'ibner-pregame-report': 'pre-game IBNER state report [64s]',
@@ -192,12 +203,10 @@ const PROBES: Record<string, string> = {
   'property-clf-basis-report': 'Property CLF basis report [21s]',
   'property-fit-report': 'Property fit reading; asserts nothing. Renamed from -check — and three engine comments claimed it ASSERTED the fit, now corrected [4s]',
   'reinsurance-layer-report': 'layer reading; asserts nothing. Renamed from -check [41s]',
-  'reinsurance-tower-check': '⚠ ASSERTS BUT EXITS 0 — collects problems[] and prints FAIL per row. Promote or drop [2s]',
   'tower-downside-report': 'tower downside reading; asserts nothing. Renamed from -check [8s]',
   'wc-above-tower-report': 'WC above-tower report [109s]',
   'wc-behaviour-report': 'WC behaviour reading; asserts nothing. Renamed from -check [5s]',
   'wc-cap-stability-report': 'WC cap stability reading; asserts nothing. Renamed from -check [21s]',
-  'wc-cutover-check': '⚠ ASSERTS BUT EXITS 0 — collects problems[] and prints FAIL per row; it was red at 19d04e7 and aa0838a and only found by hand. Promote or drop [6s]',
 };
 
 // ============================================================================
@@ -290,6 +299,82 @@ const PROBES: Record<string, string> = {
 // was "in no tier because a tier containing it would never be run"; a script in
 // no tier is one that never runs at all, which is strictly worse, and the
 // 55-minute figure it was excluded on turned out to be concurrency.
+// ============================================================================
+
+// ============================================================================
+// CAN-FAIL EVIDENCE — WHAT EACH NEVER-FIRED GATE DOES WHEN ITS SUBJECT BREAKS.
+//
+// 24 of 40 gates had never gone red. That is the absence of evidence, not
+// evidence of soundness, so each was put through the method this project uses on
+// every new gate: perturb the thing it claims to watch with a PLAUSIBLE defect,
+// confirm it goes red, revert. Full table in the commit message; the outcomes
+// that change how a reader should treat a gate are recorded here.
+//
+// 22 of 24 FIRE ON A PLAUSIBLE DEFECT. One is a smoke alarm. One cannot fire.
+//
+// ⚠ pool-market-share-check CANNOT FIRE, AND IT IS THE PUREST CASE IN THE SET.
+// It reimplements BOTH the old exposure-sum formula and the new premium-weighted
+// one locally, then asserts the year-1 gap between its own two functions. The
+// engine's pool-scope marketShare (simulationEngine.ts's charge-weighted mean)
+// is never read. Measured: re-weighting the engine's formula by poolPremium
+// instead of totalMemberCharge leaves it green, and FORCING THE FIELD TO ZERO
+// leaves it green. It is structurally incapable, not obsolete — its subject is
+// alive and watched, just not by it. On the same zeroing, pool-aggregation-check
+// fails and names marketShare, audit-formula-check reports 640 findings and
+// value-identity-check reports VALUES MOVED. The coverage exists three times
+// over; this script contributes none of it.
+//
+// ⚠ clf-downside-check CANNOT FIRE EITHER, AND IT IS WHY IT WAS NOT PROMOTED
+// with the other four. Its sole assertion is
+//   combinedAt1 = (1 + adminRatio + reinsPct) / (1 + adminRatio + reinsPct)
+// over three hardcoded admin ratios and four hardcoded reinsurance percentages.
+// That is X/X: `worst` is exactly 0 for every input and the "FAIL — formula has
+// drifted" branch is unreachable. It reads no engine value, so there is nothing
+// to perturb. The property it means to assert IS asserted, properly, by
+// ratio-basis-check against the real engine at 1e-12. Giving this one an exit
+// path would only let it exit 0 more formally.
+//
+// ⚠ funding-expected-check's HEADLINE ASSERTION IS A TAUTOLOGY, THOUGH THE
+// SCRIPT IS NOT. Section 1 claims "Expected produces CLF = exactly 1.000" and
+// implements it as `const wcExpectedClf = 1.0; assert(wcExpectedClf === 1)` —
+// its own comment says "the literal engine short-circuit, nothing to compute".
+// Measured: changing the engine's Expected dispatch to 1.001 leaves it green.
+// Section 4 is real and load-bearing — collapsing WC's four held class rates to
+// one pooled rate fails it at 1.73e-1 — so the script stays, but nothing in the
+// repo asserts that the Expected path returns exactly 1.
+//
+// ⚠ enrolment-independence-check CARRIES TWO DEAD ASSERTIONS, and this is the
+// OTHER cause of cannot-fire: the subject is gone, not the assertion broken.
+// Its printed WX and WXevent columns are `note(true, ...)` — hardcoded passes
+// left behind when the weather band moved inside the fitted severity mixture at
+// 645c15e. Confirmed: no weather draw remains anywhere in src/. The file's own
+// header says the test must come back if a cat band ever reintroduces shared
+// within-event draws; until then these two columns print OK about nothing.
+// The rest of the gate is sound and fires — see below.
+//
+// ⚠ property-tower-mc IS A SMOKE ALARM ON ITS DISCRETISATION AXIS, and its
+// resolution is now measured rather than assumed. Coarsening the Panjer lattice
+// 8x (BIN $25k -> $200k, the exact regression a person writes chasing its 21
+// minutes) moves Panjer's worst mean error 4.70% -> 5.67% against an 8% bound
+// and PASSES. At 80x ($2M) it fails at 42.67%. So it catches a gross lattice
+// defect and would miss a 2x-to-8x one. Its OTHER assertions — the sign-
+// stability of the error, and Panjer beating the lognormal comparator — are not
+// on that axis and are not characterised here.
+//
+// ⚠ AND THREE PERTURBATIONS THAT DID NOT FIRE WERE MY MISTAKE, NOT THE GATE'S.
+// Recorded because the distinction is the whole method:
+//   enrolment-independence-check  dropping the member id from GL's key but still
+//     building the rng per member gives every member an IDENTICAL stream, which
+//     is position-INdependent — so the gate correctly reported independence. The
+//     real coupling shape is ONE stream hoisted out of the member loop, and on
+//     that it fires.
+//   funding-basis-check  moving the admin RATIO 0.15 -> 0.14 is a level change;
+//     assertion 5 is about the BASIS. Moving admin onto the net pure premium
+//     fails 3 checks.
+//   trend-memoization-check  making memoizeByYear call fn(key) rather than
+//     fn(year) is a no-op while all five functions floor internally. Making one
+//     of them stop flooring — the hazard its header names — fires it.
+// A gate that does not fire on the wrong perturbation has not been tested yet.
 // ============================================================================
 
 // ---------------------------------------------------------------- manifest
