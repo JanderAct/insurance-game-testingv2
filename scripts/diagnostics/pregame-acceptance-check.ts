@@ -29,9 +29,10 @@
 // PER_CLAIM_REVISION.enabled, which is why that flag is a mutable holder rather
 // than a bare boolean — see its note.
 //
-// ⚠ THIS GATE MUTATES THE FLAG AND PUTS IT BACK, in a finally. It is the only
-// place in the repo that writes to it. If a future reader finds the flag true
-// after a failed run, this is what to look at.
+// ⚠ THIS GATE MUTATES THE FLAG AND PUTS IT BACK, in a finally, and asserts the
+// restore. Nothing in src/ ever writes to it; the only other writer in the repo
+// is revision-total-sd-report, which follows the same pattern. If a future
+// reader finds the flag true after a failed run, those two are what to look at.
 //
 // ============================================================================
 // WHAT IS ASSERTED, AND IT IS ONLY THE OFF ARM.

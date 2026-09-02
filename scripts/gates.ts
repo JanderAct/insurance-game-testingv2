@@ -40,7 +40,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIAG = path.join(__dirname, 'diagnostics');
 
 // ============================================================================
-// FAST — the tier that runs on every commit. 45 gates, about 10 minutes of CPU
+// FAST — the tier that runs on every commit. 46 gates, about 10 minutes of CPU
 // and a little over 2 minutes of wall clock at 3-way concurrency. Seconds are
 // measured, not estimated, on a 4-core box.
 //
@@ -97,6 +97,7 @@ const FAST: string[] = [
   'property-claim-check',            //   3s
   'ratio-basis-check',               //   7s
   'reinsurance-tower-check',         //   2s   PROMOTED at this commit
+  'revision-persistence-check',      //   8s   STAGE 1 — rho, read out of reviseDevelopingSet; ships its rho = 0 control
   'roster-catalog-check',            //   3s
   'save-round-trip-check',           //   3s
   'save-size-check',                 //   4s
@@ -203,6 +204,7 @@ const PROBES: Record<string, string> = {
   'opening-basis-report': 'opening-surplus basis reading; asserts nothing. Renamed from -check [10s]',
   'price-channel-facts': 'price channel facts table [10s]',
   'property-clf-basis-report': 'Property CLF basis report [21s]',
+  'revision-total-sd-report': "the per-claim law's TOTAL development against IBNER_TOTAL_SD's own basis, flag ON against OFF. No threshold, deliberately: nothing ships on the ON arm, so a bar would be invented rather than measured — pregame-acceptance-check's reasoning [32s]",
   'property-fit-report': 'Property fit reading; asserts nothing. Renamed from -check — and three engine comments claimed it ASSERTED the fit, now corrected [4s]',
   'reinsurance-layer-report': 'layer reading; asserts nothing. Renamed from -check [41s]',
   'tower-downside-report': 'tower downside reading; asserts nothing. Renamed from -check [8s]',

@@ -2063,6 +2063,24 @@ export const CLAIM_REVISION_COMBINE: ClaimRevisionCombine = 'min';
 // rates given a move and given no move came out 72% and 74%, which is the same
 // number twice. Only the DIRECTION carries memory. A reader looking for a
 // frequency chain here should find this note instead of adding one.
+//
+// ⚠ ASSERTED BY revision-persistence-check, AND IT HAD TO BE. Persistence lives
+// entirely in the autocorrelation of successive signs: it moves no total, no
+// mean, no SD and no martingale test, so a wiring that silently set it to zero
+// would be invisible everywhere else. That already happened once — the first cut
+// of reviseDevelopingSet passed `lastSign: 0` into every step, making every sign
+// a fair coin while this constant went on reading 0.18. The gate reads the rate
+// back out of reviseDevelopingSet and ships a rho = 0 control arm.
+//
+// ⚠ THE 59% IS THE LATENT CHAIN'S, NOT THE MODEL'S OBSERVABLE, AND THE TWO COME
+// APART AT THE SHIPPED phi. rho was fitted from the direction of successive
+// reserve CHANGES, as though the chain were directly observable. It is not: the
+// mean-one correction -s^2/2 makes the median move downward, so the model's
+// movement DIRECTIONS repeat more often than the chain does — 60% / 60% / 69%
+// against the chain's 59%, and most of that survives with rho set to zero. The
+// gate reports both. It is a phi-scale question and it belongs with the 84%/9.8%
+// work; recorded here so the constant is not read as if the model reproduced the
+// source's 59% on the quantity the source measured it on.
 export const CLAIM_REVISION_PERSISTENCE_RHO = 0.18;
 export const CLAIM_REVISION_FREQUENCY = 0.70;
 
@@ -2319,14 +2337,29 @@ export const PER_CLAIM_REVISION = { enabled: false };
 // error at this sample, so the honest reading is no measurable change rather
 // than a small one.
 //
-// ⚠ AND THE REASON IS THE OPEN ITEM BELOW, SEEN FROM A THIRD DIRECTION — SO THIS
-// ANSWER IS CONDITIONAL. The law was expected to widen the pre-game because
-// widening is what it is for. It does not, because at the shipped phi its
-// realised movement is SMALLER than the cohort path it replaces (9.8% of cohort
-// incurred at age 1, against IBNER_TOTAL_SD's 20-25% of ultimate) and a 3-year
-// pre-game runs only two or three revision steps. If the 84%-versus-9.8%
-// investigation raises the law's realised movement, the band question REOPENS
-// and both measurements above must be redone. Settled at this phi, not for good.
+// ⚠ THE CONDITION THAT WAS ATTACHED TO THIS IS WITHDRAWN, AND THE REASONING
+// BEHIND IT WAS WRONG TWICE OVER. It read: the law does not widen the pre-game
+// because its realised movement (9.8% of cohort incurred at age 1) is smaller
+// than the cohort path it replaces (IBNER_TOTAL_SD 20-25%), so if the 84%/9.8%
+// work raises that movement the band question reopens.
+//
+// THOSE WERE DIFFERENT STATISTICS. 9.8% is PER STEP. IBNER_TOTAL_SD is the TOTAL
+// relative SD of the ultimate over the whole runoff, by its own definition at
+// reserveStepSigma. Increments add in variance, so 9.8% over five or six steps
+// is 21.9% to 24.0% — the same neighbourhood, not a third of it.
+//
+// AND THE DIRECTION WAS BACKWARDS. Measured on the constant's own basis
+// (revision-total-sd-report: pre-cession cohort development at maturity, sample
+// unbiased in the horizon draw), the law develops 2.7x to 3.2x the cohort path
+// on the robust spread — MORE, not less, on every line.
+//
+// So the band clearance above is unconditional, and for a better reason than
+// the one it had. The ON arm measured here IS that widened mechanism at the
+// same phi: the pre-game already contains the widening and the opening
+// distribution did not move. A 3-year pre-game takes two or three steps of a
+// five-to-twelve-step runoff, at the low-age end where s is smallest, and the
+// opening surplus ratio is set by premium and loss LEVEL rather than by cohort
+// development tails. The band met the widening and survived it.
 //
 // ⚠ THE OPEN ITEM AFTER THE WIRING, RECORDED SO IT IS NOT RE-DISCOVERED. With
 // the composition table's ages aligned (see the retraction at
@@ -2343,11 +2376,42 @@ export const PER_CLAIM_REVISION = { enabled: false };
 // stack is the next question after the engine wiring, and it is NOT the closure
 // curves — that diagnosis was the retracted one.
 //
+// ⚠ AND THE SECOND OPEN ITEM, WHICH IS LARGER THAN THE FIRST: THE LAW'S COHORT
+// TOTAL IS UNBUDGETED. Measured on IBNER_TOTAL_SD's own basis
+// (revision-total-sd-report), the law develops 2.7x to 3.2x the cohort path it
+// replaces on the robust spread. Two things follow and both belong to the flip.
+//
+//   THE SD IS NOT ESTIMABLE ON THE ON ARM. WC's sample SD read 31% at 40 games
+//   and 83% at 100, because one cohort at 22x its register sum sets it. That is
+//   reserveStepSigma's own warning from the other side — its header records a
+//   Monte Carlo still climbing toward the closed form at 48M trials. "Does the
+//   law deliver IBNER_TOTAL_SD" cannot be answered by measuring an SD.
+//
+//   s IS UNBOUNDED, AND THAT IS THE PROXIMATE CAUSE. s = phi x magnitude /
+//   headroom, and nothing bounds the division: as a cohort pays down, headroom
+//   goes to zero. At the median tracked occurrence GL reaches s = 21 by age 8
+//   and Property s = 3.6 by age 4. The magnitude was fitted on the INCURRED and
+//   the division is what puts it on the reserve, so nothing fitted ever chose
+//   those values. At large s the factor is still exactly mean-one but delivers
+//   it as a near-certain collapse plus a vanishing chance of an enormous
+//   multiple. WC's tail is the other shape: s stays near 1 and twelve steps
+//   compound it.
+//
+// THIS DOES NOT CONTRADICT THE TERMINAL-SEVERITY ANCHOR. That anchor constrains
+// the log-SD of SETTLED severity PER CLAIM; this is the COHORT aggregate. The
+// old path drew one lognormal per accident year with a mixture that made half
+// of them nearly flat, while the law draws every occurrence separately and a
+// cohort's movement is then dominated by its few largest with almost no
+// diversification. Matching the one and widening the other are consistent —
+// which is exactly why this quantity went unbudgeted until it was measured.
+//
 // WHAT IS BUILT AND GREEN: terminal-severity-check (FAST, 29s) derives phi
 // against the anchor and carries the phi = 0 control arm;
-// martingale-equivalence-check (SLOW, 348s) decomposes the persistence and
-// settlement terms with separate intervals and carries the fitted-level control
-// arm, which reads 0.842 against a 1% tolerance.
+// revision-persistence-check (FAST, 8s) asserts rho out of reviseDevelopingSet
+// and carries the rho = 0 control arm; martingale-equivalence-check (SLOW,
+// 348s) decomposes the persistence and settlement terms with separate intervals
+// and carries the fitted-level control arm, which reads 0.842 against a 1%
+// tolerance.
 // ===========================================================================
 
 

@@ -155,6 +155,13 @@ export interface RevisionState {
  * drifts UP over a runoff. The settlement factor's derived mean is what pays
  * that back — the two must be measured together, which is why
  * martingale-equivalence-check decomposes them instead of reading the total.
+ *
+ * ⚠ `rho` IS A PARAMETER FOR THE SAME REASON `phi` IS: SO A CONTROL ARM CAN
+ * REMOVE IT. It defaults to the constant and nothing in src/ ever passes it.
+ * revision-persistence-check runs the whole call path at rho = 0 and asserts
+ * the same-sign rate collapses to 1/2 — without that arm the 0.59 assertion
+ * would pass on a chain that had been silently reduced to fair coin flips,
+ * which is precisely the defect it exists to catch.
  */
 export function reviseOnce(
   gameId: string,
@@ -162,6 +169,7 @@ export function reviseOnce(
   modelAge: number,
   state: RevisionState,
   phi: number = CLAIM_REVISION_PHI,
+  rho: number = CLAIM_REVISION_PERSISTENCE_RHO,
 ): RevisionState {
   // FREQUENCY IS I.I.D. — see the memoryless note at CLAIM_REVISION_FREQUENCY.
   if (claimRevisionUnit(gameId, claimId, modelAge, 'rev_freq') >= CLAIM_REVISION_FREQUENCY) {
@@ -179,7 +187,7 @@ export function reviseOnce(
   if (state.lastSign === 0) {
     sign = uSign < 0.5 ? 1 : -1;
   } else {
-    const stay = (1 + CLAIM_REVISION_PERSISTENCE_RHO) / 2;
+    const stay = (1 + rho) / 2;
     sign = uSign < stay ? (state.lastSign as 1 | -1) : (-state.lastSign as 1 | -1);
   }
 
@@ -323,14 +331,15 @@ export function reviseDevelopingSet(
   modelAge: number,
   paidShare: number,
   phi: number = CLAIM_REVISION_PHI,
+  rho: number = CLAIM_REVISION_PERSISTENCE_RHO,
 ): RevisionAllocation {
   const deltas: number[] = [];
   let applied = 0;
   for (const t of tracked) {
     const before = t.current;
     const after = reviseOnce(gameId, t.claimId, modelAge, {
-      value: before, paidShare, lastSign: signBefore(gameId, t.claimId, modelAge),
-    }, phi).value;
+      value: before, paidShare, lastSign: signBefore(gameId, t.claimId, modelAge, rho),
+    }, phi, rho).value;
     const d = after - before;
     deltas.push(d);
     applied += d;
@@ -360,9 +369,14 @@ export function reviseDevelopingSet(
  * horizon (12 on WC, 8 on GL, 4 on Property), so it is a handful of integer
  * multiplies on a path that already walks the whole register.
  */
-export function signBefore(gameId: string, claimId: string, modelAge: number): 0 | 1 | -1 {
+export function signBefore(
+  gameId: string,
+  claimId: string,
+  modelAge: number,
+  rho: number = CLAIM_REVISION_PERSISTENCE_RHO,
+): 0 | 1 | -1 {
   let sign: 0 | 1 | -1 = 0;
-  const stay = (1 + CLAIM_REVISION_PERSISTENCE_RHO) / 2;
+  const stay = (1 + rho) / 2;
   for (let a = 1; a < modelAge; a++) {
     if (claimRevisionUnit(gameId, claimId, a, 'rev_freq') >= CLAIM_REVISION_FREQUENCY) continue;
     const u = claimRevisionUnit(gameId, claimId, a, 'rev_sign');
