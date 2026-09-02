@@ -1981,6 +1981,268 @@ export const IBNER_BOOKING_BIAS_COEFF = 0.80;
 export const IBNER_UNWIND_DECAY: number = 0.5;
 
 // ===========================================================================
+// THE PER-CLAIM REVISION LAW — STAGE 1, FLAG-GATED AND OFF.
+//
+// ⚠ NOTHING BELOW IS LIVE. PER_CLAIM_REVISION_ENABLED is false and the cohort
+// IBNER path above is untouched. This block is the fitted record; claimRevision.ts
+// is the mechanism; terminal-severity-check.ts derives the one free parameter.
+//
+// What it replaces, when it is flipped: the cohort-level lognormal step above
+// develops `netUltimate` top-down against IBNER_TOTAL_SD, and
+// developmentAllocation then spreads that movement over the claims. Stage 1
+// inverts it — each open claim revises its own CASE RESERVE, and the cohort's
+// ultimate is the sum. The register stops being frozen at inception.
+//
+// ===========================================================================
+// THE BASIS IS THE CASE RESERVE, AND IT IS THE WHOLE REASON THIS SHAPE WORKS.
+//
+// Stage 0 measured what a paid-to-date floor on the INCURRED costs: 42.5% of
+// cohort ultimate on WC, 15.3% on GL, 4.5% on Property, against a martingale
+// tolerance near 1%. That is not a residual defect in the payment split — the
+// split was rebuilt and it only fell from 55.4% — it is structural. A large
+// claim's annual revision SD is the same order as the headroom ANY coherent
+// payment schedule can leave on a file that has been paying for years, so no
+// split closes it. claimClosure.ts's own header sets out the choice this
+// resolves.
+//
+// A mean-one multiplicative factor on a POSITIVE reserve is bounded away from
+// zero by construction, so nothing truncates and there is no floor to hit. The
+// conversion is one division:
+//
+//   magnitude_on_reserve = magnitude_on_incurred / headroom,   per claim
+//
+// where headroom is the share of the claim still unpaid. A claim 90% paid gets
+// a 10x larger factor on its remaining tenth, which is the same dollar
+// movement — that is what makes the two bases equivalent rather than a
+// re-scaling.
+//
+// ===========================================================================
+// MAGNITUDE — 200% / (age + 1), IN MODEL TERMS, AND THE OFFSET IS NOT COSMETIC.
+//
+// DATA AGE 1 IS A PLACEHOLDER STAGE AND IS EXCLUDED FROM THE FIT. First
+// estimates at that age are overwhelmingly round administrative numbers rather
+// than adjuster valuations, and they are revised by nearly their whole value on
+// first real contact — a distribution the model has no analogue for, because the
+// model's claims arrive already valued by the severity draw. So MODEL AGE 1
+// CORRESPONDS TO DATA AGE 2, and the curve is indexed accordingly. Reading the
+// fit off data age 1 would put a ~100% revision on every claim in its first
+// model year and it would be modelling a filing convention.
+export const CLAIM_REVISION_MAGNITUDE_NUMERATOR = 2.00;
+
+// SIZE TREND — CONTINUOUS, AND THE CONTINUITY IS THE POINT.
+//
+//   m(v) = 20.12 x v^-0.2891      v in dollars, m a fraction of incurred
+//
+// ⚠ IT MUST NOT BE A STEP FUNCTION. The obvious fit is two or three size bands,
+// and a band boundary lands on or near the $1M occurrence retention. A
+// discontinuity in revision magnitude exactly at the retention is the
+// free-lunch shape: a claim a dollar under the boundary and one a dollar over
+// develop at different rates, so the cession a player receives jumps at a
+// threshold they can see. A continuous power law has no such edge anywhere.
+export const CLAIM_REVISION_SIZE_TREND = { scale: 20.12, exponent: -0.2891 };
+
+// ⚠ COMBINE BY THE SMALLER OF THE TWO, NOT THE PRODUCT — MEASURED.
+//
+// Age and size were fitted on the SAME experience, so each has already absorbed
+// the other's average effect and multiplying them counts it twice. Measured
+// against the terminal-severity anchor, the product arm over-widens on every
+// line — 1.80x / 2.33x / 1.82x of target against 1.00 / 0.96 / 0.70 for the
+// minimum. The minimum is also the actuarially conservative reading: whichever
+// consideration binds harder is the one an adjuster acts on.
+export type ClaimRevisionCombine = 'min' | 'product';
+export const CLAIM_REVISION_COMBINE: ClaimRevisionCombine = 'min';
+
+// PERSISTENCE — SIGN ONLY, AS A TWO-STATE MARKOV CHAIN. rho = 0.18.
+//
+//   P(same sign as the previous revision) = (1 + rho) / 2 = 0.59
+//   the FIRST sign is fair, so the chain is stationary at 1/2 and every step's
+//   factor is marginally mean-one.
+//
+// ⚠ FREQUENCY IS MEMORYLESS AND THAT IS A MEASUREMENT, NOT AN OMISSION. Whether
+// a claim moves at all in a given year is i.i.d. at q = 0.70: the conditional
+// rates given a move and given no move came out 72% and 74%, which is the same
+// number twice. Only the DIRECTION carries memory. A reader looking for a
+// frequency chain here should find this note instead of adding one.
+export const CLAIM_REVISION_PERSISTENCE_RHO = 0.18;
+export const CLAIM_REVISION_FREQUENCY = 0.70;
+
+// SETTLEMENT — SHAPE MEASURED, MEAN DERIVED.
+//
+// The factor applied when a claim closes, against its then-carried value:
+// 19% of claims settle at zero, overall median 0.74, overall p90 1.60. Those
+// three points fit a zero-inflated lognormal on the non-zero part, and the
+// SHAPE below is that fit.
+//
+// ⚠ THE MEAN IS NOT MEASURED, IT IS DERIVED, AND IT HAS TO BE. Sign persistence
+// breaks the step-by-step martingale: given the previous sign, the next factor
+// is not conditionally mean-one, and over a runoff that compounds into a real
+// upward drift in E[ultimate]. The settlement factor's mean is solved so the
+// cohort is a martingale WITH rho in force. Fitting the mean as well would
+// double-book the same experience and leave the drift in.
+//
+// So `nonZeroScale` is a SOLVED number, not a fitted one, and martingale-
+// equivalence-check is what falsifies it. The measured shape is preserved
+// exactly: the zero mass and the log-spread are fixed, only the level moves.
+export const CLAIM_SETTLEMENT_FACTOR = {
+  zeroProbability: 0.19,
+  /** Log-sigma of the non-zero part, from the median/p90 pair. FITTED. */
+  nonZeroLogSigma: 0.5297,
+  /** Log-mu of the non-zero part, from the same pair. FITTED. */
+  nonZeroLogMu: -0.1432,
+  // ⚠ SOLVED, NOT FITTED — the level that makes the cohort a martingale.
+  //
+  //   nonZeroScale = 1 / (E[persistence] x (1 - p0) x exp(mu + sigma^2/2))
+  //                = 1 / (1.00460 x 0.807647) = 1.2325
+  //
+  // The fitted shape's own mean is 0.8076, so the level moves it to 0.9955.
+  // martingale-equivalence-check is what falsifies this and it decomposes the
+  // two terms rather than reading the total.
+  //
+  // ⚠ THE CORRECTION IS SMALL, WHICH IS NOT WHAT THE DERIVATION IMPLIED — AND
+  // THE FIRST SOLVE OF IT WAS UNDER-RESOLVED. MEASURED with a paired estimator:
+  // at 8 registers x 40 replicates the persistence drift read 1.00082 +/- 0.00126
+  // and looked indistinguishable from zero; at 24 x 200 it reads
+  // 1.00460 +/- 0.00065, which is +0.46% at 7 standard errors and is REAL. The
+  // first figure was not wrong, it was un-resolved — and a scale solved on it
+  // left the cohort 0.46% off. So "derive the mean to offset rho" is a genuine
+  // step applying a genuine half-percent correction; it is simply nowhere near
+  // the size the briefed phi would have needed.
+  //
+  // IT IS SMALL BECAUSE phi IS SMALL, and the two corrections compound.
+  // Measured drift against phi on one register, 80 replicates:
+  //   phi 0.00  1.00000            phi 0.63  1.00331 +/- 0.00269
+  //   phi 0.31  1.00150 +/- 0.00130  phi 1.00  1.00530 +/- 0.00445
+  //   phi 1.90  1.00866 +/- 0.01010
+  // At the briefed phi = 1.9 the drift would have been ~0.87% and would have
+  // needed a real correction; at the anchor-solved 0.63 it does not. Getting phi
+  // right shrank this problem rather than solving it separately.
+  nonZeroScale: 1.2325,
+};
+
+// ===========================================================================
+// phi — THE ONE FREE PARAMETER, AND ITS LABEL MATTERS MORE THAN ITS VALUE.
+//
+// ⚠ phi IS NOT A KNOB. Read this before changing it.
+//
+// phi = 4.2 IS A CORRECT MEASUREMENT of the pool's revision process. The
+// matched-slice check reproduces the source's own widening at 1.265 against
+// 1.285, so the number is right about the thing it measures.
+//
+// IT CANNOT BE APPLIED AT FACE VALUE, because the model's severity draw has
+// ALREADY SPENT MOST OF IT. The GL mixture was fitted to SETTLED claim values,
+// not to first estimates, so its log-SD of about 2.14 already contains the
+// revision history of the claims it was fitted to. The pool's settled log-SD is
+// 2.29. Applying a full phi = 4.2 on top of a distribution that is already
+// 2.14 wide would count the same widening twice and put the model's terminal
+// severity far past anything the pool has seen.
+//
+// ⚠ AND THE RESIDUAL IS SMALLER THAN "2.14 vs 2.29" MAKES IT LOOK. THE BRIEFED
+// phi ~ 1.9 WAS DERIVED FROM AN INCOMPLETE BUDGET AND IS ABOUT 3x TOO BIG.
+// MEASURED, terminal-severity-check, 98k-309k GL claims over five sample sizes:
+//
+//   Var[ln terminal] = Var[ln drawn] + Var[accumulated ln revision] + Var[ln settle | non-zero]
+//
+// The 2.14-vs-2.29 argument nets out the FIRST term and stops. It does not net
+// out the THIRD — the settlement factor's own fitted log-sigma of 0.5297, which
+// contributes 0.2806 of log-variance and is not phi's to spend. Measured: at
+// phi = 0 the settlement shape ALONE takes the model from a drawn 2.1668 to
+// 2.2304, which is over half of the 2.1668 -> 2.29 gap consumed before the
+// revision law contributes anything. Netting out both terms leaves a residual
+// log-variance of about 0.275, and phi ~ 0.63 is what fills it.
+//
+// ⚠ IT IS THE SAME DOUBLE-COUNT THE COMBINE RULE ALREADY REJECTS, one level up.
+// CLAIM_REVISION_COMBINE takes the minimum of age and size "because both were
+// fitted on the same experience, so multiplying double-counts". The settlement
+// factor was fitted on that same experience too, so ADDING its variance to a
+// full revision variance double-counts in exactly the parallel way. The brief's
+// argument was right; it was applied to two of the three terms.
+//
+// SOLVED, not asserted: 0.6252 / 0.6273 / 0.6285 on the three largest samples
+// (309k / 98k / 147k claims), 0.5492 and 0.5665 on the two others. The spread
+// tracks the drawn log-SD — a wider draw leaves less residual — and the value
+// below is taken from the configuration that matches a real game's year range.
+//
+// ⚠ AND THE LAW SATURATES, SO phi IS NOT IDENTIFIABLE ABOVE ABOUT 3. Measured
+// terminal log-SD against phi: 2.4540 at 1.4, 2.5431 at 1.9, 2.6028 at 2.5,
+// 2.6211 at 3.2, and 2.6017 at 4.2 — it turns DOWN. The mean-one factor
+// exp(s.sign.|Z| - s^2/2) has median exp(-s^2/2), so at large s the drift term
+// collapses carried values toward zero faster than the spread term widens them.
+// Two consequences worth stating: the model has a hard ceiling near 2.62 that no
+// phi can pass, and any phi above ~3 has a twin that reads the same. phi = 4.2
+// could therefore never have been applied here at face value even if the fit had
+// spent nothing — which strengthens the double-count argument rather than
+// replacing it.
+export const CLAIM_REVISION_PHI = 0.63;
+
+// THE ANCHOR — EXTERNAL, MEASURED AND FALSIFIABLE, AND IT IS GL'S.
+//
+// The pool's settled-claim log-SD. This is what terminal-severity-check holds
+// the model to and what phi is solved against.
+//
+// ⚠ IT IS A GL NUMBER AND THE OTHER TWO LINES INHERIT IT. WC and Property have
+// no settled-severity distribution of their own, so whatever emergent SD they
+// show under a GL-derived phi is a CONSEQUENCE of carrying that phi across, not
+// a validated result for those lines. Say so wherever those figures are quoted.
+export const CLAIM_SETTLED_LOG_SD_ANCHOR = 2.29;
+
+// ===========================================================================
+// ⚠ IBNER_TOTAL_SD RETIRES AS A TARGET WHEN THIS FLAG FLIPS — ALL THREE LINES.
+//
+// It does not retire as a record. The three values stay above as the recorded
+// predecessors, and the reason they retire is that ALL THREE SELF-DESCRIBE AS
+// JUDGEMENT: WC's 25% and GL's 20% are, in their own note, "judgement calls
+// about what a long-tail casualty runoff looks like", and Property's 15% is
+// recorded there as a playability adjustment made so the per-accident-year
+// exhibit had something to show. None is a measurement. The anchor above is
+// measured, external and falsifiable, which is why it displaces them.
+//
+// WHAT REPLACES THEM IS NOT A THIRD TARGET. Under Stage 1 the total SD of a
+// cohort's ultimate is EMERGENT — it falls out of the per-claim law, the
+// register's size mix and the closure curve, and there is no constant to set.
+// The emergent figures under a GL-derived phi are a reading, not a target:
+//
+//   WC 35.1%   GL 20.4%   Property 14.8%     (against the retired 25/20/15)
+//
+// ⚠ AND PROPERTY LANDING AT 14.8% AGAINST ITS OLD 0.15 IS A COINCIDENCE. Keep
+// this line. The old number was chosen for display content on a short-tail
+// line; the new one is what a GL-derived phi happens to produce through
+// Property's own size mix and its 2-4 year horizon. Reading the near-agreement
+// as corroboration would be reading a coincidence as a validation — and WC's
+// 35.1% against 25% is the same kind of number in the other direction, which is
+// the tell.
+export const PER_CLAIM_REVISION_ENABLED = false;
+// ===========================================================================
+// ⚠ TWO OF THE FOUR STAGE 1 GATES ARE NOT BUILT, AND NEITHER IS AN OVERSIGHT.
+// Recorded here rather than only in a commit message, because the flag must not
+// be flipped until both exist.
+//
+// THE COMPOSITION TABLE — 200/(age+1) times the open share against the pool's
+//   measured movement-by-age series. BLOCKED ON THE TARGET, not on the code.
+//   The model half is a few lines; the series it has to reproduce is source
+//   experience that is not in this repo and must not be (see the standing rule
+//   — the parameters ARE the record, the tables are not). Building the model
+//   half alone would be a `*-check` that prints a table and asserts nothing,
+//   which is precisely what the last two commits deleted two files for. Supply
+//   the target series and it becomes a real gate.
+//
+// PRE-GAME ACCEPTANCE — mean and p99 redraw attempts and failures against the
+//   500 cap, on the NEW path. BLOCKED ON THE FLAG. The pre-game search calls
+//   processYear, which develops cohorts through the OLD top-down IBNER path
+//   while PER_CLAIM_REVISION_ENABLED is false, so measuring acceptance today
+//   measures the old path — which opening-centring-check and pin-vs-band-check
+//   already cover. It becomes measurable in the commit that wires the engine,
+//   and it is the blocker that commit must clear FIRST: WC is the fragile line,
+//   and if the search starts failing, no game generates at all.
+//
+// WHAT IS BUILT AND GREEN: terminal-severity-check (FAST, 29s) derives phi
+// against the anchor and carries the phi = 0 control arm;
+// martingale-equivalence-check (SLOW, 348s) decomposes the persistence and
+// settlement terms with separate intervals and carries the fitted-level control
+// arm, which reads 0.842 against a 1% tolerance.
+// ===========================================================================
+
+
+// ===========================================================================
 // PROPERTY loss model — FITTED, and it replaces a design that was never fitted.
 //
 // ⚠ WHAT WAS WRONG, IN BOTH DIRECTIONS AT ONCE. The retired design drew ~112

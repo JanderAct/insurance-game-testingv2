@@ -40,7 +40,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIAG = path.join(__dirname, 'diagnostics');
 
 // ============================================================================
-// FAST — the tier that runs on every commit. 42 gates, about 9 minutes of CPU
+// FAST — the tier that runs on every commit. 43 gates, about 9 minutes of CPU
 // and a little over 2 minutes of wall clock at 3-way concurrency. Seconds are
 // measured, not estimated, on a 4-core box.
 //
@@ -100,6 +100,7 @@ const FAST: string[] = [
   'save-size-check',                 //   4s
   'seed-cohort-shape-check',         //   1s
   'shock-check',                     //   6s
+  'terminal-severity-check',         //  30s   STAGE 1 — derives phi against the pool's settled log-SD
   'solo-export-guard',               //   4s
   'tower-runtime-check',             //  13s
   'trend-memoization-check',         //   2s
@@ -142,6 +143,7 @@ const FAST: string[] = [
 // reset a real failure to 0.)
 // ============================================================================
 const SLOW: string[] = [
+  'martingale-equivalence-check',    // 348s — STAGE 1; sized so its own SE is a fifth of the tolerance
   'property-tower-mc',               // 571s — Monte Carlo over the tower
   'gl-clf-grid-derive',              // 702s — derives GL's CLF grid; asserts monotonicity on it
   'wc-clf-grid-derive',              // 166s — the same, for WC, with the same exit semantics
