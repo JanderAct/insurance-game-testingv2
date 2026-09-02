@@ -297,7 +297,20 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // v32: all 24 hashes moved. Which claims develop is redrawn every valuation, so
 // the claim register's values change and every workbook reading them changes
 // with it. Shape unchanged — no column added, renamed or reordered.
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v33.json');
+// v33: 12 of 24 moved — every GL-solo and every tri, while all 6 WC-solo and all
+// 6 PR-solo stayed byte-identical. GL's occurrence id became per-member and
+// closure hashes the id; the two untouched lines are what says the change did
+// not leak past GL.
+// v34: ALL 24 MOVED, shape unchanged — no column added, renamed or reordered.
+// STARTING_CAPITAL_TO_PREMIUM was re-centred, the pre-game search accepts a
+// different attempt, and a different past is simulated on every seed. A capture
+// where some export held still would be the surprising one here.
+//
+// ⚠ AND THE SHAPE CLAIM IS MEASURED, NOT ASSERTED. dbcfed7 added
+// rcEffectivenessApplied to the line result one commit earlier and this guard
+// read 24 of 24 MATCH at that commit — so the field reaches no export, and the
+// 24 hashes moving now carry no column change hidden inside them.
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v34.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

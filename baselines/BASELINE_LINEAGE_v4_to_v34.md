@@ -1,4 +1,4 @@
-# Baseline Lineage — v4 through v29
+# Baseline Lineage — v4 through v34
 
 A genealogy of the multi-line baselines: what each version represents, what change caused the jump
 to it, which numbers moved and why. Covers the multi-line-meaningful baselines (v4–v11). Earlier
@@ -2187,3 +2187,99 @@ field is among them.
 | both guards, against v33 | green after recapture |
 
 v31 retired from the working tree; v32 kept as the immediate predecessor.
+
+---
+
+## v34 — the pre-game search is re-centred on its own band
+
+`STARTING_CAPITAL_TO_PREMIUM` — the pin the reject-and-redraw pre-game search starts from — moved
+from `{WC 0.47, GL 0.24, Property 0.48}` to `{WC 0.41, GL 0.27, Property 0.41}`. The opening band
+did not move and must not: the band is the TARGET, the pin is the TUNING.
+
+The engine had drifted out from under the pin. Payout patterns, closure and the per-claim payment
+split all change how a pre-game year accumulates surplus, and nothing re-checked the centring after
+any of them. Measured at the retired pin, the **unfiltered** candidate median sat +0.131 / −0.091 /
++0.165 off its band midpoint (WC / GL / Property) — 34% / −16% / 29% of the respective band widths.
+
+### Why this is a whole-tree re-roll and not a value change to read field-by-field
+
+The search simulates each candidate past on `(seed + attempt × 997)`. Move the pin and a different
+attempt is accepted, so a different past is simulated, a different roster enrols, and every draw-side
+quantity re-rolls with it — `activeMembers` 59 → 58, `claimCount` 43 → 24. There is no subset of the
+17,785 moved values to attribute; a field-by-field reading of this diff would be reading noise.
+
+**The attribution is the separation, not the diff.** `dbcfed7` was measured alone first: it adds
+`rcEffectivenessApplied` (the +180 on this capture's SHAPE line) and moves **0 of 29,400** values,
+and solo-export-guard read **24 of 24 MATCH** at that commit — so the new field reaches no export and
+the 24 hashes moving now carry no hidden column change. Every one of the 17,785 is the pin.
+
+### The method, and the trap it avoids
+
+The pin was solved on the **unfiltered** ratio — attempt 0, no rejection. Measuring the median on the
+band-*selected* sample is a fixed-point iteration against your own selection effect: the selected
+sample is inside the band by construction and always looks centred. `995f6f9` measured it both ways
+(GL read 1.119 selected against 0.900 unfiltered) and calibrating on the selected figure produced a
+band 48% above the old one. Same trap, avoided the same way.
+
+`median_unfiltered ≈ a + b·K` fits tightly (R² 0.9988 / 0.9997 / 0.9998), but the SLOPE is what is
+reliable and the LEVEL is a noisy sample median. A first solve on a 300-seed base overshot by
+−0.063 / +0.016 / −0.096; re-measuring the level on 800 seeds and taking one Newton step with the
+fitted slope landed within 1.0 / 0.1 / 0.5 bootstrap SE on a third, independent base.
+
+### What moved, measured before and after (400 seeds, retired pin vs shipped pin)
+
+| line | unfiltered offset | attempts, mean | accepted median |
+|---|---|---|---|
+| WC | +0.131 → **+0.002** | 2.81 → 2.75 | 1.044 → 1.021 |
+| GL | −0.091 → **+0.047** | 2.63 → 2.88 | 1.524 → 1.551 |
+| Property | +0.165 → **−0.065** | 4.13 → 4.14 | 1.398 → 1.411 |
+
+### ⚠ The expected damage did not exist, and that is the finding
+
+The premise this was undertaken on — candidates sitting above the band get their top sheared off, so
+the accepted set is drawn from the low tail and the pool ships systematically weaker openings — is
+**false, measured**. At a drift of +34% of band width on WC the ACCEPTED median was +5% off midpoint
+and in the HIGH direction; re-centring moved it by 2% of a band width. The band is narrow against the
+candidate spread, so conditional on landing inside it position within it is nearly uniform: accepted
+p10–p90 spans 79–81% of the band both before and after. **Selection cannot bias what it barely filters.**
+
+What drift costs is ACCEPTANCE, and that cost is a cliff rather than a slope. While the band still
+sits in the bulk, attempts do not move (2.81 / 2.63 / 4.13 against 2.75 / 2.88 / 4.14 — nothing).
+Once it leaves, the cost explodes: pin-vs-band-check doubles the pin and reads 8.6x / 8.3x / 3.5x on
+attempts, and at the retired pins the same perturbation reached 67.9 mean attempts with a worst case
+of 481 against a cap of 500. So the drift had done no measurable damage yet — it had moved the search
+toward the edge of its own proposal distribution, where the next engine change of the same size starts
+pushing acceptance off the cliff.
+
+### The durable part is the gate, not the retune
+
+This has now drifted twice and both times it was found by accident — once at `995f6f9` (28.7% off,
+noticed while re-reading the constant) and once here (noticed while measuring the cost of a deeper
+pre-game). A third time is the expected outcome of fixing it and stopping, so `opening-centring-check`
+asserts the property directly: each line's unfiltered candidate median within 0.25 × its own band
+WIDTH of its own band midpoint.
+
+It is separate from `pin-vs-band-check` deliberately. That gate asserts a RELATIONSHIP — that
+perturbing the pin moves attempts and not the opening — and it passes at any centring, including the
+drifted one. This asserts a PROPERTY of the shipped constant against the shipped engine, which is the
+thing that drifted.
+
+The tolerance clears two constraints, and the first draft of the gate met only one. The EFFECT: the
+drift ran 49% and 52% of band width on WC and Property, so anything under ~40% catches it. The NOISE:
+the statistic is a median of a wide distribution, with bootstrap SE at 400 seeds of roughly 5% / 8% /
+11% of the respective band widths. The 15% first draft was 1.4–3.0 SE and would have flapped on
+nothing; 25% is 2.3–4.8 SE and still catches a 49% drift at nearly twice over. The gate prints the
+offset in SE so the margin is visible rather than trusted.
+
+### Gate readings
+
+| gate | reading |
+|---|---|
+| value identity | 17,785 of 29,400 changed / 77 fields, 0 added, 0 removed (+180 shape, from `dbcfed7`) |
+| ⚠ `dbcfed7` measured alone | **0 of 29,400 values, 24 of 24 exports MATCH** — the whole diff is the pin |
+| solo export guard | 24 of 24 moved, shape unchanged |
+| both, against v34 | green after recapture |
+| opening-centring-check | WC +0.022, GL −0.048, Property +0.084 — all inside 1.5 SE and 15% of band width — PASS |
+| ⚠ can it fail | **yes** — the retired pin fails all three lines: WC +38%, GL −32%, Property +49% of band width |
+
+v32 retired from the working tree; v33 kept as the immediate predecessor.

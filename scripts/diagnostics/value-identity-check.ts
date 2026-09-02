@@ -390,7 +390,27 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // closed, so stubbing the closure predicate leaves the mechanism running. What
 // survives is the mechanism switch: DEVELOPMENT_CESSION_ENABLED = false,
 // parent vs child, reads 29,400 fields and 0 differing.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v33.json');
+// v33: GL's occurrence id became per-member. The id feeds isClaimClosed, closure
+// feeds reselectDevelopingSet, and 38 fields moved down the development ->
+// cession -> reserve -> surplus chain. No GL claim AMOUNT moved; established
+// three ways, recorded in the lineage.
+// v34: STARTING_CAPITAL_TO_PREMIUM re-centred — 17,785 of 29,400 changed across
+// 77 fields, 0 added, 0 removed. THIS ONE IS A WHOLE-TREE RE-ROLL AND THE FIELD
+// LIST SHOULD BE READ AS ONE. The pre-game is a reject-and-redraw search on
+// (seed + attempt x 997); moving the pin moves which attempt is accepted, so a
+// different past is simulated, a different roster enrols, and every draw-side
+// quantity re-rolls with it — activeMembers 59 -> 58, claimCount 43 -> 24.
+// There is no subset of this diff to attribute, and a field-by-field reading of
+// it would be reading noise.
+//
+// ⚠ SO THE ATTRIBUTION IS THE SEPARATION, NOT THE DIFF. dbcfed7 was measured
+// alone first: it adds rcEffectivenessApplied (180 fields, the +180 in this
+// capture's SHAPE line) and moves 0 of 29,400 values. Every one of the 17,785 is
+// therefore the pin. What the pin change is FOR is asserted by
+// opening-centring-check, which measures the unfiltered candidate median against
+// the band midpoint directly and can fail; this capture only records that the
+// tree moved, which for a re-roll is the one thing it can honestly say.
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v34.json');
 
 function seedOf(id: string) {
   let h = 5381;

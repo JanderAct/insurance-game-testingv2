@@ -385,6 +385,29 @@ Things that were discovered expensively and live only in conversation memory. Re
   Either measure the affected sub-coverage in isolation, or run enough seeds that the reshuffle
   averages out; state which in the harness header. Same family as the full-market/enrolled error:
   arithmetically correct, measured against the wrong thing.
+- **A gate's tolerance has to clear the ESTIMATOR'S noise, not just sit under the effect.** The
+  natural way to pick a threshold is to look at the defect you are gating and halve it. That is one
+  of two constraints and the first draft of opening-centring-check only met it: 0.15 band widths
+  against a 0.49-width drift looked like a comfortable 3x margin, but the statistic being gated is a
+  MEDIAN of a wide distribution and its bootstrap SE at that sample size was 5–11% of a band width —
+  so the tolerance was 1.4–3.0 SE and would have gone red on nothing at all. A gate that flaps is a
+  gate people learn to skip, which is the same end state as no gate. Measure the estimator's own
+  sampling error, set the tolerance above it AND below the effect, and print the offset in SE
+  alongside the pass/fail so the next reader can see the margin rather than trust it. Raising the
+  sample size buys room as 1/sqrt(n) if the two constraints will not both fit.
+- **Selection cannot bias what it barely filters — measure a mis-centred search in ACCEPTANCE, not
+  in its output.** The intuitive story about a reject-and-redraw search whose proposal distribution
+  has drifted above its acceptance band is that the ceiling shears off the top and the accepted set
+  is drawn from the low tail. Measured, that is false whenever the band is narrow against the
+  proposal's spread: conditional on landing inside, position within the band is nearly uniform. At a
+  drift of +34% of band width on WC the accepted median was +5% off midpoint and in the HIGH
+  direction, and re-centring moved it by 2%; accepted p10–p90 spanned 79–81% of the band either way.
+  What drift actually costs is attempts, and that cost is a CLIFF, not a slope — flat while the band
+  sits in the bulk (2.81/2.63/4.13 attempts before against 2.75/2.88/4.14 after, i.e. nothing), then
+  8–17x once it leaves. So gate the centring, which gives warning while it is still free; watching
+  attempts or watching the shipped output gives no warning until it is already expensive. Corollary
+  for briefs and headers: do not write the intuitive damage claim into a failure message. It reads
+  as measured, and the next person budgets against a number nobody took.
 
 ## ⚠ THE TWO KINDS OF GATE BLINDNESS, AND THEY HAVE DIFFERENT ANSWERS
 

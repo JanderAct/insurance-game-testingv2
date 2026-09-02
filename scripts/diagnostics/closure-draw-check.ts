@@ -59,9 +59,39 @@ const GAMES = Number(process.env.GAMES ?? 10);
 const YEARS = Number(process.env.YEARS ?? 6);
 const MAX_AGE = 6;
 
-// The unit's mean, over thousands of claims. 0.005 is far inside what the
-// measured defect produced (0.0118 on WC) and far outside float noise.
-const MAX_MEAN_DRIFT = 0.005;
+// ⚠ A Z-SCORE, NOT AN ABSOLUTE DRIFT — AND THIS FILE MADE THE SAME MISTAKE
+// TWICE, ONCE HERE AND ONCE AT MAX_CALIBRATION_Z BELOW. The bound was 0.005,
+// picked as "far inside the measured defect (0.0118 on WC) and far outside float
+// noise". That is one of two constraints and it only met the first. The mean of
+// n uniform draws has SE = (1/sqrt(12))/sqrt(n), so an ABSOLUTE bound means a
+// different thing on each line: 0.005 is 2.9 SE on WC's ~29,000 claims, 2.5 SE
+// on GL's ~18,000, and **0.83 SE on Property's ~2,300**. A bound below one
+// standard error cannot pass reliably, and Property's arm was a coin flip from
+// the day it was written.
+//
+// MEASURED, on eight independent 10-game bases: Property fails the 0.005 bound
+// on FOUR of the eight, at 0.78 / 0.87 / 1.40 / 1.71 / 1.81 sigma — noise every
+// time. WC and GL never exceed 1.4 sigma on any base. It read green until the
+// pre-game pin was re-centred at v34, which re-rolls every claim population and
+// simply landed Property on a losing side (+0.0100, 1.65 sigma).
+//
+// SO THIS IS A UNITS FIX, NOT A LOOSENING. On WC the sigma bound is 0.0061
+// against the old 0.0055 — materially the same standard — while on Property it
+// stops asserting something the sample cannot support. The defect the gate was
+// built to catch, WC's mean of 0.4882 on 27,745 claims, scores 6.8 sigma and
+// still fails at nearly twice over.
+//
+// 3.5 sigma across three lines, matching MAX_CALIBRATION_Z for the same reason.
+//
+// POSITIVE CONTROL, RUN: shrinking the unit by 1.2% — HALF the 2.36% the shipped
+// hash produced — takes WC to -4.34 sigma and fails. Property reads 0.64 sigma
+// on the same bias and passes, which is what 2,300 claims can support and is the
+// same resolution limit the calibration block below already prints. The mean
+// arm is a WC and GL instrument; Property is watched by the chi-squared and by
+// the calibration block, and saying so beats a bound that pretends otherwise.
+const MAX_MEAN_Z = 3.5;
+/** SE of the mean of n uniform[0,1) draws. */
+const meanSE = (n: number) => (1 / Math.sqrt(12)) / Math.sqrt(n);
 // Chi-squared(9) at 99.9% is 27.9. The shipped hash read 258 on WC.
 const MAX_CHI2 = 27.9;
 // ⚠ A Z-SCORE, NOT SHARE POINTS, AND THE FIRST VERSION OF THIS CHECK GOT IT
@@ -112,7 +142,7 @@ console.log('=== THE CLOSURE DRAW ===');
 console.log(`${GAMES} games x ${YEARS} years, ${claims.length.toLocaleString()} claims.\n`);
 
 console.log('--- UNIFORM, PER LINE ---');
-console.log('  line       claims     mean unit   drift     chi2(9)   limit');
+console.log('  line       claims     mean unit   drift    drift/SE   chi2(9)   limit');
 for (const line of LINES) {
   const u = claims.filter(c => c.line === line).map(c => claimClosureUnit(c.game, c.id));
   if (u.length < 100) { console.log(`  ${line.padEnd(10)} too few claims to test`); continue; }
@@ -121,15 +151,18 @@ for (const line of LINES) {
   for (const v of u) bins[Math.min(9, Math.floor(v * 10))]++;
   const e = u.length / 10;
   const chi = bins.reduce((a, b) => a + (b - e) ** 2 / e, 0);
-  const badMean = Math.abs(m - 0.5) > MAX_MEAN_DRIFT;
+  const z = (m - 0.5) / meanSE(u.length);
+  const badMean = Math.abs(z) > MAX_MEAN_Z;
   const badChi = chi > MAX_CHI2;
   if (badMean) fail(`${line}: the closure unit's mean is ${m.toFixed(4)}, off 0.5 by `
-    + `${Math.abs(m - 0.5).toFixed(4)} — every claim on this line is biased toward ${m < 0.5 ? 'CLOSING' : 'STAYING OPEN'}`);
+    + `${Math.abs(m - 0.5).toFixed(4)} — ${Math.abs(z).toFixed(1)} standard errors on ${u.length.toLocaleString()} `
+    + `claims, against a ${MAX_MEAN_Z} limit. Every claim on this line is biased toward `
+    + `${m < 0.5 ? 'CLOSING' : 'STAYING OPEN'}`);
   if (badChi) fail(`${line}: decile chi-squared ${chi.toFixed(1)} over ${MAX_CHI2} — the hash is not `
     + 'uniform on this line\'s id shape, whatever it does on the others');
   console.log(`  ${line.padEnd(10)} ${u.length.toLocaleString().padStart(8)}   ${m.toFixed(4).padStart(9)} `
     + `${(m - 0.5 >= 0 ? '+' : '') + (m - 0.5).toFixed(4)}`.padStart(9)
-    + `${chi.toFixed(1).padStart(10)}   ${MAX_CHI2}  ${badMean || badChi ? 'FAIL' : 'ok'}`);
+    + `${z.toFixed(2).padStart(9)}` + `${chi.toFixed(1).padStart(10)}   ${MAX_CHI2}  ${badMean || badChi ? 'FAIL' : 'ok'}`);
 }
 
 console.log('\n--- CALIBRATED: realised closure vs the curve\'s own expectation ---');

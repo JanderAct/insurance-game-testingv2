@@ -1141,38 +1141,80 @@ export const SIZE_WEIGHTS = [0.55, 0.30, 0.12, 0.03];
 // MEASURED, so it is not a story. Doubling each pin in turn and re-running the
 // solo pre-game. These are pin-vs-band-check.ts's own readings; that gate
 // asserts the PROPERTY rather than these exact figures, so re-run it rather than
-// trusting the table if a band moves:
+// trusting the table if a band or a pin moves. Re-measured at the shipped
+// 0.41 / 0.27 / 0.41:
 //
 //   line       accepted opening surplus/premium   mean redraw attempts
-//   WC              1.034 -> 1.104   (+6.8%)          2.20 -> 67.90   (30.9x)
-//   GL              1.433 -> 1.602  (+11.8%)          1.75 ->  7.90    (4.5x)
-//   Property        1.431 -> 1.521   (+6.3%)          3.17 -> 14.55    (4.6x)
+//   WC              1.044 -> 1.083   (+3.7%)          1.93 -> 16.60    (8.6x)
+//   GL              1.454 -> 1.531   (+5.3%)          1.52 -> 12.65    (8.3x)
+//   Property        1.463 -> 1.487   (+1.6%)          2.92 -> 10.22    (3.5x)
 //
-// A 100% MOVE IN THE PIN BUYS A 6-12% MOVE IN THE OPENING AND MULTIPLIES THE
+// (At the retired pins the same table read 1.034 -> 1.104 / 1.433 -> 1.602 /
+// 1.431 -> 1.521 on the opening and 2.20 -> 67.90 / 1.75 -> 7.90 / 3.17 ->
+// 14.55 on attempts. The RELATIONSHIP is what the gate asserts; the digits move
+// with every re-centring and are a reading, not a target.)
+//
+// A 100% MOVE IN THE PIN BUYS A 2-6% MOVE IN THE OPENING AND MULTIPLIES THE
 // REDRAW BILL. It was found the other way round, at the retired values: doubling
 // GL's old pin of 0.45 moved its opening 1.1% and took the mean attempt count
 // from 11.8 to 108.2, with a worst case of 481 against a MAX_HISTORY_ATTEMPTS of
 // 500 — within 4% of the search failing outright.
 //
-// SO THE CALIBRATION TARGET IS REDRAW COST, and nothing else. Each value is the
-// K that centres its line's UNFILTERED opening distribution on its own band's
-// midpoint, so the band accepts near the mode instead of out in a tail. Measured
-// with the band disabled, the median opening is affine in K:
+// SO THE CALIBRATION TARGET IS THE CENTRING, and the redraw bill is its symptom.
+// Each value is the K that centres its line's UNFILTERED opening distribution on
+// its own band's midpoint, so the band accepts near the mode instead of out in a
+// tail. Measured with the band disabled, the median opening is affine in K:
 //
-//   WC        surplus/premium ~ -0.014 + 2.227 K   band midpoint 1.025  ->  0.47
-//   GL        surplus/premium ~  0.531 + 4.132 K   band midpoint 1.510  ->  0.24
-//   Property  surplus/premium ~  0.033 + 2.889 K   band midpoint 1.415  ->  0.48
+//   WC        surplus/premium ~ 0.2059 + 2.1214 K   band midpoint 1.025  ->  0.41
+//   GL        surplus/premium ~ 0.4306 + 4.1063 K   band midpoint 1.510  ->  0.27
+//   Property  surplus/premium ~ 0.1296 + 3.3089 K   band midpoint 1.415  ->  0.41
 //
-// The basin is broad, not a knife edge — GL measures 2.15 / 2.21 / 2.01 / 1.91 /
+// (300 seeds at each of five K per line, R^2 0.9988 / 0.9997 / 0.9998. The fits
+// recorded here before this commit — -0.014 + 2.227K, 0.531 + 4.132K, 0.033 +
+// 2.889K, giving 0.47 / 0.24 / 0.48 — were the same measurement against an
+// earlier engine and are superseded, not corrected.)
+//
+// The basin is broad, not a knife edge — GL measured 2.15 / 2.21 / 2.01 / 1.91 /
 // 1.95 mean attempts at K = 0.20 / 0.22 / 0.24 / 0.26 / 0.28 — so the fitted
 // value is kept rather than the sample minimum, which would be fitting noise.
 //
+// ⚠ THE SLOPE IS SOLID AND THE LEVEL IS NOISY, WHICH IS HOW TO RE-SOLVE THIS.
+// R^2 above 0.998 makes the slope reliable, but the median itself is a sample
+// statistic: bootstrap SE at 800 seeds is 0.015 / 0.031 / 0.046, so a 300-seed
+// fit can place the level ~0.05 off and the first solve from these fits
+// overshot every line by about that much. The method that worked: solve from the
+// fit, then measure the median at that K on a LARGE INDEPENDENT seed base and
+// take one Newton step, `K += (midpoint - median) / slope`. Validated at 800
+// fresh seeds, the shipped values land +0.015 / -0.003 / +0.022 from their
+// midpoints — 1.0 / 0.1 / 0.5 standard errors, i.e. centred within noise.
+// opening-centring-check asserts this property on every run.
+//
 // WHY THIS IS WORTH A COMMIT: the pre-game runs at the start of every session and
 // fifty opening positions are to be precomputed, so an attempt is setup time paid
-// fifty times over. 150 solo seeds per line, mean attempts:
+// fifty times over. 150 solo seeds per line, mean attempts, at the ORIGINAL
+// re-centring:
 //
 //   WC 7.25 -> 1.63    GL 10.57 -> 1.87    Property 4.81 -> 2.99
 //   pool total 22.63 -> 6.49 candidate pre-games per opening, a 71% cut
+//
+// ⚠ AND IT HAS NOW DRIFTED TWICE, WHICH IS WHY THERE IS A GATE. This is a
+// property of the constant AGAINST AN ENGINE, and payout patterns, closure
+// curves and the per-claim payment split all moved it after it was last set.
+// Found the first time at 995f6f9 while re-reading the constant; found the
+// second time while measuring something else entirely (the cost of a deeper
+// pre-game), by which point the unfiltered median sat +0.19 off its midpoint on
+// WC and +0.29 on Property — roughly half of each band's width, so half the
+// candidate distribution was rejected at the CEILING and the accepted set came
+// from the low tail. The pool was shipping systematically weaker openings than
+// the engine's own distribution gives, and nothing downstream could see it
+// because every accepted opening is inside the band by construction.
+//
+// The redraw bill barely moved across the second drift (2.9 / 2.6 / 4.0 attempts
+// against 2.20 / 1.75 / 3.17 recorded), which is exactly why cost is the wrong
+// thing to watch: the SELECTION BIAS is the damage and it is invisible in
+// attempt counts. opening-centring-check asserts the centring directly, so the
+// next engine change trips a gate instead of the drift being found a month later
+// by someone measuring something else.
 //
 // ⚠ THE OLD VALUES WERE 0.70 / 0.45 / 0.18 AND THEIR COMMENT APOLOGISED FOR
 // HAVING NO RATIONALE. The apology was for the absence of a rationale this
@@ -1184,16 +1226,17 @@ export const SIZE_WEIGHTS = [0.55, 0.30, 0.12, 0.03];
 // and the spread collapses from 3.9x to 2.0x, which is the tell.
 //
 // ⚠ NOT THE YEAR-1 OPENING RATIO EITHER. Three simulated years run on top of
-// these, so the opening lands at roughly 1.01x / 1.54x / 1.45x premium. Anyone
-// reading 0.47 as "WC opens at 0.47x premium" is wrong by a factor of two.
+// these, so the opening lands at roughly 1.01x / 1.55x / 1.42x premium. Anyone
+// reading 0.41 as "WC opens at 0.41x premium" is wrong by a factor of two and a
+// half.
 //
 // DISPLACED BY: nothing. A real capital standard would displace the BAND, not
 // this. See the closed form recorded under the band below.
 // ============================================================================
 export const STARTING_CAPITAL_TO_PREMIUM: Record<string, number> = {
-  WC: 0.47,
-  GL: 0.24,
-  Property: 0.48,
+  WC: 0.41,
+  GL: 0.27,
+  Property: 0.41,
 };
 
 // Pre-game acceptance band: the line's Year-1 opening surplus must land within
