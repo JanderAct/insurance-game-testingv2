@@ -7,8 +7,8 @@ Things that were discovered expensively and live only in conversation memory. Re
   arrangement without anyone noticing: `allocation-grid` threw for a whole commit, and
   `cession-path-independence` had been failing for four. Running the third one down
   (`panel-engine-parity-check`) for the first time found it red too.
-  - `npm run gates` — 39 gates, ~2 min wall clock. Every commit.
-  - `npm run gates:slow` — `property-tower-mc`, ~10 min. Before a merge, and after any tower change.
+  - `npm run gates` — 42 gates, ~2 min wall clock. Every commit.
+  - `npm run gates:slow` — `property-tower-mc` (~21 min) plus both CLF grid derivers. Before a merge, and after any tower, severity or GL cap change.
   - `npm run gates:all`, `npm run gates:probes`, `npm run gates:list`.
   - **The manifest in `scripts/gates.ts` is checked against the directory on every run.** A new script in
     `scripts/diagnostics/` that is in no list fails the runner by name. That check, not the list, is the
@@ -17,18 +17,44 @@ Things that were discovered expensively and live only in conversation memory. Re
     wrong.** This bullet used to say "eleven of them print and assert nothing", which straddled the two
     and hid the worse one. Measured: **nine** asserted nothing at all — renamed to `*-report`
     (`loss-ratio`, `membership-equilibrium`, `opening-basis`, `property-fit`, `reinsurance-layer`,
-    `tower-downside`, `wc-behaviour`, `wc-cap-stability`, `ibner-clf-basis`) — and **five** assert, print
-    `FAIL` per row, and then **exit 0** (`clf-downside-check`, `gl-claim-check`, `gl-cutover-check`,
-    `reinsurance-tower-check`, `wc-cutover-check`). The second five are worse: the runner prints `ok`
-    beside a script that just printed FAIL. They are not renamed, because `-report` would cement the
-    wrong half; promote-or-drop is a decision. Do not read a name as a verdict, and do not read a green
-    runner line as one either.
+    `tower-downside`, `wc-behaviour`, `wc-cap-stability`, `ibner-clf-basis`) — and **five** asserted,
+    printed `FAIL` per row, and then **exited 0**, so the runner printed `ok` beside a script that had
+    just printed FAIL. Four of those five were promoted to real gates (`gl-claim-check`,
+    `gl-cutover-check`, `reinsurance-tower-check`, `wc-cutover-check`); the fifth,
+    `clf-downside-check`, turned out to have nothing to promote and was deleted. Do not read a name as
+    a verdict, and do not read a green runner line as one either.
   - **A probe still has to run.** `allocation-grid` asserts nothing and was still red, because it threw.
   - **A gate's NAME can become a coverage argument, and then the coverage is imaginary.** Three comments
     in the engine credited `property-fit-check` with asserting the Property mean severity and the derived
     held pure premium — one of them saying it was "the check that would otherwise be missing". That script
     asserts nothing. The assertions were real but lived in `property-claim-check`; the name alone carried
     them for months. When a comment says a script asserts something, open the script.
+  - **A "green" gate is worth nothing until something has made it go red — and 24 of 40 here never had.**
+    Put every gate through the same method used on a new one: perturb the thing it claims to watch with a
+    *plausible* defect, confirm red, revert. 22 fired. `property-tower-mc` fired only at 80x its lattice
+    size and passes an 8x coarsening, so it is a smoke alarm on that axis and now prints its own
+    resolution. Two could not fire at all and were deleted. **Say what you perturbed and by how much** —
+    "halved the constant" and "changed it 2%" are different findings, and a gate that only fires when you
+    zero its subject has not been shown to catch anything a person would write.
+  - **A tautology is the hardest vacuous check to see, because its comment agrees with you.**
+    `const wcExpectedClf = 1.0; assert(wcExpectedClf === 1)` sat in `funding-expected-check` under the
+    comment "the literal engine short-circuit — nothing to compute". The reader agrees there is nothing to
+    compute and moves on. `clf-downside-check`'s only assertion was `(1+a+r)/(1+a+r) === 1` over hardcoded
+    literals. Both read no engine value at all, which is the tell: **if a perturbation to the engine cannot
+    reach the assertion, the assertion is about the harness.** Grep for `=== 1`, `note(true`, and locals
+    assigned a literal and then asserted.
+  - **Separate "cannot fire" from "obsolete" before deciding anything.** They look identical in a sweep and
+    need opposite responses. `pool-market-share-check` was *structurally incapable* — its subject was alive
+    and watched three times over, it just never read it; that is a bug and it was deleted because the
+    coverage existed elsewhere. `enrolment-independence-check`'s WX columns were *obsolete* — the weather
+    band moved into the fitted severity mixture and no draw remains, so there was nothing to assert; the
+    columns went and the gate stayed. **A hardcoded pass is not a skipped test, it is a test that says PASS.**
+  - **Before deleting a gate, name the file that asserts the property and the perturbation that proves it.**
+    Not "something else also looks at this". Both deletions here cleared that bar: `ratio-basis-check` holds
+    the combined-ratio identity at 1e-12 against the real engine and fails on a gross loss numerator;
+    `pool-aggregation-check` fails and names `marketShare` by field on the same zeroing that left the
+    deleted gate green. Where the coverage went is written into `scripts/gates.ts`, so the name cannot be
+    re-added on the strength of the name.
 - **"Store the inputs, not the output" — and check whether the inputs are already stored before adding
   any.** Claim regeneration was briefed as persisting five scalars per line-year against the ~7 MB of claim
   objects they replace. Tracing each one: the roster (`memberList`) and `kLineApplied` were already on the

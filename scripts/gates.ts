@@ -40,7 +40,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIAG = path.join(__dirname, 'diagnostics');
 
 // ============================================================================
-// FAST — the tier that runs on every commit. 43 gates, about 9 minutes of CPU
+// FAST — the tier that runs on every commit. 42 gates, about 9 minutes of CPU
 // and a little over 2 minutes of wall clock at 3-way concurrency. Seconds are
 // measured, not estimated, on a 4-core box.
 //
@@ -92,7 +92,6 @@ const FAST: string[] = [
   'panel-engine-parity-check',       //   4s
   'pin-vs-band-check',               //  27s
   'pool-aggregation-check',          //   2s
-  'pool-market-share-check',         //   6s
   'property-claim-check',            //   3s
   'ratio-basis-check',               //   7s
   'reinsurance-tower-check',         //   2s   PROMOTED at this commit
@@ -166,18 +165,18 @@ const SLOW: string[] = [
 // Old names appear in commit messages and in one lineage entry; they are the
 // same scripts.
 //
-// ⚠ AND THE NAMING WAS THE SMALLER HALF. FIVE MORE ASSERT AND CANNOT SAY SO.
+// ⚠ AND THE NAMING WAS THE SMALLER HALF. FIVE MORE ASSERTED AND COULD NOT SAY SO.
 // clf-downside-check, gl-claim-check, gl-cutover-check, reinsurance-tower-check
-// and wc-cutover-check each collect a `problems[]` and print `FAIL` per row —
-// and then exit 0. So the sweep prints `ok` beside a script that just printed
-// FAIL, which is strictly worse than a probe that asserts nothing: the reader
-// is told green by the runner and would have to read the body to learn
-// otherwise. THEY ARE NOT RENAMED, deliberately — calling them `-report` would
-// cement the wrong half of the problem. Their assertions are real and at least
-// two are load-bearing (962ef60 and cb00971 both turned on gl-supplied-clf and
-// gl-claim trend assertions), so the open question is PROMOTE OR DROP, which is
-// a decision and not a rename. All five print no FAIL as of 2a051bb — measured,
-// so nothing is silently red today.
+// and wc-cutover-check each collected a `problems[]` and printed `FAIL` per row
+// — and then exited 0. So the sweep printed `ok` beside a script that had just
+// printed FAIL, which is strictly worse than a probe that asserts nothing: the
+// reader is told green by the runner and would have to read the body to learn
+// otherwise. RESOLVED: four were PROMOTED at b0a9bad (they are in FAST above,
+// each proven to fire), because their assertions were real and two had been
+// deliberately strengthened while sitting in PROBES (962ef60, cb00971). The
+// fifth, clf-downside-check, had nothing to promote — its only assertion was a
+// tautology over hardcoded literals — and was DELETED here; see the retirement
+// record below for where that property is actually asserted.
 //
 // WORKING_PRACTICES said "eleven of them print and assert nothing". Measured,
 // it is nine that assert nothing and five that assert without exiting; the
@@ -185,7 +184,6 @@ const SLOW: string[] = [
 // ============================================================================
 const PROBES: Record<string, string> = {
   'allocation-grid': 'compares allocation rules cell by cell; the table it prints is quoted in developmentAllocation.ts [9s]',
-  'clf-downside-check': '⚠ ASSERTS BUT EXITS 0 — prints "FAIL — formula has drifted" on CLF-table drift and the runner still reads ok. Promote or drop [6s]',
   'clf-table-derive': 'derives the static CLF tables — a generator, not a check [240s]',
   'development-cession-size': 'the cession rate by allocation rule; the calibration table [20s]',
   'investment-dominance-report': 'underwriting against investment income, per line, with the implied return. A design reading with no threshold — see its header [12s]',
@@ -312,27 +310,52 @@ const PROBES: Record<string, string> = {
 //
 // 22 of 24 FIRE ON A PLAUSIBLE DEFECT. One is a smoke alarm. One cannot fire.
 //
-// ⚠ pool-market-share-check CANNOT FIRE, AND IT IS THE PUREST CASE IN THE SET.
-// It reimplements BOTH the old exposure-sum formula and the new premium-weighted
-// one locally, then asserts the year-1 gap between its own two functions. The
-// engine's pool-scope marketShare (simulationEngine.ts's charge-weighted mean)
-// is never read. Measured: re-weighting the engine's formula by poolPremium
-// instead of totalMemberCharge leaves it green, and FORCING THE FIELD TO ZERO
-// leaves it green. It is structurally incapable, not obsolete — its subject is
-// alive and watched, just not by it. On the same zeroing, pool-aggregation-check
-// fails and names marketShare, audit-formula-check reports 640 findings and
-// value-identity-check reports VALUES MOVED. The coverage exists three times
-// over; this script contributes none of it.
+// ============================================================================
+// ⚠ TWO GATES WERE DELETED HERE, AND THIS IS WHERE THEIR COVERAGE WENT.
+// Written down so nobody re-adds them on the strength of the name.
 //
-// ⚠ clf-downside-check CANNOT FIRE EITHER, AND IT IS WHY IT WAS NOT PROMOTED
-// with the other four. Its sole assertion is
+// pool-market-share-check  DELETED at this commit. It reimplemented BOTH the
+//   old exposure-sum formula and the new premium-weighted one locally and
+//   asserted the year-1 gap between its own two functions. The engine's
+//   pool-scope marketShare — simulationEngine's totalMemberCharge-weighted mean
+//   of each line's own share — was never read, so it could not fire. Measured:
+//   re-weighting the engine by poolPremium left it green, and FORCING THE FIELD
+//   TO ZERO left it green.
+//
+//   WHERE THE COVERAGE IS NOW, all three verified against that same zeroing:
+//     pool-aggregation-check   FAILS and names marketShare by field
+//                              ("Property-solo pooled row differs from its only
+//                              line at marketShare"). This is the real guard —
+//                              it asserts the pooled row against the line rows,
+//                              which is the property the deleted gate was
+//                              gesturing at.
+//     audit-formula-check      FAILS with 640 findings; the audit page's Market
+//                              Share row is one of them, and this gate has
+//                              caught that row wrong TWICE before (118b1fb,
+//                              ebdb147).
+//     value-identity-check     reports VALUES MOVED.
+//
+// clf-downside-check       DELETED at this commit. Its only assertion was
 //   combinedAt1 = (1 + adminRatio + reinsPct) / (1 + adminRatio + reinsPct)
-// over three hardcoded admin ratios and four hardcoded reinsurance percentages.
-// That is X/X: `worst` is exactly 0 for every input and the "FAIL — formula has
-// drifted" branch is unreachable. It reads no engine value, so there is nothing
-// to perturb. The property it means to assert IS asserted, properly, by
-// ratio-basis-check against the real engine at 1e-12. Giving this one an exit
-// path would only let it exit 0 more formally.
+//   over three hardcoded admin ratios and four hardcoded reinsurance
+//   percentages. That is X/X: `worst` is exactly 0 for every input and the
+//   "FAIL — formula has drifted" branch is unreachable. It read no engine
+//   value, so there was nothing to perturb.
+//
+//   WHERE THE COVERAGE IS NOW: ratio-basis-check asserts the same property
+//   against the REAL engine — expectedCombinedRatio === 1.0000 exactly at
+//   CLF 1.000, held at 1e-12 on all three lines AND on the pool aggregate,
+//   worst observed departure 2.22e-16 over 360 line-years. It fires: putting
+//   the loss numerator back on the gross basis reports 12 mismatches.
+//   The MEASUREMENT half of the deleted file — the downside distribution over
+//   50 games — was never gated and is not replaced; investment-dominance-report
+//   and loss-level-diagnostic cover that ground as readings.
+//
+// ⚠ NEITHER DELETION REMOVED AN ASSERTION FROM THE REPO, because neither file
+// contained one that could fail. That is the bar for deleting a gate here: not
+// "something else also looks at this", but "this file asserted nothing, and
+// here is the file that asserts it, and here is the perturbation that proves it".
+// ============================================================================
 //
 // ⚠ funding-expected-check's HEADLINE ASSERTION IS A TAUTOLOGY, THOUGH THE
 // SCRIPT IS NOT. Section 1 claims "Expected produces CLF = exactly 1.000" and

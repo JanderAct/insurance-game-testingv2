@@ -440,7 +440,22 @@ export function processLineYear(
   // fundingAtExpected bypasses the table entirely: "Expected" is CLF = 1.000
   // exactly, at every book size, every year — not an interpolated value that
   // happens to land close (see the LineDecisionSet.fundingAtExpected comment).
-  // Property ignores the flag, same as before.
+  //
+  // ⚠ ALL THREE LINES TAKE THIS BRANCH. The line that stood here said "Property
+  // ignores the flag, same as before"; that was true until Property got its own
+  // static table, and hasStaticClf has returned true for all three lines since.
+  // Nothing noticed, because the comment described the code correctly on the day
+  // it was written and the code moved underneath it.
+  //
+  // ⚠ AND EXACTLY 1.000 IS LOAD-BEARING, NOT COSMETIC. defaultDecisionSet sets
+  // fundingAtExpected true, so every martingale and null test in this project
+  // runs through here and needs the premium to carry no load — ibner-null-check's
+  // martingale, funding-basis-check's assertion 3, development-cession-check's
+  // arms, cession-path-independence's paired difference. A 1.001 here puts a
+  // silent 0.1% wedge under all of them. funding-expected-check section 1
+  // asserts this against the STORED selectedFundingCLF on all three lines across
+  // all 14 reachable confidence levels, with a flag-off control arm; before this
+  // commit it asserted a local literal equals itself.
   const selectedFundingCLF = hasStaticClf(line)
     ? (lineDecisions.fundingAtExpected ? 1.0 : staticClf(line, selectedFundingConfidenceLevel))
     : lookupCLF(selectedFundingConfidenceLevel);

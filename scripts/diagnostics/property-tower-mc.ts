@@ -221,6 +221,45 @@ console.log(`\n=== SECTION 2: Panjer vs lognormal, ${N_SEEDS} seeds x ${TRIALS.t
   check(panjerSignStable, 'Panjer\'s mean error does not change sign across attachment levels');
   check(worstPanjer < 8, 'Panjer\'s worst mean error is within 8% (the residual is the NegBin ' +
     'moment-match and the neutral-RQ severity basis, not discretisation)', `${worstPanjer.toFixed(2)}%`);
+
+  // ==========================================================================
+  // THE RESOLUTION OF THE 8% BOUND — MEASURED, AND IT IS COARSE ON THE ONE AXIS
+  // THIS FILE IS MOST LIKELY TO BE BROKEN ON.
+  //
+  // audit-formula-check's arms print what size of defect they can resolve, and
+  // this one should too, because a gate that reports PASS says nothing about how
+  // much room it left. Measured at b0a9bad by perturbing propertyAggregate's
+  // BIN and re-running this file whole:
+  //
+  //   BIN $25,000 (shipped)   worst Panjer mean error 4.70%   PASS
+  //   BIN $200,000  (8x)      worst Panjer mean error 5.67%   PASS
+  //   BIN $2,000,000 (80x)    worst Panjer mean error 42.67%  FAIL, 2 checks
+  //
+  // ⚠ SO IT WOULD MISS AN 8x COARSENING, AND THAT IS EXACTLY THE REGRESSION THIS
+  // FILE INVITES. It runs 21 minutes and 63% of the fast tier's CPU, so the
+  // change someone reaches for is a bigger lattice — and propertyAggregate's own
+  // header records that the precision came FROM going "$200k down to $2k bins",
+  // which reads as an invitation to go back. Reverting to $200k costs 1pp of
+  // accuracy here and this gate would call it green.
+  //
+  // WHAT TO DO INSTEAD OF TIGHTENING THE BOUND: the 8% is not slack, it is the
+  // NegBin moment-match plus the neutral-RQ severity basis, and lowering it
+  // would fail on correct code. The lattice needs its own direct assertion —
+  // Section 0 already measures discretisation bias against the closed-form
+  // limitedExpectedValue and is the natural home for it. Not added here: this
+  // commit records the resolution, it does not change the instrument.
+  //
+  // The OTHER two checks above are on a different axis (error sign-stability,
+  // and Panjer beating the lognormal comparator) and are NOT characterised by
+  // these three runs — the 80x run failed the comparator check as a side effect,
+  // but no perturbation has been aimed at sign-stability at all.
+  // ==========================================================================
+  console.log('');
+  console.log('  RESOLUTION OF THE 8% BOUND (measured at b0a9bad, see the note in this file):');
+  console.log('    lattice  BIN $25k shipped -> 4.70%   $200k (8x) -> 5.67% PASS   $2M (80x) -> 42.67% FAIL');
+  console.log('    so an 8x discretisation coarsening PASSES this gate. It resolves a gross');
+  console.log('    lattice defect, not a 2x-to-8x one, and this file\'s 21-minute runtime is');
+  console.log('    what makes that the likely regression. Sign-stability is uncharacterised.');
 }
 
 console.log('');

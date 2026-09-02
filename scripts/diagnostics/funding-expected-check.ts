@@ -28,7 +28,12 @@ import { WC_CLF_PERCENTILE_STOPS } from '../../src/data/wcClfGrid';
 import { computeKGl } from '../../src/utils/glClaimEngine';
 import { computeGlClf, glClfCrossingPercentile, glAggregateCumulants } from '../../src/utils/glLossDistribution';
 import { GL_CLF_PERCENTILE_STOPS } from '../../src/data/glClfGrid';
-import type { Member } from '../../src/types/simulation';
+import { generateGameInstance } from '../../src/utils/instanceGenerator';
+import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
+import { processYear } from '../../src/utils/simulationEngine';
+import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
+import { SLIDER_RANGES } from '../../src/data/defaultAssumptions';
+import type { CoverageLine, DecisionSet, GameState, Member } from '../../src/types/simulation';
 
 const YEAR = 1;
 const roster = getPredefinedMarketMembers();
@@ -58,23 +63,134 @@ function assert(cond: boolean, msg: string) {
 console.log('=== "EXPECTED" FUNDING OPTION CHECK ===\n');
 console.log(`roster: ${roster.length} members\n`);
 
-console.log('--- 1. CLF at Expected is exactly 1.000, every book size (WC and GL) ---');
-for (const frac of FRACTIONS) {
-  const members = bookAt(frac);
-  const kLine = computeKLine(members);
-  const kGl = computeKGl(members, YEAR);
-  // Mirrors simulationEngine.ts's selectedFundingCLF dispatch and
-  // fundingConsequence.ts's clfFor: atExpected bypasses the grid entirely.
-  const wcExpectedClf = 1.0; // the literal engine short-circuit — nothing to compute
-  const glExpectedClf = 1.0;
-  assert(wcExpectedClf === 1, `WC Expected CLF === 1.000 exactly (${members.length}-member book)`);
-  assert(glExpectedClf === 1, `GL Expected CLF === 1.000 exactly (${members.length}-member book)`);
-  // Sanity: the grid-based CLF at a NEARBY stop is NOT 1.000 (confirms these
-  // books actually straddle a percentile grid rather than trivially sitting
-  // on a stop already at 1.000 by coincidence).
-  const wcNear = computeWcClf(0.60, members, kLine, YEAR);
-  const glNear = computeGlClf(0.60, members, kGl, YEAR);
-  console.log(`      (for reference: WC@60%=${wcNear.toFixed(4)}  GL@60%=${glNear.toFixed(4)})`);
+// ============================================================================
+// 1. THE ENGINE'S OWN selectedFundingCLF AT "EXPECTED" IS EXACTLY 1.000.
+//
+// ⚠ THIS SECTION USED TO BE A TAUTOLOGY, AND IT IS THE ASSUMPTION EVERY NULL
+// TEST IN THIS PROJECT STANDS ON. What stood here was:
+//
+//     const wcExpectedClf = 1.0; // the literal engine short-circuit
+//     assert(wcExpectedClf === 1, 'WC Expected CLF === 1.000 exactly');
+//
+// It asserted that a local literal equals itself. Its own comment said so
+// ("nothing to compute"), which is how it survived review: the reader agrees
+// there is nothing to compute and moves on. Measured at b0a9bad — setting the
+// engine's dispatch to 1.001 left this file GREEN.
+//
+// WHY IT MATTERS MORE THAN AN ORDINARY VACUOUS CHECK. Every martingale and
+// null test here runs at defaultDecisionSet, which sets fundingAtExpected
+// true, and those tests need the CLF pinned at exactly 1.000 so that premium
+// carries no load and E[underwriting income] is zero. ibner-null-check's
+// martingale, funding-basis-check's assertion 3, development-cession-check's
+// arms and cession-path-independence's paired difference all inherit it. A CLF
+// of 1.001 would put a 0.1% wedge under every one of them and none would say so.
+//
+// ⚠ WHAT WAS AND WAS NOT ALREADY COVERED — MEASURED, NOT ASSUMED, because the
+// tempting version of this note overstates the gap and this project has been
+// caught doing that. gl-supplied-clf-check DOES assert selectedFundingCLF ===
+// 1.0 at defaults and it DOES have teeth: verified against both perturbations,
+// it fails at 1.001 and it fails when the bypass is removed (reading 1.023,
+// which is GL's own static table at 0.60 — not the generic table's literal
+// 1.000, so its default-confidence run is not passing by coincidence).
+//
+// TWO THINGS WERE GENUINELY UNCOVERED, AND THEY ARE WHY THIS SECTION EXISTS:
+//   PROPERTY, NOWHERE. gl-supplied-clf-check's LINES is ['WC', 'GL']. Nothing
+//     in the repo asserted Property's Expected CLF. And the engine's own comment
+//     at the dispatch site said "Property ignores the flag, same as before" —
+//     stale, because hasStaticClf now returns true for all three lines, so
+//     Property has taken the same bypass since it got its own table. Corrected
+//     at the site in this commit.
+//   EVERY LEVEL BUT THE DEFAULT. gl-supplied-clf-check runs at defaults only,
+//     so a dispatch that pinned 1.000 at 0.60 and not elsewhere would pass it.
+//     This section sweeps all 14 reachable slider positions.
+// Plus, of course, this file's own claim, which was a literal.
+// ============================================================================
+console.log('--- 1. THE ENGINE\'s selectedFundingCLF AT "EXPECTED" IS EXACTLY 1.000 ---');
+{
+  const LINES: CoverageLine[] = ['WC', 'GL', 'Property'];
+  const { min, max, step } = SLIDER_RANGES.fundingConfidenceLevel;
+  const levels: number[] = [];
+  for (let v = min; v <= max + 1e-9; v += step) levels.push(parseFloat(v.toFixed(4)));
+
+  // Every reachable slider position, with fundingAtExpected ON. The flag is
+  // supposed to make the level irrelevant; if it does not, these diverge.
+  const atExpected = (y: number, level: number): DecisionSet => {
+    const d = defaultDecisionSet(y);
+    for (const l of LINES) {
+      const ld = d.byLine[l];
+      if (ld) { ld.fundingAtExpected = true; ld.fundingConfidenceLevel = level; }
+    }
+    return d;
+  };
+  // The control arm: flag OFF at the same level. If THIS also reads 1.000
+  // everywhere then the assertion above is passing by coincidence and cannot
+  // distinguish the bypass from the table — so it is asserted too.
+  const offExpected = (y: number, level: number): DecisionSet => {
+    const d = defaultDecisionSet(y);
+    for (const l of LINES) {
+      const ld = d.byLine[l];
+      if (ld) { ld.fundingAtExpected = false; ld.fundingConfidenceLevel = level; }
+    }
+    return d;
+  };
+
+  const YEARS = 3;
+  const seenOn: Record<string, Set<number>> = { WC: new Set(), GL: new Set(), Property: new Set() };
+  const seenOff: Record<string, Set<number>> = { WC: new Set(), GL: new Set(), Property: new Set() };
+  let lineYears = 0;
+
+  for (const level of levels) {
+    for (const [mode, decide, sink] of [['on', atExpected, seenOn], ['off', offExpected, seenOff]] as const) {
+      const id = `FEC_${mode}_${Math.round(level * 100)}`;
+      const inst = generateGameInstance(id, 71_000_000 + Math.round(level * 1000));
+      const setup = { poolName: 'F', gameLength: YEARS, startingYear: 2026, instanceId: id, activeLines: LINES };
+      const { poolState, priorHistory } = runPriorHistory(inst, setup as never);
+      let gs: GameState = {
+        setup: setup as never, instance: inst, currentYearNumber: 1, isStarted: true, isComplete: false,
+        poolState, lockedResults: [], currentDecisions: decide(1, level), priorHistory,
+      };
+      for (let y = 1; y <= YEARS; y++) {
+        const p = processYear(gs, decide(y, level));
+        for (const l of LINES) {
+          const lr = p.result.byLine[l] as never as { selectedFundingCLF?: number } | undefined;
+          if (lr && typeof lr.selectedFundingCLF === 'number') {
+            sink[l].add(lr.selectedFundingCLF);
+            if (mode === 'on') lineYears++;
+          }
+        }
+        gs = { ...gs, currentYearNumber: y + 1, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result] };
+      }
+    }
+  }
+
+  console.log(`  ${levels.length} reachable confidence levels x ${YEARS} years x 3 lines`
+    + `  (${lineYears} line-years read from the engine's STORED selectedFundingCLF)\n`);
+  console.log('  line       flag ON: distinct CLF values                 flag OFF: distinct CLF values');
+  for (const l of LINES) {
+    const on = [...seenOn[l]].sort((a, b) => a - b);
+    const off = [...seenOff[l]].sort((a, b) => a - b);
+    const onStr = on.length <= 3 ? on.map(v => v.toFixed(6)).join(', ') : `${on.length} values, ${on[0].toFixed(4)}..${on[on.length - 1].toFixed(4)}`;
+    const offStr = off.length <= 3 ? off.map(v => v.toFixed(6)).join(', ') : `${off.length} values, ${off[0].toFixed(4)}..${off[off.length - 1].toFixed(4)}`;
+    console.log(`  ${l.padEnd(9)} ${onStr.padEnd(44)} ${offStr}`);
+  }
+  console.log('');
+
+  for (const l of LINES) {
+    const on = [...seenOn[l]];
+    // THE ASSERTION. Exactly 1, bit-for-bit, at every reachable level. Not a
+    // tolerance: the engine returns the literal 1.0 and anything else is a bug.
+    assert(on.length === 1 && on[0] === 1.0,
+      `${l}: engine selectedFundingCLF === 1.0 EXACTLY at fundingAtExpected, all ${levels.length} confidence levels`
+      + (on.length === 1 && on[0] === 1.0 ? '' : ` — saw ${on.length} distinct value(s): ${on.map(v => v.toFixed(6)).join(', ')}`));
+    // THE CONTROL. The flag must be doing the work. If the table returned
+    // 1.000 everywhere too, the assertion above would be vacuous — which is
+    // exactly the failure mode this section is being rewritten out of.
+    const off = [...seenOff[l]];
+    assert(off.some(v => v !== 1.0),
+      `${l}: with the flag OFF the CLF is NOT 1.000 everywhere, so the assertion above has teeth`
+      + (off.some(v => v !== 1.0) ? '' : ' — flag-off CLF was 1.000 at EVERY level, so this section cannot'
+        + ' distinguish the bypass from the table and the assertion above is passing by coincidence'));
+  }
 }
 
 console.log('\n--- 2. The marker matches where the grid crosses 1.000 ---');

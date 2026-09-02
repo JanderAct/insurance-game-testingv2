@@ -207,15 +207,20 @@ for (const seed of SEEDS) {
     // remaining draws are per-member keyed like WC's and GL's, so that coupling
     // cannot arise. If a cat band ever reintroduces shared within-event draws,
     // THIS TEST MUST COME BACK — it is the only one that would catch it.
+    //
+    // ⚠ AND UNTIL b0a9bad THE COLUMNS WERE STILL PRINTING. Two `note(true, ...)`
+    // calls kept a WX and a WXevent column in the per-seed table, reporting OK
+    // about a subject that no longer exists in src/ — a hardcoded pass is not a
+    // skipped test, it is a test that says PASS. Removed here. The paragraph
+    // above is the record of what they used to assert; re-add the columns only
+    // together with a real comparison.
 
     const claimCount = JSON.parse(wcRefs[0]).length + JSON.parse(glRefs[0]).length
       + JSON.parse(prRefs[0]).length;
     console.log(`  seed ${String(seed).padStart(10)} ${x.id} ${x.type.padEnd(18)} (${claimCount} claims)`
       + `  WC ${note(wcOk, `WC claims for ${x.id} move with the member set (seed ${seed})`)}`
       + `  GL ${note(glOk, `GL claims for ${x.id} move with the member set (seed ${seed})`)}`
-      + `  PR ${note(prOk, `Property attritional claims for ${x.id} move with the member set (seed ${seed})`)}`
-      + `  WX ${note(true, `Weather claims for ${x.id} move with the member set (seed ${seed})`)}`
-      + `  WXevent ${note(true, `Weather EVENT parameters move with the member set (seed ${seed})`)}`);
+      + `  PR ${note(prOk, `Property attritional claims for ${x.id} move with the member set (seed ${seed})`)}`);
   }
 }
 
