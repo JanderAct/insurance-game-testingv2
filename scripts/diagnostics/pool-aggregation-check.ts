@@ -98,6 +98,12 @@ const RECOMPUTED_RATIOS = new Set([
   'marketShare', 'memberRetentionRate', 'memberSatisfaction', 'averageRiskQuality',
   'investmentReturnRate', 'expectedLossRatio', 'expectedLossRatioMemberBasis',
   'expectedExpenseRatio', 'expectedCombinedRatio', 'actualLossRatio', 'actualExpenseRatio',
+  // ⚠ THESE TWO NEED THE RULE MORE THAN THE OTHERS, NOT LESS. Their
+  // denominators EXCLUDE the reinsurance premium, and the ceded share differs
+  // sharply by line (GL about half its charge, Property about two fifths), so
+  // an average of the three line ratios would be weighted by a quantity that is
+  // not in any of them. Summed numerator over summed denominator, as here.
+  'actualLossRatioPricingBasis', 'actualLossRatioRetainedPremium',
   'actualCombinedRatio', 'combinedRatio', 'lossRatio', 'expenseRatio',
   'excessCapitalRatio', 'capitalAdequacyRatio',
 ]);

@@ -17,6 +17,18 @@ interface DashboardPageProps {
   gameComplete: boolean;
 }
 
+/** The pricing-basis loss ratio for a seeded history year.
+ *
+ *  ⚠ RECOMPUTED WHEN THE FIELD IS ABSENT, NOT DEFAULTED TO ZERO. A save written
+ *  before `actualLossRatioPricingBasis` existed carries the dollar fields but
+ *  not the ratio, and a `?? 0` there would print a confident 0.0% for every
+ *  pre-game year. Both inputs are present in every save, so the fallback is the
+ *  same division the engine does rather than a placeholder. */
+function historicalPricingBasisLR(y: HistoricalYear): number {
+  return y.actualLossRatioPricingBasis
+    ?? y.netUltimateLoss / Math.max(y.poolPremiumAndAdminExpense, 1);
+}
+
 export default function DashboardPage({ lockedResults, historicalYears, startingFinancials, currentYearNumber, lineView, endingPositionRows, gameComplete }: DashboardPageProps) {
   // Stage 2.10: the last historical entry is the real year 0 — the simulated
   // pre-game year whose ending position IS the Year 1 opening. It renders as
@@ -29,7 +41,11 @@ export default function DashboardPage({ lockedResults, historicalYears, starting
   // year-0 history entry (per-line correct), then pool-level startingFinancials.
   const displaySurplus = last?.endingSurplus ?? openingYear?.endingSurplus ?? startingFinancials.surplus;
   const displayPremium = last?.totalMemberCharge ?? openingYear?.totalMemberCharge ?? startingFinancials.annualPremium;
-  const displayLossRatio = last?.actualLossRatio;
+  // PRICING BASIS — see the display note at Header.tsx for why the
+  // member-charge figure cannot carry a headline. Still on the result, still
+  // exported, still shown with its basis spelled out on the Results detail.
+  const displayLossRatio = last?.actualLossRatioPricingBasis;
+  const displayLossRatioRetained = last?.actualLossRatioRetainedPremium;
   const displayUnderwritingIncome = last?.underwritingIncome;
   const displayInvestmentIncome = last?.investmentIncome;
   const displayMembers = last?.activeMembers ?? openingYear?.activeMembers ?? startingFinancials.activeMembers;
@@ -58,18 +74,26 @@ export default function DashboardPage({ lockedResults, historicalYears, starting
           icon={<DollarSign size={16} />}
           sub={last ? `Prior: ${formatCurrency(last.beginingSurplus, true)}` : 'Starting position'}
         />
+        {/* ⚠ THE LABEL NAMED THE OTHER DENOMINATOR. This card renders
+            totalMemberCharge — pool premium + admin + REINSURANCE — under a
+            label that reads exactly like `poolPremiumAndAdminExpense`, the
+            field beside it. With the loss-ratio card now on the pricing basis,
+            a reader who divided the two numbers shown here would have got a
+            third answer again. */}
         <StatCard
-          label="Gross Premium & Admin Expense"
+          label="Total Member Charge"
           value={formatCurrency(displayPremium, true)}
           icon={<TrendingUp size={16} />}
-          sub={`${formatMillions(displayExposure)} payroll`}
+          sub={`Premium + admin + reinsurance · ${formatMillions(displayExposure)} payroll`}
         />
         <StatCard
-          label="Pool Loss Ratio"
+          label="Loss Ratio (prem + admin)"
           value={displayLossRatio !== undefined ? formatPct(displayLossRatio) : '—'}
           valueColor={displayLossRatio !== undefined ? colorForRatio(displayLossRatio) : 'text-gray-400'}
           icon={<Activity size={16} />}
-          sub="Net incurred loss ÷ total member charge"
+          sub={displayLossRatioRetained !== undefined
+            ? `Net loss ÷ premium + admin · ${formatPct(displayLossRatioRetained)} of retained premium`
+            : 'Net incurred loss ÷ pool premium + admin expense'}
         />
         <StatCard
           label="Underwriting Income"
@@ -141,7 +165,7 @@ export default function DashboardPage({ lockedResults, historicalYears, starting
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  {['Yr', 'Calendar', 'Gross Premium & Admin Expense', 'Gross Loss', 'Net Loss', 'Pool Loss Ratio', 'Underwriting Income', 'Investment Income', 'Total Income', 'Ending Surplus', 'Members', 'Mkt Share'].map(h => (
+                  {['Yr', 'Calendar', 'Total Member Charge', 'Prem + Admin', 'Gross Loss', 'Net Loss', 'Loss Ratio (prem + admin)', 'Underwriting Income', 'Investment Income', 'Total Income', 'Ending Surplus', 'Members', 'Mkt Share'].map(h => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -152,9 +176,10 @@ export default function DashboardPage({ lockedResults, historicalYears, starting
                     <td className="px-4 py-3 font-bold">{year.historyYearNumber}</td>
                     <td className="px-4 py-3">{year.calendarYear}</td>
                     <td className="px-4 py-3 font-medium">{formatCurrency(year.totalMemberCharge, true)}</td>
+                    <td className="px-4 py-3">{formatCurrency(year.poolPremiumAndAdminExpense, true)}</td>
                     <td className="px-4 py-3">{formatCurrency(year.grossUltimateLoss, true)}</td>
                     <td className="px-4 py-3">{formatCurrency(year.netUltimateLoss, true)}</td>
-                    <td className={`px-4 py-3 font-semibold ${colorForRatio(year.actualLossRatio)}`}>{formatPct(year.actualLossRatio)}</td>
+                    <td className={`px-4 py-3 font-semibold ${colorForRatio(historicalPricingBasisLR(year))}`}>{formatPct(historicalPricingBasisLR(year))}</td>
                     <td className={year.underwritingIncome >= 0 ? 'px-4 py-3 text-emerald-600/70' : 'px-4 py-3 text-red-600/70'}>{formatCurrency(year.underwritingIncome, true)}</td>
                     <td className="px-4 py-3">{formatCurrency(year.investmentIncome, true)}</td>
                     <td className={year.netIncome >= 0 ? 'px-4 py-3 font-semibold text-emerald-600/70' : 'px-4 py-3 font-semibold text-red-600/70'}>{formatCurrency(year.netIncome, true)}</td>
@@ -168,9 +193,10 @@ export default function DashboardPage({ lockedResults, historicalYears, starting
                     <td className="px-4 py-3 font-bold text-gray-900">0</td>
                     <td className="px-4 py-3 text-gray-600">{openingYear.calendarYear}</td>
                     <td className="px-4 py-3 font-medium text-gray-900">{formatCurrency(openingYear.totalMemberCharge, true)}</td>
+                    <td className="px-4 py-3 text-gray-700">{formatCurrency(openingYear.poolPremiumAndAdminExpense, true)}</td>
                     <td className="px-4 py-3 text-gray-700">{formatCurrency(openingYear.grossUltimateLoss, true)}</td>
                     <td className="px-4 py-3 text-gray-700">{formatCurrency(openingYear.netUltimateLoss, true)}</td>
-                    <td className={`px-4 py-3 font-semibold ${colorForRatio(openingYear.actualLossRatio)}`}>{formatPct(openingYear.actualLossRatio)}</td>
+                    <td className={`px-4 py-3 font-semibold ${colorForRatio(historicalPricingBasisLR(openingYear))}`}>{formatPct(historicalPricingBasisLR(openingYear))}</td>
                     <td className={openingYear.underwritingIncome >= 0 ? 'px-4 py-3 text-emerald-600/70' : 'px-4 py-3 text-red-600/70'}>{formatCurrency(openingYear.underwritingIncome, true)}</td>
                     <td className="px-4 py-3 text-gray-700">{formatCurrency(openingYear.investmentIncome, true)}</td>
                     <td className={openingYear.netIncome >= 0 ? 'px-4 py-3 font-semibold text-emerald-600/70' : 'px-4 py-3 font-semibold text-red-600/70'}>{formatCurrency(openingYear.netIncome, true)}</td>
@@ -184,9 +210,10 @@ export default function DashboardPage({ lockedResults, historicalYears, starting
                     <td className="px-4 py-3 font-bold text-gray-900">{r.yearNumber}</td>
                     <td className="px-4 py-3 text-gray-600">{r.calendarYear}</td>
                     <td className="px-4 py-3 font-medium text-gray-900">{formatCurrency(r.totalMemberCharge, true)}</td>
+                    <td className="px-4 py-3 text-gray-700">{formatCurrency(r.poolPremiumAndAdminExpense, true)}</td>
                     <td className="px-4 py-3 text-gray-700">{formatCurrency(r.grossUltimateLoss, true)}</td>
                     <td className="px-4 py-3 text-gray-700">{formatCurrency(r.netUltimateLoss, true)}</td>
-                    <td className={`px-4 py-3 font-semibold ${colorForRatio(r.actualLossRatio)}`}>{formatPct(r.actualLossRatio)}</td>
+                    <td className={`px-4 py-3 font-semibold ${colorForRatio(r.actualLossRatioPricingBasis)}`}>{formatPct(r.actualLossRatioPricingBasis)}</td>
                     <td className={`px-4 py-3 font-medium ${r.underwritingIncome >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                       {formatCurrency(r.underwritingIncome, true)}
                     </td>

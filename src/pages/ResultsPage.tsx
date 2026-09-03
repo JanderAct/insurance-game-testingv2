@@ -53,8 +53,14 @@ const COMPARISON_METRICS: ComparisonMetric[] = [
   { key: 'premium', label: 'Pool Premium', kind: 'currency', polarity: 'neutral', getValue: r => r.poolPremium, showPctChange: true },
   { key: 'ultimateLosses', label: 'Ultimate Losses (Gross)', kind: 'currency', polarity: 'goodDown', getValue: r => r.grossUltimateLoss, showPctChange: true },
   { key: 'netLosses', label: 'Net Ultimate Loss', kind: 'currency', polarity: 'goodDown', getValue: r => r.netUltimateLoss, showPctChange: true },
-  { key: 'lossRatio', label: 'Actual Loss Ratio', kind: 'ratio', polarity: 'goodDown', getValue: r => r.actualLossRatio, showPctChange: true },
-  { key: 'combinedRatio', label: 'Actual Combined Ratio', kind: 'ratio', polarity: 'goodDown', getValue: r => r.actualCombinedRatio, showPctChange: true },
+  // ⚠ PRICING BASIS, AND THE LABEL SAYS SO — see the display note at Header.tsx.
+  // The combined ratio below it stays on the MEMBER-CHARGE basis, because it is
+  // a sum of a loss and an expense ratio and those may only be added on a shared
+  // denominator. So these two adjacent rows are deliberately on different bases
+  // and both say which; do not "make them consistent" by moving either.
+  { key: 'lossRatio', label: 'Actual Loss Ratio (prem + admin)', kind: 'ratio', polarity: 'goodDown', getValue: r => r.actualLossRatioPricingBasis, showPctChange: true },
+  { key: 'lossRatioRetained', label: 'Actual Loss Ratio (retained premium)', kind: 'ratio', polarity: 'goodDown', getValue: r => r.actualLossRatioRetainedPremium, showPctChange: true },
+  { key: 'combinedRatio', label: 'Actual Combined Ratio (member charge)', kind: 'ratio', polarity: 'goodDown', getValue: r => r.actualCombinedRatio, showPctChange: true },
   { key: 'reserves', label: 'Ending Net Reserve', kind: 'currency', polarity: 'neutral', getValue: r => r.endingNetReserve, showPctChange: true },
   { key: 'reinsRecovery', label: 'Reinsurance Recovery (current year)', kind: 'currency', polarity: 'neutral', getValue: r => r.reinsuranceRecovery, showPctChange: false },
   { key: 'reinsRecoveryDev', label: 'Reinsurance Recovery (prior-year development)', kind: 'currency', polarity: 'neutral', getValue: r => r.priorYearDevelopmentCeded, showPctChange: false },
@@ -375,6 +381,8 @@ export default function ResultsPage({ lockedResults, lineView }: ResultsPageProp
               <Row label="Expected Expense Ratio (member charge)" value={formatPct(result.expectedExpenseRatio)} />
               <Row label="Expected Combined Ratio (member charge)" value={formatPct(result.expectedCombinedRatio)} />
               <div className="border-t border-gray-100 my-1" />
+              <Row label="Actual Loss Ratio (pricing basis)" value={formatPct(result.actualLossRatioPricingBasis)} />
+              <Row label="Actual Loss Ratio (retained premium)" value={formatPct(result.actualLossRatioRetainedPremium)} />
               <Row label="Actual Loss Ratio (Net, member charge)" value={formatPct(result.actualLossRatio)} />
               <Row label="Actual Expense Ratio (member charge)" value={formatPct(result.actualExpenseRatio)} />
               <Row label="Actual Combined Ratio (member charge)" value={formatPct(result.actualCombinedRatio)} valueColor={colorForRatio(result.actualCombinedRatio)} />

@@ -692,12 +692,42 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
     {
       key: 'expectedCombinedRatio',
       category: 'Ratios and Capital',
-      // Both terms on the member-charge basis. ~82.7% at the default CLF
-      // 1.346, i.e. 17.3 points of intended underwriting margin; 100.0% at
-      // CLF 1.0. It formerly read a hardcoded 1.000.
+      // Both terms on the member-charge basis.
+      //
+      // ⚠ THIS COMMENT DESCRIBED A CONFIGURATION THE APP DOES NOT SHIP. It read
+      // "~82.7% at the default CLF 1.346, i.e. 17.3 points of intended
+      // underwriting margin; 100.0% at CLF 1.0". The default
+      // fundingConfidenceLevel is 0.60, which maps to CLF exactly 1.000, so the
+      // SHIPPED reading is 100.0% and the intended underwriting margin is ZERO
+      // — measured at 100.0% in every one of 800 line-years. 1.346 was the old
+      // 75%-confidence default. Corrected rather than deleted, because a stale
+      // figure sitting on the metric it describes is the number a reader
+      // quotes.
+      //
+      // Above CLF 1.000 the shortfall below 100% IS the funding margin. At the
+      // shipped default there is none, which is a pricing decision recorded at
+      // FUNDING_CLF_TABLE and SLIDER_RANGES, not a defect in this metric. It
+      // formerly read a hardcoded 1.000, which is a different old bug.
       label: 'Expected Combined Ratio (member charge basis)',
       value: r => formatPct(r.expectedCombinedRatio),
       csvValue: r => r.expectedCombinedRatio,
+    },
+    {
+      // The headline. Shares expectedLossRatio's denominator above, so those
+      // two columns of the export may be compared directly and none of the
+      // others may be crossed with them.
+      key: 'actualLossRatioPricingBasis',
+      category: 'Ratios and Capital',
+      label: 'Actual Loss Ratio (pricing basis)',
+      value: r => formatPct(r.actualLossRatioPricingBasis),
+      csvValue: r => r.actualLossRatioPricingBasis,
+    },
+    {
+      key: 'actualLossRatioRetainedPremium',
+      category: 'Ratios and Capital',
+      label: 'Actual Loss Ratio (retained premium)',
+      value: r => formatPct(r.actualLossRatioRetainedPremium),
+      csvValue: r => r.actualLossRatioRetainedPremium,
     },
     {
       key: 'actualLossRatio',

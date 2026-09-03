@@ -410,7 +410,20 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // opening-centring-check, which measures the unfiltered candidate median against
 // the band midpoint directly and can fail; this capture only records that the
 // tree moved, which for a re-roll is the one thing it can honestly say.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v34.json');
+// v35: THE LOSS-RATIO BASIS FIX, AND THIS CAPTURE IS THE EVIDENCE IT STAYED IN
+// THE DISPLAY LAYER. 600 fields ADDED (actualLossRatioPricingBasis and
+// actualLossRatioRetainedPremium, 2 x 150 instances x 2 configurations), 0
+// removed, and 0 of the 29,580 pre-existing values changed. That last number is
+// the point of recapturing here rather than arguing: the change adds two
+// derived quotients of dollar figures that already existed, so if any loss,
+// premium, reserve or surplus figure had moved, it would have reached the
+// engine and that would have been the finding instead. It did not.
+//
+// ⚠ CONTRAST v33 AND v34 DELIBERATELY. Both were whole-tree re-rolls where no
+// field-by-field reading was possible. This one is the opposite shape — a pure
+// addition — and a capture that shows 0 changed values is a STRONGER statement
+// than one that shows a plausible-looking subset moved.
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v35.json');
 
 function seedOf(id: string) {
   let h = 5381;

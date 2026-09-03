@@ -310,7 +310,18 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // rcEffectivenessApplied to the line result one commit earlier and this guard
 // read 24 of 24 MATCH at that commit — so the field reaches no export, and the
 // 24 hashes moving now carry no column change hidden inside them.
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v34.json');
+// v35: ALL 24 MOVED, AND THE SHAPE CHANGED — two columns added. The loss-ratio
+// basis fix puts actualLossRatioPricingBasis and actualLossRatioRetainedPremium
+// on the result and resultMetrics exports both, so every sheet gains two
+// columns and every hash moves with them.
+//
+// ⚠ THE COLUMN ADDITION IS WHY 24 OF 24 MOVED, AND THAT IS THE WHOLE
+// EXPLANATION. Read this capture together with the v35 value-identity capture,
+// which measured 0 of 29,580 existing values changed. A hash guard cannot tell
+// "two columns appended" from "every number changed"; the value capture can,
+// and it says the second did not happen. Neither capture is sufficient alone
+// here — that pairing is the argument.
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v35.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

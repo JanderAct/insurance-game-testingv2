@@ -5,7 +5,8 @@ import type { ResultSet } from '../types/simulation';
 export function generateNarrative(result: ResultSet, _priorResult?: ResultSet): string {
   const parts: string[] = [];
 
-  const { decisions, assetAllocation, actualCombinedRatio, netIncome, grossUltimateLoss, totalMemberCharge,
+  const { decisions, assetAllocation, actualCombinedRatio, netIncome,
+    actualLossRatioPricingBasis, expectedLossRatio,
     reinsuranceRecovery, investmentIncome,
     newMembers, withdrawnMembers, shockLossIncurred,
     priorYearDevelopment, endingSurplus } = result;
@@ -27,11 +28,32 @@ export function generateNarrative(result: ResultSet, _priorResult?: ResultSet): 
   }
 
   // --- Loss Performance ---
-  const lossRatio = grossUltimateLoss / Math.max(totalMemberCharge, 1);
-  if (lossRatio > 0.90) {
-    parts.push(`Gross loss performance was unfavorable with a loss ratio of ${pct(lossRatio)}.`);
-  } else if (lossRatio < 0.55) {
-    parts.push(`Gross loss performance was strong with a favorable loss ratio of ${pct(lossRatio)}.`);
+  // ⚠ THIS WAS A FOURTH BASIS AND IT CONTRADICTED THE SCREEN IT SAT ON.
+  // It read `grossUltimateLoss / totalMemberCharge` — a GROSS numerator over the
+  // MEMBER-CHARGE denominator, a combination used nowhere else in the app — and
+  // printed the result as "a loss ratio of X". With the headline on the pricing
+  // basis, the same year could show 73% in the chip and prose calling it "a
+  // favorable loss ratio of 52%". Two numbers, two bases, one screen.
+  //
+  // ⚠ AND IT WAS NOT INERT, CONTRARY TO A REPORT OF MINE. That report said the
+  // prose "sits permanently in the silent middle and never fires", reasoning
+  // from the 66.8% POOLED DOLLAR-WEIGHTED average to the per-year firing rate.
+  // Those are different statistics. Measured per year over 1,200 pooled
+  // observations it fired low on 38.8% and high on 16.7%, silent on 44.6% — so
+  // it fired on more than half of all years, on the wrong basis, in prose a
+  // player reads. The correction matters because it makes this a live defect
+  // rather than dead code.
+  //
+  // THE THRESHOLDS ARE ANCHORED ON THE PRICED EXPECTATION, NOT FITTED TO THE
+  // DISTRIBUTION. expectedLossRatio shares this exact denominator and runs
+  // 80.9% pooled (78.9-82.4% across seeds), so 0.65 and 0.95 sit roughly
+  // symmetrically either side of what the year was PRICED to produce. Measured
+  // firing on the new basis: low 31.5%, high 15.2%, silent 53.3%.
+  const lossRatio = actualLossRatioPricingBasis;
+  if (lossRatio > 0.95) {
+    parts.push(`Net loss performance was unfavorable at ${pct(lossRatio)} of premium and admin expense, against roughly ${pct(expectedLossRatio)} priced.`);
+  } else if (lossRatio < 0.65) {
+    parts.push(`Net loss performance was strong at ${pct(lossRatio)} of premium and admin expense, against roughly ${pct(expectedLossRatio)} priced.`);
   }
 
   // --- Combined Ratio ---

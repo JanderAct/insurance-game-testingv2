@@ -15,7 +15,38 @@ export default function Header({ gameState, startingFinancials, onNewGame, onAdv
   const lastResult = gameState?.lockedResults?.[gameState.lockedResults.length - 1];
 
   const surplus = lastResult?.endingSurplus ?? startingFinancials?.surplus ?? 0;
-  const poolLossRatio = lastResult?.actualLossRatio;
+  // ============================================================================
+  // ⚠ THE PRICING BASIS, AND THE LABEL SAYS SO. Read this before changing it.
+  //
+  // This chip rendered `actualLossRatio` — netIncurredLoss / totalMemberCharge,
+  // the MEMBER-CHARGE basis — under the label "Pool Loss Ratio". Two playtesters
+  // independently read the result as a calibration failure and it was not one.
+  //
+  // WHY THAT DENOMINATOR CANNOT CARRY A HEADLINE. totalMemberCharge includes the
+  // reinsurance premium, which is 41-50% of the charge depending on line. So a
+  // pool whose retained book is running at 81% displays 44%, and "correctly
+  // priced" and "giving money away" look identical.
+  //
+  // ⚠ AND THE LEVEL WAS THE SMALLER HALF OF IT. The reinsurance premium and the
+  // admin charge are near-constant while losses are not, so the wide denominator
+  // COMPRESSES THE RANGE: measured on one WC line, a year at 117% of retained
+  // premium displayed 57% and a year at 63% displayed 31%. Every year reads
+  // "fine". A player cannot tell a bad year from a good one, which is worse than
+  // reading the wrong level, because the level is at least consistently wrong.
+  //
+  // WHY THE PRICING BASIS AND NOT PREMIUM ALONE. poolPremiumAndAdminExpense is
+  // expectedLossRatio's own denominator, so the headline actual and the pricing
+  // expectation are finally the same quantity and may be compared. That is
+  // finding 6's entire point and it had never been true in a figure a player
+  // looks at. Net loss over retained premium alone is the plainer statement and
+  // it IS shown — on the Results detail and in the export — but it has no
+  // expected counterpart to sit beside, so it is not the headline.
+  //
+  // THE MEMBER-CHARGE FIGURE IS NOT GONE. It is still on the result, still
+  // exported, and still displayed where its basis is written out in full:
+  // ResultsPage's detail rows, resultMetrics, and the audit page.
+  // ============================================================================
+  const poolLossRatio = lastResult?.actualLossRatioPricingBasis;
   const marketShare = lastResult?.marketShare ?? startingFinancials?.marketShare ?? 0;
   const poolName = gameState?.setup?.poolName ?? 'Risk Pool';
   const instanceId = gameState?.instance?.instanceId ?? '—';
@@ -59,7 +90,7 @@ export default function Header({ gameState, startingFinancials, onNewGame, onAdv
               />
               {poolLossRatio !== undefined && (
                 <Chip
-                  label="Pool Loss Ratio"
+                  label="Loss Ratio (prem + admin)"
                   value={formatPct(poolLossRatio)}
                   valueClass={colorForRatioOnDark(poolLossRatio)}
                 />

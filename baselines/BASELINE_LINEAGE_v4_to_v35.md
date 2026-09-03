@@ -2283,3 +2283,40 @@ offset in SE so the margin is visible rather than trusted.
 | ⚠ can it fail | **yes** — the retired pin fails all three lines: WC +38%, GL −32%, Property +49% of band width |
 
 v32 retired from the working tree; v33 kept as the immediate predecessor.
+
+---
+
+## v35 — the loss-ratio basis fix (display layer only, and the captures prove it)
+
+`actualLossRatio` is `netIncurredLoss / totalMemberCharge` — the member-charge basis, which includes
+the reinsurance premium and the admin charge. Reinsurance is 41–50% of the charge depending on line,
+so a pool whose retained book runs at 81% displayed 44%. Four places a player looks rendered that
+figure under the label "Pool Loss Ratio", which names a SCOPE and not a BASIS, and two playtesters
+independently read the result as a calibration failure.
+
+**The compression mattered more than the level.** The reinsurance premium and the admin charge are
+near-constant while losses are not, so the wide denominator flattens the range: on one measured WC
+line a year at 117% of retained premium displayed 57%, and a year at 63% displayed 31%. Every year
+reads "fine", and a player cannot tell a bad year from a good one.
+
+Two fields are added — `actualLossRatioPricingBasis` (over `poolPremiumAndAdminExpense`, which is
+`expectedLossRatio`'s own denominator, so expected and actual are finally comparable) and
+`actualLossRatioRetainedPremium` (over `poolPremium` alone). `actualLossRatio` keeps its value and its
+name and stays on every surface that already spelled its basis out.
+
+### Gate readings
+
+| gate | reading |
+|---|---|
+| value identity | **0 of 29,580 existing values changed**; 600 added (2 fields × 150 instances × 2 configs), 0 removed |
+| solo export guard | 24 of 24 moved, **shape CHANGED — two columns added** |
+| ⚠ why the pairing is the argument | a hash guard cannot tell "two columns appended" from "every number moved"; the value capture can, and says the second did not happen |
+| pool-aggregation-check | caught both new fields as unclassified and required them to be filed — they are, as RECOMPUTED_RATIOS |
+| FAST | 47/47 green after recapture |
+
+The shape of these two captures is the opposite of v33's and v34's. Both of those were whole-tree
+re-rolls where no field-by-field reading was possible and the honest statement was "the tree moved".
+This one is a pure addition, and a capture showing **zero** changed values is a stronger claim than one
+showing a plausible-looking subset moved.
+
+v33 retired from the working tree; v34 kept as the immediate predecessor.

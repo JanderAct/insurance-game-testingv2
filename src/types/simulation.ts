@@ -218,7 +218,14 @@ export interface HistoricalYear {
   netUltimateLoss: number;
   netPaidLosses: number;
   endingNetReserve: number;
-  actualLossRatio: number;
+  actualLossRatio: number;                 // MEMBER-CHARGE basis
+  // PRICING basis and RETAINED-PREMIUM basis, mirroring LineResultSet's.
+  // OPTIONAL because a save written before this existed carries neither, and
+  // the Dashboard's pre-game rows must keep rendering from an old save rather
+  // than showing NaN. Consumers fall back to recomputing from the dollar fields
+  // above, which are all present in every save.
+  actualLossRatioPricingBasis?: number;
+  actualLossRatioRetainedPremium?: number;
   actualExpenseRatio: number;
   actualCombinedRatio: number;
   underwritingIncome: number;
@@ -1123,18 +1130,33 @@ export interface ResultSet {
   surplusFromIncome: number;                // beginingSurplus + netIncome
   surplusTieOutDifference: number;          // endingSurplus - surplusFromIncome
 
-  // Ratios — EVERY ONE STATES ITS DENOMINATOR, because two exist and mixing
-  // them is finding 6's recurring error.
+  // Ratios — EVERY ONE STATES ITS DENOMINATOR, because THREE now exist and
+  // mixing them is finding 6's recurring error.
   //   pricing basis       = poolPremiumAndAdminExpense (poolPremium + admin)
   //   member-charge basis = totalMemberCharge (the above + reinsurance cost)
+  //   retained premium    = poolPremium alone (no admin, no reinsurance)
   // A loss ratio and an expense ratio may only be ADDED when they share a
   // denominator, which is why the combined ratios use the member-charge basis
   // on both terms.
+  //
+  // ⚠ NAMING THE FIELD WAS NOT ENOUGH, AND THAT IS WHAT THIS BLOCK GOT WRONG.
+  // Every field here has stated its basis since finding 6, and two playtesters
+  // still read the headline as a calibration failure — because the four places
+  // a player actually looks rendered `actualLossRatio` under the label "Pool
+  // Loss Ratio", which names a SCOPE and not a BASIS. The discipline has to
+  // reach the LABEL, not just the field. See the display note at Header.tsx.
   expectedLossRatio: number;             // PRICING basis — the finding-6 reconciliation figure
   expectedLossRatioMemberBasis: number;  // MEMBER-CHARGE basis — the combined-ratio component
   expectedExpenseRatio: number;          // MEMBER-CHARGE basis
   expectedCombinedRatio: number;         // member-charge basis on both terms
   actualLossRatio: number;               // MEMBER-CHARGE basis
+  // PRICING basis. Shares expectedLossRatio's denominator, so these two are the
+  // only expected/actual pair in this type that may be compared directly — and
+  // that comparability is why the headline uses this one.
+  actualLossRatioPricingBasis: number;
+  // RETAINED PREMIUM alone. No expected counterpart and no expense ratio on its
+  // basis, so it may not be added to anything: a reported figure only.
+  actualLossRatioRetainedPremium: number;
   actualExpenseRatio: number;            // MEMBER-CHARGE basis
   actualCombinedRatio: number;           // member-charge basis on both terms
   combinedRatio: number;

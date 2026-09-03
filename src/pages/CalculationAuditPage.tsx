@@ -2112,10 +2112,32 @@ export function buildSupportingRows(
       status: basisGuardStatus,
     },
     {
-      metric: 'Actual Loss Ratio',
+      metric: 'Actual Loss Ratio (pricing basis)',
+      value: formatPct(result.actualLossRatioPricingBasis),
+      numericValue: result.actualLossRatioPricingBasis,
+      formula: { kind: 'ratio', numerator: curTerm(result.netIncurredLoss, 'net incurred loss'), denominator: curTerm(result.poolPremiumAndAdminExpense, 'pool premium + admin expense') },
+      explain: 'The headline figure. It shares expectedLossRatio\'s denominator, so expected and actual are directly comparable — which is finding 6\'s point.',
+    },
+    {
+      metric: 'Actual Loss Ratio (retained premium)',
+      value: formatPct(result.actualLossRatioRetainedPremium),
+      numericValue: result.actualLossRatioRetainedPremium,
+      formula: { kind: 'ratio', numerator: curTerm(result.netIncurredLoss, 'net incurred loss'), denominator: curTerm(result.poolPremium, 'pool premium') },
+      explain: 'Net loss over the premium retained on the risk the pool kept. No expense ratio shares this denominator, so it may not be added to one.',
+    },
+    {
+      // ⚠ THE DENOMINATOR NAMED THE WRONG FIELD, AND THIS IS THE PAGE THAT
+      // CANNOT AFFORD THAT. It read curTerm(result.grossPremium, 'gross
+      // premium'). Numerically safe — grossPremium is a bare alias of
+      // totalMemberCharge at simulationEngine.ts:803 — but naming the alias
+      // concealed that the denominator carries the reinsurance premium, on the
+      // one page whose whole job is showing the arithmetic. The alias is
+      // untouched; only what this row calls it has changed.
+      metric: 'Actual Loss Ratio (member charge)',
       value: formatPct(result.lossRatio),
       numericValue: result.lossRatio,
-      formula: { kind: 'ratio', numerator: curTerm(result.netIncurredLoss, 'net incurred loss'), denominator: curTerm(result.grossPremium, 'gross premium') },
+      formula: { kind: 'ratio', numerator: curTerm(result.netIncurredLoss, 'net incurred loss'), denominator: curTerm(result.totalMemberCharge, 'total member charge') },
+      explain: 'Pairs with the actual expense ratio to form the combined ratio; both terms must share this denominator.',
     },
     {
       metric: 'Loss Ratio Check Difference',

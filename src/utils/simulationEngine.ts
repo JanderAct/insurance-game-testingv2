@@ -1636,6 +1636,20 @@ export function processLineYear(
   const expectedCombinedRatio = expectedLossRatioMemberBasis + expectedExpenseRatio;
 
   const actualLossRatio = netIncurredLoss / Math.max(totalMemberCharge, 1);
+  // ⚠ THE PRICING-BASIS ACTUAL, AND IT IS THE ONE THE HEADLINE NOW SHOWS.
+  // It shares expectedLossRatio's denominator, so expected and actual are
+  // finally comparable — which is finding 6's whole point and had never been
+  // true in any figure a player looks at. See the display note at
+  // Header.tsx's chip for why the member-charge figure could not stay there.
+  const actualLossRatioPricingBasis =
+    netIncurredLoss / Math.max(poolPremiumAndAdminExpense, 1);
+  // ⚠ RETAINED PREMIUM ALONE — no admin in the denominator. The plainest
+  // statement of how the line did on the risk it kept, and it is deliberately
+  // NOT the headline: it has no expected counterpart to be compared against and
+  // no expense ratio on its basis, so it cannot be added to anything. Reported
+  // on the Results detail and in the export, nowhere a player reads at a glance.
+  const actualLossRatioRetainedPremium =
+    netIncurredLoss / Math.max(poolPremium, 1);
   const actualExpenseRatio =
     (adminExpense + reinsuranceCost) / Math.max(totalMemberCharge, 1);
   const actualCombinedRatio = actualLossRatio + actualExpenseRatio;
@@ -1792,6 +1806,8 @@ export function processLineYear(
     expectedExpenseRatio,
     expectedCombinedRatio,
     actualLossRatio,
+    actualLossRatioPricingBasis,
+    actualLossRatioRetainedPremium,
     actualExpenseRatio,
     actualCombinedRatio,
     combinedRatio,
@@ -2582,6 +2598,15 @@ export function aggregateLineResults(
     (adminExpenseSum + reinsuranceCostSum) / Math.max(totalMemberChargeSum, 1);
   const expectedCombinedRatio = expectedLossRatioMemberBasis + expectedExpenseRatio;
   const actualLossRatio = netIncurredLossSum / Math.max(totalMemberChargeSum, 1);
+  // ⚠ SUMS OVER SUMS, NOT A MEAN OF THE LINE RATIOS — the same discipline as
+  // every other pooled ratio here, and the pricing basis needs it MORE rather
+  // than less. The reinsurance share this denominator excludes differs sharply
+  // by line (GL cedes about half its charge, Property about two fifths), so an
+  // average of the three line ratios would be weighted by the wrong thing.
+  const actualLossRatioPricingBasis =
+    netIncurredLossSum / Math.max(poolPremiumAndAdminExpenseSum, 1);
+  const actualLossRatioRetainedPremium =
+    netIncurredLossSum / Math.max(addDollars('poolPremium'), 1);
   const actualExpenseRatio = (adminExpenseSum + reinsuranceCostSum) / Math.max(totalMemberChargeSum, 1);
   const actualCombinedRatio = actualLossRatio + actualExpenseRatio;
 
@@ -2804,6 +2829,8 @@ export function aggregateLineResults(
     expectedExpenseRatio,
     expectedCombinedRatio,
     actualLossRatio,
+    actualLossRatioPricingBasis,
+    actualLossRatioRetainedPremium,
     actualExpenseRatio,
     actualCombinedRatio,
     combinedRatio: actualCombinedRatio,

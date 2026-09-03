@@ -360,6 +360,8 @@ export function toHistoricalYear(r: LineResultSet): HistoricalYear {
     netPaidLosses: r.netPaidLosses,
     endingNetReserve: r.endingNetReserve,
     actualLossRatio: r.actualLossRatio,
+    actualLossRatioPricingBasis: r.actualLossRatioPricingBasis,
+    actualLossRatioRetainedPremium: r.actualLossRatioRetainedPremium,
     actualExpenseRatio: r.actualExpenseRatio,
     actualCombinedRatio: r.actualCombinedRatio,
     underwritingIncome: r.underwritingIncome,
