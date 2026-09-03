@@ -228,7 +228,7 @@ function walk(line: CoverageLine, reg: Entry[], gameId: string, phi: number, siz
     const u = claimClosureUnit(gameId, c.id);
     let closureAge = MAX_AGE;
     for (let t = 1; t <= MAX_AGE; t++) if (closedShare(curve, t) >= u) { closureAge = t; break; }
-    let st: RevisionState = { value: c.value, paidShare: 0, lastSign: 0 };
+    let st: RevisionState = { value: c.value, paidShare: 0 };
     for (let a = 1; a <= AGES; a++) {
       if (a >= closureAge) break;
       // The magnitude the law would apply at this age to this claim.

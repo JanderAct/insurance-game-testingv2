@@ -98,7 +98,7 @@ const FAST: string[] = [
   'ratio-basis-check',               //   7s
   'cohort-ledger-check',             //  35s   three ledger identities, BOTH arms — green since the headroom fix
   'reinsurance-tower-check',         //   2s   PROMOTED at this commit
-  'revision-persistence-check',      //   8s   STAGE 1 — rho, read out of reviseDevelopingSet; ships its rho = 0 control
+  'revision-direction-check',        //  10s   STAGE 1 — the OBSERVABLE direction rate; asserts no sign chain
   'roster-catalog-check',            //   3s
   'save-round-trip-check',           //   3s
   'save-size-check',                 //   4s

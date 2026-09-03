@@ -36,7 +36,6 @@ import {
   CLAIM_REVISION_COMBINE,
   CLAIM_REVISION_FREQUENCY,
   CLAIM_REVISION_MAGNITUDE_NUMERATOR,
-  CLAIM_REVISION_PERSISTENCE_RHO,
   CLAIM_REVISION_PHI,
   CLAIM_REVISION_SIZE_TREND,
   CLAIM_SETTLEMENT_FACTOR,
@@ -130,14 +129,17 @@ export function revisionMagnitudeOnIncurred(modelAge: number, value: number): nu
   return CLAIM_REVISION_COMBINE === 'product' ? byAge * bySize : Math.min(byAge, bySize);
 }
 
-/** One claim's state as the law walks it forward. */
+/** One claim's state as the law walks it forward.
+ *
+ *  ⚠ `lastSign` IS GONE WITH THE SIGN CHAIN — see CLAIM_REVISION_PERSISTENCE_RHO.
+ *  The state is now memoryless in the direction as well as in the frequency, so
+ *  a claim's whole path is a pure function of (gameId, claimId, age) with no
+ *  carried state at all. */
 export interface RevisionState {
   /** Carried value — the claim's current estimate of its own ultimate. */
   value: number;
   /** Paid to date, as a share of the carried value. Headroom is 1 - this. */
   paidShare: number;
-  /** The sign of the last revision, or 0 before the first one. */
-  lastSign: 0 | 1 | -1;
 }
 
 /**
@@ -169,25 +171,23 @@ export function reviseOnce(
   modelAge: number,
   state: RevisionState,
   phi: number = CLAIM_REVISION_PHI,
-  rho: number = CLAIM_REVISION_PERSISTENCE_RHO,
 ): RevisionState {
-  const step = revisionStep(gameId, claimId, modelAge, state.value, state.paidShare, state.lastSign, phi, rho);
-  if (step.sign === 0) return state;
+  const factor = revisionFactor(gameId, claimId, modelAge, state.value, state.paidShare, phi);
+  if (factor === 1) return state;
 
   // The RESERVE moves; the paid stays put. So the carried value moves by the
   // reserve's share of it, and the paid share is restated against the new value.
   const paid = state.value * state.paidShare;
   const reserve = state.value - paid;
-  const newValue = paid + reserve * step.factor;
+  const newValue = paid + reserve * factor;
   return {
     value: newValue,
     paidShare: newValue > 0 ? paid / newValue : 1,
-    lastSign: step.sign,
   };
 }
 
 /**
- * ONE STEP'S FACTOR AND SIGN, WITHOUT DECIDING WHAT BALANCE IT APPLIES TO.
+ * ONE STEP'S FACTOR, WITHOUT DECIDING WHAT BALANCE IT APPLIES TO.
  *
  * ⚠ EXTRACTED FROM reviseOnce SO THERE IS STILL ONE IMPLEMENTATION OF THE LAW.
  * The engine has to scale the factor onto the COHORT's own remaining balance
@@ -196,22 +196,19 @@ export function reviseOnce(
  * reimplementing the draw. Every expression below is reviseOnce's, in
  * reviseOnce's order, so nothing about the law's arithmetic moved.
  *
- * `sign` of 0 means THE FREQUENCY DRAW DID NOT FIRE and `factor` is exactly 1:
- * a quiet year, with the previous sign carried forward untouched.
+ * A factor of exactly 1 means THE FREQUENCY DRAW DID NOT FIRE — a quiet year.
  */
-export function revisionStep(
+export function revisionFactor(
   gameId: string,
   claimId: string,
   modelAge: number,
   value: number,
   paidShare: number,
-  lastSign: 0 | 1 | -1,
   phi: number = CLAIM_REVISION_PHI,
-  rho: number = CLAIM_REVISION_PERSISTENCE_RHO,
-): { factor: number; sign: 0 | 1 | -1 } {
+): number {
   // FREQUENCY IS I.I.D. — see the memoryless note at CLAIM_REVISION_FREQUENCY.
   if (claimRevisionUnit(gameId, claimId, modelAge, 'rev_freq') >= CLAIM_REVISION_FREQUENCY) {
-    return { factor: 1, sign: 0 };
+    return 1;
   }
 
   const headroom = Math.max(1e-9, 1 - paidShare);
@@ -219,19 +216,13 @@ export function revisionStep(
   // THE BASIS CONVERSION, AND IT IS THE ONLY DIVISION IN THE LAW.
   const s = onIncurred / headroom;
 
-  // SIGN — two-state Markov, first sign fair.
-  const uSign = claimRevisionUnit(gameId, claimId, modelAge, 'rev_sign');
-  let sign: 1 | -1;
-  if (lastSign === 0) {
-    sign = uSign < 0.5 ? 1 : -1;
-  } else {
-    const stay = (1 + rho) / 2;
-    sign = uSign < stay ? (lastSign as 1 | -1) : (-lastSign as 1 | -1);
-  }
+  // SIGN — A FAIR COIN, AND NOTHING CARRIES BETWEEN AGES. See
+  // CLAIM_REVISION_PERSISTENCE_RHO for why the two-state chain that used to be
+  // here is gone.
+  const sign = claimRevisionUnit(gameId, claimId, modelAge, 'rev_sign') < 0.5 ? 1 : -1;
 
   const z = Math.abs(normalQuantile(claimRevisionUnit(gameId, claimId, modelAge, 'rev_mag')));
-  const factor = Math.exp(sign * s * z - (s * s) / 2);
-  return { factor, sign };
+  return Math.exp(sign * s * z - (s * s) / 2);
 }
 
 /**
@@ -285,7 +276,7 @@ export function claimTerminalValue(
   paidShareAt: (age: number) => number = () => 0,
   phi: number = CLAIM_REVISION_PHI,
 ): number {
-  let state: RevisionState = { value: drawnValue, paidShare: 0, lastSign: 0 };
+  let state: RevisionState = { value: drawnValue, paidShare: 0 };
   for (let age = 1; age < closureAge; age++) {
     state = { ...state, paidShare: paidShareAt(age) };
     state = reviseOnce(gameId, claimId, age, state, phi);
@@ -414,7 +405,6 @@ export function reviseDevelopingSet(
   tracked: RevisableClaim[],
   cohort: CohortStep,
   phi: number = CLAIM_REVISION_PHI,
-  rho: number = CLAIM_REVISION_PERSISTENCE_RHO,
 ): RevisionAllocation {
   const { untracked, untrackedFactor, balance, modelAge } = cohort;
   const mass = Math.max(0, untracked);
@@ -435,11 +425,8 @@ export function reviseDevelopingSet(
   const deltas: number[] = [];
   let applied = 0;
   for (const t of tracked) {
-    const step = revisionStep(
-      gameId, t.claimId, modelAge, t.current, paidShare,
-      signBefore(gameId, t.claimId, modelAge, rho), phi, rho,
-    );
-    const d = Math.max(0, t.current) * h * (step.factor - 1);
+    const factor = revisionFactor(gameId, t.claimId, modelAge, t.current, paidShare, phi);
+    const d = Math.max(0, t.current) * h * (factor - 1);
     deltas.push(d);
     applied += d;
   }
@@ -493,42 +480,3 @@ export function settleClosingSet(
   return { deltas, untrackedDelta: 0, applied, unallocated: 0 };
 }
 
-/**
- * The sign the persistence chain is carrying when it ENTERS `modelAge`.
- *
- * ⚠ DERIVED BY REPLAY, NOT STORED, AND THE ALTERNATIVE WAS A SILENT BUG. The
- * engine sees one cohort step at a time and has no `lastSign` to hand it. The
- * first cut of reviseDevelopingSet passed `lastSign: 0`, which makes every step
- * draw a FAIR sign — i.e. it sets rho to zero at every step while
- * CLAIM_REVISION_PERSISTENCE_RHO still reads 0.18, and nothing in the totals
- * would have shown it. The whole path is a pure function of
- * (gameId, claimId, age), so the chain is replayed from age 1 instead.
- *
- * ⚠ THE CHAIN ADVANCES ONLY ON STEPS THAT ACTUALLY REVISED. reviseOnce returns
- * the state untouched when the frequency draw does not fire, so a quiet year
- * carries the previous sign forward rather than resetting it. This replay has to
- * make the same frequency test, in the same order, or the two disagree about
- * which sign a claim is carrying — so it calls the same unit with the same
- * purpose label rather than re-deriving the condition.
- *
- * Cost is O(age) hashes per claim per step, and ages are bounded by the runoff
- * horizon (12 on WC, 8 on GL, 4 on Property), so it is a handful of integer
- * multiplies on a path that already walks the whole register.
- */
-export function signBefore(
-  gameId: string,
-  claimId: string,
-  modelAge: number,
-  rho: number = CLAIM_REVISION_PERSISTENCE_RHO,
-): 0 | 1 | -1 {
-  let sign: 0 | 1 | -1 = 0;
-  const stay = (1 + rho) / 2;
-  for (let a = 1; a < modelAge; a++) {
-    if (claimRevisionUnit(gameId, claimId, a, 'rev_freq') >= CLAIM_REVISION_FREQUENCY) continue;
-    const u = claimRevisionUnit(gameId, claimId, a, 'rev_sign');
-    sign = sign === 0
-      ? (u < 0.5 ? 1 : -1)
-      : (u < stay ? sign : (-sign as 1 | -1));
-  }
-  return sign;
-}

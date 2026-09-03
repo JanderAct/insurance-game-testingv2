@@ -122,7 +122,7 @@ const paidShareAt = (age: number) => Math.min(0.999, cumulativePaid(pattern, age
 function terminalValues(reg: DrawnClaim[], phi: number, nonZeroScale: number): number[] {
   const out: number[] = [];
   for (const c of reg) {
-    let st: RevisionState = { value: c.value, paidShare: 0, lastSign: 0 };
+    let st: RevisionState = { value: c.value, paidShare: 0 };
     for (let age = 1; age < c.closureAge; age++) {
       st = { ...st, paidShare: paidShareAt(age) };
       st = reviseOnce(c.gameId, c.claimId, age, st, phi);

@@ -2084,11 +2084,39 @@ export const CLAIM_REVISION_SIZE_TREND = { scale: 20.12, exponent: -0.2891 };
 export type ClaimRevisionCombine = 'min' | 'product';
 export const CLAIM_REVISION_COMBINE: ClaimRevisionCombine = 'min';
 
-// PERSISTENCE — SIGN ONLY, AS A TWO-STATE MARKOV CHAIN. rho = 0.18.
+// ⚠ PERSISTENCE IS RETIRED. rho = 0 AND THE SIGN CHAIN IS GONE FROM THE CODE.
+// The constant stays at zero as the RECORD of a fitted parameter that was ruled
+// out; nothing reads it. What follows is why, because the reasoning is the part
+// worth keeping.
 //
-//   P(same sign as the previous revision) = (1 + rho) / 2 = 0.59
-//   the FIRST sign is fair, so the chain is stationary at 1/2 and every step's
-//   factor is marginally mean-one.
+// WHAT IT WAS: a two-state Markov chain on the sign, rho = 0.18, so that
+// P(same sign as the previous revision) = (1 + rho)/2 = 0.59, fitted from the
+// pool's own GL experience. The first sign was fair, so the chain was stationary
+// at 1/2 and every step's factor stayed marginally mean-one.
+//
+// ⚠ WHY IT WENT, AND THE TRADE IS NOT CLOSE. Sign persistence makes each step
+// CONDITIONALLY non-mean-one, so a runoff drifts UP, and the settlement level
+// existed to pay that back. Once the ledger crossing was closed by putting the
+// settlement factor on the RESERVE, that offset became h-scaled — the required
+// level is (1/persistence - 1)/h and h is a cohort quantity that varies by line,
+// age and realised development, so no scalar cancels it. The drift stopped being
+// cancellable and ran at +6.04% pre-cession on WC, six times the martingale
+// tolerance from one term.
+//
+// AGAINST THAT, rho bought 3.5 / 4.2 / 1.8pp on a direction statistic the model
+// already produces most of by another route: at rho = 0 the realised same-sign
+// rate still reads 57.0 / 55.5 / 66.9% against the pool's 59%, because the
+// mean-one correction -s^2/2 biases moves downward and a biased coin repeats
+// itself. Six percent of drift in the ultimate for four points on a statistic
+// that was already three-quarters delivered is not a trade.
+//
+// ⚠ AND IT WAS ALWAYS THE WEAKER PARAMETER, WHICH IS THE DURABLE LESSON. It was
+// FITTED from OBSERVED reserve-change directions and APPLIED as a LATENT chain,
+// on a model whose observable direction is dominated by something else entirely.
+// A parameter fitted on one basis and applied on another double-counts whatever
+// the other mechanism already supplies. revision-direction-check now asserts the
+// OBSERVABLE — the thing the pool actually measured — rather than a latent rate
+// no data ever saw.
 //
 // ⚠ FREQUENCY IS MEMORYLESS AND THAT IS A MEASUREMENT, NOT AN OMISSION. Whether
 // a claim moves at all in a given year is i.i.d. at q = 0.70: the conditional
@@ -2113,7 +2141,18 @@ export const CLAIM_REVISION_COMBINE: ClaimRevisionCombine = 'min';
 // gate reports both. It is a phi-scale question and it belongs with the 84%/9.8%
 // work; recorded here so the constant is not read as if the model reproduced the
 // source's 59% on the quantity the source measured it on.
-export const CLAIM_REVISION_PERSISTENCE_RHO = 0.18;
+export const CLAIM_REVISION_PERSISTENCE_RHO = 0;
+
+// THE DIRECTION TARGET — the pool's own GL rate at which successive revisions on
+// the same claim move the same way. This is the OBSERVABLE, measured on reserve
+// changes, and it is what revision-direction-check holds the model to.
+//
+// ⚠ IT IS THE SAME 0.59 THAT rho WAS FITTED FROM, ON THE BASIS IT WAS MEASURED
+// ON. rho took this figure and applied it to a LATENT chain; the model's
+// observable direction is dominated by the mean-one correction instead, so the
+// chain double-counted it. The number did not change — what it is compared
+// against did.
+export const CLAIM_MOVEMENT_DIRECTION_TARGET = 0.59;
 export const CLAIM_REVISION_FREQUENCY = 0.70;
 
 // SETTLEMENT — SHAPE MEASURED, MEAN DERIVED.
@@ -2154,23 +2193,17 @@ export const CLAIM_REVISION_FREQUENCY = 0.70;
 //   IT MAKES "CLOSES AT ZERO" LITERALLY TRUE. A claim settling at factor 0 now
 //   lands at v.(1 - h), its paid to date, rather than at nothing.
 //
-//   ⚠ AND IT COLLAPSES THE OFFSET. The expected effect on a claim's value is
-//   1 + h.(E[f] - 1) rather than E[f], so with h around 0.2 at closure the
-//   -0.45% this level was solved to deliver arrives as about -0.09%. Measured
-//   on the engine, paired off against on: the settlement quotient reads
-//   0.998 / 1.000 / 1.013 (WC +/- 0.003), i.e. essentially 1. THE PERSISTENCE
-//   DRIFT IS UNCANCELLED ON THE ENGINE PATH.
+//   ⚠ AND IT COLLAPSED THE OFFSET, WHICH IS WHAT RETIRED rho. The expected effect
+//   on a claim's value is 1 + h.(E[f] - 1) rather than E[f], so an offset arrives
+//   scaled by the cohort's h. The required level was (1/persistence - 1)/h and h
+//   varies by cohort, so no scalar could cancel the drift — the engine ran +6.04%
+//   pre-cession on WC. The resolution was to remove the drift rather than chase
+//   the offset: see CLAIM_REVISION_PERSISTENCE_RHO.
 //
-// ⚠ AND nonZeroScale CANNOT BE RE-SOLVED FOR IT, WHICH IS THE FINDING RATHER
-// THAN AN OMISSION. The required offset is (1/persistence - 1)/h, and h is a
-// COHORT quantity that varies by line, age and realised development. No single
-// scalar cancels an h-dependent drift. The level below stays as it is because it
-// is still exactly right for the LAW's own walk — claimTerminalValue and
-// martingale-equivalence-check's decomposition are on the whole-value basis and
-// are bit-identical across this commit (verified by digest, and the gate's
-// per-register figures are unchanged). What has opened is a divergence between
-// the law as calibrated and the law as run, which is the next thing to close and
-// is not closable by moving this number.
+// ⚠ WITH NO DRIFT TO CANCEL, THE LEVEL IS THE ONE THAT MAKES THIS FACTOR
+// MEAN-ONE OUTRIGHT, AND THE h PROBLEM DISSOLVES. 1 + h.(1 - 1) = 1 for every h.
+// Measured on the engine, paired off against on, the settlement quotient now
+// reads 0.997 / 1.000 / 0.999 — neutral, which is what it should be.
 //
 // ⚠ AND IT DOES NOT REDUCE CESSION, WHICH IS THE OPPOSITE OF WHAT IT WAS
 // EXPECTED TO DO. Settlement was reasoned about as the FAVOURABLE force — a
@@ -2191,9 +2224,18 @@ export const CLAIM_SETTLEMENT_FACTOR = {
   // ⚠ SOLVED, NOT FITTED — the level that makes the cohort a martingale.
   //
   //   nonZeroScale = 1 / (E[persistence] x (1 - p0) x exp(mu + sigma^2/2))
-  //                = 1 / (1.00460 x 0.807647) = 1.2325
+  //                = 1 / (1.00000 x 0.807646) = 1.238164
   //
-  // The fitted shape's own mean is 0.8076, so the level moves it to 0.9955.
+  // The fitted shape's own mean is 0.8076, so the level moves it to 1.0000.
+  //
+  // ⚠ E[persistence] IS NOW EXACTLY 1 AND THAT DISSOLVES THE h PROBLEM. It read
+  // 1.00460 while the sign chain existed, and the offset that cancelled it was
+  // 0.9955 — which, once settlement moved onto the RESERVE, arrived scaled by the
+  // cohort's h and therefore did not cancel anything. With rho retired there is
+  // no drift to pay back, so the right level is the one that makes the settlement
+  // factor mean-one outright. And a mean-one factor is mean-one at ANY h:
+  // 1 + h(E[f] - 1) = 1 for every h. The h-dependence was only ever a problem for
+  // a NON-zero offset, and there is no longer one.
   // martingale-equivalence-check is what falsifies this and it decomposes the
   // two terms rather than reading the total.
   //
@@ -2215,7 +2257,7 @@ export const CLAIM_SETTLEMENT_FACTOR = {
   // At the briefed phi = 1.9 the drift would have been ~0.87% and would have
   // needed a real correction; at the anchor-solved 0.63 it does not. Getting phi
   // right shrank this problem rather than solving it separately.
-  nonZeroScale: 1.2325,
+  nonZeroScale: 1.238164,
 };
 
 // ===========================================================================
@@ -2483,8 +2525,16 @@ export const CLAIM_OPEN_SHARE_MODEL_RECORDED: readonly number[] = [0.901, 0.794,
 // and netUltimate is NET. It would have gone green on the seeds it was built
 // against and red on someone else's.
 //
-// ⚠ WHAT IT COSTS, AND IT IS THE NEXT OPEN ITEM: THE SETTLEMENT NO LONGER PAYS
-// BACK THE PERSISTENCE DRIFT ON THE ENGINE PATH. See CLAIM_SETTLEMENT_FACTOR.
+// ⚠ WHAT IT COST WAS THE SETTLEMENT OFFSET, AND THAT ITEM IS NOW CLOSED BY
+// RETIRING rho. The offset became h-scaled and therefore uncancellable; with the
+// sign chain gone there is no drift to cancel, the settlement level is re-solved
+// to mean-one, and a mean-one factor is mean-one at every h. See
+// CLAIM_REVISION_PERSISTENCE_RHO and CLAIM_SETTLEMENT_FACTOR.
+//
+// ⚠ AND THE HEADROOM FIX IS INDEPENDENT OF rho — MEASURED, NOT ASSUMED.
+// cohort-ledger-check reads 0 violations on both arms with the chain removed,
+// across 9,373 flag-on cohort-valuations. The bound is arithmetic on the
+// weights; it never referred to the sign.
 //
 // ⚠ THE ORIGINAL FINDING, KEPT BECAUSE THE DIAGNOSIS IS THE USEFUL PART:
 // THE PER-CLAIM PATH COULD DRIVE A COHORT'S NET RESERVE NEGATIVE. `newUnpaid += res.retained` sums

@@ -133,7 +133,7 @@ function replicate(reg: Entry[], gameId: string): { persistence: number; settlem
     const u = claimClosureUnit(gameId, c.id);
     let closureAge = MAX_AGE;
     for (let t = 1; t <= MAX_AGE; t++) if (closedShare(curve, t) >= u) { closureAge = t; break; }
-    let st: RevisionState = { value: c.value, paidShare: 0, lastSign: 0 };
+    let st: RevisionState = { value: c.value, paidShare: 0 };
     for (let a = 1; a < closureAge; a++) {
       st = { ...st, paidShare: paidShareAt(a) };
       st = reviseOnce(gameId, c.id, a, st, CLAIM_REVISION_PHI);
@@ -229,7 +229,7 @@ const offScale = stat(regs.map((r, s) => {
     const u = claimClosureUnit(`CTL${s}`, c.id);
     let ca = MAX_AGE;
     for (let t = 1; t <= MAX_AGE; t++) if (closedShare(curve, t) >= u) { ca = t; break; }
-    let st: RevisionState = { value: c.value, paidShare: 0, lastSign: 0 };
+    let st: RevisionState = { value: c.value, paidShare: 0 };
     for (let a = 1; a < ca; a++) { st = { ...st, paidShare: paidShareAt(a) }; st = reviseOnce(`CTL${s}`, c.id, a, st, CLAIM_REVISION_PHI); }
     drawn += c.value;
     // the FITTED settlement shape at its own level — i.e. the mean NOT derived
