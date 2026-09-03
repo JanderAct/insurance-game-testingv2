@@ -60,9 +60,9 @@ import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { SeededRandom } from '../../src/utils/random';
 import { cumulativePaid } from '../../src/utils/payoutPattern';
-import { revisionMagnitudeOnIncurred } from '../../src/utils/claimRevision';
+import { revisionSigma } from '../../src/utils/claimRevision';
 import {
-  CLAIM_REVISION_PHI, IBNER_HORIZON, IBNER_TOTAL_SD, LINE_PAYOUT_PATTERN, PER_CLAIM_REVISION,
+  IBNER_HORIZON, IBNER_TOTAL_SD, LINE_PAYOUT_PATTERN, PER_CLAIM_REVISION,
 } from '../../src/data/defaultAssumptions';
 import type { CoverageLine, GameState, ReserveCohort } from '../../src/types/simulation';
 
@@ -210,7 +210,13 @@ for (const l of LINES) {
   for (let a = 1; a <= 12; a++) {
     if (a > IBNER_HORIZON[l].max) { cells.push('     -'); continue; }
     const headroom = Math.max(1e-9, 1 - cumulativePaid(pattern, a));
-    const s = CLAIM_REVISION_PHI * revisionMagnitudeOnIncurred(a, v) / headroom;
+    // ⚠ THROUGH THE LAW'S OWN FUNCTION, NOT A COPY OF IT. This line used to read
+    // `CLAIM_REVISION_PHI * revisionMagnitudeOnIncurred(a, v) / headroom` — the
+    // headroom division inlined here. When the division moved out of the law
+    // this copy stayed, and the table below printed the RETIRED form's s for a
+    // whole commit under a heading describing the shipped one. See
+    // revisionSigma's note.
+    const s = revisionSigma(a, v, headroom);
     cells.push((s >= 100 ? s.toExponential(0) : s.toFixed(2)).padStart(6));
   }
   console.log(`  ${l.padEnd(9)}       ` + cells.join(''));
@@ -218,9 +224,11 @@ for (const l of LINES) {
 
 console.log('');
 console.log('  ⚠ THEY DO NOT AGREE, AND THE DISAGREEMENT IS THE OTHER WAY UP. The law develops');
-console.log('    MORE in total than the cohort path it replaces — 2.7x to 3.2x on the robust');
-console.log('    spread, on every line. So 42b2c2b\'s reasoning was wrong twice over: the two');
-console.log('    figures it compared were different statistics, AND the direction was backwards.');
+console.log('    MORE in total than the cohort path it replaces, on every line — read the ON/OFF');
+console.log('    column above rather than a figure quoted here, because it has moved twice with');
+console.log('    the headroom exponent and once went BELOW 1.0 on WC. So 42b2c2b\'s reasoning was');
+console.log('    wrong twice over: the two figures it compared were different statistics, AND the');
+console.log('    direction was backwards.');
 console.log('');
 console.log('  ⚠ THE SD COLUMN IS NOT AN ESTIMATE ON THE ON ARM, AND THE max |dev| COLUMN IS WHY.');
 console.log('    A single cohort at twenty-two times its register sum sets WC\'s sample SD, which');
@@ -232,17 +240,32 @@ console.log('    answered by measuring an SD at any game count this repo will ev
 console.log('    spread and its bootstrap are what is estimable, and they are what the comparison');
 console.log('    above is built on.');
 console.log('');
-console.log('  ⚠ AND THE TAIL HAS A NAMED SOURCE, IN TWO DIFFERENT SHAPES. The basis conversion');
-console.log('    divides by headroom and NOTHING BOUNDS THE RESULT: as a cohort pays down,');
-console.log('    headroom goes to zero and s goes to infinity. GL reaches s = 21 by age 8 and');
-console.log('    Property s = 3.6 by age 4, at an s no fitted parameter chose — the magnitude was');
-console.log('    fitted on the incurred, and the division is what puts it on the reserve. At large');
-console.log('    s the factor exp(s.sign.|Z| - s^2/2) is still exactly mean-one, but it delivers');
-console.log('    that mean as a near-certain collapse plus a vanishing chance of an enormous');
-console.log('    multiple. WC\'s tail is the OTHER shape and the table shows that too: s never');
-console.log('    leaves the neighbourhood of 1, but twelve steps of a log walk at that scale');
-console.log('    compound to a log-SD near 3, which is a 20x multiple at two SD. One mechanism');
-console.log('    runs away in s, the other in depth. Both are where the flip\'s next question is.');
+console.log('  ⚠ READ THE TABLE ABOVE AGAINST WHAT IT USED TO SAY. On this same pattern-headroom');
+console.log('    basis the retired s = phi.m/h form read GL 22.75 by age 8 and Property 3.80 by');
+console.log('    age 4. At the shipped exponent they are 1.84 and 1.01. That is the amplification');
+console.log('    coming out, and it is the single largest thing the exponent does.');
+console.log('');
+console.log('  ⚠ AND s IS STILL UNBOUNDED IN PRINCIPLE, WHICH THIS TABLE CANNOT SHOW. It uses the');
+console.log('    PAYOUT PATTERN\'s headroom, which never gets very small. The engine uses the');
+console.log('    cohort\'s REALISED balance over its register, and on an exhausted cohort that is');
+console.log('    far smaller — 0.003 against a pattern 0.125 was measured when the ledger crossing');
+console.log('    was diagnosed. So s at the real call site goes higher than anything printed here.');
+console.log('');
+console.log('    IT NO LONGER COSTS WHAT IT USED TO, AND THAT IS THE RECONCILIATION. The dollar');
+console.log('    movement is d = v.h.(f-1), so to first order it goes as v.phi.m.h^e:');
+console.log('');
+console.log('      e = 0     s ~ 1/h       movement INDEPENDENT of h — a huge s on a nearly');
+console.log('                              exhausted cohort still moved full dollars. The tail.');
+console.log('      e = 0.5   s ~ 1/sqrt(h) movement ~ sqrt(h) — s runs away exactly where the');
+console.log('                              balance it multiplies is vanishing, so the product');
+console.log('                              does not. Worst cohort 63-88% against 2950%.');
+console.log('');
+console.log('    So do not clamp s. What made the old form dangerous was the cancellation, not');
+console.log('    the magnitude, and a clamp would attack the symptom on the arm where it is now');
+console.log('    harmless. WC\'s tail was always the OTHER shape and the table still shows it: s');
+console.log('    never leaves the neighbourhood of 1, and depth rather than height is what');
+console.log('    compounds there. That one is barely touched by the exponent and is the next');
+console.log('    question.');
 console.log('');
 console.log('  ⚠ IT DOES NOT CONTRADICT THE TERMINAL-SEVERITY ANCHOR, and that is worth being');
 console.log('    precise about rather than assuming either way. The anchor constrains the log-SD');

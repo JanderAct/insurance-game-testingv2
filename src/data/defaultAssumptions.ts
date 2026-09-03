@@ -2019,11 +2019,11 @@ export const IBNER_UNWIND_DECAY: number = 0.5;
 // ===========================================================================
 // MAGNITUDE — 200% / (age + 1), IN MODEL TERMS, AND THE OFFSET IS NOT COSMETIC.
 //
-// ⚠ AND THE MAGNITUDE IS ON THE INCURRED, WITH NO 1/HEADROOM CORRECTION — A
-// DATA RULING. s used to be phi.m/headroom so that the DOLLAR movement was
-// invariant to how much of a claim had been paid. The pool's own GL experience,
-// banded by headroom, value-weighted within band, open claims, pre-game
-// excluded, says movement scales WITH headroom instead:
+// ⚠ AND THE MAGNITUDE IS ON THE INCURRED, WITH THE HEADROOM CORRECTION MOVED
+// OUT TO ITS OWN CONSTANT — A DATA RULING. s used to be phi.m/headroom so that
+// the DOLLAR movement was invariant to how much of a claim had been paid. The
+// pool's own GL experience, banded by headroom, value-weighted within band, open
+// claims, pre-game excluded, says movement scales WITH headroom instead:
 //
 //   headroom      |move| / incurred      |move| / reserve
 //   h < 5%              0.015                  0.997
@@ -2032,21 +2032,13 @@ export const IBNER_UNWIND_DECAY: number = 0.5;
 //   35-65%              0.766                  1.512
 //   h > 65%             0.788                  0.854
 //
-// A claim under 5% headroom moves 1.5% of its incurred, not 79%. The reserve
-// column has no trend, which is the same statement: |move| is proportional to
-// the reserve, so |move|/incurred is proportional to h. Deleting the division
-// and keeping d = v.h.(f-1) is what reproduces that.
-//
-// ⚠ THE FITTED EXPONENT IS NOT ROBUST AND THE RULING DOES NOT REST ON IT. A
-// value-weighted power fit over all five bands gives h^0.94 to h^1.25 depending
-// on weighting, but DROPPING THE TWO BANDS WITH n < 50 collapses it to
-// h^0.33-0.46 — the exponent is carried almost entirely by the two thinnest
-// bands. What is robust is the 53x ratio between the top and bottom bands, and
-// the 15-35% band at n = 112: normalised to its own top band the pool reads
-// 0.57 there while the model USED TO read 0.88. Measured after the change the
-// model reads h^1.15 with a flat reserve column, against h^0.38 and a steeply
-// FALLING reserve column before. The direction is settled; the exponent is not,
-// and a re-fit should not be built on these five points.
+// A claim under 5% headroom moves 1.5% of its incurred, not 79%. That direction
+// is settled and nothing below reopens it. HOW FAST movement scales with
+// headroom is a separate question, it was got wrong once, and it now lives at
+// CLAIM_REVISION_HEADROOM_EXPONENT with the sweep that settled it. Do not fit an
+// exponent to the five rows above without reading that note first: the two
+// thinnest bands carry almost the whole slope of a naive fit, and a power fitted
+// across all five reproduces neither regime.
 //
 // DATA AGE 1 IS A PLACEHOLDER STAGE AND IS EXCLUDED FROM THE FIT. First
 // estimates at that age are overwhelmingly round administrative numbers rather
@@ -2057,6 +2049,172 @@ export const IBNER_UNWIND_DECAY: number = 0.5;
 // fit off data age 1 would put a ~100% revision on every claim in its first
 // model year and it would be modelling a filing convention.
 export const CLAIM_REVISION_MAGNITUDE_NUMERATOR = 2.00;
+
+// ===========================================================================
+// THE HEADROOM EXPONENT — HOW FAST MOVEMENT SCALES WITH HEADROOM.
+//
+//   s = phi x m x h^(e-1),   applied through   d = v x h x (f-1)
+//   so  |move| / incurred  ~  0.798 x phi x m x h^e   in the small-s limit.
+//
+// e = 0 is the retired form (the h cancels; movement invariant to headroom).
+// e = 1 is the form this replaces (movement strictly proportional to headroom).
+//
+// ⚠ THIS IS A CHOICE OF WHICH REGIME TO FIT, NOT A FITTED EXPONENT. Read the
+// three notes below before changing it. Two of them say the evidence is weaker
+// than it looks, and the third says the functional form is wrong. All three
+// still leave 0.50 as the right call, for reasons that are about WHICH part of
+// the source is trustworthy rather than about goodness of fit.
+//
+// ===========================================================================
+// 1. THE ANCHOR DOES NOT DISCRIMINATE. THE EXPONENT IS A FREE CHOICE.
+//
+// phi is re-solved against CLAIM_SETTLED_LOG_SD_ANCHOR at every exponent, and
+// every one of them lands the terminal settled log-SD at 2.2900 exactly:
+//
+//   e      0.00    0.25    0.35    0.50    0.75    1.00    1.25
+//   phi   0.6452  0.6527  0.6590  0.6699  0.6907  0.7123  0.7345
+//
+// phi moves 4% across the entire range of exponents anyone has argued for —
+// from the form where h cancels completely to one steeper than the naive fit.
+// The reason is the variance budget at phi's own note: phi is solved against a
+// small residual, so large changes in the walk move the terminal log-SD very
+// little.
+//
+// ⚠ SO THE LOAD-BEARING GATE OF STAGE 1 CANNOT SEE THIS PARAMETER, and anyone
+// re-solving phi later should know the anchor will not object to whatever
+// exponent it is solved under. terminal-severity-check going green says nothing
+// about whether the exponent is right. What discriminates is the band shape
+// below and the engine's cohort spread — neither of which is an anchor.
+//
+// ===========================================================================
+// 2. WC AND PROPERTY CANNOT BE SCORED. THIS IS A GL CHOICE APPLIED BY ASSUMPTION.
+//
+// Measured on the model, both lines read exactly 0.000 in the h < 5% and
+// h > 65% bands, because their payout patterns never put a cohort's headroom
+// there: WC's first valuation sits at 59% headroom and Property's at 49.6%, and
+// their IBNER horizons truncate before headroom falls under 5%. Only GL spans
+// the range, reaching 90.4%. Any shape score for the other two lines is
+// arithmetic over two structurally empty cells and means nothing — theirs came
+// out at 0.62-0.65 against GL's 0.185 and that difference is an artefact of the
+// empty cells, not a worse fit.
+//
+// The source band table is GL's. So the exponent is chosen on GL evidence and
+// carried to WC and Property by assumption, exactly as CLAIM_SETTLED_LOG_SD_
+// ANCHOR and CLAIM_REVISION_SIZE_TREND are. Say so wherever those lines'
+// figures are quoted.
+//
+// ===========================================================================
+// 3. THE FORM IS WRONG AND THE DECISION IS RIGHT.
+//
+// The source has TWO REGIMES, not one slope. Taking the recorded band table
+// above and reading the exponent between adjacent band midpoints:
+//
+//   0.025 -> 0.100     e = 1.05     the two thinnest rows in the table
+//   0.100 -> 0.229     e = 2.36     the steep segment, and it rests on the
+//                                   thinnest row of all
+//   0.229 -> 0.477     e = 0.72
+//   0.477 -> 0.806     e = 0.05     essentially FLAT
+//
+// A factor of 47 between the steepest and flattest segment. No single power has
+// two slopes, so a single exponent must sit in the middle and be wrong at both
+// ends — which is visible in the sweep: the exponent that matches the collapse
+// regime is furthest wrong on the flat one and vice versa. The choice is which
+// regime to fit, and it is ABOVE 15% HEADROOM, because the three bands above
+// that hold the overwhelming majority of the pool's claims while the collapse
+// regime rests on the two thinnest rows in the table. Fitting both at once is
+// what produced the h^1.0 reading that put this at e = 1.
+//
+// ⚠ AND 0.50 REPRODUCES THE LOW-HEADROOM FLOOR'S EFFECT WITHOUT IMPOSING ONE.
+// The model's h < 5% band reads 0.014 against the source's 0.015 at this
+// exponent — not because a knee was built, but because the model's own size
+// trend and its development path correlate m with h. So the argument for a
+// two-regime form or an explicit floor loses most of its value: it would buy a
+// knee position and a second slope fitted to the two thinnest rows in the table,
+// to reproduce something the single power already delivers.
+//
+// A TWO-REGIME FORM IS THE BETTER DESCRIPTION AND WAS NOT BUILT, DELIBERATELY.
+// If a low-headroom band ever arrives with a serious sample behind it, that is
+// the thing to revisit. A saturating hyperbola h/(h+h0) was checked and is the
+// WRONG FAMILY — it is concave, so it cannot produce a sharp low-h collapse at
+// all. Do not reach for it.
+//
+// ===========================================================================
+// WHY 0.50 AND NOT ITS NEIGHBOURS — the sweep, on shape and on the engine.
+//
+// SHAPE. Each table normalised to its own top band, RMS against the source's
+// normalised shape. "thick" is the three bands above 15% headroom:
+//
+//   e       RMS all five     RMS thick bands
+//   0.00       0.282             0.154
+//   0.25       0.301             0.140   <- best on the thick bands
+//   0.35       0.221             0.161
+//   0.50       0.185             0.203   <- best overall
+//   0.75       0.215             0.274
+//   1.00       0.261             0.336   <- what this replaces
+//   1.25       0.301             0.389
+//
+// ENGINE. 40 games x 20 years, robust spread of pre-cession cohort development,
+// against a flag-off arm reading 7.51 / 6.78 / 4.20% on WC / GL / Property:
+//
+//   e       WC/GL/Prop robust      worst cohort, WC/GL/Prop      x flag-off
+//   0.25     12.14 / 13.59 / 9.43   180.81 / 89.14 / 205.68%     1.62/2.00/2.25
+//   0.50      8.37 / 10.10 / 7.95    74.30 / 63.29 /  87.74%     1.11/1.49/1.89
+//   1.00      5.65 /  7.17 / 6.77    78.99 / 66.75 /  65.57%     0.75/1.06/1.61
+//
+// NOT 1.0. At that exponent the law makes WC develop LESS than the cohort path
+// it supersedes — 0.75x. That is a qualitative defect rather than a magnitude
+// preference, and 0.50 puts all three lines above 1.0.
+//
+// NOT 0.25, even though it wins the thick bands. The tail restarts: 181% on WC
+// and 206% on Property against 63-88% at 0.50. The whole reason e = 0 was
+// retired was the tail, and buying shape back at the price of reopening it is
+// the trade that ruling already refused.
+//
+// NOT 0.35 — AND IT IS RECORDED HERE AS THE CANDIDATE TO REVISIT. It is the
+// SLOPE-OPTIMAL choice: the model's realised log-log slope at a nominal 0.35 is
+// h^0.477, against the source's above-15% regime of h^0.48. (Realised slope runs
+// ABOVE nominal e at every exponent, because m rises as claims develop and
+// headroom falls.) It was not taken because it is law-level only — it has no
+// engine measurement and no ledger run behind it — while 0.50 has both, already
+// holds the tail, and already fixes the WC reversal. The gain is one regime's
+// slope against a measured value. Revisit 0.35 if a low-headroom band ever
+// arrives with a serious sample, or if the level question below is settled.
+//
+// ===========================================================================
+// ⚠ OPEN, AND LARGER THAN THE EXPONENT: THE BAND LEVELS ARE ~7x APART.
+//
+// The model's |move|/incurred tops out at 0.10-0.11 per band where the source
+// reads 0.45-0.79. That gap is a near-constant factor across bands and it is
+// present AT EVERY EXPONENT, because the level is set by phi and phi is pinned
+// by the terminal-severity anchor. No exponent addresses it. It cancels under
+// normalisation, which is why the shape comparison above is the one that carries
+// information.
+//
+// ⚠ IT IS THE 84-VERSUS-9.8 GAP AGAIN, SEEN PER-CLAIM RATHER THAN PER-COHORT.
+// That item is recorded as CLOSED at CLAIM_MOVEMENT_BY_AGE_TARGET, on
+// survivorship the model cannot have, a denominator worth x0.756, and a
+// numerator dominated by a placeholder phenomenon the model does not model. Those
+// compound to roughly 2x. They do not compound to 7x. So one of two things is
+// true and this file does not yet know which:
+//
+//   EITHER the closure was too generous — one or more of those three factors is
+//     doing less work than it was credited with, and the residual is real;
+//   OR the remaining factor is the STEP-AND-BASIS question: the source ratio's
+//     step length and its denominator are not established to be the model's
+//     per-model-age step on carried incurred, and a mismatch there would show up
+//     as exactly this — a constant multiple, invariant to the exponent.
+//
+// ⚠ NOBODY SHOULD TUNE AGAINST THE BAND LEVELS UNTIL THAT IS SETTLED. Pinning
+// the source ratio's step length and denominator basis is the next measurement,
+// and it is a measurement rather than a fit.
+//
+// AND KEEP THE TWO EFFECTS IN PROPORTION. The exponent move lifts cohort spread
+// against the retired constants from 0.23/0.36/0.45 to 0.33/0.51/0.53 — a
+// relative gain of 43/42/18%, but only 13/23/15% of the distance remaining to
+// 1.0x. So the exponent is the smaller half of the quietness question and this
+// level item is the larger one. It is not the law's to fix until the two ratios
+// are known to be the same quantity.
+export const CLAIM_REVISION_HEADROOM_EXPONENT = 0.50;
 
 // SIZE TREND — CONTINUOUS, AND THE CONTINUITY IS THE POINT.
 //
@@ -2094,11 +2252,20 @@ export const CLAIM_REVISION_MAGNITUDE_NUMERATOR = 2.00;
 // Property its own slope is a re-fit, and adding a size-conditional frequency
 // is a new mechanism. Recorded here so the next reader does not re-derive it.
 //
-// ⚠ THE s TAIL THIS CONSTANT FED IS GONE WITH THE 1/HEADROOM. The size trend is
-// still what makes s vary between claims, but s no longer grows without bound as
-// a cohort pays down: it was reaching 21 on GL by age 8, with 15.6% of tracked
-// value sitting at s >= 10 where E|f-1|/s had collapsed to 0.133. See
-// CLAIM_REVISION_MAGNITUDE_NUMERATOR's headroom note for the ruling.
+// ⚠ THE s TAIL THIS CONSTANT FED IS SHUT, AND IT IS THE EXPONENT THAT SHUT IT.
+// The size trend is still what makes s vary between claims. Under s = phi.m/h,
+// at the median tracked occurrence on the payout pattern's headroom, s reached
+// 22.75 on GL by age 8 and 3.80 on Property by age 4, with 15.6% of tracked
+// value sitting at s >= 10 where E|f-1|/s had collapsed to 0.133. At the shipped
+// exponent the same table reads 1.84 and 1.01. The engine's worst cohort is
+// 63-88% of register against 2950%.
+//
+// ⚠ THIS IS A TAIL HELD, NOT A DIVISOR REMOVED, AND THE REASON MATTERS. h^-0.5
+// still diverges, and the engine divides by the cohort's REALISED balance rather
+// than by the pattern, which goes lower still. What killed the tail is that the
+// delta no longer cancels the divisor: movement goes as sqrt(h), so a large s
+// arrives exactly where the balance it multiplies is vanishing. Re-measure if
+// the exponent ever moves down — at e = 0 the cancellation is exact again.
 //
 // ⚠ NOTHING TESTS THIS WHERE IT DOES ITS WORK, and that gap is real and stays
 // open. composition-table-check validates the AGE curve on a count basis, and
@@ -2316,15 +2483,19 @@ export const CLAIM_SETTLEMENT_FACTOR = {
 // ANCHOR SOLVE, AND A NOTE THAT STOOD HERE COMPARED THE TWO AS IF IT HAD NOT.
 //
 // In claimRevision.ts, phi is a STRAIGHT MULTIPLIER on the magnitude:
-//     s = phi x magnitude / headroom,   factor = exp(sign.s.|Z| - s^2/2)
+//     s = phi x magnitude x headroom^-0.5,  factor = exp(sign.s.|Z| - s^2/2)
 // so `s` is the log-SD of the mean-one factor and phi is dimensionless. The
 // addendum's phi is e^(s^2) — an SD-to-median ratio, bounded below by 1 by
 // construction. THE TWO NUMBERS ARE NOT COMPARABLE.
 //
 // Converting at GL age 1 (count-weighted magnitude 0.934, headroom 0.904):
-//     phi_here 0.63  ->  s = 0.651  ->  e^(s^2) = 1.53 in the addendum's units
-//     addendum 1.9   ->  s = 0.801
-//     addendum 4.2   ->  s = 1.198
+//     phi_here 0.6699 ->  s = 0.658 ->  e^(s^2) = 1.54 in the addendum's units
+//     addendum 1.9    ->  s = 0.801
+//     addendum 4.2    ->  s = 1.198
+// The conversion has barely moved across all three headroom exponents (it read
+// 1.53 under both predecessors) — at GL age 1 headroom is 0.904, so any power of
+// it is near 1 and the exponent has almost no leverage this early. It bites late
+// in a runoff, not here.
 //
 // ⚠ SO THE EARLIER NOTE'S "ABOUT 3x TOO BIG" WAS A UNITS ERROR OF MINE, and it
 // is corrected here rather than left to mislead the next investigation. On a
@@ -2349,12 +2520,18 @@ export const CLAIM_SETTLEMENT_FACTOR = {
 // tracks the drawn log-SD — a wider draw leaves less residual — and the value
 // below is taken from the configuration that matches a real game's year range.
 //
-// ⚠ RE-SOLVED WHEN THE 1/HEADROOM CAME OUT OF s. It was 0.63 against the same
-// anchor while s = phi.m/h; with s = phi.m the walk is quieter, so phi rises to
-// compensate. It rises only 13%, and the reason is the variance budget above:
-// phi is solved against a small residual, so a large change in the walk moves
-// the terminal log-SD very little. At the new form 0.63 would still have read
-// 2.2777 against the 2.29 anchor.
+// ⚠ RE-SOLVED TWICE AS THE HEADROOM SCALING CHANGED, AND BARELY MOVING IS THE
+// POINT. It was 0.63 while s = phi.m/h, 0.7123 at s = phi.m, and 0.6699 at the
+// shipped s = phi.m/sqrt(h). The whole range over which the exponent has been
+// argued moves phi by 4% — see the table at CLAIM_REVISION_HEADROOM_EXPONENT,
+// where every exponent from 0.00 to 1.25 lands the anchor at 2.2900 exactly.
+// The reason is the variance budget above: phi is solved against a small
+// residual, so a large change in the walk moves the terminal log-SD very little.
+//
+// ⚠ WHICH MEANS THE ANCHOR CANNOT SEE THE EXPONENT, and terminal-severity-check
+// going green is not evidence that the headroom scaling is right. Whoever
+// re-solves phi next should read that note before concluding anything from this
+// one.
 //
 // ⚠ AND THE LAW SATURATES, SO phi IS NOT IDENTIFIABLE ABOVE ABOUT 3 — IN THE
 // UNITS OF THIS FILE, i.e. phi as a multiplier. Re-measured at the new form:
@@ -2367,7 +2544,7 @@ export const CLAIM_SETTLEMENT_FACTOR = {
 // could therefore never have been applied here at face value even if the fit had
 // spent nothing — which strengthens the double-count argument rather than
 // replacing it.
-export const CLAIM_REVISION_PHI = 0.7123;
+export const CLAIM_REVISION_PHI = 0.6699;
 
 // THE ANCHOR — EXTERNAL, MEASURED AND FALSIFIABLE, AND IT IS GL'S.
 //
@@ -2452,6 +2629,26 @@ export const CLAIM_SETTLED_LOG_SD_ANCHOR = 2.29;
 // 61%, and with (1)'s drift removed the dispersion the model must supply is
 // about 41% of the ceiling at age 1. The reserve basis has room. It only looked
 // incapable because it was being compared against an unrestated statistic.
+//
+// ============================================================================
+// ⚠ AND THE CLOSURE HAS SINCE BEEN QUESTIONED FROM A SECOND DIRECTION. READ THIS
+// BEFORE CITING THE THREE REASONS ABOVE AS SETTLED.
+//
+// The same gap reappears PER CLAIM rather than per cohort: banded by headroom,
+// the model's |move|/incurred tops out at 0.10-0.11 where the source reads
+// 0.45-0.79, a near-constant ~7x at every headroom exponent. The three reasons
+// above compound to roughly 2x, not 7x. So either one of them is doing less work
+// than it was credited with, or there is a fourth factor — the step-and-basis
+// question — and this file does not yet know which. The full statement of it,
+// with both possibilities named, is the open item at
+// CLAIM_REVISION_HEADROOM_EXPONENT.
+//
+// WHAT THAT DOES AND DOES NOT DO TO THIS NOTE. It does not restore this series
+// as a target: survivorship is still structural and the model still has no
+// placeholder stage, so no phi and no re-fit make the model reproduce it. What
+// it does is remove the right to treat the SIZE of the residual as accounted
+// for. "Not a target" and "fully explained" are different claims, and only the
+// first is established.
 export const CLAIM_MOVEMENT_BY_AGE_TARGET: readonly number[] = [1.10, 0.65, 0.42, 0.17, 0.06];
 
 // ⚠ RETRACTED AT THIS COMMIT — THIS IS THE MODEL'S OWN READING, NOT SOURCE DATA.
@@ -2502,24 +2699,38 @@ export const CLAIM_OPEN_SHARE_MODEL_RECORDED: readonly number[] = [0.901, 0.794,
 // register's size mix and the closure curve, and there is no constant to set.
 // The emergent figures under a GL-derived phi are a reading, not a target.
 //
-// ⚠ AND THE READING HAS MOVED A LONG WAY SINCE, TWICE. It was WC 35.1% / GL
-// 20.4% / Property 14.8% when the law walked claims on the pattern's headroom.
-// Measured on the engine at 40 games x 20 years, robust spread of pre-cession
-// cohort development, the flag-on arm now reads 5.65 / 7.17 / 6.77% against a
-// flag-off 7.51 / 6.78 / 4.20% — 0.75x / 1.06x / 1.61x of the path it replaces,
-// and 0.23 / 0.36 / 0.45 of the retired constants.
+// ⚠ AND THE READING HAS MOVED A LONG WAY SINCE, THREE TIMES, ALL OF IT DRIVEN BY
+// THE HEADROOM EXPONENT. Measured on the engine at 40 games x 20 years, robust
+// spread of pre-cession cohort development, WC / GL / Property:
 //
-// THE DROP IS THE 1/HEADROOM COMING OUT OF s, and it took the tail with it: WC's
-// sample SD fell from 169% to 7.79% and its worst cohort from 2950% to 79% of
-// register. That is the estimability problem closing — the martingale's
-// persistence SE tightened 3.7x on the same sample — and it is also the law
-// producing materially LESS cohort development than the cohort lognormal on WC.
-// Both are consequences of the same ruling and neither is a target being missed,
-// because there is no longer a target. Recorded so the next reader sees the size
+//   s = phi.m/h        35.1 / 20.4 / 14.8%   worst cohort 2950%, sample SD 169%
+//   s = phi.m           5.65 / 7.17 / 6.77%  worst cohort 79%,   sample SD 7.79%
+//   s = phi.m/sqrt(h)   8.37 / 10.10 / 7.95% worst cohort 88%,   sample SD 10.83%
+//
+// against a flag-off arm of 7.51 / 6.78 / 4.20%. The shipped middle row is
+// 1.11x / 1.49x / 1.89x of the path it replaces and 0.33 / 0.51 / 0.53 of the
+// retired constants.
+//
+// TWO THINGS THE MIDDLE ROW SHOWS THAT THE OTHERS DO NOT. The tail stays shut —
+// the estimability problem that the 1/h form created is closed, and the
+// martingale's persistence SE stays tight. And the law develops MORE than the
+// cohort lognormal on every line, which s = phi.m did not: at that exponent WC
+// read 0.75x, i.e. the replacement was quieter than the thing it replaced. That
+// reversal is what the exponent move fixed, and it was a qualitative defect
+// rather than a magnitude preference. Recorded so the next reader sees the size
 // of the move rather than rediscovering it.
 //
-// ⚠ AND PROPERTY LANDING AT 14.8% AGAINST ITS OLD 0.15 IS A COINCIDENCE. Keep
-// this line. The old number was chosen for display content on a short-tail
+// ⚠ AND ~0.5x OF THE RETIRED CONSTANTS IS STILL NOT 1.0x. That is not a target
+// being missed, because there is no longer a target — but the remaining gap has
+// a named suspect and it is NOT the exponent. See the open item at
+// CLAIM_REVISION_HEADROOM_EXPONENT: the model's per-band movement level sits ~7x
+// below the source's at every exponent, and the exponent cannot move it.
+//
+// ⚠ AND PROPERTY LANDING AT 14.8% AGAINST ITS OLD 0.15 WAS A COINCIDENCE — the
+// FIRST row of the table above, not the shipped one, which reads 7.95%. Keep
+// this line anyway: the warning is about how to read agreement, and it is worth
+// more now that the number no longer agrees. The old constant was chosen for
+// display content on a short-tail
 // line; the new one is what a GL-derived phi happens to produce through
 // Property's own size mix and its 2-4 year horizon. Reading the near-agreement
 // as corroboration would be reading a coincidence as a validation — and WC's
@@ -2546,9 +2757,21 @@ export const CLAIM_OPEN_SHARE_MODEL_RECORDED: readonly number[] = [0.901, 0.794,
 // dominated by a placeholder phenomenon the model does not model by design.
 // Anyone reopening it should read that note before measuring anything.
 //
+// ⚠ AND ONE ITEM HAS SINCE REOPENED IN A NARROW SENSE — THE LEVEL, NOT THE
+// TARGET. The per-band movement level sits ~7x below the source's at every
+// headroom exponent, and the three reasons above compound to about 2x. The
+// target stays closed; the SIZE of the residual is not accounted for. Full
+// statement, with both candidate explanations, at
+// CLAIM_REVISION_HEADROOM_EXPONENT.
+//
 // WHAT HOLDS, AND THESE ARE WHAT FEED THE GAME:
 //   terminal severity              2.29, the external anchor, phi solved to it
-//   emergent cohort SD             0.81 / 1.12 / 0.93 of the retired constants
+//                                  — but the anchor cannot see the headroom
+//                                  exponent, so it is not evidence for that
+//   emergent cohort SD             0.33 / 0.51 / 0.53 of the retired constants,
+//                                  1.11 / 1.49 / 1.89x of the path it replaces
+//   headroom exponent              0.50, chosen on GL band shape and the
+//                                  engine's tail, recorded as a regime choice
 //   martingale                     passes, persistence and settlement
 //                                  decomposed separately
 //   pre-game acceptance            unmoved on all three lines, no fallbacks
@@ -2567,11 +2790,13 @@ export const CLAIM_OPEN_SHARE_MODEL_RECORDED: readonly number[] = [0.901, 0.794,
 // BOTH arms and reads 0 violations across 81,312 flag-on cohort-valuations at 6x
 // its shipped sample. Its EXPECTED_RED entry is gone.
 //
-// ⚠ AND h IS THE SAME IN THE FACTOR AND IN THE DELTA, WHICH IS WHAT KEPT THE
-// SCALE. s = phi.m/h and d = v.h.(f-1), so to first order the h cancels and a
-// claim moves by the same dollars it did — the fix corrects WHICH reserve the
-// movement is a share of, not how much a claim moves. Splitting the two would
-// have shrunk every GL movement by half.
+// ⚠ AND h IS THE SAME IN THE FACTOR AND IN THE DELTA. s = phi.m.h^-0.5 and
+// d = v.h.(f-1), so to first order a claim's movement goes as sqrt(h) — half the
+// h cancels and half survives, and the surviving half is the ruling at
+// CLAIM_REVISION_HEADROOM_EXPONENT. The fix corrects WHICH reserve the movement
+// is a share of; the exponent decides how much a claim moves. Feeding the two
+// different h's — the pattern's to one and the cohort's to the other — is what
+// caused the crossing in the first place and must not come back.
 //
 // THE REJECTED ALTERNATIVE, RECORDED: h = netUnpaid / netUltimate tracks the
 // pattern headroom almost exactly on healthy cohorts (median 0.945 / 0.976 /
@@ -2764,15 +2989,24 @@ export const PER_CLAIM_REVISION = { enabled: false, settlement: true };
 //   Monte Carlo still climbing toward the closed form at 48M trials. "Does the
 //   law deliver IBNER_TOTAL_SD" cannot be answered by measuring an SD.
 //
-//   s IS UNBOUNDED, AND THAT IS THE PROXIMATE CAUSE. s = phi x magnitude /
-//   headroom, and nothing bounds the division: as a cohort pays down, headroom
-//   goes to zero. At the median tracked occurrence GL reaches s = 21 by age 8
-//   and Property s = 3.6 by age 4. The magnitude was fitted on the INCURRED and
+//   s IS UNBOUNDED, AND THAT WAS THE PROXIMATE CAUSE. Under s = phi x magnitude
+//   / headroom nothing bounded the division: as a cohort pays down, headroom
+//   goes to zero. At the median tracked occurrence GL reached s = 22.75 by age 8
+//   and Property s = 3.80 by age 4. The magnitude was fitted on the INCURRED and
 //   the division is what puts it on the reserve, so nothing fitted ever chose
 //   those values. At large s the factor is still exactly mean-one but delivers
 //   it as a near-certain collapse plus a vanishing chance of an enormous
 //   multiple. WC's tail is the other shape: s stays near 1 and twelve steps
 //   compound it.
+//   ⚠ s IS STILL UNBOUNDED AND THE TAIL IS STILL SHUT — BOTH, AND THIS PARAGRAPH
+//   STAYS AS WRITTEN BECAUSE ITS DIAGNOSIS WAS ONLY HALF RIGHT. h^-0.5 diverges
+//   too, and the same table now reads GL 1.84 and Property 1.01 only because it
+//   uses the PATTERN's headroom; the engine uses the realised balance and goes
+//   lower. What actually removed the tail is that the delta stopped cancelling
+//   the divisor — movement goes as sqrt(h), so a large s now arrives where the
+//   balance it multiplies is vanishing. So "s is unbounded" was never the
+//   mechanism on its own, and clamping s would not have been the fix. See
+//   CLAIM_REVISION_HEADROOM_EXPONENT.
 //
 // THIS DOES NOT CONTRADICT THE TERMINAL-SEVERITY ANCHOR. That anchor constrains
 // the log-SD of SETTLED severity PER CLAIM; this is the COHORT aggregate. The
@@ -2782,13 +3016,23 @@ export const PER_CLAIM_REVISION = { enabled: false, settlement: true };
 // diversification. Matching the one and widening the other are consistent —
 // which is exactly why this quantity went unbudgeted until it was measured.
 //
-// WHAT IS BUILT AND GREEN: terminal-severity-check (FAST, 29s) derives phi
+// WHAT IS BUILT AND GREEN: terminal-severity-check (FAST, 30s) derives phi
 // against the anchor and carries the phi = 0 control arm;
-// revision-persistence-check (FAST, 8s) asserts rho out of reviseDevelopingSet
-// and carries the rho = 0 control arm; martingale-equivalence-check (SLOW,
-// 348s) decomposes the persistence and settlement terms with separate intervals
-// and carries the fitted-level control arm, which reads 0.842 against a 1%
-// tolerance.
+// revision-direction-check (FAST, 5s) asserts the probe arm out of
+// reviseDevelopingSet; martingale-equivalence-check (SLOW) decomposes the
+// persistence and settlement terms with separate intervals and carries the
+// fitted-level control arm, which reads 0.837 against a 1% tolerance. At the
+// shipped exponent it measures persistence 1.00034 +/- 0.00022, settlement
+// 1.00099 +/- 0.00174, total 1.00130 +/- 0.00172 over 49.4M claim-walks, with
+// the engine arm agreeing on h to 1.7e-15 within cohort.
+//
+// ⚠ AND ONE THING THAT WAS NOT GREEN AND NOTHING CAUGHT: revision-total-sd-report
+// kept its own inlined copy of s with the headroom division hardcoded, so for a
+// whole commit it printed the RETIRED form's s table under a heading describing
+// the shipped one, with a paragraph of prose reasoning from those numbers. It is
+// now routed through revisionSigma, which exists for that reason. A report that
+// recomputes the law cannot disagree with the law, so no gate could have found
+// this — only reading it could.
 // ===========================================================================
 
 

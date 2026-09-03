@@ -35,6 +35,7 @@
 import {
   CLAIM_REVISION_COMBINE,
   CLAIM_REVISION_FREQUENCY,
+  CLAIM_REVISION_HEADROOM_EXPONENT,
   CLAIM_REVISION_MAGNITUDE_NUMERATOR,
   CLAIM_REVISION_PHI,
   CLAIM_REVISION_SIZE_TREND,
@@ -129,6 +130,41 @@ export function revisionMagnitudeOnIncurred(modelAge: number, value: number): nu
   return CLAIM_REVISION_COMBINE === 'product' ? byAge * bySize : Math.min(byAge, bySize);
 }
 
+/**
+ * s — THE LOG-SD OF ONE STEP'S MEAN-ONE FACTOR.
+ *
+ *   s = phi x m(age, value) x headroom^(e-1)
+ *
+ * ⚠ EXPORTED SO THAT NOTHING REIMPLEMENTS IT, AND THAT IS NOT HOUSEKEEPING.
+ * revision-total-sd-report kept its own copy of this line with the headroom
+ * division hardcoded. When the exponent moved out of the law the copy did not
+ * move with it, and for a whole commit that report printed the RETIRED form's s
+ * table — s = 22.75 at GL age 8 — under a heading describing the shipped one,
+ * with a paragraph of prose reasoning from the wrong numbers. Nothing caught it,
+ * because a report that recomputes the law cannot disagree with itself.
+ *
+ * The lesson is claimClosureUnit's, and terminal-severity-check states it in its
+ * own imports: a diagnostic that re-derives the mechanism is measuring its own
+ * copy. There is now one implementation and every reader of s goes through it.
+ */
+export function revisionSigma(
+  modelAge: number,
+  value: number,
+  headroom: number,
+  phi: number = CLAIM_REVISION_PHI,
+): number {
+  // ⚠ THE CLAMP IS NUMERICAL AND NOT A MODELLING FLOOR. h = 0 would make a
+  // negative power infinite and s NaN; nothing else about it is load-bearing.
+  // What actually keeps h off this floor is the caller: reviseDevelopingSet
+  // returns early unless the cohort balance is positive, and reviseOnce's paid
+  // share comes from a payout pattern capped at 0.999. And the clamp cannot
+  // reach the ledger either — however large s becomes, d = v.h.(f-1) >= -v.h
+  // holds for any f >= 0, so the bound in reviseDevelopingSet is untouched.
+  const h = Math.max(1e-9, headroom);
+  return phi * revisionMagnitudeOnIncurred(modelAge, value)
+    * Math.pow(h, CLAIM_REVISION_HEADROOM_EXPONENT - 1);
+}
+
 /** One claim's state as the law walks it forward.
  *
  *  ⚠ `lastSign` IS GONE WITH THE SIGN CHAIN — see CLAIM_REVISION_PERSISTENCE_RHO.
@@ -165,7 +201,11 @@ export function reviseOnce(
   state: RevisionState,
   phi: number = CLAIM_REVISION_PHI,
 ): RevisionState {
-  const factor = revisionFactor(gameId, claimId, modelAge, state.value, phi);
+  const factor = revisionFactor(
+    gameId, claimId, modelAge,
+    { value: state.value, headroom: 1 - state.paidShare },
+    phi,
+  );
   if (factor === 1) return state;
 
   // The RESERVE moves; the paid stays put. So the carried value moves by the
@@ -179,23 +219,63 @@ export function reviseOnce(
   };
 }
 
+/** What one step's factor needs to know about the claim it is drawn for.
+ *
+ *  ⚠ AN OBJECT AND NOT TWO BARE NUMBERS, FOR CohortStep's REASON. `value` and
+ *  `headroom` are both plain numbers, and this function's previous signature
+ *  ended `(..., value, phi?)`. Adding the headroom as a fifth positional number
+ *  would have let every stale caller — including the three gates that walk the
+ *  law directly — compile while passing phi as the headroom and defaulting phi.
+ *  That is the exact failure recorded at CohortStep, where a mis-ordered call
+ *  ran and reported 0% upward movements against 50%. A mis-order must be a type
+ *  error, not a red gate. */
+export interface RevisionStep {
+  /** The claim's carried value now. What the SIZE TREND is evaluated on. */
+  value: number;
+  /** The share of the claim still unpaid, h in the formulae below. */
+  headroom: number;
+}
+
 /**
  * ONE STEP'S FACTOR, WITHOUT DECIDING WHAT BALANCE IT APPLIES TO.
  *
- * ⚠ s DOES NOT SCALE AS 1/HEADROOM ANY MORE, AND THAT IS A DATA RULING RATHER
- * THAN A SIMPLIFICATION. The division existed to make the DOLLAR movement
- * invariant to headroom: with s = phi.m/h and d = v.h.(f-1) the h cancelled, so
- * a claim moved by the same dollars however much of it had been paid. The pool's
- * own GL experience says that is not what claims do — see
- * CLAIM_REVISION_MAGNITUDE_NUMERATOR's headroom note. Movement scales WITH
- * headroom, so the cancellation was removing a real effect.
+ * ⚠ s SCALES AS h^(e-1) AND THE RULING IS THE EXPONENT, NOT THE PRESENCE OF h.
+ * Two shipped forms preceded this one and both are corners of the same family,
+ * s = phi.m.h^(e-1) applied through d = v.h.(f-1):
  *
- * The factor now applies to the reserve without being inflated for it, and
- * d = v.h.(f-1) carries the proportionality the data shows. Three symptoms go
- * with the division: s stops growing without bound as a cohort pays down,
- * E|f-1|/s stops collapsing (it had fallen to 0.133 for the 15.6% of tracked
- * value sitting at s >= 10), and the tail that made cohort means unestimable
- * goes with it.
+ *   e = 0     s = phi.m / h        the h cancels out of the delta entirely, so
+ *                                  a claim moves by the same DOLLARS however
+ *                                  much of it has been paid
+ *   e = 1     s = phi.m            no h in the factor, so the dollar movement is
+ *                                  strictly proportional to headroom
+ *   e = 0.50  s = phi.m / sqrt(h)  HERE. Half the cancellation survives, and
+ *                                  |move|/incurred goes as sqrt(h)
+ *
+ * e = 0 was retired because the pool's own GL experience says movement scales
+ * WITH headroom rather than being invariant to it. e = 1 replaced it and
+ * OVERSHOT: it reproduces the two thinnest bands of that experience almost
+ * exactly and is furthest wrong on the three that carry the overwhelming
+ * majority of its claims. The
+ * sweep that chose 0.50, what it measured, and the reasons this is a CHOICE OF
+ * REGIME rather than a fitted exponent are all at
+ * CLAIM_REVISION_HEADROOM_EXPONENT. Read that before moving this.
+ *
+ * ⚠ WHAT THE 1/h REMOVAL BOUGHT IS KEPT AT 0.50, MEASURED. On the payout
+ * pattern's headroom at the median tracked occurrence, s peaked at GL 22.75 by
+ * age 8 and Property 3.80 by age 4 under e = 0; at this exponent it reads 1.84
+ * and 1.01 (revision-total-sd-report). E|f-1|/s does not collapse, and the tail
+ * stays shut — worst cohort 63-88% of register on the engine against 66-79% at
+ * e = 1 and 2950% at e = 0.
+ *
+ * ⚠ BUT s IS NOT BOUNDED, AND THE TAIL BEING SHUT IS NOT THE SAME CLAIM. h^-0.5
+ * still diverges as a cohort pays down, and the engine feeds it the cohort's
+ * REALISED balance, which goes far lower than any payout pattern. What removed
+ * the tail is not a smaller s — it is that the CANCELLATION is gone. At e = 0
+ * the delta's h cancelled the factor's 1/h exactly, so an enormous s on a
+ * nearly-exhausted cohort still moved full dollars. At e = 0.5 the delta goes as
+ * sqrt(h): s runs away precisely where the balance it multiplies is vanishing,
+ * and the product does not. Anyone tempted to clamp s should read that twice —
+ * the magnitude was never the mechanism.
  *
  * ⚠ EXTRACTED FROM reviseOnce SO THERE IS STILL ONE IMPLEMENTATION OF THE LAW.
  * The engine has to scale the factor onto the COHORT's own remaining balance
@@ -210,7 +290,7 @@ export function revisionFactor(
   gameId: string,
   claimId: string,
   modelAge: number,
-  value: number,
+  step: RevisionStep,
   phi: number = CLAIM_REVISION_PHI,
 ): number {
   // FREQUENCY IS I.I.D. — see the memoryless note at CLAIM_REVISION_FREQUENCY.
@@ -218,8 +298,7 @@ export function revisionFactor(
     return 1;
   }
 
-  // ⚠ NO HEADROOM HERE. THE DIVISION IS GONE — see this function's header.
-  const s = phi * revisionMagnitudeOnIncurred(modelAge, value);
+  const s = revisionSigma(modelAge, step.value, step.headroom, phi);
 
   // SIGN — A FAIR COIN, AND NOTHING CARRIES BETWEEN AGES. See
   // CLAIM_REVISION_PERSISTENCE_RHO for why the two-state chain that used to be
@@ -367,20 +446,23 @@ export interface RevisableClaim {
  * measured, the register exceeds netUltimate on 89% of cohort-valuations
  * (median 1.31x, p95 2.86x) because the register is GROSS and netUltimate is NET.
  *
- * ⚠ THE SAME h GOES INTO THE FACTOR, AND THAT IS WHAT KEEPS THE DOLLAR SCALE.
- * `revisionStep` divides the magnitude by the headroom to put it on the reserve,
- * so s = phi.m/h, and the delta multiplies by h again: to first order
- * d_i ~ v_i . h . s . Z = v_i . phi . m . Z and the h cancels. Scaling by the
- * cohort's realised balance therefore corrects WHICH reserve the movement is a
- * share of without rescaling how much a claim moves. Passing the pattern's
- * headroom to one and the cohort's to the other would break the cancellation and
- * silently shrink every movement.
+ * ⚠ THE SAME h GOES INTO THE FACTOR AND INTO THE DELTA, AND IT MUST BE THE SAME
+ * ONE. revisionFactor raises it to e-1 = -0.50 and the delta multiplies by h
+ * again, so to first order
+ *     d_i ~ v_i . h . s . Z = v_i . phi . m . sqrt(h) . Z
+ * — half the h cancels and half survives. That surviving half IS the ruling (see
+ * CLAIM_REVISION_HEADROOM_EXPONENT); it is not a residual to tidy away. Passing
+ * the PATTERN's headroom to the factor and the COHORT's to the delta would mix
+ * two different h's into one product and silently rescale every movement, which
+ * is a live hazard rather than a hypothetical: that mismatch is exactly what
+ * caused the ledger crossing this function's bound now closes.
  *
  * ⚠ WHAT IT COSTS, STATED: h is smaller than the pattern headroom on an
- * exhausted cohort, so s is correspondingly larger there, and s is already
- * unbounded as headroom falls (see CLAIM_REVISION_SIZE_TREND's note and
- * revision-total-sd-report). This fix makes the reserve arithmetic exact and
- * makes that tail worse. It is a recorded open item, not a surprise.
+ * exhausted cohort, so s is larger there — by 1/sqrt(h) rather than the 1/h that
+ * made s reach 22.75 by GL age 8, but larger. This fix makes the reserve arithmetic
+ * exact and makes that tail worse. It is a recorded open item, not a surprise,
+ * and it is bounded in practice: the engine's worst cohort at this exponent is
+ * 63-88% of register.
  *
  * `cohort.untrackedFactor` is the cohort lognormal, applied to the mass that has
  * no claim ids to revise. It is inside the same h and the same weights, so it is
@@ -420,17 +502,17 @@ export function reviseDevelopingSet(
   if (!(balance > 0) || !(register > 0)) {
     return { deltas: tracked.map(() => 0), untrackedDelta: 0, applied: 0, unallocated: 0 };
   }
-  // ⚠ h IS NOW ONLY THE BALANCE THE MOVEMENT IS A SHARE OF. It used to be fed
-  // back into the factor as well, as 1 - paidShare, so that s = phi.m/h and the
-  // h cancelled out of the dollar movement. The division is gone (see
-  // revisionFactor), so h appears exactly once and the movement is proportional
-  // to it — which is what the pool's headroom banding says claims do.
+  // ⚠ ONE h, DERIVED ONCE, USED IN BOTH PLACES. It reaches the factor as
+  // h^-0.50 and the delta as h^1, so the cohort's realised headroom sets both
+  // how large the draw is and what balance it is a share of. Deriving it from
+  // the balance rather than from the payout pattern is the ledger fix; using
+  // the same value in both places is what keeps the two consistent.
   const h = balance / register;
 
   const deltas: number[] = [];
   let applied = 0;
   for (const t of tracked) {
-    const factor = revisionFactor(gameId, t.claimId, modelAge, t.current, phi);
+    const factor = revisionFactor(gameId, t.claimId, modelAge, { value: t.current, headroom: h }, phi);
     const d = Math.max(0, t.current) * h * (factor - 1);
     deltas.push(d);
     applied += d;
