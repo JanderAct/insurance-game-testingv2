@@ -2019,6 +2019,35 @@ export const IBNER_UNWIND_DECAY: number = 0.5;
 // ===========================================================================
 // MAGNITUDE — 200% / (age + 1), IN MODEL TERMS, AND THE OFFSET IS NOT COSMETIC.
 //
+// ⚠ AND THE MAGNITUDE IS ON THE INCURRED, WITH NO 1/HEADROOM CORRECTION — A
+// DATA RULING. s used to be phi.m/headroom so that the DOLLAR movement was
+// invariant to how much of a claim had been paid. The pool's own GL experience,
+// banded by headroom, value-weighted within band, open claims, pre-game
+// excluded, says movement scales WITH headroom instead:
+//
+//   headroom      |move| / incurred      |move| / reserve
+//   h < 5%              0.015                  0.997
+//   5-15%               0.064                  0.801
+//   15-35%              0.451                  1.741
+//   35-65%              0.766                  1.512
+//   h > 65%             0.788                  0.854
+//
+// A claim under 5% headroom moves 1.5% of its incurred, not 79%. The reserve
+// column has no trend, which is the same statement: |move| is proportional to
+// the reserve, so |move|/incurred is proportional to h. Deleting the division
+// and keeping d = v.h.(f-1) is what reproduces that.
+//
+// ⚠ THE FITTED EXPONENT IS NOT ROBUST AND THE RULING DOES NOT REST ON IT. A
+// value-weighted power fit over all five bands gives h^0.94 to h^1.25 depending
+// on weighting, but DROPPING THE TWO BANDS WITH n < 50 collapses it to
+// h^0.33-0.46 — the exponent is carried almost entirely by the two thinnest
+// bands. What is robust is the 53x ratio between the top and bottom bands, and
+// the 15-35% band at n = 112: normalised to its own top band the pool reads
+// 0.57 there while the model USED TO read 0.88. Measured after the change the
+// model reads h^1.15 with a flat reserve column, against h^0.38 and a steeply
+// FALLING reserve column before. The direction is settled; the exponent is not,
+// and a re-fit should not be built on these five points.
+//
 // DATA AGE 1 IS A PLACEHOLDER STAGE AND IS EXCLUDED FROM THE FIT. First
 // estimates at that age are overwhelmingly round administrative numbers rather
 // than adjuster valuations, and they are revised by nearly their whole value on
@@ -2064,6 +2093,12 @@ export const CLAIM_REVISION_MAGNITUDE_NUMERATOR = 2.00;
 // cession rising furthest under the law, and it is a separate commit: giving
 // Property its own slope is a re-fit, and adding a size-conditional frequency
 // is a new mechanism. Recorded here so the next reader does not re-derive it.
+//
+// ⚠ THE s TAIL THIS CONSTANT FED IS GONE WITH THE 1/HEADROOM. The size trend is
+// still what makes s vary between claims, but s no longer grows without bound as
+// a cohort pays down: it was reaching 21 on GL by age 8, with 15.6% of tracked
+// value sitting at s >= 10 where E|f-1|/s had collapsed to 0.133. See
+// CLAIM_REVISION_MAGNITUDE_NUMERATOR's headroom note for the ruling.
 //
 // ⚠ NOTHING TESTS THIS WHERE IT DOES ITS WORK, and that gap is real and stays
 // open. composition-table-check validates the AGE curve on a count basis, and
@@ -2314,10 +2349,17 @@ export const CLAIM_SETTLEMENT_FACTOR = {
 // tracks the drawn log-SD — a wider draw leaves less residual — and the value
 // below is taken from the configuration that matches a real game's year range.
 //
+// ⚠ RE-SOLVED WHEN THE 1/HEADROOM CAME OUT OF s. It was 0.63 against the same
+// anchor while s = phi.m/h; with s = phi.m the walk is quieter, so phi rises to
+// compensate. It rises only 13%, and the reason is the variance budget above:
+// phi is solved against a small residual, so a large change in the walk moves
+// the terminal log-SD very little. At the new form 0.63 would still have read
+// 2.2777 against the 2.29 anchor.
+//
 // ⚠ AND THE LAW SATURATES, SO phi IS NOT IDENTIFIABLE ABOVE ABOUT 3 — IN THE
-// UNITS OF THIS FILE, i.e. phi as a multiplier. Measured
-// terminal log-SD against phi: 2.4540 at 1.4, 2.5431 at 1.9, 2.6028 at 2.5,
-// 2.6211 at 3.2, and 2.6017 at 4.2 — it turns DOWN. The mean-one factor
+// UNITS OF THIS FILE, i.e. phi as a multiplier. Re-measured at the new form:
+// terminal log-SD 2.4197 at 1.4, 2.5108 at 1.9, 2.5873 at 2.5, 2.6295 at 3.2,
+// 2.6331 at 4.2 — it flattens against a ceiling near 2.633. The mean-one factor
 // exp(s.sign.|Z| - s^2/2) has median exp(-s^2/2), so at large s the drift term
 // collapses carried values toward zero faster than the spread term widens them.
 // Two consequences worth stating: the model has a hard ceiling near 2.62 that no
@@ -2325,7 +2367,7 @@ export const CLAIM_SETTLEMENT_FACTOR = {
 // could therefore never have been applied here at face value even if the fit had
 // spent nothing — which strengthens the double-count argument rather than
 // replacing it.
-export const CLAIM_REVISION_PHI = 0.63;
+export const CLAIM_REVISION_PHI = 0.7123;
 
 // THE ANCHOR — EXTERNAL, MEASURED AND FALSIFIABLE, AND IT IS GL'S.
 //
@@ -2458,9 +2500,23 @@ export const CLAIM_OPEN_SHARE_MODEL_RECORDED: readonly number[] = [0.901, 0.794,
 // WHAT REPLACES THEM IS NOT A THIRD TARGET. Under Stage 1 the total SD of a
 // cohort's ultimate is EMERGENT — it falls out of the per-claim law, the
 // register's size mix and the closure curve, and there is no constant to set.
-// The emergent figures under a GL-derived phi are a reading, not a target:
+// The emergent figures under a GL-derived phi are a reading, not a target.
 //
-//   WC 35.1%   GL 20.4%   Property 14.8%     (against the retired 25/20/15)
+// ⚠ AND THE READING HAS MOVED A LONG WAY SINCE, TWICE. It was WC 35.1% / GL
+// 20.4% / Property 14.8% when the law walked claims on the pattern's headroom.
+// Measured on the engine at 40 games x 20 years, robust spread of pre-cession
+// cohort development, the flag-on arm now reads 5.65 / 7.17 / 6.77% against a
+// flag-off 7.51 / 6.78 / 4.20% — 0.75x / 1.06x / 1.61x of the path it replaces,
+// and 0.23 / 0.36 / 0.45 of the retired constants.
+//
+// THE DROP IS THE 1/HEADROOM COMING OUT OF s, and it took the tail with it: WC's
+// sample SD fell from 169% to 7.79% and its worst cohort from 2950% to 79% of
+// register. That is the estimability problem closing — the martingale's
+// persistence SE tightened 3.7x on the same sample — and it is also the law
+// producing materially LESS cohort development than the cohort lognormal on WC.
+// Both are consequences of the same ruling and neither is a target being missed,
+// because there is no longer a target. Recorded so the next reader sees the size
+// of the move rather than rediscovering it.
 //
 // ⚠ AND PROPERTY LANDING AT 14.8% AGAINST ITS OLD 0.15 IS A COINCIDENCE. Keep
 // this line. The old number was chosen for display content on a short-tail

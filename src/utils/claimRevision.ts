@@ -152,18 +152,11 @@ export interface RevisionState {
  * E[cosh(s|Z|)] = e^{s^2/2} exactly — so E[factor] = 1 with no truncation
  * anywhere and no floor to hit.
  *
- * ⚠ CONDITIONALLY IT IS NOT MEAN-ONE, AND THAT IS THE PERSISTENCE. Given the
- * previous sign, E[sign] = rho rather than 0, so a run compounds and E[ultimate]
- * drifts UP over a runoff. The settlement factor's derived mean is what pays
- * that back — the two must be measured together, which is why
- * martingale-equivalence-check decomposes them instead of reading the total.
- *
- * ⚠ `rho` IS A PARAMETER FOR THE SAME REASON `phi` IS: SO A CONTROL ARM CAN
- * REMOVE IT. It defaults to the constant and nothing in src/ ever passes it.
- * revision-persistence-check runs the whole call path at rho = 0 and asserts
- * the same-sign rate collapses to 1/2 — without that arm the 0.59 assertion
- * would pass on a chain that had been silently reduced to fair coin flips,
- * which is precisely the defect it exists to catch.
+ * ⚠ AND IT IS NOW UNCONDITIONALLY MEAN-ONE TOO, because the sign chain is gone.
+ * While rho existed the factor was conditionally biased given the previous sign,
+ * a runoff drifted up, and the settlement level was solved to pay that back. It
+ * is retired — see CLAIM_REVISION_PERSISTENCE_RHO — so there is nothing left for
+ * the settlement mean to cancel and it is solved to 1 instead.
  */
 export function reviseOnce(
   gameId: string,
@@ -172,7 +165,7 @@ export function reviseOnce(
   state: RevisionState,
   phi: number = CLAIM_REVISION_PHI,
 ): RevisionState {
-  const factor = revisionFactor(gameId, claimId, modelAge, state.value, state.paidShare, phi);
+  const factor = revisionFactor(gameId, claimId, modelAge, state.value, phi);
   if (factor === 1) return state;
 
   // The RESERVE moves; the paid stays put. So the carried value moves by the
@@ -189,6 +182,21 @@ export function reviseOnce(
 /**
  * ONE STEP'S FACTOR, WITHOUT DECIDING WHAT BALANCE IT APPLIES TO.
  *
+ * ⚠ s DOES NOT SCALE AS 1/HEADROOM ANY MORE, AND THAT IS A DATA RULING RATHER
+ * THAN A SIMPLIFICATION. The division existed to make the DOLLAR movement
+ * invariant to headroom: with s = phi.m/h and d = v.h.(f-1) the h cancelled, so
+ * a claim moved by the same dollars however much of it had been paid. The pool's
+ * own GL experience says that is not what claims do — see
+ * CLAIM_REVISION_MAGNITUDE_NUMERATOR's headroom note. Movement scales WITH
+ * headroom, so the cancellation was removing a real effect.
+ *
+ * The factor now applies to the reserve without being inflated for it, and
+ * d = v.h.(f-1) carries the proportionality the data shows. Three symptoms go
+ * with the division: s stops growing without bound as a cohort pays down,
+ * E|f-1|/s stops collapsing (it had fallen to 0.133 for the 15.6% of tracked
+ * value sitting at s >= 10), and the tail that made cohort means unestimable
+ * goes with it.
+ *
  * ⚠ EXTRACTED FROM reviseOnce SO THERE IS STILL ONE IMPLEMENTATION OF THE LAW.
  * The engine has to scale the factor onto the COHORT's own remaining balance
  * rather than onto the claim's pattern-implied reserve — see
@@ -203,7 +211,6 @@ export function revisionFactor(
   claimId: string,
   modelAge: number,
   value: number,
-  paidShare: number,
   phi: number = CLAIM_REVISION_PHI,
 ): number {
   // FREQUENCY IS I.I.D. — see the memoryless note at CLAIM_REVISION_FREQUENCY.
@@ -211,10 +218,8 @@ export function revisionFactor(
     return 1;
   }
 
-  const headroom = Math.max(1e-9, 1 - paidShare);
-  const onIncurred = phi * revisionMagnitudeOnIncurred(modelAge, value);
-  // THE BASIS CONVERSION, AND IT IS THE ONLY DIVISION IN THE LAW.
-  const s = onIncurred / headroom;
+  // ⚠ NO HEADROOM HERE. THE DIVISION IS GONE — see this function's header.
+  const s = phi * revisionMagnitudeOnIncurred(modelAge, value);
 
   // SIGN — A FAIR COIN, AND NOTHING CARRIES BETWEEN AGES. See
   // CLAIM_REVISION_PERSISTENCE_RHO for why the two-state chain that used to be
@@ -415,17 +420,17 @@ export function reviseDevelopingSet(
   if (!(balance > 0) || !(register > 0)) {
     return { deltas: tracked.map(() => 0), untrackedDelta: 0, applied: 0, unallocated: 0 };
   }
+  // ⚠ h IS NOW ONLY THE BALANCE THE MOVEMENT IS A SHARE OF. It used to be fed
+  // back into the factor as well, as 1 - paidShare, so that s = phi.m/h and the
+  // h cancelled out of the dollar movement. The division is gone (see
+  // revisionFactor), so h appears exactly once and the movement is proportional
+  // to it — which is what the pool's headroom banding says claims do.
   const h = balance / register;
-  // The share ALREADY PAID, as the law's headroom convention wants it. h may
-  // exceed 1 on a cohort whose register has fallen below its own reserve, and a
-  // negative paidShare is the honest reading of that: headroom is h either way,
-  // since revisionStep takes 1 - paidShare.
-  const paidShare = 1 - h;
 
   const deltas: number[] = [];
   let applied = 0;
   for (const t of tracked) {
-    const factor = revisionFactor(gameId, t.claimId, modelAge, t.current, paidShare, phi);
+    const factor = revisionFactor(gameId, t.claimId, modelAge, t.current, phi);
     const d = Math.max(0, t.current) * h * (factor - 1);
     deltas.push(d);
     applied += d;

@@ -42,13 +42,20 @@
 // ============================================================================
 // WHAT IS REPORTED, AND WHY IT IS NOT ASSERTED.
 //
-// 1. THE LEVEL AGAINST THE POOL'S OBSERVED RATE. GL reads 55.47% against
-//    CLAIM_MOVEMENT_DIRECTION_TARGET of 59%. That is 3.5 points, and at an SE of
-//    0.23 points it is fifteen standard errors — a real gap, not noise. NO BAND
-//    CONTAINS BOTH, and a band wide enough to would be seven times the
-//    estimator's noise and chosen to pass. So the gap is RECORDED rather than
-//    asserted. WC reads 57.15% and Property 67.40%; the target is a GL figure
-//    and those two are carried across, so they were never assertable anyway.
+// 1. THE LEVEL AGAINST THE POOL'S OBSERVED RATE. GL reads 51.86% against
+//    CLAIM_MOVEMENT_DIRECTION_TARGET of 59%. That is 7.1 points at an SE of 0.24,
+//    thirty standard errors — a real gap, not noise. NO BAND CONTAINS BOTH, and
+//    a band wide enough to would be chosen to pass. So the gap is RECORDED rather
+//    than asserted. WC reads 51.03% and Property 51.28%; the target is a GL
+//    figure and those two are carried across, so they were never assertable.
+//
+//    ⚠ THE GAP WIDENED WHEN THE 1/HEADROOM CAME OUT OF s, AND THAT IS EXPECTED
+//    RATHER THAN A REGRESSION. The model's same-sign rate was 55-67% because the
+//    -s^2/2 correction biased movements downward and a biased coin repeats
+//    itself; a smaller s is a fairer coin. Share-up went 31/36/25% to 42/40/41%
+//    and the same-sign rate fell with it. The model now produces almost none of
+//    the pool's 59% — which is the honest position, since it never had a
+//    mechanism for direction memory once rho was retired.
 //
 // 2. THE EXCESS OVER A BIASED COIN, AND MY FIRST CUT ASSERTED THIS AND WAS WRONG.
 //    For a single Bernoulli with a fixed p, P(same) = p^2 + (1-p)^2 exactly. I
@@ -58,13 +65,27 @@
 //    p^2 + (1-p)^2 is convex, so E[P(same)] exceeds the prediction at E[p] by
 //    Jensen for any spread in p.
 //
-//    ⚠ AND PART OF THE EXCESS IS REAL DEPENDENCE, WHICH IS THE INTERESTING PART.
-//    The size trend falls with claim size, so a claim that moves DOWN gets a
-//    larger magnitude, a larger s, and a more downward-biased next move. The
-//    model therefore produces direction persistence WITHOUT a sign chain, through
-//    the carried value feeding back into the magnitude. Property, whose s runs
-//    highest, shows it most. Reported here; it belongs with the s-unbounded item
-//    at CLAIM_REVISION_SIZE_TREND and is not chased in this file.
+//    ⚠ RETRACTED: I THEN ATTRIBUTED THE RESIDUAL TO A REAL FEEDBACK LOOP AND
+//    THAT WAS WRONG. 377e70a's header and its commit message said the model
+//    produces direction persistence without a sign chain, through the carried
+//    value feeding back into the magnitude, and put it at +4.55pp on Property.
+//    IT IS NOT +4.55pp AND IT IS MOSTLY NOT FEEDBACK. Measured two ways:
+//
+//      freezing the size trend on the DRAWN value, so the feedback channel is
+//        off and nothing else changes — Property 4.142 -> 3.903pp, GL
+//        0.754 -> 0.646pp. The channel is worth 0.24pp and 0.11pp.
+//      predicting PER PAIR with each step's own p = 1 - Phi(s/2) instead of the
+//        pooled p — the excess collapses to +0.371 / -0.139 / +0.525pp.
+//
+//    So roughly 3.8pp of Property's 4.3pp was Jensen on my own pooled estimator
+//    and about 0.24pp was the feedback. The diagnosis of the pooling problem was
+//    right in the same commit; the attribution of what was left was not tested
+//    before it was written down. Recorded the way b206cc6's arithmetic artefact
+//    is recorded, because a wrong finding in a commit message outlives the
+//    measurement that produced it.
+//
+//    ⚠ AND THE QUESTION IS NOW MOOT ANYWAY. With the 1/headroom out of s the
+//    excess reads -0.19 / -0.20 / -0.36pp — zero to within noise on every line.
 //
 // ============================================================================
 // POWER. On the PROBE arm the signs are i.i.d. Bernoulli — each comes from its
