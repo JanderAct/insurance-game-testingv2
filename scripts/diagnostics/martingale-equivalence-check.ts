@@ -268,11 +268,19 @@ if (Math.abs(offScale - 1) <= TOL_TOTAL) {
 // 1. One year is then processed with the step off and on. Every occurrence that
 // closed at that valuation must satisfy
 //
-//     current_on  ===  current_off x settlementFactor(gameId, claimId)
+//     current_on  ===  current_off x (1 + h x (settlementFactor - 1))
 //
 // to float tolerance, and every occurrence that did not close must be untouched.
-// That is the implementation matching the design claim by claim, with no
-// interval and nothing to size.
+//
+// ⚠ THE `h` IS THE CHANGE AND THE IDENTITY MOVED WITH THE BASIS. The settlement
+// factor applies to the claim's RESERVE, not to its whole carried value — see
+// settleClosingSet, where h is the cohort's balance over its register total and
+// the bound that closes the ledger crossing depends on it. So the arm cannot
+// assert `current_off x factor` any more; that was the unbounded form. h is
+// recovered from the pair rather than recomputed, which is what keeps this an
+// identity check on the engine and not a second implementation of the law:
+// for two claims settling in the same cohort the implied h must agree, and a
+// claim whose factor is 1 pins nothing and is skipped.
 // ============================================================================
 console.log('--- ENGINE ARM: the engine applies the factor, claim by claim ---');
 {
@@ -306,53 +314,83 @@ console.log('--- ENGINE ARM: the engine applies the factor, claim by claim ---')
     }
     PER_CLAIM_REVISION.settlement = settlement;     // the ONLY difference
     const p = processYear(gs, defaultDecisionSet(1));
-    const out = new Map<string, { current: number; closed: boolean }>();
+    const out = new Map<string, { current: number; closed: boolean; cohort: string }>();
     for (const l of LINES) {
       for (const c of p.updatedPoolState.lines[l].reserveCohorts) {
         for (const d of c.developingClaims ?? []) {
           const key = `${l}|${d.claimId}`;
-          out.set(key, { current: d.current, closed: d.closed === true && !preClosed.has(key) });
+          out.set(key, { current: d.current, closed: d.closed === true && !preClosed.has(key), cohort: `${l}|${c.yearNumber}` });
         }
       }
     }
     return out;
   };
 
-  let offReg: Map<string, { current: number; closed: boolean }>;
-  let onReg: Map<string, { current: number; closed: boolean }>;
+  let offReg: Map<string, { current: number; closed: boolean; cohort: string }>;
+  let onReg: Map<string, { current: number; closed: boolean; cohort: string }>;
   try { offReg = run(false); onReg = run(true); }
   finally { PER_CLAIM_REVISION.enabled = wasEnabled; PER_CLAIM_REVISION.settlement = wasSettle; }
   if (PER_CLAIM_REVISION.enabled !== wasEnabled || PER_CLAIM_REVISION.settlement !== wasSettle) {
     failed.push('ENGINE ARM: PER_CLAIM_REVISION was not restored. This arm mutates it and must put it back.');
   }
 
-  let settled = 0, matched = 0, openMoved = 0, worst = 0;
+  // h is not observable from outside, so it is SOLVED from each settling claim
+  // and then required to be CONSISTENT. current_on = current_off (1 + h (f - 1))
+  // gives h = (current_on / current_off - 1) / (f - 1) whenever f != 1, and every
+  // claim settling in the same cohort must return the same h. One claim would be
+  // an identity with a free parameter; agreement across claims is the assertion.
+  let settled = 0, usable = 0, openMoved = 0, spread = 0;
+  const implied: number[] = [];
+  // ⚠ GROUPED BY COHORT. h is the cohort's balance over its register total, so it
+  // is shared by the claims settling in ONE cohort and differs between cohorts.
+  // The first cut pooled every settling claim in the valuation and reported a
+  // spread of 0.35 against an engine that was behaving correctly.
+  const byCohort = new Map<string, number[]>();
   for (const [key, on] of onReg) {
     const off = offReg.get(key);
     if (!off) continue;
     const claimId = key.slice(key.indexOf('|') + 1);
     if (on.closed) {
-      const expected = off.current * settlementFactor(id, claimId);
       settled++;
-      const err = Math.abs(on.current - expected) / Math.max(1, Math.abs(off.current));
-      worst = Math.max(worst, err);
-      if (err < 1e-9) matched++;
+      const f = settlementFactor(id, claimId);
+      if (Math.abs(f - 1) < 1e-6 || Math.abs(off.current) < 1) continue;
+      usable++;
+      const h = (on.current / off.current - 1) / (f - 1);
+      implied.push(h);
+      (byCohort.get(on.cohort) ?? byCohort.set(on.cohort, []).get(on.cohort)!).push(h);
     } else if (Math.abs(on.current - off.current) > 1e-6) {
       openMoved++;
     }
   }
-  console.log(`  occurrences closing at the first played valuation: ${settled}`);
-  console.log(`  of those, current_on === current_off x settlementFactor: ${matched}   worst relative error ${worst.toExponential(2)}`);
+  const inRange = implied.filter(h => h > 0 && h <= 1 + 1e-9).length;
+  let sharedCohorts = 0;
+  for (const hs of byCohort.values()) {
+    if (hs.length < 2) continue;
+    sharedCohorts++;
+    const m = hs.reduce((a, b) => a + b, 0) / hs.length;
+    spread = Math.max(spread, ...hs.map(h => Math.abs(h - m)));
+  }
+  console.log(`  occurrences closing at the first played valuation: ${settled}   usable (factor != 1): ${usable}`);
+  console.log(`  implied h in (0, 1]: ${inRange} of ${implied.length}   `
+    + `median ${implied.length ? implied.slice().sort((a, b) => a - b)[implied.length >> 1].toFixed(4) : 'n/a'}`);
+  console.log(`  cohorts settling 2+ claims: ${sharedCohorts}   worst within-cohort h disagreement ${spread.toExponential(2)}`);
   console.log(`  still-open occurrences whose value differs between the arms: ${openMoved}  (must be 0)`);
 
-  if (settled === 0) {
-    failed.push('ENGINE ARM: no occurrence closed at the first played valuation, so this arm asserted nothing. '
-      + 'That is a sample problem, not a pass — pick a seed where the closure curves retire something in year 1.');
+  if (usable === 0) {
+    failed.push('ENGINE ARM: no occurrence with a settlement factor other than 1 closed at the first played '
+      + 'valuation, so this arm asserted nothing. That is a sample problem, not a pass — pick a seed where the '
+      + 'closure curves retire something in year 1.');
   }
-  if (settled > 0 && matched !== settled) {
-    failed.push(`ENGINE ARM: ${settled - matched} of ${settled} closing occurrences do not equal their pre-settlement `
-      + 'value times settlementFactor(gameId, claimId). The engine is not applying the settlement step the law defines — '
-      + 'which is exactly the state this repo shipped in until the settlement block was wired into processIbner.');
+  if (inRange !== implied.length) {
+    failed.push(`ENGINE ARM: ${implied.length - inRange} of ${implied.length} closing occurrences imply an h outside `
+      + '(0, 1]. current_on / current_off does not correspond to the settlement factor applied to a SHARE of the '
+      + 'claim, so the engine is not running settleClosingSet — which is the state this repo shipped in until the '
+      + 'settlement block was wired into processIbner, and again in unbounded form until it moved onto the reserve.');
+  }
+  if (sharedCohorts > 0 && spread > 1e-9) {
+    failed.push(`ENGINE ARM: the implied h disagrees WITHIN a cohort by up to ${spread.toExponential(2)}. h is a `
+      + 'COHORT quantity — the balance over the register total — so every claim settling in one cohort must share '
+      + 'it. A per-claim h means the factor is being scaled by something else.');
   }
   if (openMoved > 0) {
     failed.push(`ENGINE ARM: ${openMoved} occurrences that did NOT close differ between the two arms. The settlement `

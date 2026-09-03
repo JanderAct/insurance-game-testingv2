@@ -96,7 +96,7 @@ const FAST: string[] = [
   'pregame-acceptance-check',        //  55s   STAGE 1 BLOCKER — the search must still accept on the shipped path
   'property-claim-check',            //   3s
   'ratio-basis-check',               //   7s
-  'cohort-ledger-check',             //  35s   ⚠ EXPECTED RED, exit 2 — see EXPECTED_RED below
+  'cohort-ledger-check',             //  35s   three ledger identities, BOTH arms — green since the headroom fix
   'reinsurance-tower-check',         //   2s   PROMOTED at this commit
   'revision-persistence-check',      //   8s   STAGE 1 — rho, read out of reviseDevelopingSet; ships its rho = 0 control
   'roster-catalog-check',            //   3s
@@ -459,13 +459,13 @@ function checkManifest(): string[] {
 // shipped path can never hide behind the expected redness.
 // ============================================================================
 const EXPECTED_RED: Record<string, { code: number; why: string }> = {
-  'cohort-ledger-check': {
-    code: 2,
-    why: 'flag-on cohort ledger crossing — the per-claim law scales movements by the payout '
-      + "pattern's headroom, not the cohort's realised one. Diagnosed at PER_CLAIM_REVISION; "
-      + 'the fix is the claim headroom becoming netUnpaid / netUltimate. Flag-off is clean and '
-      + 'exit 1 (a flag-off regression) is NOT excused.',
-  },
+  // ⚠ EMPTY, AND THAT IS THE MECHANISM WORKING. cohort-ledger-check was entered
+  // here at 85252cc with exit 2 for the flag-on ledger crossing. The fix landed,
+  // the gate went green, and the XPASS guard would have failed the sweep if this
+  // entry had been left behind — which is the whole reason the category asserts
+  // in both directions. It stays as an empty map rather than being deleted: the
+  // next gate built before its fix needs somewhere to go, and the argument for
+  // how to do that safely is above.
 };
 
 // ---------------------------------------------------------------- runner

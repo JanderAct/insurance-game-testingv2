@@ -1,7 +1,8 @@
 // ============================================================================
-// THE COHORT LEDGER IDENTITIES — A GATE, AND IT SHIPS RED ON THE FLAG-ON ARM.
+// THE COHORT LEDGER IDENTITIES — A GATE. GREEN ON BOTH ARMS SINCE THE HEADROOM
+// FIX; IT SHIPPED RED ON THE FLAG-ON ARM AT 85252cc AND THAT WAS THE POINT.
 //
-// ⚠ THIS EXITS NON-ZERO, AND ON THE FLAG-ON ARM IT IS SUPPOSED TO. Run:
+// ⚠ THIS EXITS NON-ZERO IF AN IDENTITY BREAKS. Run:
 //   npx tsx scripts/diagnostics/cohort-ledger-check.ts
 //   GAMES=60 npx tsx scripts/diagnostics/cohort-ledger-check.ts
 //
@@ -10,8 +11,10 @@
 //       EXPECTED_RED entry in gates.ts must be removed
 //   1   the FLAG-OFF arm violated an identity. A REAL REGRESSION on the shipped
 //       path, never excused by anything
-//   2   flag-off clean, flag-on violating. The KNOWN OPEN ITEM, attributed in
-//       gates.ts and reported as `xfail` by the sweep
+//   2   flag-off clean, flag-on violating. THIS WAS THE STATE AT 85252cc and it
+//       is now unreachable — the bound in reviseDevelopingSet makes it so. Kept
+//       because the distinction is what stops a flag-off regression hiding
+//       behind a flag-on one, and because the next mechanism change may need it
 //
 // A single red would have let a flag-off regression hide behind the expected
 // flag-on redness, which is the exact family this repo has now found sixteen
@@ -51,9 +54,9 @@
 // whatever is shipped.
 //
 // ============================================================================
-// THE OPEN ITEM THIS IS RED FOR, NAMED SO THE REDNESS IS ATTRIBUTABLE.
+// WHAT IT WAS RED FOR, AND WHAT CLOSED IT.
 //
-// The per-claim revision law scales each claim's movement by a headroom taken
+// The per-claim revision law scaled each claim's movement by a headroom taken
 // from the PAYOUT PATTERN — `cumulativePaid(LINE_PAYOUT_PATTERN[line], age + 1)`
 // at reviseDevelopingSet's call site — while the cohort balance those movements
 // land on has been paid down along its own REALISED path. Development moves the
@@ -73,11 +76,20 @@
 // floored by cedeDevelopment. The per-claim reserve genuinely cannot go
 // negative. It is the cohort balance that is not tied to it.
 //
-// THE FIX IS THE NEXT COMMIT: the claim headroom becomes the cohort's realised
-// netUnpaid / netUltimate. It is a reconciliation and NOT A FLOOR — a floor on
-// the reserve is the Stage 0 defect that simulationEngine's floors note records,
-// one-sided truncation of favourable movement that breaks the martingale. When
-// the fix lands this gate goes green and its EXPECTED_RED entry comes out.
+// THE FIX, LANDED: the law takes the cohort's BALANCE and derives the headroom
+// from it as h = balance / register total, so the sum of the movements is
+// bounded by the balance they land in. It is a reconciliation and NOT A FLOOR —
+// a floor on the reserve is the Stage 0 defect that simulationEngine's floors
+// note records, one-sided truncation of favourable movement that breaks the
+// martingale. The closure argument is an inequality and lives at
+// reviseDevelopingSet, not here and not in prose. Verified at 6x this gate's
+// sample: 0 violations across 81,312 flag-on cohort-valuations.
+//
+// ⚠ netUnpaid / netUltimate WAS THE OTHER CANDIDATE AND IT DOES NOT CLOSE. Its
+// bound needs sum(claim values) <= netUltimate; measured, the register exceeds
+// netUltimate on 89% of cohort-valuations (median 1.31x, p95 2.86x) because the
+// register is GROSS and netUltimate is NET. It would have gone green on these
+// seeds and red on someone else's.
 // ============================================================================
 
 import { generateGameInstance } from '../../src/utils/instanceGenerator';

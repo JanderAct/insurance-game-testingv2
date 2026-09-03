@@ -171,39 +171,67 @@ export function reviseOnce(
   phi: number = CLAIM_REVISION_PHI,
   rho: number = CLAIM_REVISION_PERSISTENCE_RHO,
 ): RevisionState {
+  const step = revisionStep(gameId, claimId, modelAge, state.value, state.paidShare, state.lastSign, phi, rho);
+  if (step.sign === 0) return state;
+
+  // The RESERVE moves; the paid stays put. So the carried value moves by the
+  // reserve's share of it, and the paid share is restated against the new value.
+  const paid = state.value * state.paidShare;
+  const reserve = state.value - paid;
+  const newValue = paid + reserve * step.factor;
+  return {
+    value: newValue,
+    paidShare: newValue > 0 ? paid / newValue : 1,
+    lastSign: step.sign,
+  };
+}
+
+/**
+ * ONE STEP'S FACTOR AND SIGN, WITHOUT DECIDING WHAT BALANCE IT APPLIES TO.
+ *
+ * ⚠ EXTRACTED FROM reviseOnce SO THERE IS STILL ONE IMPLEMENTATION OF THE LAW.
+ * The engine has to scale the factor onto the COHORT's own remaining balance
+ * rather than onto the claim's pattern-implied reserve — see
+ * reviseDevelopingSet's closure argument — and it must not do that by
+ * reimplementing the draw. Every expression below is reviseOnce's, in
+ * reviseOnce's order, so nothing about the law's arithmetic moved.
+ *
+ * `sign` of 0 means THE FREQUENCY DRAW DID NOT FIRE and `factor` is exactly 1:
+ * a quiet year, with the previous sign carried forward untouched.
+ */
+export function revisionStep(
+  gameId: string,
+  claimId: string,
+  modelAge: number,
+  value: number,
+  paidShare: number,
+  lastSign: 0 | 1 | -1,
+  phi: number = CLAIM_REVISION_PHI,
+  rho: number = CLAIM_REVISION_PERSISTENCE_RHO,
+): { factor: number; sign: 0 | 1 | -1 } {
   // FREQUENCY IS I.I.D. — see the memoryless note at CLAIM_REVISION_FREQUENCY.
   if (claimRevisionUnit(gameId, claimId, modelAge, 'rev_freq') >= CLAIM_REVISION_FREQUENCY) {
-    return state;
+    return { factor: 1, sign: 0 };
   }
 
-  const headroom = Math.max(1e-9, 1 - state.paidShare);
-  const onIncurred = phi * revisionMagnitudeOnIncurred(modelAge, state.value);
+  const headroom = Math.max(1e-9, 1 - paidShare);
+  const onIncurred = phi * revisionMagnitudeOnIncurred(modelAge, value);
   // THE BASIS CONVERSION, AND IT IS THE ONLY DIVISION IN THE LAW.
   const s = onIncurred / headroom;
 
   // SIGN — two-state Markov, first sign fair.
   const uSign = claimRevisionUnit(gameId, claimId, modelAge, 'rev_sign');
   let sign: 1 | -1;
-  if (state.lastSign === 0) {
+  if (lastSign === 0) {
     sign = uSign < 0.5 ? 1 : -1;
   } else {
     const stay = (1 + rho) / 2;
-    sign = uSign < stay ? (state.lastSign as 1 | -1) : (-state.lastSign as 1 | -1);
+    sign = uSign < stay ? (lastSign as 1 | -1) : (-lastSign as 1 | -1);
   }
 
   const z = Math.abs(normalQuantile(claimRevisionUnit(gameId, claimId, modelAge, 'rev_mag')));
   const factor = Math.exp(sign * s * z - (s * s) / 2);
-
-  // The RESERVE moves; the paid stays put. So the carried value moves by the
-  // reserve's share of it, and the paid share is restated against the new value.
-  const paid = state.value * state.paidShare;
-  const reserve = state.value - paid;
-  const newValue = paid + reserve * factor;
-  return {
-    value: newValue,
-    paidShare: newValue > 0 ? paid / newValue : 1,
-    lastSign: sign,
-  };
+  return { factor, sign };
 }
 
 /**
@@ -318,33 +346,151 @@ export interface RevisableClaim {
 /**
  * Revise every tracked occurrence of one cohort by one annual step.
  *
- * `modelAge` is the step about to be taken, 1-based — the cohort's `age + 1`,
- * matching the unwind's own convention at the call site.
+ * ⚠ THE MOVEMENT IS A SHARE OF THE COHORT'S OWN REMAINING BALANCE, NOT OF EACH
+ * CLAIM'S PATTERN-IMPLIED RESERVE. This is the fix for the ledger crossing and
+ * the closure argument is an INEQUALITY, not a claim. Write v_i for the
+ * occurrence values, U for `untracked`, R = sum(v_i) + U for the register total,
+ * B for `balance` (the cohort's reserve after paydown, before development), and
+ * h = B / R. Then with w_i = v_i / R and w_U = U / R, so that sum(w) = 1:
  *
- * `paidShare` is the cohort's, not each claim's: claimClosure.ts's prohibition
- * stands and no claim draws its own payment schedule.
+ *     d_i = v_i . h . (f_i - 1) = B . w_i . (f_i - 1)   >=  -B . w_i
+ *
+ * because every f_i >= 0 — the factor is a lognormal and is strictly positive.
+ * Summing over the tracked set and the untracked mass:
+ *
+ *     sum(d) >= -B . sum(w) = -B      so      B + sum(d) >= 0
+ *
+ * ⚠ AND THE BOUND SURVIVES CESSION, which is where it has to hold. cedeDevelopment
+ * returns the pool's retained share, retained_i = P(v_i + d_i) - P(v_i) for the
+ * pool's retained function P, which is non-decreasing with P(0) = 0 and is
+ * 1-Lipschitz (the ceded derivative is never negative). So retained_i >= d_i
+ * wherever d_i < 0, and retained_i >= 0 wherever d_i >= 0. Hence
+ * sum(retained) >= -B and the NET balance cannot cross zero either. Nothing
+ * above requires any relationship between the register and netUltimate — which
+ * is exactly why the alternative, h = netUnpaid / netUltimate, does NOT close:
+ * measured, the register exceeds netUltimate on 89% of cohort-valuations
+ * (median 1.31x, p95 2.86x) because the register is GROSS and netUltimate is NET.
+ *
+ * ⚠ THE SAME h GOES INTO THE FACTOR, AND THAT IS WHAT KEEPS THE DOLLAR SCALE.
+ * `revisionStep` divides the magnitude by the headroom to put it on the reserve,
+ * so s = phi.m/h, and the delta multiplies by h again: to first order
+ * d_i ~ v_i . h . s . Z = v_i . phi . m . Z and the h cancels. Scaling by the
+ * cohort's realised balance therefore corrects WHICH reserve the movement is a
+ * share of without rescaling how much a claim moves. Passing the pattern's
+ * headroom to one and the cohort's to the other would break the cancellation and
+ * silently shrink every movement.
+ *
+ * ⚠ WHAT IT COSTS, STATED: h is smaller than the pattern headroom on an
+ * exhausted cohort, so s is correspondingly larger there, and s is already
+ * unbounded as headroom falls (see CLAIM_REVISION_SIZE_TREND's note and
+ * revision-total-sd-report). This fix makes the reserve arithmetic exact and
+ * makes that tail worse. It is a recorded open item, not a surprise.
+ *
+ * `cohort.untrackedFactor` is the cohort lognormal, applied to the mass that has
+ * no claim ids to revise. It is inside the same h and the same weights, so it is
+ * inside the bound — under the previous form it was `U . (factor - 1)`, with no
+ * headroom scaling at all, and was one of the two ways the balance was overdrawn.
+ *
+ * ⚠ THE COHORT ARGUMENTS ARE AN OBJECT AND THAT IS NOT STYLE. This function took
+ * four bare numbers for one commit, and adding them silently broke
+ * revision-persistence-check: every parameter is a `number`, so a caller left on
+ * the old order compiled, ran, and reported 0% upward movements against 50%. It
+ * was caught in FAST the same run, which is the system working — but a signature
+ * where a mis-order is a type error rather than a red gate is the better one.
  */
+export interface CohortStep {
+  /** The sub-retention mass, gross. It has no claim ids to revise. */
+  untracked: number;
+  /** The cohort lognormal, applied to that mass. Strictly positive. */
+  untrackedFactor: number;
+  /** The cohort's own reserve after paydown, before development. The bound. */
+  balance: number;
+  /** The step about to be taken, 1-based — the cohort's `age + 1`. */
+  modelAge: number;
+}
+
 export function reviseDevelopingSet(
   gameId: string,
   tracked: RevisableClaim[],
-  untrackedDelta: number,
-  modelAge: number,
-  paidShare: number,
+  cohort: CohortStep,
   phi: number = CLAIM_REVISION_PHI,
   rho: number = CLAIM_REVISION_PERSISTENCE_RHO,
 ): RevisionAllocation {
+  const { untracked, untrackedFactor, balance, modelAge } = cohort;
+  const mass = Math.max(0, untracked);
+  const register = tracked.reduce((a, t) => a + Math.max(0, t.current), 0) + mass;
+  // Nothing to move, and nothing to move it out of. A non-positive balance is
+  // returned untouched rather than developed — the bound above says the balance
+  // can never GET there, and if it somehow has, developing it is not the answer.
+  if (!(balance > 0) || !(register > 0)) {
+    return { deltas: tracked.map(() => 0), untrackedDelta: 0, applied: 0, unallocated: 0 };
+  }
+  const h = balance / register;
+  // The share ALREADY PAID, as the law's headroom convention wants it. h may
+  // exceed 1 on a cohort whose register has fallen below its own reserve, and a
+  // negative paidShare is the honest reading of that: headroom is h either way,
+  // since revisionStep takes 1 - paidShare.
+  const paidShare = 1 - h;
+
   const deltas: number[] = [];
   let applied = 0;
   for (const t of tracked) {
-    const before = t.current;
-    const after = reviseOnce(gameId, t.claimId, modelAge, {
-      value: before, paidShare, lastSign: signBefore(gameId, t.claimId, modelAge, rho),
-    }, phi, rho).value;
-    const d = after - before;
+    const step = revisionStep(
+      gameId, t.claimId, modelAge, t.current, paidShare,
+      signBefore(gameId, t.claimId, modelAge, rho), phi, rho,
+    );
+    const d = Math.max(0, t.current) * h * (step.factor - 1);
     deltas.push(d);
     applied += d;
   }
+  const untrackedDelta = mass * h * (untrackedFactor - 1);
   return { deltas, untrackedDelta, applied: applied + untrackedDelta, unallocated: 0 };
+}
+
+/**
+ * The settlement movement for occurrences closing at this valuation, on the same
+ * basis and inside the same bound.
+ *
+ * ⚠ THE FACTOR IS ON THE RESERVE, NOT ON THE WHOLE VALUE, AND THAT IS WHAT MAKES
+ * "CLOSES AT ZERO" LITERALLY TRUE. A claim settling at factor 0 lands at
+ * v.(1 - h) = v.paidShare — its paid to date — rather than at nothing. The
+ * previous form was `v.(f - 1)`, i.e. h implicitly 1, which removed a claim's
+ * whole carried value from a balance that had only ever held h of it. That was
+ * the second of the two overdrafts and it doubled the crossing rate.
+ *
+ *     d_i = v_i . h . (f_i - 1) >= -v_i . h   for the settling set only,
+ *     sum(d) >= -h . sum(v over settling) >= -h . R = -B
+ *
+ * ⚠ IT RE-OPENS CLAIM_SETTLEMENT_FACTOR.nonZeroScale. That level was solved so
+ * E[f] cancels the persistence drift on a WHOLE-VALUE basis. On the reserve basis
+ * the expected effect on a claim's value is 1 + h.(E[f] - 1), so the offset is
+ * scaled by h and is weaker — and h varies by cohort, so no single scalar
+ * cancels the drift exactly any more. See the measurement recorded at
+ * CLAIM_SETTLEMENT_FACTOR.
+ */
+export function settleClosingSet(
+  gameId: string,
+  tracked: RevisableClaim[],
+  settling: readonly boolean[],
+  untracked: number,
+  balance: number,
+  nonZeroScale: number = CLAIM_SETTLEMENT_FACTOR.nonZeroScale,
+): RevisionAllocation {
+  const mass = Math.max(0, untracked);
+  const register = tracked.reduce((a, t) => a + Math.max(0, t.current), 0) + mass;
+  if (!(balance > 0) || !(register > 0)) {
+    return { deltas: tracked.map(() => 0), untrackedDelta: 0, applied: 0, unallocated: 0 };
+  }
+  const h = balance / register;
+  const deltas: number[] = [];
+  let applied = 0;
+  tracked.forEach((t, i) => {
+    if (!settling[i]) { deltas.push(0); return; }
+    const d = Math.max(0, t.current) * h * (settlementFactor(gameId, t.claimId, nonZeroScale) - 1);
+    deltas.push(d);
+    applied += d;
+  });
+  return { deltas, untrackedDelta: 0, applied, unallocated: 0 };
 }
 
 /**

@@ -31,7 +31,7 @@ import {
   allocateDevelopment, buildTrackedSet, cedeDevelopment, markDownForBooking, reselectDevelopingSet,
 } from './developmentAllocation';
 import { isClaimClosed } from './claimClosure';
-import { reviseDevelopingSet, settlementFactor } from './claimRevision';
+import { reviseDevelopingSet, settleClosingSet } from './claimRevision';
 import { poolYearFactor, wcGenerationInputs, glGenerationInputs, propertyGenerationInputs } from './claimGeneration';
 import {
   aggregateRecovery,
@@ -42,7 +42,7 @@ import {
   quoteAggregate,
 } from './reinsuranceTower';
 import { simulateMarketReturns, blendInvestmentReturn } from './investmentEngine';
-import { cohortCloseBelow, conditionalPaydown, cumulativePaid, unpaidShare } from './payoutPattern';
+import { cohortCloseBelow, conditionalPaydown, unpaidShare } from './payoutPattern';
 import { simulateMemberMovement } from './membershipEngine';
 import { cloneMembershipHistory, openInterval, closeInterval } from './membershipHistory';
 import { cloneMemberLossHistory, recordMemberLossYear } from './memberLossHistory';
@@ -3264,9 +3264,16 @@ function processIbner(
             // says nothing about whether the LAW moves this cohort, and the
             // enabled arm does not read step.amount at all.
             if (!usePerClaim && step.amount === 0) continue;
+            // ⚠ `newUnpaid` IS THE BALANCE, AND PASSING IT IS THE FIX FOR THE
+            // LEDGER CROSSING. It read `cumulativePaid(pattern, c.age + 1)` — a
+            // FIXED CURVE — while this balance has been paid down along its own
+            // realised path, and on an exhausted cohort the two differed by 42x
+            // (pattern headroom 0.125 against a realised 0.003). The law now
+            // takes the balance itself and derives the headroom from it, so the
+            // sum of the movements is bounded by the balance they land in.
+            // reviseDevelopingSet carries the inequality; do not restate it here.
             const alloc = usePerClaim
-              ? reviseDevelopingSet(gameId, live, untracked * (factor - 1), c.age + 1,
-                  cumulativePaid(LINE_PAYOUT_PATTERN[line], c.age + 1))
+              ? reviseDevelopingSet(gameId, live, { untracked, untrackedFactor: factor, balance: newUnpaid, modelAge: c.age + 1 })
               : allocateDevelopment(live, untracked, step.amount, step.mode);
             const res = cedeDevelopment(line as TowerLine, live, alloc.deltas, alloc.untrackedDelta, placed);
             live = res.moved;
@@ -3426,9 +3433,18 @@ function processIbner(
         if (settling.some(Boolean)) {
           const settlePlaced = c.placedAtInception ?? normalizeLayersPlaced(line as TowerLine, undefined);
           const before = developingClaimsOut.map(d => d.current);
-          const deltas = developingClaimsOut.map((d, i) => (
-            settling[i] ? d.current * (settlementFactor(gameId, d.claimId) - 1) : 0
-          ));
+          // ⚠ ON THE RESERVE, INSIDE THE SAME BOUND. This read
+          // `d.current * (settlementFactor(...) - 1)` — the factor on the whole
+          // carried value, i.e. headroom implicitly 1 — which removed a claim's
+          // entire value from a balance that had only ever held a fraction of it
+          // and doubled the crossing rate. settleClosingSet carries the
+          // inequality and makes "closes at zero" land on the paid to date.
+          const alloc = settleClosingSet(
+            gameId,
+            developingClaimsOut.map(d => ({ claimId: d.claimId, current: d.current })),
+            settling, untrackedOut ?? 0, newUnpaid,
+          );
+          const deltas = alloc.deltas;
           // Through cedeDevelopment like any other movement, so the tower sees a
           // settlement exactly as it sees a deterioration: same convex function,
           // same layers, opposite sign. That is what makes the give-back real

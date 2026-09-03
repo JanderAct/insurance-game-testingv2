@@ -158,7 +158,17 @@ function walk(line: CoverageLine, reg: RevisableClaim[], gameId: string, phi: nu
     live = live.filter(c => a < (closeAt.get(c.claimId) ?? 0));
     if (live.length === 0) break;
     const paidShare = Math.min(0.999, cumulativePaid(pattern, a));
-    const alloc = reviseDevelopingSet(gameId, live, 0, a, paidShare, phi, rho);
+    // ⚠ THE BALANCE, NOT THE PAID SHARE. reviseDevelopingSet takes the cohort's
+    // reserve and derives h = balance / register from it, so the headroom this
+    // file wants — the payout pattern's, since it is measuring the SIGN chain and
+    // not the ledger — is expressed as a balance of that share of the register.
+    // There is no untracked mass here, so its factor is the neutral 1.
+    const register = live.reduce((acc, c) => acc + c.current, 0);
+    const alloc = reviseDevelopingSet(
+      gameId, live,
+      { untracked: 0, untrackedFactor: 1, balance: register * (1 - paidShare), modelAge: a },
+      phi, rho,
+    );
     live = live.map((c, i) => {
       const d = alloc.deltas[i];
       if (d !== 0) {

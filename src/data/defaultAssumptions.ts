@@ -2145,6 +2145,33 @@ export const CLAIM_REVISION_FREQUENCY = 0.70;
 // valuation each claim closes. Verified to fail: un-wiring the engine block
 // turns that arm red 24 of 24 while leaving every statistical term green.
 //
+// ⚠ THE ENGINE APPLIES IT TO THE RESERVE, NOT TO THE WHOLE VALUE, AND THAT
+// CHANGES WHAT THE LEVEL DELIVERS THERE. settleClosingSet computes
+// v.h.(f - 1) with h the cohort's balance over its register, because the
+// unbounded form — the factor on the whole carried value — was half of the
+// ledger crossing. Two consequences, both measured:
+//
+//   IT MAKES "CLOSES AT ZERO" LITERALLY TRUE. A claim settling at factor 0 now
+//   lands at v.(1 - h), its paid to date, rather than at nothing.
+//
+//   ⚠ AND IT COLLAPSES THE OFFSET. The expected effect on a claim's value is
+//   1 + h.(E[f] - 1) rather than E[f], so with h around 0.2 at closure the
+//   -0.45% this level was solved to deliver arrives as about -0.09%. Measured
+//   on the engine, paired off against on: the settlement quotient reads
+//   0.998 / 1.000 / 1.013 (WC +/- 0.003), i.e. essentially 1. THE PERSISTENCE
+//   DRIFT IS UNCANCELLED ON THE ENGINE PATH.
+//
+// ⚠ AND nonZeroScale CANNOT BE RE-SOLVED FOR IT, WHICH IS THE FINDING RATHER
+// THAN AN OMISSION. The required offset is (1/persistence - 1)/h, and h is a
+// COHORT quantity that varies by line, age and realised development. No single
+// scalar cancels an h-dependent drift. The level below stays as it is because it
+// is still exactly right for the LAW's own walk — claimTerminalValue and
+// martingale-equivalence-check's decomposition are on the whole-value basis and
+// are bit-identical across this commit (verified by digest, and the gate's
+// per-register figures are unchanged). What has opened is a divergence between
+// the law as calibrated and the law as run, which is the next thing to close and
+// is not closable by moving this number.
+//
 // ⚠ AND IT DOES NOT REDUCE CESSION, WHICH IS THE OPPOSITE OF WHAT IT WAS
 // EXPECTED TO DO. Settlement was reasoned about as the FAVOURABLE force — a
 // claim above the retention settling low hands the layer back. It does hand
@@ -2431,8 +2458,36 @@ export const CLAIM_OPEN_SHARE_MODEL_RECORDED: readonly number[] = [0.901, 0.794,
 //   flag off                       bit-identical to the parent on both
 //                                  standing gates
 //
-// ⚠ ONE BLOCKER, FOUND WHILE WIRING THE SETTLEMENT STEP: THE PER-CLAIM PATH CAN
-// DRIVE A COHORT'S NET RESERVE NEGATIVE. `newUnpaid += res.retained` sums
+// ⚠ RESOLVED — THE LEDGER CROSSING IS CLOSED, BY AN INEQUALITY RATHER THAN A
+// FLOOR. reviseDevelopingSet now takes the cohort's BALANCE and derives the
+// headroom from it, h = balance / register total, so every claim's movement is
+// a share of the balance it lands in: d_i = B.w_i.(f_i - 1) >= -B.w_i with
+// sum(w) = 1 and every f_i >= 0, hence sum(d) >= -B. The bound survives cession
+// because the retained function is non-decreasing, 1-Lipschitz and zero at zero.
+// settleClosingSet puts the settlement factor inside the same h. The full
+// argument is at those two functions; cohort-ledger-check asserts the outcome on
+// BOTH arms and reads 0 violations across 81,312 flag-on cohort-valuations at 6x
+// its shipped sample. Its EXPECTED_RED entry is gone.
+//
+// ⚠ AND h IS THE SAME IN THE FACTOR AND IN THE DELTA, WHICH IS WHAT KEPT THE
+// SCALE. s = phi.m/h and d = v.h.(f-1), so to first order the h cancels and a
+// claim moves by the same dollars it did — the fix corrects WHICH reserve the
+// movement is a share of, not how much a claim moves. Splitting the two would
+// have shrunk every GL movement by half.
+//
+// THE REJECTED ALTERNATIVE, RECORDED: h = netUnpaid / netUltimate tracks the
+// pattern headroom almost exactly on healthy cohorts (median 0.945 / 0.976 /
+// 1.000 of it) and would have been the smaller change, but its bound needs
+// sum(claim values) <= netUltimate and the register EXCEEDS netUltimate on 89%
+// of cohort-valuations — median 1.31x, p95 2.86x — because the register is GROSS
+// and netUltimate is NET. It would have gone green on the seeds it was built
+// against and red on someone else's.
+//
+// ⚠ WHAT IT COSTS, AND IT IS THE NEXT OPEN ITEM: THE SETTLEMENT NO LONGER PAYS
+// BACK THE PERSISTENCE DRIFT ON THE ENGINE PATH. See CLAIM_SETTLEMENT_FACTOR.
+//
+// ⚠ THE ORIGINAL FINDING, KEPT BECAUSE THE DIAGNOSIS IS THE USEFUL PART:
+// THE PER-CLAIM PATH COULD DRIVE A COHORT'S NET RESERVE NEGATIVE. `newUnpaid += res.retained` sums
 // CLAIM-level deltas and nothing bounds that sum by the cohort's own remaining
 // reserve, so a register that settles or improves below what the cohort has
 // already paid leaves a negative balance. Measured over 40 games x 15 years:
@@ -2468,16 +2523,9 @@ export const CLAIM_OPEN_SHARE_MODEL_RECORDED: readonly number[] = [0.901, 0.794,
 // cumulative netPaid FALLS on 8.9% of cohort year-over-year steps and 815
 // cohort-valuations carry an ultimate below their own paid-to-date.
 //
-// GATED, AND RED ON PURPOSE: cohort-ledger-check (FAST) asserts the three ledger
-// identities on BOTH arms and ships red on the flag-on one, so the fix turns it
-// green rather than being argued in a report. It exits 2 for this open item and
-// 1 for a flag-off regression, and gates.ts excuses only the 2 — see EXPECTED_RED
-// there, which also fails the sweep if the gate ever unexpectedly passes.
-//
-// THE FIX, NOT DONE HERE: the claim headroom becomes the cohort's realised
-// netUnpaid / netUltimate. It re-opens CLAIM_SETTLEMENT_FACTOR.nonZeroScale,
-// because the settlement level was solved on a whole-value basis and moving
-// settlement onto the reserve changes the offset it delivers.
+// GATED: cohort-ledger-check (FAST) asserts the three ledger identities on BOTH
+// arms. It was built RED against the flag-on arm at 85252cc so that the fix
+// would turn it green rather than being argued in a report, and it did.
 //
 // WHAT IS STILL OPEN AND IS NOT CALIBRATION: the size trend is untested where
 // it does its work (see its own note and composition-table-check's head), and
