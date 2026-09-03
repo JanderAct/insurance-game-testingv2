@@ -946,8 +946,15 @@ export interface ResultSet {
   // consumer computing "gross development = net + this field" was short by the
   // give-back. One field doing two jobs, with a name that invites the wrong one.
   //
-  // GROSS PRIOR-YEAR DEVELOPMENT IS NOW priorYearDevelopment + this, with nothing
-  // to correct.
+  // GROSS PRIOR-YEAR DEVELOPMENT IS priorYearDevelopment MINUS this, with nothing
+  // to correct. ⚠ THE SIGN WAS WRONG HERE AND READ "+ this". Both fields are
+  // favourable-positive on the net ultimate (developmentImpact accumulates
+  // `c.netUltimate - newUltimate`) while this one is positive when the reinsurer
+  // ABSORBS adverse movement, so the retained figure is the LESS adverse of the
+  // two and the gross is recovered by subtracting. The old wording is right in
+  // MAGNITUDE for an adverse year — |gross| = |net| + ceded — and wrong in sign,
+  // which is exactly the shape that survives a spot-check and misleads a reader
+  // computing the favourable side.
   //
   // ⚠ THIS IS A MEMO FIGURE AND MUST NOT BE ADDED TO INCOME AGAIN. It is the
   // same convention as reinsuranceRecovery beside it: netUltimateLoss is

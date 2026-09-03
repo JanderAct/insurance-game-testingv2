@@ -64,14 +64,19 @@
 // no CLF and no funding decision at all.
 // ============================================================================
 
+import { generateGameInstance } from '../../src/utils/instanceGenerator';
+import { processYear } from '../../src/utils/simulationEngine';
+import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
+import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { generateGlClaims } from '../../src/utils/glClaimEngine';
 import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
 import { closedShare, claimClosureUnit } from '../../src/utils/claimClosure';
 import { cumulativePaid } from '../../src/utils/payoutPattern';
 import { reviseOnce, settlementFactor, settlementFactorMean, type RevisionState } from '../../src/utils/claimRevision';
 import {
-  CLAIM_REVISION_PHI, CLAIM_SETTLEMENT_FACTOR, LINE_PAYOUT_PATTERN, resolveClosureCurve,
+  CLAIM_REVISION_PHI, CLAIM_SETTLEMENT_FACTOR, LINE_PAYOUT_PATTERN, PER_CLAIM_REVISION, resolveClosureCurve,
 } from '../../src/data/defaultAssumptions';
+import type { CoverageLine, GameState } from '../../src/types/simulation';
 
 // ⚠ SIZED SO THE ESTIMATOR'S OWN NOISE CLEARS THE TOLERANCE, AND THE FIRST
 // DRAFT OF THIS FILE DID NOT. At 8 x 40 the total read 1.00127 with an SE of
@@ -121,7 +126,7 @@ function register(seedIndex: number): Entry[] {
   return out;
 }
 
-function replicate(reg: Entry[], gameId: string): { persistence: number; total: number } {
+function replicate(reg: Entry[], gameId: string): { persistence: number; settlement: number; total: number } {
   let drawn = 0, carried = 0, terminal = 0;
   for (const c of reg) {
     const curve = resolveClosureCurve('GL', c.value);
@@ -137,7 +142,12 @@ function replicate(reg: Entry[], gameId: string): { persistence: number; total: 
     carried += st.value;
     terminal += st.value * settlementFactor(gameId, c.id);
   }
-  return { persistence: carried / drawn, total: terminal / drawn };
+  // ⚠ ALL THREE MEASURED ON ONE WALK, AND THE SETTLEMENT TERM IS NO LONGER A
+  // CLOSED FORM. It used to be settlementFactorMean(), an analytic number that
+  // cannot disagree with anything — see this file's header for why that made the
+  // gate blind to an unwired implementation. It is now the realised
+  // value-weighted ratio of terminal to carried, off the same claims.
+  return { persistence: carried / drawn, settlement: terminal / carried, total: terminal / drawn };
 }
 
 const stat = (xs: number[]) => {
@@ -154,29 +164,29 @@ const regs = Array.from({ length: REG }, (_, i) => register(i));
 const claimWalks = regs.reduce((a, r) => a + r.length, 0) * REPS;
 
 console.log('  reg   claims     persistence (mean +/- se)     total (mean +/- se)');
-const regP: number[] = [], regT: number[] = [];
+const regP: number[] = [], regS: number[] = [], regT: number[] = [];
 const withinSeP: number[] = [], withinSeT: number[] = [];
 for (let s = 0; s < REG; s++) {
-  const ps: number[] = [], ts: number[] = [];
+  const ps: number[] = [], ss: number[] = [], ts: number[] = [];
   for (let r = 0; r < REPS; r++) {
     const v = replicate(regs[s], `MEC${s}_${r}`);
-    ps.push(v.persistence); ts.push(v.total);
+    ps.push(v.persistence); ss.push(v.settlement); ts.push(v.total);
   }
-  const P = stat(ps), T = stat(ts);
-  regP.push(P.m); regT.push(T.m);
+  const P = stat(ps), S = stat(ss), T = stat(ts);
+  regP.push(P.m); regS.push(S.m); regT.push(T.m);
   withinSeP.push(P.se); withinSeT.push(T.se);
   console.log(`  ${String(s).padStart(3)}  ${String(regs[s].length).padStart(7)}     ${P.m.toFixed(5)} +/- ${P.se.toFixed(5)}        ${T.m.toFixed(5)} +/- ${T.se.toFixed(5)}`);
 }
 
-const P = stat(regP), T = stat(regT);
-const settleMean = settlementFactorMean();
+const P = stat(regP), S = stat(regS), T = stat(regT);
 
 console.log('');
 console.log('--- THE DECOMPOSITION, WHICH IS THE POINT OF THIS FILE ---');
 console.log('  term                                       value        interval        bound');
 console.log(`  PERSISTENCE  sum(carried)/sum(drawn)       ${P.m.toFixed(5)}    +/- ${P.se.toFixed(5)}     |drift| < ${MAX_TERM}`);
-console.log(`  SETTLEMENT   E[factor], closed form        ${settleMean.toFixed(5)}    exact           |drift| < ${MAX_TERM}`);
+console.log(`  SETTLEMENT   sum(terminal)/sum(carried)    ${S.m.toFixed(5)}    +/- ${S.se.toFixed(5)}     |drift| < ${MAX_TERM}`);
 console.log(`  TOTAL        sum(terminal)/sum(drawn)      ${T.m.toFixed(5)}    +/- ${T.se.toFixed(5)}     |drift| < ${TOL_TOTAL}`);
+console.log(`               (closed form, REPORTED and no longer asserted: ${settlementFactorMean().toFixed(5)})`);
 console.log('');
 console.log(`  claim-walks           ${claimWalks.toLocaleString()}`);
 console.log(`  WITHIN-register SE    persistence ${stat(withinSeP).m.toFixed(5)}   total ${stat(withinSeT).m.toFixed(5)}   <- the LAW's noise, what the bounds are sized against`);
@@ -188,15 +198,23 @@ if (Math.abs(P.m - 1) > MAX_TERM) {
   failed.push(`PERSISTENCE drifts ${((P.m - 1) * 100).toFixed(3)}% (+/- ${(P.se * 100).toFixed(3)}pp), over the ${MAX_TERM * 100}% per-term bound. `
     + 'A large persistence term offset by a large settlement term reads as a passing total and is not one.');
 }
-if (Math.abs(settleMean - 1) > MAX_TERM) {
-  failed.push(`SETTLEMENT mean is ${settleMean.toFixed(5)}, over the ${MAX_TERM * 100}% per-term bound. `
+if (Math.abs(S.m - 1) > MAX_TERM) {
+  failed.push(`SETTLEMENT is ${S.m.toFixed(5)} (+/- ${(S.se * 100).toFixed(3)}pp), over the ${MAX_TERM * 100}% per-term bound. `
     + 'CLAIM_SETTLEMENT_FACTOR.nonZeroScale is solved against the persistence term; if that term is small, this must be near one.');
+}
+// ⚠ AND THE TWO TERMS MUST MULTIPLY TO THE TOTAL. They are measured off one walk
+// so this is arithmetic, not a test of the model — but it is a test that the
+// three numbers printed above describe the same sample, which is the failure a
+// future edit to this file is most likely to introduce.
+if (Math.abs(P.m * S.m - T.m) > 1e-3) {
+  failed.push(`The decomposition does not reconstruct: persistence x settlement = ${(P.m * S.m).toFixed(5)} `
+    + `against a measured total of ${T.m.toFixed(5)}. The three terms are not being read off the same walk.`);
 }
 if (Math.abs(T.m - 1) > TOL_TOTAL) {
   failed.push(`THE COHORT IS NOT A MARTINGALE: sum(terminal)/sum(drawn) = ${T.m.toFixed(5)}, drift `
     + `${((T.m - 1) * 100).toFixed(3)}% against a ${TOL_TOTAL * 100}% tolerance. Re-solve `
     + `CLAIM_SETTLEMENT_FACTOR.nonZeroScale as 1 / (persistence x shape mean) = `
-    + `${(1 / (P.m * settlementFactorMean(1))).toFixed(6)}; do not widen the tolerance.`);
+    + `${(CLAIM_SETTLEMENT_FACTOR.nonZeroScale / T.m).toFixed(6)}; do not widen the tolerance.`);
 }
 
 // ---------------------------------------------------------------- control arm
@@ -224,6 +242,122 @@ if (Math.abs(offScale - 1) <= TOL_TOTAL) {
   failed.push('CONTROL: the total reads within tolerance even with the settlement level left at its FITTED value, '
     + 'whose mean is 0.808. The statistic is therefore not sensitive to the level it is supposed to be solving, '
     + 'and the martingale assertion above proves nothing.');
+}
+
+// ============================================================================
+// THE ENGINE ARM — EXACT, NOT STATISTICAL, AND IT IS THE ONE THAT WOULD HAVE
+// CAUGHT THE DEFECT THIS FILE WAS BLIND TO.
+//
+// Everything above walks the LAW. Until this commit the ENGINE never called
+// settlementFactor at all — it had no caller in src/ outside claimRevision.ts —
+// so every number above could be perfect while a claim that pierced the
+// retention and settled at 0.74x handed nothing back in an actual game.
+//
+// ⚠ THIS ARM IS EXACT BECAUSE A STATISTICAL ONE IS NOT AFFORDABLE, AND THAT WAS
+// MEASURED RATHER THAN ASSUMED. Running the engine paired — same register, same
+// instanceId, settlement off against on — gives a settlement quotient with a
+// standard error of 0.017 on WC, 0.034 on GL and 0.036 on Property at 6
+// registers x 4 ids x 25 years (18 seconds). The arms diverge in which claims
+// they track and in what the tower takes, so pairing does not collapse it.
+// Reaching the 1% the decomposition is held to would need roughly 50x that on
+// WC and 500x on GL — half an hour to three hours, for a weaker statement than
+// the one below.
+//
+// SO IT ASSERTS THE WIRING INSTEAD, AND ASSERTS IT EXACTLY. The pre-game runs
+// with settlement OFF on both arms, so the two are bit-identical entering year
+// 1. One year is then processed with the step off and on. Every occurrence that
+// closed at that valuation must satisfy
+//
+//     current_on  ===  current_off x settlementFactor(gameId, claimId)
+//
+// to float tolerance, and every occurrence that did not close must be untouched.
+// That is the implementation matching the design claim by claim, with no
+// interval and nothing to size.
+// ============================================================================
+console.log('--- ENGINE ARM: the engine applies the factor, claim by claim ---');
+{
+  const LINES: CoverageLine[] = ['WC', 'GL', 'Property'];
+  const id = 'MECENG', seed = 61_000_000;
+  const wasEnabled = PER_CLAIM_REVISION.enabled, wasSettle = PER_CLAIM_REVISION.settlement;
+
+  /** Registers after ONE played year, keyed line -> claimId. */
+  const run = (settlement: boolean) => {
+    PER_CLAIM_REVISION.enabled = true;
+    PER_CLAIM_REVISION.settlement = false;          // pre-game identical on both arms
+    const inst = generateGameInstance(id, seed);
+    const setup = { poolName: 'R', gameLength: 10, startingYear: 2026, instanceId: id, activeLines: LINES };
+    const { poolState, priorHistory } = runPriorHistory(inst, setup as never);
+    const gs = {
+      setup: setup as never, instance: inst, currentYearNumber: 1, isStarted: true, isComplete: false,
+      poolState, lockedResults: [], currentDecisions: defaultDecisionSet(1), priorHistory,
+    } as GameState;
+    // ⚠ WHAT WAS ALREADY CLOSED ENTERING YEAR 1 TAKES NO SETTLEMENT, and the
+    // first cut of this arm did not exclude them. The pre-game closes files of
+    // its own; those settled (or, with the step off on both arms here, did not)
+    // at the valuation they closed and must not settle again. Reading `closed`
+    // off the year-1 register alone conflates "closed this valuation" with
+    // "closed at some point", and the arm reported 26 of 50 mismatches against
+    // an engine that was behaving correctly.
+    const preClosed = new Set<string>();
+    for (const l of LINES) {
+      for (const c of poolState.lines[l].reserveCohorts) {
+        for (const d of c.developingClaims ?? []) if (d.closed === true) preClosed.add(`${l}|${d.claimId}`);
+      }
+    }
+    PER_CLAIM_REVISION.settlement = settlement;     // the ONLY difference
+    const p = processYear(gs, defaultDecisionSet(1));
+    const out = new Map<string, { current: number; closed: boolean }>();
+    for (const l of LINES) {
+      for (const c of p.updatedPoolState.lines[l].reserveCohorts) {
+        for (const d of c.developingClaims ?? []) {
+          const key = `${l}|${d.claimId}`;
+          out.set(key, { current: d.current, closed: d.closed === true && !preClosed.has(key) });
+        }
+      }
+    }
+    return out;
+  };
+
+  let offReg: Map<string, { current: number; closed: boolean }>;
+  let onReg: Map<string, { current: number; closed: boolean }>;
+  try { offReg = run(false); onReg = run(true); }
+  finally { PER_CLAIM_REVISION.enabled = wasEnabled; PER_CLAIM_REVISION.settlement = wasSettle; }
+  if (PER_CLAIM_REVISION.enabled !== wasEnabled || PER_CLAIM_REVISION.settlement !== wasSettle) {
+    failed.push('ENGINE ARM: PER_CLAIM_REVISION was not restored. This arm mutates it and must put it back.');
+  }
+
+  let settled = 0, matched = 0, openMoved = 0, worst = 0;
+  for (const [key, on] of onReg) {
+    const off = offReg.get(key);
+    if (!off) continue;
+    const claimId = key.slice(key.indexOf('|') + 1);
+    if (on.closed) {
+      const expected = off.current * settlementFactor(id, claimId);
+      settled++;
+      const err = Math.abs(on.current - expected) / Math.max(1, Math.abs(off.current));
+      worst = Math.max(worst, err);
+      if (err < 1e-9) matched++;
+    } else if (Math.abs(on.current - off.current) > 1e-6) {
+      openMoved++;
+    }
+  }
+  console.log(`  occurrences closing at the first played valuation: ${settled}`);
+  console.log(`  of those, current_on === current_off x settlementFactor: ${matched}   worst relative error ${worst.toExponential(2)}`);
+  console.log(`  still-open occurrences whose value differs between the arms: ${openMoved}  (must be 0)`);
+
+  if (settled === 0) {
+    failed.push('ENGINE ARM: no occurrence closed at the first played valuation, so this arm asserted nothing. '
+      + 'That is a sample problem, not a pass — pick a seed where the closure curves retire something in year 1.');
+  }
+  if (settled > 0 && matched !== settled) {
+    failed.push(`ENGINE ARM: ${settled - matched} of ${settled} closing occurrences do not equal their pre-settlement `
+      + 'value times settlementFactor(gameId, claimId). The engine is not applying the settlement step the law defines — '
+      + 'which is exactly the state this repo shipped in until the settlement block was wired into processIbner.');
+  }
+  if (openMoved > 0) {
+    failed.push(`ENGINE ARM: ${openMoved} occurrences that did NOT close differ between the two arms. The settlement `
+      + 'step is reaching files it must not touch; it fires once, at the valuation a claim closes.');
+  }
 }
 
 console.log('');

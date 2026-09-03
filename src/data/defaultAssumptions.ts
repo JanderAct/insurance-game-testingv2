@@ -2053,6 +2053,18 @@ export const CLAIM_REVISION_MAGNITUDE_NUMERATOR = 2.00;
 // movement of 110% of cohort incurred cannot be a statement about proportional
 // revision, because the value sits in the bands that move LEAST.
 //
+// ⚠ ALL THREE LINES RUN THIS EXPONENT, AND IT IS GL'S. There is no per-line
+// size trend — this is a bare object, not a Record keyed by line, and nothing
+// in src/ or scripts/ indexes it by line. The same is true of
+// CLAIM_REVISION_FREQUENCY: q = 0.70 is one scalar for every claim on every
+// line. So the plan's domain read that "Property revision probability falls
+// steeply with claim size" reached the code in NEITHER form — not as a Property
+// slope on the magnitude, and not at all as a size-conditional FREQUENCY, which
+// the model does not have anywhere. That is the explanation for Property's
+// cession rising furthest under the law, and it is a separate commit: giving
+// Property its own slope is a re-fit, and adding a size-conditional frequency
+// is a new mechanism. Recorded here so the next reader does not re-derive it.
+//
 // ⚠ NOTHING TESTS THIS WHERE IT DOES ITS WORK, and that gap is real and stays
 // open. composition-table-check validates the AGE curve on a count basis, and
 // its only sensitivity to this constant is a floor asserting it does NOT bind.
@@ -2121,6 +2133,28 @@ export const CLAIM_REVISION_FREQUENCY = 0.70;
 // So `nonZeroScale` is a SOLVED number, not a fitted one, and martingale-
 // equivalence-check is what falsifies it. The measured shape is preserved
 // exactly: the zero mass and the log-spread are fixed, only the level moves.
+//
+// ⚠ IT IS WIRED INTO THE ENGINE AS OF THIS COMMIT, AND FOR TWO COMMITS IT WAS
+// NOT. settlementFactor had no caller in src/ outside claimRevision.ts: the
+// engine routed processIbner through reviseDevelopingSet and nothing else, so a
+// claim that pierced the retention and settled at 0.74x handed nothing back.
+// The gate could not see it — it paired a MEASURED persistence term with this
+// CLOSED-FORM mean, and a closed form cannot disagree with an implementation.
+// Both terms are now measured, and the gate carries an ENGINE ARM that asserts
+// current_on === current_off x settlementFactor claim by claim, exactly, at the
+// valuation each claim closes. Verified to fail: un-wiring the engine block
+// turns that arm red 24 of 24 while leaving every statistical term green.
+//
+// ⚠ AND IT DOES NOT REDUCE CESSION, WHICH IS THE OPPOSITE OF WHAT IT WAS
+// EXPECTED TO DO. Settlement was reasoned about as the FAVOURABLE force — a
+// claim above the retention settling low hands the layer back. It does hand
+// back on the downside, but cession is CONVEX in occurrence size and this
+// factor is a large mean-neutral dispersion (19% at zero against a p90 of
+// 1.60) applied to every claim at closure. By Jensen the up-tail cedes more
+// than the down-tail returns. Measured, 200 games, flag ON against OFF: total
+// expected recovery per line-year moves 1.16x on WC, 1.02x on GL and 1.20x on
+// Property WITH settlement, against 1.07 / 1.01 / 1.01 without it. Wiring the
+// favourable force made the tower respond MORE.
 export const CLAIM_SETTLEMENT_FACTOR = {
   zeroProbability: 0.19,
   /** Log-sigma of the non-zero part, from the median/p90 pair. FITTED. */
@@ -2397,12 +2431,36 @@ export const CLAIM_OPEN_SHARE_MODEL_RECORDED: readonly number[] = [0.901, 0.794,
 //   flag off                       bit-identical to the parent on both
 //                                  standing gates
 //
+// ⚠ ONE BLOCKER, FOUND WHILE WIRING THE SETTLEMENT STEP: THE PER-CLAIM PATH CAN
+// DRIVE A COHORT'S NET RESERVE NEGATIVE. `newUnpaid += res.retained` sums
+// CLAIM-level deltas and nothing bounds that sum by the cohort's own remaining
+// reserve, so a register that settles or improves below what the cohort has
+// already paid leaves a negative balance. Measured over 40 games x 15 years:
+// 0.00% of cohort-valuations with the flag off, 4.03% with the flag on and the
+// settlement step suppressed (worst -$17.1M), 7.88% with it live (worst
+// -$35.3M). It arrived with the Stage 1 wiring at 42b2c2b; settlement roughly
+// doubles it. ibner-null-check cannot see it — that gate runs flag-off, where
+// the count is genuinely zero, and simulationEngine's floors note still says the
+// crossing is "unreachable", which is true only of the cohort path.
+// DO NOT CLAMP IT. A floor on the reserve is precisely the Stage 0 defect that
+// note records: it truncates favourable movement one-sidedly and breaks the
+// martingale. THE FLAG MUST NOT FLIP UNTIL THIS IS RESOLVED.
+//
 // WHAT IS STILL OPEN AND IS NOT CALIBRATION: the size trend is untested where
 // it does its work (see its own note and composition-table-check's head), and
 // the law's cohort total is unbudgeted against the retired constants — recorded
 // below, and a cost for the flip to own rather than a question for Stage 1.
+//
+// ⚠ `settlement` IS A SECOND ARM, NOT A SECOND FEATURE, AND IT SHIPS TRUE.
+// It exists so martingale-equivalence-check can run the engine with the
+// settlement step suppressed and read the PERSISTENCE term on its own, then run
+// it again with the step live and read the TOTAL. The settlement factor is
+// hash-derived and consumes no RNG stream, so the two runs are identical in
+// every other respect — a perfect pairing, and the only way to decompose the
+// martingale from the engine rather than from a closed form. It has no effect
+// whatever while `enabled` is false, because the settlement block never runs.
 // ============================================================================
-export const PER_CLAIM_REVISION = { enabled: false };
+export const PER_CLAIM_REVISION = { enabled: false, settlement: true };
 // ===========================================================================
 // ⚠ ALL FOUR STAGE 1 GATES NOW EXIST. This note recorded two as unbuilt and
 // said the flag must not be flipped until both did; both do, and the record of

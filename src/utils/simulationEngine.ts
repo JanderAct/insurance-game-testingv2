@@ -31,7 +31,7 @@ import {
   allocateDevelopment, buildTrackedSet, cedeDevelopment, markDownForBooking, reselectDevelopingSet,
 } from './developmentAllocation';
 import { isClaimClosed } from './claimClosure';
-import { reviseDevelopingSet } from './claimRevision';
+import { reviseDevelopingSet, settlementFactor } from './claimRevision';
 import { poolYearFactor, wcGenerationInputs, glGenerationInputs, propertyGenerationInputs } from './claimGeneration';
 import {
   aggregateRecovery,
@@ -3351,6 +3351,107 @@ function processIbner(
           grossMovement += newUnpaid - grossBefore;
         }
       }
+
+      // ============================================================================
+      // SETTLEMENT — THE ADJUSTER'S FINAL RESOLUTION, AT THE VALUATION A CLAIM
+      // CLOSES. STAGE 1, AND IT RUNS ONLY WHEN THE FLAG IS ON.
+      //
+      // ⚠ THIS BLOCK IS WHY THE THREE FORCES ARE NOW THREE. Stage 2 measured
+      // cession on a path that had no settlement in it at all: settlementFactor
+      // had no caller in src/, so a claim that pierced the retention and then
+      // settled at 0.74x never handed the layer back. That is the FAVOURABLE
+      // force, and every Stage 2 number was taken without it.
+      //
+      // ⚠ IT SITS OUTSIDE `if (developing)` DELIBERATELY, AND THAT IS NOT TIDINESS.
+      // Cohorts mature at IBNER_HORIZON (12 / 8 / 4) while closure curves run to
+      // age 40, so a large share of every line's value closes AFTER its cohort
+      // has stopped developing. Scoped to the developing window this would settle
+      // only the claims that happen to close early, leave the rest carrying an
+      // unresolved estimate for ever, and deliver a fraction of the offset the
+      // level was solved for. Reselection already refreshes `closed` on matured
+      // cohorts for exactly this reason — see its note.
+      //
+      // ⚠ AND IT RUNS AFTER THE UNWIND, NOT BEFORE. The unwind is the reversal of
+      // an optimistic booking markdown and reaches closed occurrences too; the
+      // settlement is the resolution of whatever the file is carrying once that
+      // reversal has landed. Settling first would resolve against a marked-down
+      // value and then un-mark-down a settled claim.
+      //
+      // ⚠ "CLOSES AT ZERO" MEANS FINAL INCURRED EQUALS PAID TO DATE, AND THAT IS
+      // COHERENT ONLY BECAUSE OF STAGE 0's CLOSURE-AWARE SPLIT (3ee8ba8). Paid is
+      // not accumulated per claim — claimPaidSplit re-derives it every valuation
+      // from the register's CURRENT values, closed files first. So a claim whose
+      // factor is 0 simply carries nothing and takes no share of the cohort's
+      // paid; the cohort's paid total is the payout pattern's and redistributes
+      // to the files still open. Under a per-claim accumulated paid ledger the
+      // same event would drive incurred below paid and the identity would break.
+      //
+      // ⚠ THIS BLOCK MAKES A STANDING CLAIM IN THIS FILE FALSE, AND THE CLAIM WAS
+      // ALREADY FALSE BEFORE IT. See the floors note below: "Developing the
+      // reserve directly removes the crossing entirely... a lognormal factor on a
+      // positive balance stays positive", and ibner-null-check asserts the
+      // floored count is exactly 0. That is TRUE of the cohort path and NOT true
+      // of the per-claim path, because `newUnpaid += res.retained` takes a sum of
+      // CLAIM-level deltas that nothing bounds by the cohort's own remaining
+      // reserve. Measured, 40 games x 15 years, share of cohort-valuations
+      // carrying a NEGATIVE net reserve:
+      //
+      //   flag off (ships today)        0.00%    worst 0
+      //   flag on, settlement off       4.03%    worst -$17.1M
+      //   flag on, settlement on        7.88%    worst -$35.3M
+      //
+      // So it arrived with the Stage 1 wiring at 42b2c2b and this block roughly
+      // doubles it. NOT FIXED HERE, and deliberately: a floor is what the Stage 0
+      // note above records as the original defect — it truncates favourable
+      // movement one-sidedly and breaks the martingale — so the fix is a design
+      // question, not a clamp. It is a BLOCKER for the flip and is recorded as one
+      // at PER_CLAIM_REVISION. ibner-null-check cannot see it because it runs with
+      // the flag off, where the count is genuinely zero.
+      //
+      // ⚠ THE UNTRACKED MASS TAKES NO SETTLEMENT, AND THE BOUNDARY IS
+      // SELF-CONSISTENT rather than merely inherited. It takes no per-claim
+      // revision either, so it carries NO persistence drift — and the settlement
+      // level exists precisely to pay that drift back. A mass with no drift needs
+      // no offset. The two boundaries line up, which is why this one does not
+      // leave a residual the way an arbitrary split would.
+      // ============================================================================
+      if (PER_CLAIM_REVISION.enabled && PER_CLAIM_REVISION.settlement
+        && DEVELOPMENT_CESSION_ENABLED && developingClaimsOut && developingClaimsOut.length > 0) {
+        // Newly closed = closed now, not closed at the last valuation. Closure is
+        // monotone (see reselectDevelopingSet), so this fires exactly once per
+        // claim over its whole life without storing a "settled" flag.
+        const wasClosed = new Set<string>();
+        for (const d of c.developingClaims ?? []) if (d.closed === true) wasClosed.add(d.claimId);
+        const settling = developingClaimsOut.map(d => d.closed === true && !wasClosed.has(d.claimId));
+        if (settling.some(Boolean)) {
+          const settlePlaced = c.placedAtInception ?? normalizeLayersPlaced(line as TowerLine, undefined);
+          const before = developingClaimsOut.map(d => d.current);
+          const deltas = developingClaimsOut.map((d, i) => (
+            settling[i] ? d.current * (settlementFactor(gameId, d.claimId) - 1) : 0
+          ));
+          // Through cedeDevelopment like any other movement, so the tower sees a
+          // settlement exactly as it sees a deterioration: same convex function,
+          // same layers, opposite sign. That is what makes the give-back real
+          // rather than a net-side adjustment the reinsurer never participates in.
+          const res = cedeDevelopment(line as TowerLine, developingClaimsOut, deltas, 0, settlePlaced);
+          cededToDate += res.ceded;
+          developmentCeded += res.ceded;
+          newUnpaid += res.retained;
+          grossMovement += res.retained + res.ceded;
+          developingClaimsOut = res.moved.map((d, i) => {
+            const moved = d.current - before[i];
+            if (moved === 0) return d;
+            // Into THIS valuation's entry, added to whatever the development step
+            // already wrote there — one entry per valuation, the convention the
+            // development write-back above sets and claims-workbook-check asserts.
+            const series = [...(d.movementByStep ?? [])];
+            while (series.length < c.age) series.push(0);
+            series[c.age] = (series[c.age] ?? 0) + moved;
+            return { ...d, movementByStep: series };
+          });
+        }
+      }
+
       // The register's movement lands on the gross ledger's unpaid balance, the
       // same way the retained part lands on the net one above — then floored,
       // for the reason set out where cGrossUnpaid is read.
