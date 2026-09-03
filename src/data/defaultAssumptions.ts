@@ -2039,6 +2039,26 @@ export const CLAIM_REVISION_MAGNITUDE_NUMERATOR = 2.00;
 // free-lunch shape: a claim a dollar under the boundary and one a dollar over
 // develop at different rates, so the cession a player receives jumps at a
 // threshold they can see. A continuous power law has no such edge anywhere.
+//
+// ⚠ THE EXPONENT SURVIVED A CHALLENGE AND THE CHALLENGE IS WORTH RECORDING.
+// The suspicion was that -0.2891 is a COUNT-BASIS ARTEFACT — fitted where small
+// claims dominate the count, and therefore not a statement about the value the
+// pool actually carries. It is not. On a value-weighted basis the pool's two
+// largest size bands differ by a factor of 2.76, against the 2.8 this exponent
+// predicts for the same pair. Large claims genuinely revise about a third as
+// much proportionally as mid-size ones, and the exponent is a value-basis fact.
+//
+// ⚠ AND THAT IS WHAT CLOSED THE MOVEMENT TARGET — see
+// CLAIM_MOVEMENT_BY_AGE_TARGET. Once the exponent is real, a value-weighted
+// movement of 110% of cohort incurred cannot be a statement about proportional
+// revision, because the value sits in the bands that move LEAST.
+//
+// ⚠ NOTHING TESTS THIS WHERE IT DOES ITS WORK, and that gap is real and stays
+// open. composition-table-check validates the AGE curve on a count basis, and
+// its only sensitivity to this constant is a floor asserting it does NOT bind.
+// At GL model age 1 the size trend binds on 14.3% of claims by COUNT and 95.9%
+// by VALUE, so the gate and this constant do not meet. The measured cost of
+// closing the gap is recorded at that gate's head.
 export const CLAIM_REVISION_SIZE_TREND = { scale: 20.12, exponent: -0.2891 };
 
 // ⚠ COMBINE BY THE SMALLER OF THE TWO, NOT THE PRODUCT — MEASURED.
@@ -2224,6 +2244,69 @@ export const CLAIM_SETTLED_LOG_SD_ANCHOR = 2.29;
 // the model has no analogue for. So MODEL age = DATA age - 1 and the five
 // figures below are model ages 1 through 5. Data age 7+ is noise and is not a
 // target.
+//
+// ============================================================================
+// ⚠ CLOSED, NOT DEFERRED: THIS SERIES IS NOT A TARGET THE MODEL CAN MATCH, AND
+// NONE OF THE THREE REASONS IS A DEFECT IN THE LAW.
+//
+// The model realises 11.1% at model age 1 against this series' 110%. That gap
+// was chased for three commits as if it were one number with one cause. It is
+// three basis mismatches, and once each is named the residual is not a defect.
+// The series stays in the file as the RECORD of what the pool did; it is no
+// longer something the law is expected to reproduce, and no phi, no
+// re-parameterisation and no re-fit will make it reproduce it.
+//
+// 1. SURVIVORSHIP — STRUCTURAL AND UNCLOSABLE.
+//    The series is measured on claims OPEN at the earlier valuation, and in the
+//    pool that subset is systematically adverse: it grows 1.30x to 1.49x a year
+//    while the whole cohort grows 1.09x to 1.11x. Cheap claims close, so the
+//    survivors are the ones that grew.
+//    THE MODEL CANNOT HAVE THIS. Closure resolves from the DRAWN value and its
+//    unit hashes (gameId, claimId) — see simulationEngine's isClaimClosed call
+//    site — so staying open is size-correlated and GROWTH-INDEPENDENT. Measured
+//    across three lines, six age steps, with and without the settlement factor,
+//    the model's open subset grows 0.97x to 1.01x. It is mean-one to within
+//    half a percent because it was built to be.
+//    ⚠ THE SIZE OF THIS: at GL ages 1-3 the target's PURE DRIFT COMPONENT alone
+//    exceeds the model's entire realised movement — 0.355 / 0.237 / 0.177 of
+//    cohort incurred against the model's whole 0.111 / 0.093 / 0.076. No
+//    dispersion argument is needed to see the two are different quantities.
+//    Closing it would mean making closure depend on the revision path, which
+//    claimClosure.ts prohibits for unrelated and stronger reasons.
+//
+// 2. DENOMINATOR — MECHANICAL, WORTH x0.756 OR BETTER.
+//    The series divides by the pool's BOOKED INCURRED at that valuation. The
+//    model divides by the sum of DRAWN grossUltimate — see composition-table-
+//    check's `total`. In the model those are the same object: the register is
+//    drawn AT ultimate and the law is mean-one, so measured booked(age)/drawn
+//    runs 1.000 to 1.009. In the pool they are not: its cohort incurred grows
+//    9-11% a year, so an early valuation's denominator is materially below
+//    ultimate. Over the three measured steps that is x1.322, so restating this
+//    series onto the model's denominator multiplies it by at most 0.756 —
+//    less if development continues past the measured window.
+//
+// 3. NUMERATOR COMPOSITION — THE 110% IS A TAIL STATEMENT, NOT A MAGNITUDE ONE.
+//    Value-weighted movement within size band falls by two orders of magnitude
+//    from the smallest band to the largest, and the small bands dominate the
+//    numerator. A claim under $10k moves many times its own incurred: that is
+//    near-zero reserves becoming real claims — the placeholder phenomenon
+//    already excluded at data age 1 (see CLAIM_REVISION_MAGNITUDE_NUMERATOR),
+//    reappearing at every age in the small bands. THE MODEL HAS NO PLACEHOLDER
+//    STAGE BY DESIGN: a $500 drawn claim is a $500 claim, and the severity draw
+//    delivers it already valued. The two largest bands, where the model and the
+//    pool are describing the same thing, agree — see the exponent's own
+//    validation at CLAIM_REVISION_SIZE_TREND.
+//
+// ⚠ AND THE CEILING FINDING WEAKENED ONCE (2) WAS APPLIED. This is worth
+// keeping because it is the reason the RESERVE BASIS is not the constraint.
+// E[f] = 1 with f >= 0 gives E|f-1| <= 2, so movement/incurred can never exceed
+// 2 x openShare x headroom x q for ANY mean-one factor on the reserve. Against
+// that ceiling this series sat at 91 / 76 / 86 / 76 / 81% — close enough to a
+// degenerate limit to read as an impossibility proof, and it was reported as
+// one. Restated onto the model's denominator it sits at 69 / 57 / 65 / 58 /
+// 61%, and with (1)'s drift removed the dispersion the model must supply is
+// about 41% of the ceiling at age 1. The reserve basis has room. It only looked
+// incapable because it was being compared against an unrestated statistic.
 export const CLAIM_MOVEMENT_BY_AGE_TARGET: readonly number[] = [1.10, 0.65, 0.42, 0.17, 0.06];
 
 // ⚠ RETRACTED AT THIS COMMIT — THIS IS THE MODEL'S OWN READING, NOT SOURCE DATA.
@@ -2293,20 +2376,49 @@ export const CLAIM_OPEN_SHARE_MODEL_RECORDED: readonly number[] = [0.901, 0.794,
 //
 // ⚠ MUTATE IT ONLY IN A GATE, AND PUT IT BACK. The shipped value is false and
 // nothing in src/ writes to it.
+//
+// ============================================================================
+// ⚠ STAGE 1'S CALIBRATION IS CLOSED. NOT DEFERRED — CLOSED.
+//
+// The movement-by-age target is the last item and it resolved as NOT MATCHABLE,
+// for three basis reasons none of which is a defect in the law. The full record
+// is at CLAIM_MOVEMENT_BY_AGE_TARGET; the short form is survivorship the model
+// cannot have by construction, a denominator worth x0.756, and a numerator
+// dominated by a placeholder phenomenon the model does not model by design.
+// Anyone reopening it should read that note before measuring anything.
+//
+// WHAT HOLDS, AND THESE ARE WHAT FEED THE GAME:
+//   terminal severity              2.29, the external anchor, phi solved to it
+//   emergent cohort SD             0.81 / 1.12 / 0.93 of the retired constants
+//   martingale                     passes, persistence and settlement
+//                                  decomposed separately
+//   pre-game acceptance            unmoved on all three lines, no fallbacks
+//   sign persistence               gated, with its rho = 0 control arm
+//   flag off                       bit-identical to the parent on both
+//                                  standing gates
+//
+// WHAT IS STILL OPEN AND IS NOT CALIBRATION: the size trend is untested where
+// it does its work (see its own note and composition-table-check's head), and
+// the law's cohort total is unbudgeted against the retired constants — recorded
+// below, and a cost for the flip to own rather than a question for Stage 1.
+// ============================================================================
 export const PER_CLAIM_REVISION = { enabled: false };
 // ===========================================================================
-// ⚠ TWO OF THE FOUR STAGE 1 GATES ARE NOT BUILT, AND NEITHER IS AN OVERSIGHT.
-// Recorded here rather than only in a commit message, because the flag must not
-// be flipped until both exist.
+// ⚠ ALL FOUR STAGE 1 GATES NOW EXIST. This note recorded two as unbuilt and
+// said the flag must not be flipped until both did; both do, and the record of
+// WHY each was blocked is kept because each blocker was a real one.
 //
-// THE COMPOSITION TABLE — 200/(age+1) times the open share against the pool's
-//   measured movement-by-age series. BLOCKED ON THE TARGET, not on the code.
-//   The model half is a few lines; the series it has to reproduce is source
-//   experience that is not in this repo and must not be (see the standing rule
-//   — the parameters ARE the record, the tables are not). Building the model
-//   half alone would be a `*-check` that prints a table and asserts nothing,
-//   which is precisely what the last two commits deleted two files for. Supply
-//   the target series and it becomes a real gate.
+// THE COMPOSITION TABLE — BUILT (composition-table-check, FAST). It was blocked
+//   on the target, not on the code: the series it reproduces is source
+//   experience that must stay out of this repo (the standing rule — the
+//   parameters ARE the record, the tables are not), and building the model half
+//   alone would have been a `*-check` that prints a table and asserts nothing.
+//   The target was supplied and it became a real gate.
+//   ⚠ AND WHAT IT ASSERTS IS NARROWER THAN ITS NAME. It validates the AGE curve
+//   on a COUNT basis. It does not reach the size trend, and the movement target
+//   it was built against has since been closed as unmatchable — see
+//   CLAIM_MOVEMENT_BY_AGE_TARGET. The gate is still correct and still worth
+//   running; it is the SCOPE that a reader must not over-read.
 //
 // PRE-GAME ACCEPTANCE — BUILT AT THE WIRING COMMIT (pregame-acceptance-check).
 //   It could not exist before: the search calls processYear, which developed
@@ -2361,20 +2473,40 @@ export const PER_CLAIM_REVISION = { enabled: false };
 // opening surplus ratio is set by premium and loss LEVEL rather than by cohort
 // development tails. The band met the widening and survived it.
 //
-// ⚠ THE OPEN ITEM AFTER THE WIRING, RECORDED SO IT IS NOT RE-DISCOVERED. With
-// the composition table's ages aligned (see the retraction at
-// CLAIM_OPEN_SHARE_MODEL_RECORDED), the composition tracks as briefed:
-// count-weighted magnitude x leaving open share gives 84 / 50 / 30 / 17 / 8
-// against the target's 110 / 65 / 42 / 17 / 6, about a quarter low at ages 1-3
-// and on target after.
+// ⚠ THE 84%-VERSUS-9.8% ITEM IS CLOSED. Its answer is at
+// CLAIM_MOVEMENT_BY_AGE_TARGET and it is that the target is not a target. What
+// follows is what the chase established, kept because each step was wrong in a
+// way a future reader could repeat.
 //
-// WHAT DOES NOT TRACK is the law's REALISED movement against that composition —
-// 9.8% at age 1 against the composition's 84%. The composition is a statement
-// about the law's PARAMETERS; the realised movement is what the law does. Between
-// them sit the frequency q = 0.70, phi = 0.63, the fact that E|X-1| for a mean-one
-// lognormal sits below its log-sigma, and count-versus-value weighting. That
-// stack is the next question after the engine wiring, and it is NOT the closure
-// curves — that diagnosis was the retracted one.
+// THE COMPOSITION AND THE TARGET NEVER MET. With the ages aligned (see the
+// retraction at CLAIM_OPEN_SHARE_MODEL_RECORDED) the composition tracks as
+// briefed — count-weighted magnitude x leaving open share gives 84 / 50 / 30 /
+// 17 / 8 against 110 / 65 / 42 / 17 / 6 — and that agreement carried no
+// information about the target, because the two constrain DISJOINT HALVES of
+// the min(age, size) combine. At GL model age 1 the size trend binds on 14.3%
+// of claims by count and 95.9% by value: the count-weighted composition is
+// measuring the AGE CURVE with the size trend inactive, and the value-weighted
+// target is measuring the SIZE TREND with the age curve inactive. A gate that
+// validates one says nothing about the other.
+//
+// THE DECOMPOSITION, WHICH CLOSES EXACTLY. Composed 0.829 to realised 0.111 at
+// GL age 1 is four multiplicative terms and the ladder reproduces the realised
+// figure to three decimals at every age on every line:
+//   weighting basis, count against value   /2.88   53% of the log gap
+//   phi = 0.63                             /1.59   23%
+//   q = 0.70                               /1.43   18%
+//   E|f-1| / s = 0.799                     /1.25   11%
+//   open-share timing                      x1.10   -5%
+// phi and q are not defects — they are terms the composition never contained.
+//
+// ⚠ AND THE MEAN-ONE CORRECTION WAS THE SMALLEST TERM, WHICH REFUTED THE
+// HYPOTHESIS IT WAS BUILT TO TEST. exp(-s^2/2) was the natural suspect: one
+// parameter doing two jobs, a median that collapses as s grows. It accounts for
+// 11% of the gap and, at the ages the target lives on, essentially none of it —
+// E|X-1|/s tends to sqrt(2/pi) = 0.798 for ANY log-symmetric factor as s -> 0,
+// and GL age 1 measures 0.799. The correction only bites where s is large,
+// which on GL is age 5 (0.763) and on Property is age 5 (0.258). It is a real
+// property of the factor and it is not the movement gap.
 //
 // ⚠ AND THE SECOND OPEN ITEM, WHICH IS LARGER THAN THE FIRST: THE LAW'S COHORT
 // TOTAL IS UNBUDGETED. Measured on IBNER_TOTAL_SD's own basis

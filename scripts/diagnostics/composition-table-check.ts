@@ -14,6 +14,60 @@
 // product are needed, and only ONE of them is the revision law's.
 //
 // ============================================================================
+// ⚠ WHAT THIS GATE ASSERTS IS NARROWER THAN ITS NAME, AND A READER HAS ALREADY
+// OVER-READ IT ONCE. IT VALIDATES THE AGE CURVE, ON A COUNT BASIS. Nothing here
+// reaches CLAIM_REVISION_SIZE_TREND.
+//
+// The law combines age and size by min(), and at GL model age 1 the size trend
+// binds on 14.3% of claims BY COUNT and 95.9% BY VALUE. Arm 1 is count-weighted,
+// so it measures the age curve with the size trend inactive on 86% of claims —
+// which is why realised magnitude reads 0.955 against an age cap of 1.000. The
+// ONLY sensitivity this file has to the size trend is LEVEL_FLOOR, and that is
+// an assertion that the size trend does NOT bind. The constant that carries 96%
+// of GL's value at that age has no assertion anywhere in the repo.
+//
+// ⚠ AND THE MOVEMENT-BY-AGE SERIES THIS GATE WAS BUILT AGAINST HAS SINCE BEEN
+// CLOSED AS UNMATCHABLE — three basis mismatches, recorded in full at
+// CLAIM_MOVEMENT_BY_AGE_TARGET. That does not weaken anything asserted below:
+// arm 1 holds the model to its own age curve and the control arm shows the age
+// curve is doing work. It does mean the composition's agreement with the series
+// was never evidence about the size trend, because the two constrain disjoint
+// halves of the min.
+//
+// ============================================================================
+// THE GAP THAT STAYS OPEN, AND ITS MEASURED COST SO THE DECISION IS PRICED.
+//
+// The test that WOULD reach the size trend is value-weighted movement BY SIZE
+// BAND, asserted as RATIOS between bands rather than levels. Ratios are the
+// right form: the three basis mismatches at CLAIM_MOVEMENT_BY_AGE_TARGET are
+// level effects, and a ratio between two adjacent bands cancels most of them.
+//
+// MEASURED COST, GL, ages 1-5 pooled, on this file's own register harness:
+//   24 registers x 6 replicates = 144 runs      2.6 seconds
+//   $100k-1M / >$1M ratio        2.153, relative SE 2.10%
+//   the exponent's own prediction for that pair 2.32
+//
+// SAMPLE: registers, not replicates. The >$1M band holds only about 28 claims
+// per register, so register-to-register mix variation dominates and the SE
+// falls as sqrt(registers) — 6 registers gives 4.0%, 24 gives 2.1%. At 2% a
+// +/-5% tolerance is 2.5 SE and separates the exponent's 2.32 from a
+// size-trend-free 1.00 by more than 25 SE.
+//
+// ⚠ BUT DECIDE WHAT IT ASSERTS AGAINST BEFORE BUILDING IT, BECAUSE THE TWO
+// CHOICES DO NOT BOTH PASS.
+//   AGAINST THE EXPONENT (2.32): passes today at 2.153, about 1 SE. This is an
+//     IMPLEMENTATION-FIDELITY gate — it catches the size trend losing its reach
+//     through a refactor, an age-cap change, or a register size-mix shift. It
+//     is cheap, it is green, and it closes the "no assertion anywhere" gap.
+//   AGAINST THE SOURCE (2.76): GOES RED TODAY, 2.153 against 2.76, about 7 SE.
+//     That is NOT a licence to ship it as a red gate. The source ratio is
+//     itself measured on an open subset carrying its own survivorship drift,
+//     and that drift differs by band — so the 22% shortfall is not yet
+//     attributable to the model. Restating the source's band ratios the way
+//     CLAIM_MOVEMENT_BY_AGE_TARGET restates the series is a prerequisite, and
+//     that needs another extract rather than more code.
+//
+// ============================================================================
 // ⚠ THIS FILE SHIPPED A FINDING THAT WAS AN ARITHMETIC ARTEFACT. RETRACTED HERE.
 //
 // b206cc6's header said the open-share term was source experience, that the
