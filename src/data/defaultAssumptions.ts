@@ -2446,6 +2446,39 @@ export const CLAIM_OPEN_SHARE_MODEL_RECORDED: readonly number[] = [0.901, 0.794,
 // note records: it truncates favourable movement one-sidedly and breaks the
 // martingale. THE FLAG MUST NOT FLIP UNTIL THIS IS RESOLVED.
 //
+// ⚠ THE MECHANISM IS NOW DIAGNOSED AND IT IS AN AGGREGATION DEFECT, NOT A HOLE
+// IN THE RESERVE BASIS. reviseDevelopingSet's call site scales each claim's
+// movement by a headroom taken from the PAYOUT PATTERN,
+// `cumulativePaid(LINE_PAYOUT_PATTERN[line], c.age + 1)`, while the cohort
+// balance those movements land on has been paid down along its own REALISED
+// path — and development moves the realised path off the curve. Median headroom
+// entering a step: 0.125 pattern against 0.003 realised on cohorts that end the
+// step negative, 0.136 against 0.143 on cohorts that do not. A 46x
+// overstatement of the balance available to move.
+//
+// THE CLAIM LEVEL IS SOUND. With settlement suppressed, 100% of negative-reserve
+// cohorts have every tracked claim carrying a positive value and 0% were floored
+// by cedeDevelopment — the per-claim reserve genuinely cannot go negative, which
+// is the whole basis argument and it holds. What is broken is that the cohort
+// balance is maintained in parallel with nothing tying it to the register.
+// The cohort path cannot do this because `newUnpaid *= factor` MULTIPLIES the
+// balance; the per-claim path ADDS deltas computed against a different base.
+//
+// AND IT IS THE SAME CROSSING STAGE 0 REMOVED, arriving by a different route:
+// cumulative netPaid FALLS on 8.9% of cohort year-over-year steps and 815
+// cohort-valuations carry an ultimate below their own paid-to-date.
+//
+// GATED, AND RED ON PURPOSE: cohort-ledger-check (FAST) asserts the three ledger
+// identities on BOTH arms and ships red on the flag-on one, so the fix turns it
+// green rather than being argued in a report. It exits 2 for this open item and
+// 1 for a flag-off regression, and gates.ts excuses only the 2 — see EXPECTED_RED
+// there, which also fails the sweep if the gate ever unexpectedly passes.
+//
+// THE FIX, NOT DONE HERE: the claim headroom becomes the cohort's realised
+// netUnpaid / netUltimate. It re-opens CLAIM_SETTLEMENT_FACTOR.nonZeroScale,
+// because the settlement level was solved on a whole-value basis and moving
+// settlement onto the reserve changes the offset it delivers.
+//
 // WHAT IS STILL OPEN AND IS NOT CALIBRATION: the size trend is untested where
 // it does its work (see its own note and composition-table-check's head), and
 // the law's cohort total is unbudgeted against the retired constants — recorded

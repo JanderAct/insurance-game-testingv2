@@ -40,7 +40,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIAG = path.join(__dirname, 'diagnostics');
 
 // ============================================================================
-// FAST — the tier that runs on every commit. 46 gates, about 10 minutes of CPU
+// FAST — the tier that runs on every commit. 47 gates, about 10 minutes of CPU
 // and a little over 2 minutes of wall clock at 3-way concurrency. Seconds are
 // measured, not estimated, on a 4-core box.
 //
@@ -96,6 +96,7 @@ const FAST: string[] = [
   'pregame-acceptance-check',        //  55s   STAGE 1 BLOCKER — the search must still accept on the shipped path
   'property-claim-check',            //   3s
   'ratio-basis-check',               //   7s
+  'cohort-ledger-check',             //  35s   ⚠ EXPECTED RED, exit 2 — see EXPECTED_RED below
   'reinsurance-tower-check',         //   2s   PROMOTED at this commit
   'revision-persistence-check',      //   8s   STAGE 1 — rho, read out of reviseDevelopingSet; ships its rho = 0 control
   'roster-catalog-check',            //   3s
@@ -428,8 +429,44 @@ function checkManifest(): string[] {
   for (const n of listed) {
     if (!onDisk.includes(n)) errs.push(`manifest names ${n}, which is not on disk`);
   }
+  for (const name of Object.keys(EXPECTED_RED)) {
+    if (!FAST.includes(name) && !SLOW.includes(name)) {
+      errs.push(`EXPECTED_RED names '${name}', which is in no tier. An expectation is not an exclusion — `
+        + 'the gate has to keep running for the expectation to mean anything.');
+    }
+  }
   return errs;
 }
+
+// ============================================================================
+// EXPECTED_RED — GATES THAT ARE LEGITIMATELY RED PENDING A NAMED OPEN ITEM.
+//
+// ⚠ THIS IS NEW AND IT IS DELIBERATELY NARROW. Every other red in this repo's
+// history has been a defect to chase or a check to correct. This category is for
+// the third case: a gate built BEFORE the fix it demands, so that the fix turns
+// it green and that is the proof, rather than a before-and-after in a report.
+//
+// ⚠ IT IS NOT AN EXCLUSION, AND THE DISTINCTION IS THE WHOLE REASON IT EXISTS.
+// cession-path-independence stayed red for five commits and panel-engine-parity
+// for sixty-two, both because nobody was looking. An entry here KEEPS the gate in
+// its tier, prints it on every routine run with the open item named beside it,
+// and — the load-bearing part — FAILS THE SWEEP IF THE GATE UNEXPECTEDLY PASSES.
+// An expectation cannot outlive the defect it describes.
+//
+// `code` is the EXACT exit code excused, and nothing else is. cohort-ledger-check
+// exits 2 for the known flag-on aggregation defect and 1 for a flag-off
+// regression, so excusing 2 leaves 1 a hard failure — a real regression on the
+// shipped path can never hide behind the expected redness.
+// ============================================================================
+const EXPECTED_RED: Record<string, { code: number; why: string }> = {
+  'cohort-ledger-check': {
+    code: 2,
+    why: 'flag-on cohort ledger crossing — the per-claim law scales movements by the payout '
+      + "pattern's headroom, not the cohort's realised one. Diagnosed at PER_CLAIM_REVISION; "
+      + 'the fix is the claim headroom becoming netUnpaid / netUltimate. Flag-off is clean and '
+      + 'exit 1 (a flag-off regression) is NOT excused.',
+  },
+};
 
 // ---------------------------------------------------------------- runner
 interface Result { name: string; code: number | null; ms: number; timedOut: boolean; tail: string }
@@ -466,7 +503,11 @@ async function pool(names: string[], jobs: number): Promise<Result[]> {
       const r = await run(n);
       results.push(r);
       const secs = (r.ms / 1000).toFixed(0).padStart(4);
-      const verdict = r.timedOut ? 'TIMEOUT' : r.code === 0 ? 'ok     ' : `FAIL ${r.code}`;
+      const xr = EXPECTED_RED[r.name];
+      const verdict = r.timedOut ? 'TIMEOUT'
+        : xr && r.code === xr.code ? 'xfail  '
+          : xr && r.code === 0 ? 'XPASS  '
+            : r.code === 0 ? 'ok     ' : `FAIL ${r.code}`;
       console.log(`  ${verdict}  ${secs}s  ${r.name}`);
     }
   });
@@ -507,7 +548,16 @@ const results = await pool(set, JOBS);
 // exited 1 for a whole commit because it threw. Under --probes a non-zero exit
 // means the script did not complete, which is worth the same red as a failed
 // assertion.
-const failed = results.filter(r => r.code !== 0);
+// ⚠ AN EXPECTED RED IS NOT A FAILURE AND AN UNEXPECTED PASS IS. `xfail` is the
+// gate doing exactly what its EXPECTED_RED entry says; `XPASS` means the open
+// item is gone and the entry is now a lie, which has to be as loud as a break.
+const failed = results.filter(r => {
+  const xr = EXPECTED_RED[r.name];
+  if (!xr) return r.code !== 0;
+  return r.code !== xr.code;
+});
+const xfailed = results.filter(r => EXPECTED_RED[r.name] && r.code === EXPECTED_RED[r.name].code);
+const xpassed = results.filter(r => EXPECTED_RED[r.name] && r.code === 0);
 
 console.log('');
 if (manifestErrors.length > 0) {
@@ -525,10 +575,25 @@ if (failed.length > 0) {
   console.log('');
 }
 
+if (xpassed.length > 0) {
+  console.log('--- UNEXPECTED PASS ---');
+  for (const r of xpassed) {
+    console.log(`  ${r.name} passed, but EXPECTED_RED says it should exit ${EXPECTED_RED[r.name].code}.`);
+    console.log('  The open item it was built for appears to be FIXED. Remove its EXPECTED_RED entry.');
+  }
+  console.log('');
+}
+
 const total = results.reduce((a, r) => a + r.ms, 0);
 const wall = Math.max(...results.map(r => r.ms));
-console.log(`${results.length - failed.length}/${results.length} green`
+console.log(`${results.length - failed.length - xfailed.length}/${results.length} green`
+  + (xfailed.length > 0 ? `, ${xfailed.length} expected red` : '')
   + `   cpu ${(total / 60000).toFixed(1)} min   slowest ${(wall / 1000).toFixed(0)}s`);
+// ⚠ PRINTED ON EVERY RUN, GREEN OR NOT. The point of the category is that the
+// redness stays in front of whoever runs the sweep.
+for (const r of xfailed) {
+  console.log(`EXPECTED RED: ${r.name} (exit ${r.code}) — ${EXPECTED_RED[r.name].why}`);
+}
 if (failed.length > 0) console.log(`RED: ${failed.map(f => f.name).join(', ')}`);
 if (manifestErrors.length > 0) console.log(`MANIFEST INCOMPLETE: ${manifestErrors.length} problem(s)`);
 
