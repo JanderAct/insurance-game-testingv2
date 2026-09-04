@@ -58,8 +58,17 @@ const CAP = 500;
 // The shipped path must not be limping. Today's search accepts in a handful of
 // attempts on every line, so these are loose bounds on a quantity that is
 // nowhere near them — they exist to catch a regression, not to grade the search.
-const MAX_MEAN_ATTEMPTS_OFF = 12;
-const MAX_P99_ATTEMPTS_OFF = 120;
+// ⚠ THE BOUNDS ARE NOT ARM-SPECIFIC AND THEIR NAMES NO LONGER SAY "OFF".
+// They were named _OFF when the flag was off and only the OFF arm was asserted.
+// At the flip that made this gate assert THE ARM THAT NO LONGER SHIPS while
+// merely reporting the one that does — the exact inversion a flip creates and
+// the reason a gate should not encode which arm is shipped. Both arms are now
+// asserted against the same bounds, so the next flip cannot invert it either.
+// The VALUES are unchanged, and nothing was retuned to make the ON arm fit:
+// measured at the flip, ON reads WC 2.70/10, GL 3.05/12, Property 4.12/19
+// against 12 and 120, with more room than the OFF arm had.
+const MAX_MEAN_ATTEMPTS = 12;
+const MAX_P99_ATTEMPTS = 120;
 
 const failed: string[] = [];
 const RULE = '='.repeat(72);
@@ -145,25 +154,27 @@ for (const line of LINES) {
 
 // ---------------------------------------------------------------- assertions
 console.log('');
-console.log('--- ASSERTED: the SHIPPED path only (the flag is off) ---');
+console.log('--- ASSERTED: BOTH ARMS, same bounds (the shipped arm is whichever the flag says) ---');
 for (const line of LINES) {
-  const a = off[line].attempts;
-  if (off[line].fallbacks > 0) {
-    failed.push(`${line} OFF: the search exhausted all ${CAP} attempts on ${off[line].fallbacks} of ${SEEDS} seeds `
-      + 'and shipped a closest-miss opening outside the band. On the SHIPPED path that must never happen — '
-      + 'a game that cannot generate its own past is a game that cannot start.');
-  }
-  if (mean(a) > MAX_MEAN_ATTEMPTS_OFF) {
-    failed.push(`${line} OFF: mean attempts ${mean(a).toFixed(2)} over the ${MAX_MEAN_ATTEMPTS_OFF} bound. `
-      + 'The search is running near the edge of its own proposal distribution — see opening-centring-check, '
-      + 'which measures the cause rather than the symptom.');
-  }
-  if (q(a, 0.99) > MAX_P99_ATTEMPTS_OFF) {
-    failed.push(`${line} OFF: p99 attempts ${q(a, 0.99)} over the ${MAX_P99_ATTEMPTS_OFF} bound — the tail is `
-      + `approaching the ${CAP} cap even though the mean looks healthy.`);
+  for (const [label, arm] of [['OFF', off[line]], ['ON', on[line]]] as const) {
+    const a = arm.attempts;
+    if (arm.fallbacks > 0) {
+      failed.push(`${line} ${label}: the search exhausted all ${CAP} attempts on ${arm.fallbacks} of ${SEEDS} seeds `
+        + 'and shipped a closest-miss opening outside the band. That must never happen on either arm — '
+        + 'a game that cannot generate its own past is a game that cannot start.');
+    }
+    if (mean(a) > MAX_MEAN_ATTEMPTS) {
+      failed.push(`${line} ${label}: mean attempts ${mean(a).toFixed(2)} over the ${MAX_MEAN_ATTEMPTS} bound. `
+        + 'The search is running near the edge of its own proposal distribution — see opening-centring-check, '
+        + 'which measures the cause rather than the symptom.');
+    }
+    if (q(a, 0.99) > MAX_P99_ATTEMPTS) {
+      failed.push(`${line} ${label}: p99 attempts ${q(a, 0.99)} over the ${MAX_P99_ATTEMPTS} bound — the tail is `
+        + `approaching the ${CAP} cap even though the mean looks healthy.`);
+    }
   }
 }
-console.log(`  no fallbacks on any line, mean under ${MAX_MEAN_ATTEMPTS_OFF}, p99 under ${MAX_P99_ATTEMPTS_OFF}`
+console.log(`  no fallbacks on either arm, mean under ${MAX_MEAN_ATTEMPTS}, p99 under ${MAX_P99_ATTEMPTS}`
   + `  ${failed.length === 0 ? '— holds' : '— SEE FAILURES'}`);
 
 // ---------------------------------------------------------------- the cost
@@ -188,8 +199,7 @@ if (failed.length > 0) {
   console.log(RULE);
   process.exitCode = 1;
 } else {
-  console.log('PRE-GAME ACCEPTANCE HOLDS ON THE SHIPPED PATH — every line accepts inside');
-  console.log('the cap with room, and no seed fell back to a closest-miss opening. The ON');
-  console.log('arm above is the flip\'s cost, reported and not gated.');
+  console.log('PRE-GAME ACCEPTANCE HOLDS ON BOTH ARMS — every line accepts inside the cap');
+  console.log('with room, and no seed fell back to a closest-miss opening on either arm.');
   console.log(RULE);
 }

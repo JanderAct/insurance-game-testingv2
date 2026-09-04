@@ -56,7 +56,27 @@ const sd = (xs: number[]) => {
 const fmt$ = (x: number) => `$${(x / 1e6).toFixed(2)}M`;
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 
-const SEEDS = Array.from({ length: 40 }, (_, i) => (((i + 1) * 2654435761) >>> 0).toString(36).toUpperCase().padStart(8, '0').slice(0, 8));
+// ⚠ 200 SEEDS, NOT 40, AND THE SAMPLE SIZE IS PART OF THIS GATE'S CLAIM.
+// WC's ground-up drawn/expected is a heavy-tailed sample mean, and at 40 seeds
+// (200 line-years) its 99% CI half-width is ~0.060 — wide enough that an
+// ordinary resample lands outside it. That is not hypothetical: the per-claim
+// flip changed the pre-game search's ACCEPTANCE COUNT (measured: WC mean
+// attempts 2.93 -> 2.70), which shifts the RNG stream and resamples this gate
+// even though grossUltimateLoss is the generator's own draw and cannot move.
+// It duly read 0.9143 [0.8542, 0.9744] and went red on an unchanged generator.
+//
+// MEASURED AT 200 SEEDS (1,000 line-years per arm), both arms:
+//   WC  flag off 1.0260 +/-0.0494    flag on 1.0239 +/-0.0497   1.00 inside both
+//   GL  flag off 1.0471 +/-0.0798    flag on 1.0263 +/-0.0786   1.00 inside both
+// The two arms differ by 0.002 on WC, which is the proof the generator did not
+// move; the red was the gate's own power.
+//
+// RAISING THE SAMPLE, NOT WIDENING THE TOLERANCE — this repo's own recorded
+// remedy for the failure mode (WORKING_PRACTICES, heavy-tailed gates: "the
+// SAMPLE SIZE, not the tolerance, is what buys detection power"). Widening
+// would have destroyed the check; this keeps it a gross-error detector with
+// honest power. Cost: ~6s to ~30s.
+const SEEDS = Array.from({ length: 200 }, (_, i) => (((i + 1) * 2654435761) >>> 0).toString(36).toUpperCase().padStart(8, '0').slice(0, 8));
 const LINES: CoverageLine[] = ['WC', 'GL', 'Property'];
 const YEARS = 5;
 const Z99 = 2.5758;
