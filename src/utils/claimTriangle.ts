@@ -1,4 +1,31 @@
 // ============================================================================
+// ⚠ THIS IS A REFERENCE IMPLEMENTATION, NOT THE PRICING PATH. READ THIS FIRST.
+//
+// S3 does NOT price off this file. The pool already had a triangle —
+// LinePoolState.reserveDevelopment, an append-only ledger of its own played
+// accident years on both bases — and that is what experienceRating.ts prices
+// off. This module builds a SECOND, SYNTHETIC ten-year history from the member
+// catalog, which the pool never lived.
+//
+// ⚠ AND THE REASON IS A CORRECTION TO THIS FILE'S OWN HEADER. The note below
+// says the factors here become true of the played game once PER_CLAIM_REVISION
+// flips. That was wrong. Matching the development PROCESS was necessary but not
+// sufficient: the engine also has to PRODUCE development, and its law is
+// MEAN-ONE, so E[terminal] = E[initial] and the played incurred triangle is
+// flat (cumulative 0.9857 / 0.9912 / 1.0005) after the flip exactly as before
+// it. This triangle develops only because developmentDrift is applied HERE, and
+// nothing in src/ outside this file applies it — so GL's synthetic cumulative
+// of 3.60 stands against a played 0.9912.
+//
+// ⚠ WHY IT IS KEPT RATHER THAN DELETED. Its generator is the blueprint for
+// making the ENGINE develop incurred: it draws an INITIAL estimate and walks it
+// forward to a terminal landing on the severity fit, verified at 2.052 / 2.141
+// / 1.619. Giving the engine that behaviour is what turns S3's method selection
+// from a puzzle with one answer into a real choice — see experienceRating.ts's
+// one-sidedness note. That is the follow-on piece, and this file is the
+// reference for it. It is not dead code and it is not a fifth ledger mechanism.
+//
+// ============================================================================
 // THE PRICING TRIANGLE — S1. NOTHING READS THIS YET.
 //
 // ⚠ PRICING_TRIANGLE.enabled IS FALSE AND NOTHING IN src/ CALLS THIS MODULE.

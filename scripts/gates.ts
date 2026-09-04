@@ -77,6 +77,7 @@ const FAST: string[] = [
   'development-cession-check',       //  14s
   'ending-position-check',           //   6s
   'enrolment-independence-check',    //   2s
+  'experience-pricing-check',        //  75s   EXPECTED RED — PRICING_TRIANGLE's retirement condition
   'export-number-format-check',      //  12s
   'funding-basis-check',             //  10s
   'funding-expected-check',          //   2s
@@ -532,6 +533,19 @@ const EXPECTED_RED: Record<string, { code: number; why: string }> = {
       + 'the flag off at this same commit. The magnitudes are small but the exhibit is internally '
       + 'inconsistent — it prints a blank next to a value that moved. FIX: S3, which has to settle what '
       + 'maturity means once pricing reads a triangle whose claims develop to closure.',
+  },
+  'experience-pricing-check': {
+    code: 1,
+    why: 'THE RETIREMENT CONDITION FOR PRICING_TRIANGLE, ENTERED THE DAY THE FLAG WAS CREATED. Three '
+      + 'arms; when all three pass, this entry comes out and the flag goes with it. ARM 1 (does it price '
+      + 'sanely) PASSES on all three lines — the experience rate lands +5.1% / +0.9% / +3.0% from the '
+      + 'REALISED ultimate loss cost, while the held rate it replaces is 27-46% heavy against the same '
+      + 'measure. ARM 2 (year-to-year movement) passes on WC (0.2% of years move >20%) and Property '
+      + '(0.9%) and FAILS on GL at 9.6%, which is GL\'s 3.2x first paid factor developing an immature '
+      + 'year. ARM 3 (loop stability) IS NOT BUILT, deliberately: the held pure premium is what stopped '
+      + 'pricing chasing the roster (finding 17), S3 removes it, and nothing replaces it yet. The flag '
+      + 'therefore ships OFF. Do not enable PRICING_TRIANGLE until arm 3 exists and passes — turning it '
+      + 'on moves every line\'s rate down 24-46% AND removes an ungated feedback loop\'s only damping.',
   },
   'clf-label-backtest-check': {
     code: 1,

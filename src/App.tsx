@@ -475,6 +475,12 @@ export default function App() {
         lossTrend: gameState.instance.lossEnvironment.lossTrend,
         priorRcEffectiveness: lineState.riskControlEffectiveness,
         riskControlPct: d.riskControlPct,
+        // S3: the panel prices off the same played triangle the engine does.
+        experience: {
+          rows: lineState.reserveDevelopment ?? [],
+          allMarketMembers: gameState.poolState.allMarketMembers,
+          membershipHistory: gameState.poolState.membershipHistory,
+        },
       },
     );
   }, [gameState, decisionLine, decisionLineFundingLevel, decisionLineFundingAtExpected, decisionLineActiveMembers, currentDecisions]);

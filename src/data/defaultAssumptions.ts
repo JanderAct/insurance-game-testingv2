@@ -2986,7 +2986,60 @@ export const PER_CLAIM_REVISION = { enabled: true, settlement: true };
 // on feature/payout-patterns and reached this branch by merge, so the triangle's
 // development law and the engine's are the same process. That was the
 // precondition for S3 and it is the reason S3 could not have been built first.
+// ⚠ AND THE PRECONDITION TURNED OUT NOT TO BE SUFFICIENT, WHICH IS WHY THIS
+// FLAG DOES NOT GATE claimTriangle.ts ANY MORE. Matching the development
+// PROCESS was necessary; the engine also has to PRODUCE development, and a
+// mean-one law produces none. The played incurred triangle is flat on every
+// line (cumulative 0.9857 / 0.9912 / 1.0005) after the flip exactly as before
+// it. So S3 prices off reserveDevelopment — the pool's own played PAID triangle
+// — and experienceRating.ts is the consumer. See that file's header for the
+// measurements and for why the incurred side cannot be priced off.
 export const PRICING_TRIANGLE = { enabled: false };
+// ===========================================================================
+// ⚠ THIS FLAG HAS A RETIREMENT CONDITION AND IT IS WRITTEN ON DAY ONE.
+//
+// It exists for ONE reason: so the held rate and the experience rate can be
+// measured on identical seeds. It does not exist afterwards. PER_CLAIM_REVISION
+// lasted weeks because there was always one more thing to measure, so this one
+// gets its ending written down before its first use.
+//
+// THE THREE MEASUREMENTS, and then it goes. experience-pricing-check is the
+// gate; it is entered in EXPECTED_RED so the XPASS guard retires the entry the
+// moment all three pass, and the flag goes with it.
+//
+//   1. DOES THE TRIANGLE PRICE SANELY? Rate off the triangle against the
+//      current held path, per line, identical seeds.
+//      MEASURED AT THIS COMMIT — and the answer is better than the question
+//      assumed. Against the REALISED ultimate loss cost on mature accident
+//      years (50 games, 20 years), the HELD rate is heavy on every line:
+//        realised / held    WC 0.745    GL 0.585    Property 0.744
+//      and the experience rate lands at
+//        experience / held  WC 0.764    GL 0.483    Property 0.776
+//      So on WC and Property the triangle is within 2-3 points of the truth
+//      while the held rate is ~25% above it, and on GL the triangle is ~17%
+//      light against a held rate that is ~71% heavy. MEASUREMENT 1 PASSES.
+//
+//   2. WHAT DOES THE RATE DO YEAR TO YEAR? A rolling window should give a few
+//      points of movement from experience, not twenty.
+//      MEASURED — and it decided the estimator. With a fitted log-linear trend
+//      the rate moves >20% in 9.2% / 26.1% / 28.8% of years; with the window
+//      mean, 0.1% / 9.4% / 1.2%. The window mean ships. GL is MARGINAL at
+//      9.4% and that is not yet a pass — see the gate.
+//
+//   3. DOES THE LOOP STAY STABLE? Price chases the roster and the roster
+//      chases price, and nothing in the repo gates it. NOT YET MEASURED.
+//      This is the one the held rate existed to prevent, and it is the reason
+//      the flag ships OFF at this commit rather than on.
+//
+// ⚠ WHY IT SHIPS OFF, AND THIS IS A DEVIATION FROM THE BRIEF, STATED. Turning
+// it on moves every line's rate down 24% to 52%. That is not a flagged
+// experiment, it is a re-levelling of the whole game, and the CLF tables, the
+// opening band, the reserve margin and the surplus fields are all percentiles
+// of a distribution it changes. Shipping the level and the cascade together
+// before measurement 3 exists would put the recalibration on top of an
+// ungated feedback loop. The old arm is a baseline, not a shipped path — so
+// flag-off bit-identity is proved ONCE, here, and not required again.
+// ===========================================================================
 
 // Ten years is ordinary practice and the window is a weak lever, so it is not
 // tuned. It is SHORTER THAN THE TAIL deliberately: the year that drops off is

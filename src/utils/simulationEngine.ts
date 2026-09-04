@@ -24,7 +24,7 @@ function mergeShockRecords(lineResults: LineResultSet[]): ShockRecord[] | undefi
   return merged.size > 0 ? [...merged.values()] : undefined;
 }
 import { SeededRandom, deriveSubRng } from './random';
-import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, IBNER_BOOKING_BIAS_COEFF, IBNER_HORIZON, IBNER_STEP_MIXTURE, IBNER_TOTAL_SD, IBNER_UNWIND_DECAY, LINE_PAYOUT_PATTERN, PER_CLAIM_REVISION, MEMBER_LOSS_VOLATILITY, OPERATING_CASH_PCT_OF_PREMIUM, PROPERTY_HELD_PURE_PREMIUM_PER_100, RISK_CONTROL_PARAMS, resolveClosureCurve } from '../data/defaultAssumptions';
+import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, IBNER_BOOKING_BIAS_COEFF, IBNER_HORIZON, IBNER_STEP_MIXTURE, IBNER_TOTAL_SD, IBNER_UNWIND_DECAY, LINE_PAYOUT_PATTERN, PER_CLAIM_REVISION, PRICING_TRIANGLE, MEMBER_LOSS_VOLATILITY, OPERATING_CASH_PCT_OF_PREMIUM, PROPERTY_HELD_PURE_PREMIUM_PER_100, RISK_CONTROL_PARAMS, resolveClosureCurve } from '../data/defaultAssumptions';
 import type { TowerLine } from '../data/reinsuranceTower';
 import {
   DEVELOPMENT_ALLOCATION, DEVELOPMENT_CESSION_ENABLED, STOCHASTIC_ALLOCATION_MODE,
@@ -32,6 +32,7 @@ import {
 } from './developmentAllocation';
 import { isClaimClosed } from './claimClosure';
 import { reviseDevelopingSet, settleClosingSet } from './claimRevision';
+import { experienceRatePer100, type ExperienceBasis } from './experienceRating';
 import { poolYearFactor, wcGenerationInputs, glGenerationInputs, propertyGenerationInputs } from './claimGeneration';
 import {
   aggregateRecovery,
@@ -215,7 +216,32 @@ export function currentPurePremiumPer100(
   // — both are flat across member types, so a vector-of-one would be a scalar
   // wearing a costume and would invite a reader to think it meant something.
   members: Member[] = [],
+  // S3. The pool's own played paid triangle plus what is needed to reconstruct
+  // each accident year's exposure. Optional because a caller that cannot supply
+  // it gets the held path, which is the honest fallback rather than a guess.
+  experience?: ExperienceBasis,
 ): number {
+  // ⚠ S3 — THE POOL PRICES OFF ITS OWN EXPERIENCE, AND THE HELD RATE BELOW IS
+  // THE FALLBACK, NOT THE DEFAULT, ONCE THIS FLAG IS ON.
+  //
+  // THIS IS A DELIBERATE REVERSAL OF FINDING 17's PROTECTION, RECORDED AS ONE.
+  // The held pure premium exists so that pricing does not chase the roster: a
+  // rate derived from the enrolled book moves when the book moves, the book
+  // moves in response to the rate, and the loop has no damping. That argument
+  // is still correct. What retires it is that the protection was ALREADY
+  // PARTIAL — WC's rate is the exposure-weighted blend of four held class rates
+  // over the ENROLLED book (see wcBlendedRatePer100 above), so WC has chased
+  // the roster through its class mix all along — and that the held rate is
+  // measurably heavy: against realised ultimate loss cost on mature accident
+  // years, realised/held reads WC 0.745, GL 0.585, Property 0.744.
+  //
+  // ⚠ WHAT STANDS IN FOR THE PROTECTION IS MEASUREMENT 3 AT PRICING_TRIANGLE,
+  // AND IT IS NOT MEASURED YET. That is why the flag is off. Do not turn it on
+  // until experience-pricing-check's loop-stability arm exists and passes.
+  if (PRICING_TRIANGLE.enabled && experience) {
+    const rate = experienceRatePer100(line, experience);
+    if (rate !== null && rate > 0) return rate;
+  }
   return line === 'WC'
     ? wcBlendedRatePer100(members, yearNumber)
       * wcFrequencyTrend(yearNumber)
@@ -533,7 +559,16 @@ export function processLineYear(
   // full-roster expectation. All three factors are pure functions of the year and
   // cannot see the roster, so k_line keeps sole responsibility for the
   // roster/risk-quality-mix correction.
-  const newPurePremiumPer100 = currentPurePremiumPer100(line, yearNumber, currentActiveMembers);
+  // S3's inputs, assembled once so both pricing calls below and the decisions
+  // panel see the same basis. `rows` is the pool's OWN played triangle; the
+  // roster and history are what reconstruct each accident year's exposure,
+  // which reserveDevelopment does not carry.
+  const experienceBasis: ExperienceBasis = {
+    rows: lineState.reserveDevelopment ?? [],
+    allMarketMembers: ctx.allMarketMembers,
+    membershipHistory: ctx.membershipHistory,
+  };
+  const newPurePremiumPer100 = currentPurePremiumPer100(line, yearNumber, currentActiveMembers, experienceBasis);
 
   // Preliminary contribution estimate used only for member movement.
   // Final premium is recalculated after member movement because exposure changes.
@@ -688,7 +723,7 @@ export function processLineYear(
   // measured worst error 10.8% on a single line-year, mean 0.18%. Caught by
   // asserting the composition residual is exactly zero, which is the check that
   // only becomes possible once four rates are exact.
-  const pricedPurePremiumPer100 = currentPurePremiumPer100(line, yearNumber, memberResult.activeMembers);
+  const pricedPurePremiumPer100 = currentPurePremiumPer100(line, yearNumber, memberResult.activeMembers, experienceBasis);
 
   const totalMarketExposure = memberResult.totalMarketExposure;
   const marketShare = activeExposure / Math.max(totalMarketExposure, 0.01);

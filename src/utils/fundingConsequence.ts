@@ -33,6 +33,7 @@
 
 import { SLIDER_RANGES } from '../data/defaultAssumptions';
 import { lookupCLF, currentPurePremiumPer100 } from './simulationEngine';
+import type { ExperienceBasis } from './experienceRating';
 import { hasStaticClf, staticClf, staticClfCrossing } from '../data/clfTables';
 import { quoteLineRates } from './linePricing';
 import type { CoverageLine, Member } from '../types/simulation';
@@ -144,6 +145,11 @@ export interface FundingConsequenceBook {
   lossTrend: number;
   priorRcEffectiveness: number;
   riskControlPct: number;
+  /** S3. The pool's own played paid triangle and what reconstructs its
+   *  exposure. Omitted by callers that do not have a pool state to hand, which
+   *  then price off the held rate — panel-engine-parity-check asserts the two
+   *  agree, so a caller that omits it while the engine supplies it goes red. */
+  experience?: ExperienceBasis;
 }
 
 function ratesAt(
@@ -162,7 +168,10 @@ function ratesAt(
   // same members the engine priced on. Omitting it would put the panel back on
   // the full-market blend and reopen exactly the parity gap this file exists to
   // assert against. GL and Property ignore the argument.
-  const purePremiumPer100 = currentPurePremiumPer100(line, book.yearNumber, book.members);
+  // S3: the panel must reach the engine's number, so it needs the same
+  // experience basis. Optional on the book for the same reason it is optional
+  // on the engine function — a caller that cannot supply it gets the held path.
+  const purePremiumPer100 = currentPurePremiumPer100(line, book.yearNumber, book.members, book.experience);
   const clf = clfFor(line, confidenceLevel, atExpected);
   const q = quoteLineRates({
     line,
