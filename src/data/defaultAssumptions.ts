@@ -409,6 +409,22 @@ export const WC_LOSS_MODEL = {
   // which applies to all three lines and needs no deferral architecture. The
   // per-component pDelayed fields above went with it. See the note in
   // simulationEngine where the IBNR provision used to be computed.
+  //
+  // ⚠ AND ITS ABSENCE HAS NOW BEEN REDISCOVERED FIVE TIMES, SO IT IS WRITTEN
+  // DOWN HERE RATHER THAN FOUND AGAIN. The model has NO late reporting on any
+  // line: every claim is in the register from its accident year. The source's
+  // reported COUNTS grow 6.5% by age 2 and are still moving 0.25% at age 5.
+  //
+  // It is small, and it is a real absence rather than a simplification with a
+  // ruling behind it. What it costs is specific: a triangle built from this
+  // model develops only through CASE movement on claims already reported, so
+  // every age-to-age factor is a statement about open claims and none of it is
+  // pure emergence. Anything that reasons from a factor above 1.0 on a line
+  // whose claims are closed — as one reading of GL's ages 9 and 10 did — has no
+  // mechanism here to explain it and should suspect this first.
+  //
+  // RECORDED, NOT FIXED. Reinstating it is a deferral architecture and a ruling
+  // reversal, and at 6.5% by age 2 it is not what is holding the rebuild up.
 
 
   // ⚠ SHOCK-ONLY NOW. This no longer scales chronic severity — it is retained
@@ -2982,9 +2998,84 @@ export const TRIANGLE_HISTORY_YEARS = 10;
 // They are not free parameters: triangle-check re-solves them and fails if
 // either the terminal spread or the preserved mean has drifted.
 export const TRIANGLE_INITIAL_CONTRACTION: Record<string, { k: number; A: number }> = {
-  WC: { k: 0.952764, A: 1.872520 },
-  GL: { k: 0.932367, A: 2.686934 },
-  Property: { k: 0.945154, A: 2.247899 },
+  WC: { k: 0.901934, A: 1.506467 },
+  GL: { k: 0.855989, A: 2.156982 },
+  Property: { k: 0.924533, A: 2.431518 },
+};
+
+// ===========================================================================
+// THE DEVELOPMENT DRIFT — WHY THE HISTORY DEVELOPS AT ALL.
+//
+//     value(age+1) = value(age) x (1 + g x 2/(age+1)),  while the claim is OPEN
+//
+// ⚠ S1 SHIPPED WITHOUT THIS AND THE TRIANGLE CAME OUT FLAT. The revision law is
+// mean-one, so E[terminal] = E[initial] however the initial spread is
+// contracted: contracting buys DISPERSION and a chain ladder estimates the MEAN.
+// Measured then, cumulative over six steps: 1.002 / 1.036 / 0.987, against the
+// pool's own GL cumulative of 3.60. A factor selection had nothing to be wrong
+// about, which is what made assertion 5 red.
+//
+// ⚠ THE DECAY IS LOAD-BEARING AND A CONSTANT RATE IS THE THIRD INSTANCE OF ONE
+// FAILURE FAMILY. Sized both ways before choosing: a constant per-open-year rate
+// anchored on GL gives WC a cumulative of 4,756, because 3.9% of WC's VALUE is
+// still open at age 30 and a geometric rate compounds over all of it. Same shape
+// as s = phi.m/h and as the 1/headroom exponent — a rate applied to a quantity
+// that does not shrink fast enough to stop it. The shape used instead is
+// CLAIM_REVISION_MAGNITUDE_NUMERATOR's own age curve, read from that constant
+// rather than copied.
+//
+// ===========================================================================
+// ⚠ GL IS MEASURED. WC AND PROPERTY ARE JUDGEMENT. Do not read the three as
+// equally grounded.
+//
+// GL's target cumulative of 3.60 is the pool's own age-to-age factors multiplied
+// out: 1.872 x 1.439 x 1.265 x 1.031 x 1.024. 85% of that development sits in
+// ages 2 to 4. An earlier reading that GL still develops at ages 9 and 10 was
+// withdrawn as noise — those factors are 0.998 and 1.026 on three observations
+// each, straddling 1.0 — and GL's own fitted closure curve agrees: 0.1% of GL
+// value is open at age 10.
+//
+// WC 2.50 and Property 1.25 have NO source behind them. Neither transfer rule
+// from GL works and both were measured before being rejected: the same annual
+// rate gives WC a cumulative of 8.8 and Property 1.65; the same cumulative needs
+// g of 34.9% on WC and 138% on Property. Either is a judgement wearing an
+// anchor's clothes, so these are stated as judgement instead — the same standing
+// as IBNER_TOTAL_SD's 25/20/15%, phi's carry-across to two lines with no settled
+// severity of their own, and the headroom exponent chosen on GL evidence. The
+// reasoning is ordinary domain judgement: WC is long-tailed but its early
+// development is less explosive than liability, and Property settles most of its
+// book within three years.
+//
+// WHAT WOULD DISPLACE THEM: those two lines' own age-to-age triangles. One
+// extract each, and they stop being judgement.
+//
+// ===========================================================================
+// ⚠ AND THE WINDOW TAIL IS WC's ALONE, WHICH IS NOT WHAT THE DESIGN ASSUMED.
+// The point of a ten-year window is that development continues past it, so the
+// correct tail factor is unknown and has to be selected. Measured from each
+// line's own fitted closure curve, value-weighted open share at age 10:
+//
+//   WC 43.6%      GL 0.1%      Property 0.1%
+//
+// So GL and Property have essentially nothing open past the window and NO drift
+// of any size reaches beyond it — their tail factors run 1.0001 to 1.027 across
+// the whole plausible range of g. Only WC gets a structural window error, and at
+// its shipped drift that is about 17% — a CHOSEN number, since WC's g is
+// judgement, not a measured one.
+//
+// This is not a defect to fix here. It means the SELECTION error carries GL and
+// Property rather than supplementing them, which is S5's job and now its whole
+// job on two of three lines. Said plainly so nobody later reads a structural
+// tail error as applying to all three.
+//
+// ⚠ LENGTHENING IBNER_HORIZON WOULD DO NOTHING, and this was checked rather than
+// assumed. That constant bounds the COHORT path; the triangle develops while
+// age < closureAge and never reads it. The binding constraint is closure, and
+// those curves are fitted per line against their own over-threshold experience.
+export const TRIANGLE_DEVELOPMENT_DRIFT: Record<string, number> = {
+  WC: 0.26342,
+  GL: 0.58721,
+  Property: 0.26093,
 };
 // ===========================================================================
 // ⚠ ALL FOUR STAGE 1 GATES NOW EXIST. This note recorded two as unbuilt and

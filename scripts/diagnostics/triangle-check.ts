@@ -29,17 +29,22 @@
 //      spread moves off the fit and this fails by name. That is the coupling
 //      that makes these constants derived rather than free.
 //
-//   4. THE MEAN IS PRESERVED. A is solved to hold E[initial] = E[drawn]. The
-//      triangle is read as a loss cost, so a contraction that quietly moved the
-//      mean would misprice by exp((1-k^2) sigma^2 / 2) — a factor of 1.5 on GL —
-//      while every spread statistic still looked right.
+//   4. THE MEAN IS PRESERVED THROUGH THE DRIFT. A is solved to hold
+//      E[TERMINAL] = E[drawn]. The initial is deliberately BELOW the drawn now —
+//      by 1/cumulative, so 0.28 on GL — and it develops up; asserting on the
+//      initial would fail by exactly that factor and would be asserting the wrong
+//      invariant. The triangle is read as a loss cost, so a drift that quietly
+//      moved the terminal mean would misprice while every spread statistic still
+//      looked right.
 //
 //   5. FORWARD DEVELOPMENT IS REAL. The incurred triangle must actually develop.
-//      On the shipped path it does not: age-to-age factors there are 0.992-1.002
-//      and a chain ladder returns the truth. If this triangle reads flat too,
-//      the rebuild has no mechanism and everything downstream of it is pointless.
-//      The floor is deliberately loose — this asserts that development EXISTS,
-//      not that it has any particular size, because the size is S2's to set.
+//      On the shipped engine path it does not — age-to-age factors there are
+//      0.992-1.002 and a chain ladder returns the truth — and S1's triangle read
+//      flat for a different reason: a mean-one law gives E[terminal] = E[initial]
+//      whatever the initial spread. TRIANGLE_DEVELOPMENT_DRIFT is what fixed it,
+//      and this asserts the fix reaches the walk. The floor is loose because the
+//      SIZE is the constant's business; what fails here is a drift that is not
+//      being applied at all.
 //
 // ⚠ IT ASSERTS NOTHING ABOUT PRICING, AND THAT IS THE POINT OF S1. The flag is
 // off, no path in src/ consumes a triangle, and both standing gates are
@@ -50,7 +55,8 @@ import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
 import { claimTerminalValue, reviseOnce, settlementFactor, type RevisionState } from '../../src/utils/claimRevision';
 import { cumulativePaid } from '../../src/utils/payoutPattern';
 import {
-  ageToAgeFactors, cellAt, generateClaimTriangle, initialEstimate,
+  ageToAgeFactors, cellAt, cumulativeDevelopment, developmentDrift,
+  generateClaimTriangle, initialEstimate,
 } from '../../src/utils/claimTriangle';
 import { generateWcClaims } from '../../src/utils/wcClaimEngine';
 import { generateGlClaims } from '../../src/utils/glClaimEngine';
@@ -72,18 +78,15 @@ const TERMINAL_TARGET: Record<string, number> = { WC: 2.044, GL: 2.140, Property
 // tight enough that a real drift in phi or the exponent cannot pass. The spread
 // is a sample statistic of a distribution with CV near 30 on GL.
 const SD_TOL = 0.08;
-const MEAN_TOL = 0.02;
+const MEAN_TOL = 0.05;
+// Seed families averaged over. The statistics below are value-weighted on a
+// heavy tail, so one family is not a measurement — see assertion 3 & 4's note.
+const FAMILIES = Number(process.env.FAMILIES ?? 6);
 
 const members = getPredefinedMarketMembers();
 const failed: string[] = [];
-// ⚠ THE FLAT-TRIANGLE ITEM EXITS 3, NOT 1, AND THE SPLIT IS cohort-ledger-check's.
-// Assertions 1-4 are S1's own contract and exit 1 — a real regression on them can
-// never hide behind the expected redness, because EXPECTED_RED excuses the exact
-// code 3 and nothing else.
-const openItem: string[] = [];
 const RULE = '='.repeat(72);
 const note = (ok: boolean, msg: string) => { if (!ok) failed.push(msg); return ok ? 'OK' : '*** FAIL ***'; };
-const noteOpen = (ok: boolean, msg: string) => { if (!ok) openItem.push(msg); return ok ? 'OK' : '*** RED, EXPECTED ***'; };
 const sd = (x: number[]) => {
   if (x.length < 2) return NaN;
   const m = x.reduce((a, b) => a + b, 0) / x.length;
@@ -152,6 +155,7 @@ console.log('  off-by-one in the ages, a wrong paid share, a settlement applied 
             st = { ...st, value: st.value * settlementFactor(gameId, c.id) };
             settled = true;
           } else if (!settled) {
+            st = { ...st, value: st.value * developmentDrift(line, age) };
             st = { ...st, paidShare: Math.min(0.999, cumulativePaid(pattern, age)) };
             st = reviseOnce(gameId, c.id, age, st);
           }
@@ -176,46 +180,62 @@ console.log('  off-by-one in the ages, a wrong paid share, a settlement applied 
 
 // --------------------------------------- 3 & 4. terminal spread, and the mean
 console.log('\n--- 3 & 4. THE TERMINAL LANDS ON THE FIT, AND THE MEAN IS PRESERVED ---');
-console.log('  line       k         A        sd(ln terminal)  target   mean initial/drawn');
+console.log('  ⚠ AVERAGED ACROSS SEED FAMILIES, AND THE SPREAD IS PRINTED. Both statistics');
+console.log('    are value-weighted on a severity with a blended CV near 30, so a single');
+console.log('    family swings several percent on nothing — finding 26, which already forced');
+console.log('    gl-cutover-check and marketplace-generation-check onto a bounded basis. A');
+console.log('    single sample here read 1.055 / 0.926 / 0.964 on the mean and would have');
+console.log('    failed a 2% tolerance while the constants were correct.\n');
+console.log('  line       k         A       sd(ln terminal) +/- sd   target   mean term/drawn +/- sd');
 for (const line of LINES) {
   const { k, A } = TRIANGLE_INITIAL_CONTRACTION[line];
   const pattern = LINE_PAYOUT_PATTERN[line];
-  const lnT: number[] = [];
-  let sumInit = 0, sumDrawn = 0;
-  const reps = line === 'Property' ? 40 : line === 'GL' ? 8 : 6;
-  for (let g = 0; g < reps; g++) {
-    const gameId = `SPR${line}${g}#tri1`;
-    for (let y = 1; y <= 4; y++) {
-      const base = { members, yearNumber: y, calendarYear: 2025 + y, instanceSeed: 4_300_000 + g * 7919, riskControlEffectiveness: 0 };
-      const r = line === 'WC' ? generateWcClaims({ ...base, kLine: 1 })
-        : line === 'GL' ? generateGlClaims({ ...base, kGl: 1, gPool: 1 })
-          : generatePropertyClaims({ ...base, kPr: 1 });
-      for (const c of r.claims) {
-        const init = initialEstimate(line, c.grossUltimate);
-        sumInit += init; sumDrawn += c.grossUltimate;
-        const curve = resolveClosureCurve(line, c.grossUltimate);
-        const u = claimClosureUnit(gameId, c.id);
-        let ca = 40;
-        for (let t = 1; t <= 40; t++) if (closedShare(curve, t) >= u) { ca = t; break; }
-        const term = claimTerminalValue(gameId, c.id, init, ca, undefined,
-          age => Math.min(0.999, cumulativePaid(pattern, age)));
-        if (term > 0) lnT.push(Math.log(term));
+  const reps = line === 'Property' ? 30 : line === 'GL' ? 6 : 5;
+  const sds: number[] = [], mrs: number[] = [];
+  for (let fam = 0; fam < FAMILIES; fam++) {
+    const lnT: number[] = [];
+    let sumTerm = 0, sumDrawn = 0;
+    for (let g = 0; g < reps; g++) {
+      const gameId = `SPR${line}${fam}_${g}#tri1`;
+      for (let y = 1; y <= 4; y++) {
+        const base = { members, yearNumber: y, calendarYear: 2025 + y, instanceSeed: 4_300_000 + fam * 131_071 + g * 7919, riskControlEffectiveness: 0 };
+        const r = line === 'WC' ? generateWcClaims({ ...base, kLine: 1 })
+          : line === 'GL' ? generateGlClaims({ ...base, kGl: 1, gPool: 1 })
+            : generatePropertyClaims({ ...base, kPr: 1 });
+        for (const c of r.claims) {
+          const init = initialEstimate(line, c.grossUltimate);
+          sumDrawn += c.grossUltimate;
+          const curve = resolveClosureCurve(line, c.grossUltimate);
+          const u = claimClosureUnit(gameId, c.id);
+          let ca = 40;
+          for (let t = 1; t <= 40; t++) if (closedShare(curve, t) >= u) { ca = t; break; }
+          // The drift is deterministic given the closure age, so the terminal is
+          // claimTerminalValue's mean-one walk scaled by the whole cumulative.
+          const term = cumulativeDevelopment(line, ca)
+            * claimTerminalValue(gameId, c.id, init, ca, undefined,
+              age => Math.min(0.999, cumulativePaid(pattern, age)));
+          sumTerm += term;
+          if (term > 0) lnT.push(Math.log(term));
+        }
       }
     }
+    sds.push(sd(lnT)); mrs.push(sumTerm / sumDrawn);
   }
-  const s = sd(lnT), mr = sumInit / sumDrawn, tgt = TERMINAL_TARGET[line];
-  console.log(`  ${line.padEnd(9)} ${k.toFixed(6)} ${A.toFixed(4).padStart(9)}  ${s.toFixed(4).padStart(13)}  ${tgt.toFixed(3)}   ${mr.toFixed(5).padStart(9)}  `
-    + `${note(Math.abs(s - tgt) <= SD_TOL,
-      `${line}: the developed terminal spread is ${s.toFixed(4)} against a ${tgt} target, off by ${Math.abs(s - tgt).toFixed(4)} on a ${SD_TOL} tolerance `
-      + '— TRIANGLE_INITIAL_CONTRACTION has drifted from the law it was solved against (phi, the headroom exponent or the settlement level moved). Re-solve it; do not widen this.')} `
+  const s0 = mean(sds), mr = mean(mrs), tgt = TERMINAL_TARGET[line];
+  console.log(`  ${line.padEnd(9)} ${k.toFixed(6)} ${A.toFixed(4).padStart(8)}  ${s0.toFixed(4).padStart(10)} +/- ${sd(sds).toFixed(4)}  ${tgt.toFixed(3)}   ${mr.toFixed(4).padStart(8)} +/- ${sd(mrs).toFixed(4)}  `
+    + `${note(Math.abs(s0 - tgt) <= SD_TOL,
+      `${line}: the developed terminal spread is ${s0.toFixed(4)} against a ${tgt} target, off by ${Math.abs(s0 - tgt).toFixed(4)} on a ${SD_TOL} tolerance `
+      + '— TRIANGLE_INITIAL_CONTRACTION has drifted from the law it was solved against (phi, the headroom exponent, the settlement level or the drift moved). Re-solve it; do not widen this.')} `
     + `${note(Math.abs(mr - 1) <= MEAN_TOL,
-      `${line}: the initial estimates average ${mr.toFixed(5)} of the drawn values against a 1.000 target — A no longer preserves the mean, so a triangle read as a loss cost would misprice by that factor`)}`);
+      `${line}: the DEVELOPED terminal averages ${mr.toFixed(4)} of the drawn values against 1.000 (across-family sd ${sd(mrs).toFixed(4)}) — A no longer preserves the mean through the drift, so a triangle read as a loss cost would misprice by that factor`)}`);
 }
 
 // ------------------------------------------------ 5. development is real
 console.log('\n--- 5. THE INCURRED TRIANGLE ACTUALLY DEVELOPS ---');
-console.log('  The shipped path reads 0.992-1.002 and a chain ladder returns the truth.');
-console.log('  This asserts development EXISTS; its SIZE is S2\'s to set.\n');
+console.log('  The shipped ENGINE path reads 0.992-1.002 and a chain ladder returns the');
+console.log('  truth. S1\'s triangle read flat too, for a different reason: a mean-one law');
+console.log('  gives E[terminal] = E[initial] whatever the initial spread. This asserts');
+console.log('  TRIANGLE_DEVELOPMENT_DRIFT reaches the walk.\n');
 console.log('  line       basis      age-to-age factors (mean over instances), first six');
 for (const line of LINES) {
   const inc: number[][] = [], pd: number[][] = [];
@@ -232,10 +252,57 @@ for (const line of LINES) {
   console.log(`  ${line.padEnd(9)} incurred  ` + incAvg.map(x => x.toFixed(3).padStart(8)).join('')
     + `   cumulative ${cum.toFixed(3)}`);
   console.log(`  ${' '.repeat(9)} paid      ` + pdAvg.map(x => x.toFixed(3).padStart(8)).join(''));
-  console.log(`  ${' '.repeat(9)}           ${noteOpen(cum > 1.02,
+  // ⚠ THE FLOOR IS LOW BECAUSE A SHORT-TAIL LINE CANNOT CLEAR A HIGH ONE.
+  // Property's whole target cumulative is 1.25 and 92% of its value is closed by
+  // age 4, so its observable six-step aggregate reads 1.08 with the drift working
+  // perfectly. A floor at WC's or GL's level would fail Property for being
+  // short-tailed. This catches a drift that is not applied; assertion 6 is what
+  // pins the SIZE, and only GL has an anchor for that.
+  console.log(`  ${' '.repeat(9)}           ${note(cum > 1.05,
     `${line}: the incurred triangle is FLAT — cumulative development ${cum.toFixed(4)} over ${nShow} steps. `
-    + 'A chain ladder on it returns the truth and there is nothing for a factor selection to be wrong about, '
-    + 'which is the shipped path\'s defect arriving in the replacement. The forward walk is not developing.')}`);
+    + 'A chain ladder on it returns the truth and there is nothing for a factor selection to be wrong about. '
+    + 'TRIANGLE_DEVELOPMENT_DRIFT is not reaching the walk.')}`);
+}
+
+// ------------------------------------------------ 6. GL lands on its own anchor
+console.log('\n--- 6. GL\'s CUMULATIVE DEVELOPMENT LANDS ON ITS MEASURED 3.60 ---');
+console.log('  1.872 x 1.439 x 1.265 x 1.031 x 1.024 = 3.60, the pool\'s own factors.');
+console.log('  Deterministic given the closure ages, so this is an identity, not a sample.');
+console.log('  ⚠ WC AND PROPERTY HAVE NO SUCH ANCHOR and are asserted only against the');
+console.log('    judgement recorded at the constant — see its note.\n');
+console.log('  line     value-weighted full cumulative   target   basis');
+{
+  const TARGET_CUM: Record<string, number> = { WC: 2.50, GL: 3.60, Property: 1.25 };
+  for (const line of LINES) {
+    const per: number[] = [];
+    const reps = line === 'Property' ? 30 : line === 'GL' ? 8 : 6;
+    for (let fam = 0; fam < FAMILIES; fam++) {
+    let num = 0, den = 0;
+    for (let g = 0; g < reps; g++) {
+      const gameId = `CUM${line}${fam}_${g}#tri1`;
+      for (let y = 1; y <= 4; y++) {
+        const base = { members, yearNumber: y, calendarYear: 2025 + y, instanceSeed: 4_500_000 + fam * 131_071 + g * 7919, riskControlEffectiveness: 0 };
+        const r = line === 'WC' ? generateWcClaims({ ...base, kLine: 1 })
+          : line === 'GL' ? generateGlClaims({ ...base, kGl: 1, gPool: 1 })
+            : generatePropertyClaims({ ...base, kPr: 1 });
+        for (const c of r.claims) {
+          const curve = resolveClosureCurve(line, c.grossUltimate);
+          const u = claimClosureUnit(gameId, c.id);
+          let ca = 60;
+          for (let t = 1; t <= 60; t++) if (closedShare(curve, t) >= u) { ca = t; break; }
+          num += c.grossUltimate * cumulativeDevelopment(line, ca);
+          den += c.grossUltimate;
+        }
+      }
+    }
+    per.push(num / den);
+    }
+    const got = mean(per), want = TARGET_CUM[line];
+    console.log(`  ${line.padEnd(9)} ${got.toFixed(3).padStart(20)} +/- ${sd(per).toFixed(3)}   ${want.toFixed(2)}   ${line === 'GL' ? 'MEASURED' : 'judgement'}  `
+      + `${note(Math.abs(got / want - 1) <= 0.08,
+        `${line}: cumulative development is ${got.toFixed(3)} (across-family sd ${sd(per).toFixed(3)}) against ${want} — TRIANGLE_DEVELOPMENT_DRIFT no longer produces the level it was solved for. `
+        + (line === 'GL' ? 'On GL that target is the pool\'s own measured factors and must not be moved to fit the code.' : 'On this line the target is judgement, recorded as such at the constant.'))}`);
+  }
 }
 
 console.log('');
@@ -245,37 +312,15 @@ if (failed.length > 0) {
   for (const f of failed) console.log(`  - ${f}`);
   console.log(RULE);
   process.exitCode = 1;
-} else if (openItem.length > 0) {
-  console.log('S1\'S CONTRACT HOLDS: ragged by construction, walked through');
-  console.log('claimRevision\'s own law, landing on the severity fit as a TERMINAL target');
-  console.log('with the mean preserved.');
-  console.log('');
-  console.log(`RED ON THE OPEN ITEM (${openItem.length}) — EXPECTED, exit 3:`);
-  for (const f of openItem) console.log(`  - ${f}`);
-  console.log('');
-  console.log('  ⚠ WHY THIS IS STRUCTURAL AND NOT A BUG IN THE WALK. The revision law is');
-  console.log('    MEAN-ONE (martingale-equivalence-check reads persistence 1.00034), and A is');
-  console.log('    solved to hold E[initial] = E[drawn]. So E[terminal] = E[initial] by');
-  console.log('    construction and the AGGREGATE incurred triangle cannot develop, however the');
-  console.log('    initial spread is contracted. Contracting buys DISPERSION around the first');
-  console.log('    estimate; a chain ladder estimates the MEAN factor, and that is 1.000.');
-  console.log('');
-  console.log('    The pool\'s own GL factors are 1.872 / 1.439 / 1.265, cumulative ~3.6 — a');
-  console.log('    first estimate near a quarter of ultimate. Reproducing that needs');
-  console.log('    E[terminal] >> E[initial], which a mean-one law cannot supply.');
-  console.log('');
-  console.log('  WHAT TURNS IT GREEN, AND IT IS S2 RATHER THAN A PATCH HERE: the synthetic');
-  console.log('    history\'s development needs a DRIFT, with the initial estimate scaled down');
-  console.log('    by the cumulative factor so the terminal still lands on the fit. That is');
-  console.log('    safe in a way the last three attempts were not — this triangle is DATA the');
-  console.log('    pool reads, not a ledger it books, so the drift is meant to be visible and');
-  console.log('    the error stays on the PICK. It is a new parameter and a ruling, so it is');
-  console.log('    not taken here.');
-  console.log(RULE);
-  process.exitCode = 3;
 } else {
   console.log('THE TRIANGLE HOLDS — ragged by construction, developed forward through');
   console.log('claimRevision\'s own law, landing on the severity fit as a TERMINAL target');
   console.log('with the mean preserved, and the incurred triangle genuinely develops.');
+  console.log('');
+  console.log('  ⚠ THE WINDOW TAIL IS WC\'s ALONE. GL and Property have 0.1% of value open at');
+  console.log('    age 10, so no drift reaches past the window on either — their tail factors');
+  console.log('    run 1.0001-1.027 across the whole plausible range of g. Only WC gets a');
+  console.log('    structural window error, and its size is CHOSEN, not measured. S5\'s');
+  console.log('    selection error carries the other two rather than supplementing them.');
   console.log(RULE);
 }

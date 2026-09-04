@@ -58,7 +58,9 @@ import { cumulativePaid } from './payoutPattern';
 import { reviseOnce, settlementFactor, type RevisionState } from './claimRevision';
 import { getMemberExposure } from './lineHelpers';
 import {
+  CLAIM_REVISION_MAGNITUDE_NUMERATOR,
   LINE_PAYOUT_PATTERN,
+  TRIANGLE_DEVELOPMENT_DRIFT,
   TRIANGLE_HISTORY_YEARS,
   TRIANGLE_INITIAL_CONTRACTION,
   resolveClosureCurve,
@@ -135,6 +137,43 @@ export function initialEstimate(line: CoverageLine, drawn: number): number {
   return A * Math.pow(Math.max(0, drawn), k);
 }
 
+/**
+ * The DRIFT applied to an open claim at one age — the reason the history
+ * develops at all.
+ *
+ *     1 + g x 2/(age + 1)
+ *
+ * ⚠ IT DECAYS WITH AGE, AND A CONSTANT PER-OPEN-YEAR RATE IS THE THIRD INSTANCE
+ * OF ONE FAILURE FAMILY. Sized both ways: a constant rate anchored on GL gives WC
+ * a cumulative development factor of 4,756, because WC still has 3.9% of its
+ * VALUE open at age 30 and a geometric rate compounds over all of it. That is the
+ * same shape as the 1/headroom exponent (a rate divided by a quantity that goes
+ * to zero) and as the retired s = phi.m/h — a rate applied to something that does
+ * not shrink fast enough to stop it. Real factors decay towards 1.0: GL's own run
+ * 1.872 / 1.439 / 1.265 / 1.031 / 1.024.
+ *
+ * ⚠ THE SHAPE IS NOT INVENTED HERE. 2/(age+1) is
+ * CLAIM_REVISION_MAGNITUDE_NUMERATOR's age curve, fitted against the pool's own
+ * experience and already carrying the ruling that model age 1 is data age 2. The
+ * numerator is read from that constant rather than copied, so the two cannot
+ * drift apart — and if it moves, triangle-check's terminal assertion fails.
+ *
+ * Applied while the claim is OPEN, at ages 1..closureAge-1. At closure the
+ * settlement factor resolves the file and no further drift applies.
+ */
+export function developmentDrift(line: CoverageLine, age: number): number {
+  return 1 + TRIANGLE_DEVELOPMENT_DRIFT[line] * (CLAIM_REVISION_MAGNITUDE_NUMERATOR / (age + 1));
+}
+
+/** A claim's whole cumulative development factor, first estimate to ultimate.
+ *  Deterministic given the closure age, which is what makes the identity at
+ *  TRIANGLE_INITIAL_CONTRACTION exactly checkable rather than approximately. */
+export function cumulativeDevelopment(line: CoverageLine, closureAge: number): number {
+  let f = 1;
+  for (let a = 1; a < closureAge; a++) f *= developmentDrift(line, a);
+  return f;
+}
+
 /** The age at which a claim closes.
  *
  *  ⚠ RESOLVED FROM THE DRAWN VALUE, NOT THE CONTRACTED INITIAL ESTIMATE.
@@ -194,6 +233,13 @@ function walkClaim(
       st = { ...st, value: st.value * settlementFactor(gameId, claimId) };
       settled = true;
     } else if (!settled) {
+      // ⚠ DRIFT FIRST, THEN THE MEAN-ONE LAW, AND BOTH ARE NEEDED. The drift is
+      // the LEVEL — it is why E[terminal] > E[initial] and why a chain ladder
+      // reads factors above 1.000 at all. The law is the DISPERSION around it.
+      // S1 shipped the second without the first and the triangle came out flat:
+      // contracting the initial spread buys spread, and a chain ladder estimates
+      // the mean. Order matters only for reproducibility, not for either moment.
+      st = { ...st, value: st.value * developmentDrift(line, age) };
       st = { ...st, paidShare: Math.min(0.999, cumulativePaid(pattern, age)) };
       st = reviseOnce(gameId, claimId, age, st);
     }

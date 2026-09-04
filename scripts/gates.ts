@@ -460,23 +460,14 @@ function checkManifest(): string[] {
 // shipped path can never hide behind the expected redness.
 // ============================================================================
 const EXPECTED_RED: Record<string, { code: number; why: string }> = {
-  // ⚠ WAS EMPTY, AND THE COMMENT THAT STOOD HERE SAID THE NEXT GATE BUILT BEFORE
-  // ITS FIX WOULD NEED SOMEWHERE TO GO. This is that gate. cohort-ledger-check
-  // was the previous occupant, entered at 85252cc with exit 2 and removed when
-  // the fix turned it green — which is the XPASS guard working, and the reason
-  // this category asserts in both directions rather than excusing a red.
-  'triangle-check': {
-    code: 3,
-    why: 'S1 ships the triangle ragged, forward-developed and landing on the severity fit as a '
-      + 'TERMINAL target — assertions 1-4, which exit 1 and are NOT excused here. What is red is '
-      + 'assertion 5: the aggregate INCURRED triangle does not develop (cumulative 1.002 / 1.036 / '
-      + '0.987 against the pool\'s own GL ~3.6). That is structural, not a defect in the walk: the '
-      + 'revision law is mean-one and the initial estimate is solved to preserve the mean, so '
-      + 'E[terminal] = E[initial] and a chain ladder reads a factor of 1.000. Reproducing real '
-      + 'factors needs a DRIFT in the synthetic history\'s development, with the initial scaled '
-      + 'down to match — a new parameter and a ruling, so S2 rather than a patch inside S1. The '
-      + 'code 3 is deliberate: assertions 1-4 exit 1 and can never hide behind this.',
-  },
+  // ⚠ EMPTY AGAIN, AND THAT IS THE MECHANISM WORKING TWICE. cohort-ledger-check
+  // was entered here at 85252cc for the flag-on ledger crossing; triangle-check
+  // at e551e9a with exit 3, because S1's triangle came out flat — a mean-one law
+  // gives E[terminal] = E[initial] whatever the initial spread is contracted to.
+  // S2's development drift turned it green and the entry came out in the same
+  // commit, which is what the XPASS guard exists to force: an expectation cannot
+  // outlive the defect it describes. It stays as an empty map rather than being
+  // deleted, for the next gate built before its fix.
 };
 
 // ---------------------------------------------------------------- runner
