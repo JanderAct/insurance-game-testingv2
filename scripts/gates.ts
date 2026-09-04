@@ -107,7 +107,8 @@ const FAST: string[] = [
   'solo-export-guard',               //   4s
   'terminal-severity-check',         //  30s   STAGE 1 — derives phi against the pool's settled log-SD
   'tower-runtime-check',             //  13s
-  'trend-memoization-check',         //   2s
+  'trend-memoization-check',
+  'triangle-check',         //   2s
   'value-identity-check',            //   3s
   'wc-cap-check',                    //   4s
   'wc-cutover-check',                //   6s   PROMOTED at this commit
@@ -459,13 +460,23 @@ function checkManifest(): string[] {
 // shipped path can never hide behind the expected redness.
 // ============================================================================
 const EXPECTED_RED: Record<string, { code: number; why: string }> = {
-  // ⚠ EMPTY, AND THAT IS THE MECHANISM WORKING. cohort-ledger-check was entered
-  // here at 85252cc with exit 2 for the flag-on ledger crossing. The fix landed,
-  // the gate went green, and the XPASS guard would have failed the sweep if this
-  // entry had been left behind — which is the whole reason the category asserts
-  // in both directions. It stays as an empty map rather than being deleted: the
-  // next gate built before its fix needs somewhere to go, and the argument for
-  // how to do that safely is above.
+  // ⚠ WAS EMPTY, AND THE COMMENT THAT STOOD HERE SAID THE NEXT GATE BUILT BEFORE
+  // ITS FIX WOULD NEED SOMEWHERE TO GO. This is that gate. cohort-ledger-check
+  // was the previous occupant, entered at 85252cc with exit 2 and removed when
+  // the fix turned it green — which is the XPASS guard working, and the reason
+  // this category asserts in both directions rather than excusing a red.
+  'triangle-check': {
+    code: 3,
+    why: 'S1 ships the triangle ragged, forward-developed and landing on the severity fit as a '
+      + 'TERMINAL target — assertions 1-4, which exit 1 and are NOT excused here. What is red is '
+      + 'assertion 5: the aggregate INCURRED triangle does not develop (cumulative 1.002 / 1.036 / '
+      + '0.987 against the pool\'s own GL ~3.6). That is structural, not a defect in the walk: the '
+      + 'revision law is mean-one and the initial estimate is solved to preserve the mean, so '
+      + 'E[terminal] = E[initial] and a chain ladder reads a factor of 1.000. Reproducing real '
+      + 'factors needs a DRIFT in the synthetic history\'s development, with the initial scaled '
+      + 'down to match — a new parameter and a ruling, so S2 rather than a patch inside S1. The '
+      + 'code 3 is deliberate: assertions 1-4 exit 1 and can never hide behind this.',
+  },
 };
 
 // ---------------------------------------------------------------- runner

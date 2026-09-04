@@ -2873,6 +2873,85 @@ export const CLAIM_OPEN_SHARE_MODEL_RECORDED: readonly number[] = [0.901, 0.794,
 // whatever while `enabled` is false, because the settlement block never runs.
 // ============================================================================
 export const PER_CLAIM_REVISION = { enabled: false, settlement: true };
+
+// ===========================================================================
+// THE PRICING TRIANGLE — S1, FLAG-GATED AND OFF. Nothing in src/ reads it.
+//
+// Ten accident years, each at its own maturity, claims drawn as an INITIAL
+// estimate and developed FORWARD. The mechanism is at claimTriangle.ts; this
+// block is the parameter record and the M1 measurement that cleared it.
+//
+// ⚠ TWO FLAGS, AND THE ORDER BETWEEN THEM IS LOAD-BEARING. A triangle is a
+// per-claim object, so its development is the per-claim law — and with
+// PER_CLAIM_REVISION off the live engine develops COHORTS and has no per-claim
+// development to match. So the factors this triangle teaches become true of the
+// played game only once PER_CLAIM_REVISION flips. PER_CLAIM_REVISION must lead
+// PRICING_TRIANGLE. Neither is flipped here.
+export const PRICING_TRIANGLE = { enabled: false };
+
+// Ten years is ordinary practice and the window is a weak lever, so it is not
+// tuned. It is SHORTER THAN THE TAIL deliberately: the year that drops off is
+// the most mature one, so the tail is never fully observed.
+//
+// ⚠ AND WHAT THAT BUYS DIFFERS BY BASIS — measured, because the two were
+// conflated once. On the PAID triangle a ten-year window costs WC 9.8% (chain
+// ladder estimate/truth 0.902 in every one of 40 games), because WC's payments
+// run past its twelve-year IBNER horizon and a tail factor of 1.0 misses them.
+// On the INCURRED triangle it costs almost nothing (0.999-1.002 on all three
+// lines), because the estimate stops moving at the horizon. GL and Property fit
+// inside the window on both bases. Do not quote the paid figure on the incurred
+// basis; they are different deficiencies.
+export const TRIANGLE_HISTORY_YEARS = 10;
+
+// ===========================================================================
+// THE INITIAL ESTIMATE — DERIVED FROM THE TERMINAL TARGET, NOT FITTED.
+//
+//     initial = A x drawn^k
+//
+// The severity fit becomes the TERMINAL distribution rather than the draw, so
+// the initial spread is what is left after development is netted out:
+//
+//     Var[ln initial] = Var[ln terminal] - Var[ln development] - 2Cov
+//     k = sqrt(target^2 - devt^2) / sd(ln drawn),   A = mean(drawn) / mean(drawn^k)
+//
+// ⚠ M1 — THE STOP CONDITION, AND IT CLEARED ON EVERY LINE. A negative residual
+// on any line would mean that line has no initial distribution and the rebuild
+// stops there. Measured, each line walked through ITS OWN claims, its own
+// horizon and its own size mix:
+//
+//   line      terminal target   own devt   residual var   implied initial
+//   WC              2.044         0.620        3.792          1.947
+//   GL              2.140         0.714        4.069          2.017
+//   Property        1.636         0.579        2.344          1.531
+//
+// ⚠ AND GL'S DEVELOPMENT VARIANCE WAS NOT CARRIED ACROSS, WHICH MATTERED IN THE
+// UNEXPECTED DIRECTION. The brief tabulated the residual at GL's 1.28 for all
+// three lines, which put Property at an implied initial of 1.019 and made it the
+// stop-condition candidate. Each line's OWN development is roughly half that
+// figure — 0.579 on Property — so its real headroom is 1.531 and it is not
+// close to the boundary. Carrying GL across would have been conservative rather
+// than dangerous here, but it would have been a second inheritance stacked on
+// the GL-derived phi, and the point of measuring was not to find out which way
+// it leaned.
+//
+// ⚠ WHAT THE REBUILD ACTUALLY WANTS IS STILL FURTHER AWAY, AND THIS IS THE OPEN
+// ITEM. The source's own first-estimate-to-settled spread is 1.48-1.96. At these
+// terminal targets that implies development of 1.410-0.580 on WC and 1.546-0.859
+// on GL, against the model's 0.620 and 0.714 today — so phi would have to rise
+// substantially. AND PROPERTY CANNOT REACH THE TOP OF THAT RANGE AT ALL: at a
+// terminal of 1.636, an initial of 1.96 is a NEGATIVE residual. Property's
+// terminal is too narrow to hold the source's first-estimate spread, and that is
+// a real constraint on S2 rather than a rounding problem. Recorded now because
+// S1 is where it becomes visible and S2 is where it has to be answered.
+//
+// The constants below are solved against the SHIPPED law at the SHIPPED phi.
+// They are not free parameters: triangle-check re-solves them and fails if
+// either the terminal spread or the preserved mean has drifted.
+export const TRIANGLE_INITIAL_CONTRACTION: Record<string, { k: number; A: number }> = {
+  WC: { k: 0.952764, A: 1.872520 },
+  GL: { k: 0.932367, A: 2.686934 },
+  Property: { k: 0.945154, A: 2.247899 },
+};
 // ===========================================================================
 // ⚠ ALL FOUR STAGE 1 GATES NOW EXIST. This note recorded two as unbuilt and
 // said the flag must not be flipped until both did; both do, and the record of
