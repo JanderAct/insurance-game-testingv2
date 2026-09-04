@@ -423,7 +423,27 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // field-by-field reading was possible. This one is the opposite shape — a pure
 // addition — and a capture that shows 0 changed values is a STRONGER statement
 // than one that shows a plausible-looking subset moved.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v35.json');
+// v36: THE PER-CLAIM FLIP. PER_CLAIM_REVISION.enabled false -> true. A WHOLE-TREE
+// RE-ROLL and there is no field-by-field reading to be had: 15,840 of 30,180
+// values moved across 79 fields, 0 added, 0 removed.
+//
+// ⚠ THE RE-ROLL IS NOT THE MECHANISM AND THE DISTINCTION IS MEASURABLE. The flag
+// alone does not shift the RNG stream — `factor` is drawn in both arms whether or
+// not the enabled arm uses it, which was deliberate at 42b2c2b. What re-rolls
+// every game is that the PRE-GAME ACCEPTANCE SEARCH takes a different number of
+// attempts on the two arms (measured at the flip: WC mean 2.93 -> 2.70, GL 3.06
+// -> 3.05, Property 3.97 -> 4.12), and each rejected candidate past consumes
+// draws. So the tree moves for two reasons at once and this capture cannot
+// separate them.
+//
+// WHAT IS ASSERTED INSTEAD, because a re-roll capture cannot carry it: the shape
+// of the flip was measured paired, same seeds both arms, 300 games x 10 years —
+// ending pool surplus 0.9886x, insolvency 5.3% on BOTH arms, net unpaid reserve
+// within 1% on every line, actual loss ratio within 0.5pp on every line and
+// basis. The mechanism's own correctness is held by cohort-ledger-check (three
+// identities, both arms), martingale-equivalence-check (term by term) and
+// terminal-severity-check (phi on its anchor), all green at this commit.
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v36.json');
 
 function seedOf(id: string) {
   let h = 5381;

@@ -70,11 +70,11 @@ const FAST: string[] = [
   'cession-path-independence',       //  77s   GAMES=300 — it cannot resolve its subject below that
   'cession-uplift-basis',            //  22s
   'claims-workbook-check',           //  17s
+  'clf-label-backtest-check',        //  20s   EXPECTED RED — see the entry below; nothing else backtests STATIC_CLF_TABLE
   'closure-draw-check',              //   3s
   'cohort-stock-check',              //   4s   (sixty years, four games)
   'composition-table-check',         //  17s   STAGE 1 — the magnitude law against 200/(age+1); GL only
   'development-cession-check',       //  14s
-  'development-sign-symmetry',       //  11s
   'ending-position-check',           //   6s
   'enrolment-independence-check',    //   2s
   'export-number-format-check',      //  12s
@@ -84,7 +84,7 @@ const FAST: string[] = [
   'gl-cutover-check',                //   6s   PROMOTED at this commit
   'gl-supplied-clf-check',           //  44s
   'ibner-null-check',                //  40s
-  'marketplace-generation-check',    //   7s
+  'marketplace-generation-check',    //  28s   200 seeds — the sample size IS the claim, see its header
   'member-loss-history-check',       //   2s
   'net-funding-fields-check',        //   6s
   'opening-centring-check',          //  30s
@@ -190,7 +190,6 @@ const SLOW: string[] = [
 // eleven straddled the two and hid the five. Corrected there too.
 // ============================================================================
 const PROBES: Record<string, string> = {
-  'allocation-grid': 'compares allocation rules cell by cell; the table it prints is quoted in developmentAllocation.ts [9s]',
   'clf-table-derive': 'derives the static CLF tables — a generator, not a check [240s]',
   'development-cession-size': 'the cession rate by allocation rule; the calibration table [20s]',
   'investment-dominance-report': 'underwriting against investment income, per line, with the implied return. A design reading with no threshold — see its header [12s]',
@@ -343,6 +342,45 @@ const PROBES: Record<string, string> = {
 //                              ebdb147).
 //     value-identity-check     reports VALUES MOVED.
 //
+// ============================================================================
+// ⚠ TWO MORE GATES WERE RETIRED AT THE PER-CLAIM FLIP, AND THIS IS WHERE THEIR
+// COVERAGE WENT. Both were PROVED GREEN ON THE NEW MECHANISM FIRST — the
+// argument that per-claim revision has no routing choice is the reason to
+// retire them, but the argument alone was not accepted as the evidence.
+//
+// development-sign-symmetry  RETIRED. It asserted that adverse and favourable
+//   movements cede at the same MARGINAL rate under the engine's own stochastic
+//   routing. Run at this commit with the flag ON: green, WC 1.06x, GL 1.04x,
+//   Property 1.05x against its own tolerance. Its subject was the free-lunch
+//   surface created by a ROUTING CHOICE — a movement could be allocated to the
+//   developing set or proportionally, and the choice could be made to differ by
+//   sign. The per-claim law has no such choice: every claim's delta is its own
+//   revision, so there is nothing left to route and the surface closes by
+//   construction rather than by assertion.
+//
+//   WHERE THE COVERAGE IS NOW:
+//     cession-uplift-basis     holds the DOLLAR statement over complete cohort
+//                              lives, which the retired gate's own closing text
+//                              named as the stronger claim and explicitly
+//                              deferred to.
+//     development-cession-check holds allocateDevelopment's invariants directly,
+//                              including both modes and the spill.
+//     cohort-ledger-check      holds the three ledger identities on BOTH arms.
+//
+//   ⚠ WHAT IS GENUINELY GIVEN UP, stated rather than glossed: nothing now
+//   asserts sign-symmetry of the COHORT arm's stochastic routing. That arm is
+//   still reachable (it is the flag-off control) but is no longer a shipped
+//   path, so the property is no longer a property of the played game.
+//
+// allocation-grid            RETIRED. A probe, not a gate — it asserted nothing
+//   and printed a rule-by-rule cession table quoted in developmentAllocation.ts.
+//   Run at this commit with the flag ON: exit 0, table intact. It compared
+//   ALLOCATION RULES (largest-3, sizeWtd-3, sizeWtd-10, proportional) against
+//   each other, and the shipped path now selects none of them for the stochastic
+//   step. development-cession-size remains in PROBES and prints the cession rate
+//   by rule for anyone who needs that comparison again.
+//
+// ============================================================================
 // clf-downside-check       DELETED at this commit. Its only assertion was
 //   combinedAt1 = (1 + adminRatio + reinsPct) / (1 + adminRatio + reinsPct)
 //   over three hardcoded admin ratios and four hardcoded reinsurance
@@ -460,14 +498,55 @@ function checkManifest(): string[] {
 // shipped path can never hide behind the expected redness.
 // ============================================================================
 const EXPECTED_RED: Record<string, { code: number; why: string }> = {
-  // ⚠ EMPTY AGAIN, AND THAT IS THE MECHANISM WORKING TWICE. cohort-ledger-check
-  // was entered here at 85252cc for the flag-on ledger crossing; triangle-check
-  // at e551e9a with exit 3, because S1's triangle came out flat — a mean-one law
-  // gives E[terminal] = E[initial] whatever the initial spread is contracted to.
-  // S2's development drift turned it green and the entry came out in the same
-  // commit, which is what the XPASS guard exists to force: an expectation cannot
-  // outlive the defect it describes. It stays as an empty map rather than being
-  // deleted, for the next gate built before its fix.
+  // ⚠ THREE ENTRIES, ALL FROM THE PER-CLAIM FLIP, AND THEY ARE NOT THE SAME KIND
+  // OF RED. Two are gates whose SUBJECT was built out of the cohort mechanism's
+  // constants and no longer describes what runs; one is a gate added to make a
+  // PRE-EXISTING mis-calibration impossible to forget. Keeping them separate
+  // matters — the first two retire when their nulls are rebuilt, the third when
+  // the tables are re-derived, and those are different pieces of work.
+  //
+  // ⚠ AND THE MAP HAS BEEN EMPTIED TWICE BEFORE, WHICH IS THE MECHANISM WORKING.
+  // cohort-ledger-check was entered at 85252cc for the flag-on ledger crossing;
+  // triangle-check at e551e9a with exit 3, because S1's triangle came out flat —
+  // a mean-one law gives E[terminal] = E[initial] whatever the initial spread is
+  // contracted to. S2's drift turned it green and the entry came out in the same
+  // commit. An expectation cannot outlive the defect it describes, and the XPASS
+  // guard is what forces that.
+  'ibner-null-check': {
+    code: 1,
+    why: 'THE NULL IS BUILT FROM THE COHORT LAW\'S CONSTANTS. It zeroes the IBNER_* scales and '
+      + 'asserts development collapses to nothing. The per-claim law does not read those constants — it '
+      + 'has its own phi, its own age curve and a hash-derived settlement factor — so zeroing them is no '
+      + 'longer a null and the gate reports 10 problems (development $6.16M at the "null", a matured '
+      + 'cohort missing registerSum by 33%). Verified: GREEN with the flag off at this same commit, so '
+      + 'this is the null\'s construction and not a regression. FIX: rebuild the null for the per-claim '
+      + 'law — phi to zero, the drift to zero, and the settlement factor neutralised to 1.0 — which needs '
+      + 'a settlement override the law does not currently expose. Not S3; its own small commit.',
+  },
+  'actuarial-memo-check': {
+    code: 1,
+    why: 'THE MEMO\'S DEFINITION OF "MATURED" IS THE COHORT HORIZON. It asserts that an accident year '
+      + 'past IBNER_HORIZON shows a blank 1-year development and does not move. Under the per-claim law a '
+      + 'cohort keeps developing while its claims are OPEN, which outlives that horizon, so 48 findings '
+      + 'report matured years moving by 0.1-1.5% (e.g. prior 6.42 vs current 6.44). Verified: GREEN with '
+      + 'the flag off at this same commit. The magnitudes are small but the exhibit is internally '
+      + 'inconsistent — it prints a blank next to a value that moved. FIX: S3, which has to settle what '
+      + 'maturity means once pricing reads a triangle whose claims develop to closure.',
+  },
+  'clf-label-backtest-check': {
+    code: 1,
+    why: 'ADDED AT THIS COMMIT, RED FROM ITS FIRST RUN, AND ITS RED IS OLDER THAN THE COMMIT. Nothing '
+      + 'in this repo backtested STATIC_CLF_TABLE against the engine — the two CLF grid derivers assert '
+      + 'monotonicity on the grid they PRODUCE, not on the static table the engine prices off (see the '
+      + 'SLOW block above). Measured on BOTH arms at 120 games x 8 years: worst label error +14.5pp with '
+      + 'the flag off and +14.7pp with it on, both GL at the 45% stop. So the flip is NOT the cause — it '
+      + 'moves realised confidence under a point at every stop on every line. The error is GL\'s table '
+      + 'PROVENANCE: GL reads GL_SUPPLIED (source \'supplied\', not derived from this engine) and its 60% '
+      + 'stop delivers 73%. WC runs -1 to -4pp and Property is inside +/-1.5pp at every stop. FIX: S3 '
+      + 're-derives all three tables against the shipped mechanism. UNTIL THEN THE FUNDING SLIDER\'S '
+      + 'PERCENTAGES ARE LABELS ON A DISTRIBUTION NOBODY IS DRAWING FROM — acceptable on a development '
+      + 'branch, not acceptable in front of a player who reads them as meaningful.',
+  },
 };
 
 // ---------------------------------------------------------------- runner

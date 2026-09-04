@@ -2922,7 +2922,51 @@ export const CLAIM_OPEN_SHARE_MODEL_RECORDED: readonly number[] = [0.901, 0.794,
 // martingale from the engine rather than from a closed form. It has no effect
 // whatever while `enabled` is false, because the settlement block never runs.
 // ============================================================================
-export const PER_CLAIM_REVISION = { enabled: false, settlement: true };
+export const PER_CLAIM_REVISION = { enabled: true, settlement: true };
+// ===========================================================================
+// ⚠ FLIPPED AT THIS COMMIT, AND THE ALLOCATION MACHINERY DID NOT DIE WITH IT.
+// The Stage 1 plan inventoried DEVELOPMENT_ALLOCATION, the bench, reselection,
+// the spill, the clamp, buildTrackedSet and untrackedTotal as becoming dead at
+// the flip. Checked line by line against the engine as it now stands: NONE of
+// them is dead, and there are two separate reasons.
+//
+// 1. THEY ARE NOT FLAG-GATED AT ALL. buildTrackedSet, markDownForBooking and
+//    reselectDevelopingSet are gated on DEVELOPMENT_CESSION_ENABLED, not on
+//    this flag, and they run identically on both arms. The per-claim law is
+//    their CONSUMER, not their replacement — reviseDevelopingSet is called as
+//    `reviseDevelopingSet(gameId, live, { untracked, ... })`, where `live` is
+//    the tracked set those functions build and `untracked` is the mass they
+//    leave behind. Deleting them would remove the law's own inputs.
+//
+//    allocateDevelopment also survives, because 72b0099 carved the UNWIND out
+//    as untouched in both arms: processIbner runs two steps, and only the
+//    stochastic one takes the new path. The unwind still calls
+//    allocateDevelopment with mode 'proportional', every year, on both arms.
+//
+// 2. THE ONE GENUINELY FLAG-SPECIFIC PIECE IS THE FLAG-OFF CONTROL.
+//    STOCHASTIC_ALLOCATION_MODE is 'developing', and with this flag true the
+//    engine never passes it — so on the shipped path allocateDevelopment's
+//    'developing' branch and its spill are unreachable. They are still the
+//    OFF ARM's stochastic routing, and three diagnostics force this flag false
+//    and run the engine as a control: cohort-ledger-check (which ASSERTS all
+//    three ledger identities on that arm), pregame-acceptance-check and
+//    revision-total-sd-report. Deleting the branch would silently redefine the
+//    control those gates compare against — the stochastic step would fall
+//    through to 'proportional' and the OFF arm would stop being the cohort
+//    mechanism at all.
+//
+// SO THE MACHINERY BECOMES DELETABLE WHEN THIS FLAG DOES, not when it flips,
+// and the flag cannot go while a gate needs the cohort arm as a control. That
+// is a real follow-up with a real precondition, not an oversight: retire the
+// two-arm gates onto single-arm assertions first, then the flag, then the
+// 'developing' mode and STOCHASTIC_ALLOCATION_MODE fall out together.
+//
+// WHAT WAS RETIRED HERE INSTEAD, both proved green on the new mechanism BEFORE
+// deletion rather than on the argument alone: development-sign-symmetry and
+// allocation-grid. Their subject was the free-lunch surface created by a
+// ROUTING CHOICE, and the per-claim law has no routing choice — every claim's
+// delta is its own revision. See scripts/gates.ts for where their coverage
+// went and for what is genuinely given up.
 
 // ===========================================================================
 // THE PRICING TRIANGLE — S1, FLAG-GATED AND OFF. Nothing in src/ reads it.
@@ -2936,7 +2980,12 @@ export const PER_CLAIM_REVISION = { enabled: false, settlement: true };
 // PER_CLAIM_REVISION off the live engine develops COHORTS and has no per-claim
 // development to match. So the factors this triangle teaches become true of the
 // played game only once PER_CLAIM_REVISION flips. PER_CLAIM_REVISION must lead
-// PRICING_TRIANGLE. Neither is flipped here.
+// PRICING_TRIANGLE.
+//
+// ⚠ THE LEAD CONDITION IS NOW SATISFIED. PER_CLAIM_REVISION flipped at 98ae506
+// on feature/payout-patterns and reached this branch by merge, so the triangle's
+// development law and the engine's are the same process. That was the
+// precondition for S3 and it is the reason S3 could not have been built first.
 export const PRICING_TRIANGLE = { enabled: false };
 
 // Ten years is ordinary practice and the window is a weak lever, so it is not
