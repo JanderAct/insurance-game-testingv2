@@ -2273,6 +2273,40 @@ export const CLAIM_REVISION_HEADROOM_EXPONENT = 0.50;
 // At GL model age 1 the size trend binds on 14.3% of claims by COUNT and 95.9%
 // by VALUE, so the gate and this constant do not meet. The measured cost of
 // closing the gap is recorded at that gate's head.
+// ============================================================================
+// ⚠ THE LAW SUPPLIES ABOUT HALF THE DISPERSION REALITY DOES — MEASURED PER LINE
+// AGAINST A REAL COMPARATOR, WHICH IS WHAT MAKES THIS DIFFERENT FROM THE EARLIER
+// STATEMENTS OF IT.
+//
+// ln(settled / first estimate), each line walked through its OWN claims, its own
+// closure curve and its own size mix rather than carrying GL's figure across:
+//
+//   line       model development log-SD     source, first estimate to settled
+//   WC                  0.620                          1.28
+//   GL                  0.714                          1.28
+//   Property            0.579                          1.28
+//
+// The comparator is the pool's own first-estimate-to-settled spread, not a
+// judgement constant, which is why this reading is worth more than the three
+// that preceded it. IBNER_TOTAL_SD's 25/20/15% self-describe as judgement; the
+// movement-by-age target turned out not to be a target at all; the cohort-spread
+// ratios were against those same retired constants. This one is against a
+// measured external quantity and it says the same thing they did.
+//
+// ⚠ IT IS NOT THE SAME FINDING AS THE BAND LEVELS, AND THEY SHOULD NOT BE ADDED.
+// CLAIM_REVISION_HEADROOM_EXPONENT records a ~7x gap in per-step |move|/incurred
+// whose basis is unsettled. This is the ACCUMULATED spread over a whole claim
+// life, on a basis that is settled, and it is a factor of about two. If the two
+// are the same underlying shortfall seen at different aggregations, the per-step
+// figure has to come down as the step basis is pinned; if they are not, there
+// are two.
+//
+// NOT THIS COMMIT'S TO FIX, and not the triangle's either. Raising it means
+// raising phi, which re-solves against the terminal anchor and moves the
+// headroom exponent's whole sweep with it. Recorded here, where the variance the
+// size trend feeds actually lives, so the next re-solve starts from a measured
+// number instead of rediscovering it.
+// ============================================================================
 export const CLAIM_REVISION_SIZE_TREND = { scale: 20.12, exponent: -0.2891 };
 
 // ⚠ COMBINE BY THE SMALLER OF THE TWO, NOT THE PRODUCT — MEASURED.
