@@ -3096,6 +3096,44 @@ export const TRIANGLE_HISTORY_YEARS = 10;
 // a real constraint on S2 rather than a rounding problem. Recorded now because
 // S1 is where it becomes visible and S2 is where it has to be answered.
 //
+// ⚠ WHICH STATISTIC THESE PRESERVE, MEASURED, BECAUSE THE ENGINE NEEDS A
+// DIFFERENT ONE FROM THE TRIANGLE AND THEY ARE NOT THE SAME ON A PARETO TAIL.
+//
+// A triangle read as a LOSS COST needs the mean over CLAIMS preserved. An
+// engine LEDGER needs the COHORT TOTAL preserved, which is value-weighted. On
+// GL (alpha 1.3) those diverge by 40%+, so the question had to be measured
+// rather than assumed. Held at a FIXED yearNumber — severity and wage trend
+// otherwise drift the ratio across the span, because the contraction is CONCAVE
+// and the trend grows the claims it applies to; a 40-year span read GL at
+// 1.2485 for that reason alone and nearly became a false finding.
+//
+//   line      count-weighted E[term]/E[drawn]   VALUE-weighted sum(term)/sum(drawn)
+//   WC                     1.0419                            1.0328
+//   GL                     1.3840                            0.9330
+//   Property               1.3173                            0.9862
+//
+// THE VALUE-WEIGHTED COLUMN IS THE ONE THAT HOLDS, and it is the one the engine
+// needs. It also agrees with triangle-check's own assertion 4, whose column is
+// `sumTerm / sumDrawn` — 1.0317 / 0.9608 / 0.9896 across seed families. The
+// count-weighted column is a different statistic and NOTHING asserts it; do not
+// read it as a defect.
+//
+// ⚠ SO THE ENGINE CAN BOOK AT initialEstimate() AND DEVELOP UP TO THE REGISTER.
+// E[netUltimate] = registerSum is not deleted by that change — it moves from a
+// DAY-ONE identity to a MATURITY one, which is what the source's own experience
+// looks like. The opening contraction, sum(initial)/sum(drawn), measured on the
+// same registers:
+//
+//   WC 0.4268     GL 0.2897     Property 0.8056
+//
+// So a GL cohort would open at 29% of its register and develop up ~3.5x, which
+// is GL's own cumulative of 3.58. That is the mechanism the ratemaking loop's
+// condition 3 needs and it is correctly anchored — but it re-levels reserves,
+// and it moves claims across the tower's lowest attachment at inception
+// (occurrences over $1M: WC 347 -> 93, GL 791 -> 208, Property 333 -> 287), so
+// the tower, the CLF tables, the opening band and the reserve margin all follow
+// it. See ratemaking-loop-check.
+//
 // The constants below are solved against the SHIPPED law at the SHIPPED phi.
 // They are not free parameters: triangle-check re-solves them and fails if
 // either the terminal spread or the preserved mean has drifted.

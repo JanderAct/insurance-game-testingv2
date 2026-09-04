@@ -96,6 +96,7 @@ const FAST: string[] = [
   'pool-aggregation-check',          //   2s
   'pregame-acceptance-check',        //  55s   STAGE 1 BLOCKER — the search must still accept on the shipped path
   'property-claim-check',            //   3s
+  'ratemaking-loop-check',           //  55s   EXPECTED RED — THE ACCEPTANCE TEST for the loop
   'ratio-basis-check',               //   7s
   'cohort-ledger-check',             //  35s   three ledger identities, BOTH arms — green since the headroom fix
   'reinsurance-tower-check',         //   2s   PROMOTED at this commit
@@ -533,6 +534,19 @@ const EXPECTED_RED: Record<string, { code: number; why: string }> = {
       + 'the flag off at this same commit. The magnitudes are small but the exhibit is internally '
       + 'inconsistent — it prints a blank next to a value that moved. FIX: S3, which has to settle what '
       + 'maturity means once pricing reads a triangle whose claims develop to closure.',
+  },
+  'ratemaking-loop-check': {
+    code: 1,
+    why: 'THE ACCEPTANCE TEST FOR THE RATEMAKING LOOP, WRITTEN BEFORE THE LOOP AND FAILING ON PURPOSE. '
+      + 'Play a year; four things must hold — (1) the triangle the pool priced off now contains that year '
+      + 'at age 1, (2) the oldest accident year is gone, (3) every remaining year developed one step ON '
+      + 'INCURRED, (4) the next year is priced off the updated triangle. All four fail today and the gate '
+      + 'reports 0/4 with the cause: LinePoolState.pricingTriangle does not exist, because S3 derives '
+      + 'factors on the fly from reserveDevelopment and stores no triangle. 1, 2 and 4 are wiring. 3 needs '
+      + 'the ENGINE to develop incurred, which it cannot: a claim is booked AT its drawn ultimate and the '
+      + 'revision law is mean-one, so played incurred age-to-age reads 0.997 / 0.995 / 1.000. FIX: book at '
+      + 'initialEstimate() and develop forward with drift, per claimTriangle.ts. The anchoring is verified '
+      + '— see that constant\'s block for the value-weighted measurement that makes it safe.',
   },
   'experience-pricing-check': {
     code: 1,
