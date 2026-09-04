@@ -28,12 +28,19 @@ import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
-import { TRIANGLE_HISTORY_YEARS } from '../../src/data/defaultAssumptions';
+import { FORWARD_BOOKING, TRIANGLE_HISTORY_YEARS } from '../../src/data/defaultAssumptions';
 import type { CoverageLine, GameState } from '../../src/types/simulation';
 
 const RULE = '='.repeat(72);
 const LINES: CoverageLine[] = ['WC', 'GL', 'Property'];
-const GAMES = Number(process.env.GAMES ?? 12);
+// ⚠ FOUR GAMES, AND THE REASON IS THE MECHANISM, NOT THRIFT. On the flagged arm
+// the pre-game acceptance search runs ~240 attempts a seed against a shipped
+// mean of 3 (see the flag's block: the opening band is calibrated to the old
+// reserve level and forward booking raises surplus/premium out of it). Every
+// game here therefore costs ~80x what it does on the shipped path. Four is
+// enough to report 0/4 against a structure that does not exist; raise it when
+// commit 4 puts the band back and the search is cheap again.
+const GAMES = Number(process.env.GAMES ?? 4);
 // Play far enough in that every window slot is a PLAYED accident year, so
 // condition 3 is asserted against the engine rather than against the generator's
 // seeded years. One window depth plus two.
@@ -49,6 +56,12 @@ interface PricingTriangleState {
    *  than assumed — a rate recomputed by the harness would prove nothing. */
   ratePer100?: number;
 }
+
+// ⚠ THIS GATE ASSERTS THE FLAGGED ARM. FORWARD_BOOKING ships off, so the
+// shipped path is untouched and this is the only place the new mechanism is
+// exercised in the sweep. Restored in a finally; the restoration is asserted.
+const wasForward = FORWARD_BOOKING.enabled;
+FORWARD_BOOKING.enabled = true;
 
 const failures: string[] = [];
 const counts = { c1: 0, c2: 0, c3: 0, c4: 0, checked: 0, absent: 0 };
@@ -151,6 +164,11 @@ if (devSamples.length > 0) {
   console.log(`\n  incurred one-step development, when observable: mean ${mean.toFixed(4)}  `
     + `median ${s[Math.floor(s.length / 2)].toFixed(4)}  n ${s.length}`);
   console.log('  (1.0000 is the failure mode — a mean-one law produces no development)');
+}
+
+FORWARD_BOOKING.enabled = wasForward;
+if (FORWARD_BOOKING.enabled !== wasForward) {
+  failures.push('FORWARD_BOOKING was not restored — this gate mutates it and must put it back');
 }
 
 console.log('');

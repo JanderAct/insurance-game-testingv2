@@ -24,7 +24,7 @@ function mergeShockRecords(lineResults: LineResultSet[]): ShockRecord[] | undefi
   return merged.size > 0 ? [...merged.values()] : undefined;
 }
 import { SeededRandom, deriveSubRng } from './random';
-import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, IBNER_BOOKING_BIAS_COEFF, IBNER_HORIZON, IBNER_STEP_MIXTURE, IBNER_TOTAL_SD, IBNER_UNWIND_DECAY, LINE_PAYOUT_PATTERN, PER_CLAIM_REVISION, PRICING_TRIANGLE, MEMBER_LOSS_VOLATILITY, OPERATING_CASH_PCT_OF_PREMIUM, PROPERTY_HELD_PURE_PREMIUM_PER_100, RISK_CONTROL_PARAMS, resolveClosureCurve } from '../data/defaultAssumptions';
+import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, IBNER_BOOKING_BIAS_COEFF, IBNER_HORIZON, IBNER_STEP_MIXTURE, IBNER_TOTAL_SD, IBNER_UNWIND_DECAY, LINE_PAYOUT_PATTERN, FORWARD_BOOKING, PER_CLAIM_REVISION, PRICING_TRIANGLE, MEMBER_LOSS_VOLATILITY, OPERATING_CASH_PCT_OF_PREMIUM, PROPERTY_HELD_PURE_PREMIUM_PER_100, RISK_CONTROL_PARAMS, resolveClosureCurve } from '../data/defaultAssumptions';
 import type { TowerLine } from '../data/reinsuranceTower';
 import {
   DEVELOPMENT_ALLOCATION, DEVELOPMENT_CESSION_ENABLED, STOCHASTIC_ALLOCATION_MODE,
@@ -33,6 +33,7 @@ import {
 import { isClaimClosed } from './claimClosure';
 import { reviseDevelopingSet, settleClosingSet } from './claimRevision';
 import { experienceRatePer100, type ExperienceBasis } from './experienceRating';
+import { developmentDrift, initialEstimate } from './claimTriangle';
 import { poolYearFactor, wcGenerationInputs, glGenerationInputs, propertyGenerationInputs } from './claimGeneration';
 import {
   aggregateRecovery,
@@ -1188,6 +1189,10 @@ export function processLineYear(
   // rather than silently defaulted, so a future line without a closed-form
   // E[ceded] fails here instead of silently retaining everything.
   let reinsuranceRecovery: number;
+  // 1 on the shipped path. On the flagged arm, the value-weighted ratio of the
+  // booked register to the drawn one, taken from the occurrence totals the
+  // tower actually saw so the two cannot disagree.
+  let bookedGrossContraction = 1;
   let cededByLayer: number[] = [];
   let retainedAboveTower = 0;
   let aggregateRecoveryAmount = 0;
@@ -1197,7 +1202,20 @@ export function processLineYear(
   if (hasTractableCeded) {
     const towerLine = line as TowerLine;
     const placed = normalizeLayersPlaced(towerLine, lineDecisions.layersPlaced);
-    const totals = occurrenceTotals(generatedClaims ?? [], generatedOccurrences ?? []);
+    const drawnTotals = occurrenceTotals(generatedClaims ?? [], generatedOccurrences ?? []);
+    // ⚠ FORWARD BOOKING: THE TOWER ATTACHES TO THE BOOKED OCCURRENCE, NOT THE
+    // DRAWN ONE. A pool does not book a recovery on a claim it has reserved at
+    // $300k. Contracting first means far less pierces at inception and the
+    // recovery arrives later, through cedeDevelopment, as the claim develops
+    // past the retention — which is what makes recovery LAG the loss.
+    // Occurrences are 1:1 with claims on all three lines (see occurrenceTotals),
+    // so contracting the occurrence total IS contracting the claim.
+    const totals = FORWARD_BOOKING.enabled
+      ? drawnTotals.map(t => initialEstimate(line, t))
+      : drawnTotals;
+    const drawnSum = drawnTotals.reduce((a, b) => a + b, 0);
+    const bookedSum = totals.reduce((a, b) => a + b, 0);
+    if (FORWARD_BOOKING.enabled && drawnSum > 0) bookedGrossContraction = bookedSum / drawnSum;
     const cession = cedeOccurrences(towerLine, totals, placed);
     cededByLayer = cession.cededByLayer;
     retainedAboveTower = cession.retainedAboveTower;
@@ -1227,7 +1245,14 @@ export function processLineYear(
     throw new Error(`processLineYear: no tractable ceded reinsurance for line ${line}`);
   }
 
-  const netUltimateLoss = grossUltimateLoss - reinsuranceRecovery;
+  // ⚠ THE BOOKED GROSS, NOT THE REGISTER, ON THE FLAGGED ARM. grossUltimateLoss
+  // is what the pool's books say it has incurred; the claim register keeps the
+  // DRAWN value untouched (Claim.grossUltimate "never moves") and remains the
+  // maturity target the cohort develops towards. Scaling gross by the same
+  // contraction the tower saw is what keeps gross, net and recovery on ONE
+  // basis — the split-basis failure this branch has produced six times.
+  const bookedGrossUltimate = bookedGrossContraction * grossUltimateLoss;
+  const netUltimateLoss = bookedGrossUltimate - reinsuranceRecovery;
 
   // --- Investment Income ---
   // This line's own segregated portfolio (Stage 2.9): drawn in processYear from
@@ -1293,7 +1318,12 @@ export function processLineYear(
         line as TowerLine,
         (generatedOccurrences ?? []).map(o => o.id),
         (generatedOccurrences ?? []).map(o => o.claimIds[0] ?? o.id),
-        occurrenceTotals(generatedClaims ?? [], generatedOccurrences ?? []),
+        // Same contraction the tower saw — the tracked set IS the register the
+        // development law moves, so it must open where the books opened.
+        (() => {
+          const t = occurrenceTotals(generatedClaims ?? [], generatedOccurrences ?? []);
+          return FORWARD_BOOKING.enabled ? t.map(v => initialEstimate(line, v)) : t;
+        })(),
         DEVELOPMENT_ALLOCATION,
         ibnerRng,
         reselectRng(instance.seed, line, yearNumber, yearNumber, 'bench'),
@@ -3335,7 +3365,13 @@ function processIbner(
             // sum of the movements is bounded by the balance they land in.
             // reviseDevelopingSet carries the inequality; do not restate it here.
             const alloc = usePerClaim
-              ? reviseDevelopingSet(gameId, live, { untracked, untrackedFactor: factor, balance: newUnpaid, modelAge: c.age + 1 })
+              ? reviseDevelopingSet(gameId, live, {
+                untracked, untrackedFactor: factor, balance: newUnpaid, modelAge: c.age + 1,
+                // FORWARD BOOKING: the deterministic climb back towards the
+                // register. developmentDrift is claimTriangle's own curve, read
+                // rather than restated so the two cannot drift apart.
+                drift: FORWARD_BOOKING.enabled ? developmentDrift(line, c.age + 1) : 1,
+              })
               : allocateDevelopment(live, untracked, step.amount, step.mode);
             const res = cedeDevelopment(line as TowerLine, live, alloc.deltas, alloc.untrackedDelta, placed);
             live = res.moved;

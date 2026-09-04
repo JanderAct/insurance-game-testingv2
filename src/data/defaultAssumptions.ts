@@ -2994,6 +2994,117 @@ export const PER_CLAIM_REVISION = { enabled: true, settlement: true };
 // it. So S3 prices off reserveDevelopment — the pool's own played PAID triangle
 // — and experienceRating.ts is the consumer. See that file's header for the
 // measurements and for why the incurred side cannot be priced off.
+// ===========================================================================
+// FORWARD BOOKING — the engine books at an INITIAL ESTIMATE and develops up.
+//
+// ⚠ COMMIT 1 OF THE RATEMAKING LOOP, FLAGGED, AND THE FLAG IS THE ANSWER TO A
+// REAL OBJECTION. A half-migrated engine has no measurable intermediate state;
+// a flag gives it one. The shipped path keeps working, the migration is
+// measured on the flagged arm, and every gate the mechanism breaks is
+// registered in EXPECTED_RED BY NAME so later commits turn them green one at a
+// time and each of those is itself a measurable state.
+//
+// WHAT IT CHANGES. A cohort is booked at the sum of its claims' INITIAL
+// estimates rather than at its register, and develops forward:
+//
+//   sum(initial)/sum(drawn)    WC 0.4268    GL 0.2897    Property 0.8056
+//
+// GL opens at 29% of its register and climbs ~3.5x, against GL's own measured
+// cumulative of 3.58. That is the mechanism the played incurred triangle needs:
+// today it reads 0.997 / 0.995 / 1.000 and a chain ladder on it returns the
+// booked ultimate, so incurred CL is exact by construction and the method
+// selection is a puzzle with one answer.
+//
+// ⚠ E[netUltimate] = registerSum IS NOT DELETED. It moves from a DAY-ONE
+// identity to a MATURITY one, and only on the VALUE-WEIGHTED basis — the
+// count-weighted reading differs by 40% on GL's alpha-1.3 tail and is not the
+// ledger's. See TRIANGLE_INITIAL_CONTRACTION for both columns and for why the
+// distinction had to be measured rather than assumed.
+//
+// ⚠ THE TOWER ATTACHES TO THE BOOKED OCCURRENCE, WHICH IS A RULING AND NOT AN
+// ARTEFACT. A real pool does not book a recovery on a claim reserved at $300k;
+// it books one when the claim develops past the retention, and cedeDevelopment
+// already carries that. Occurrences over the lowest attachment at inception go
+// WC 347 -> 93, GL 791 -> 208, Property 333 -> 287, and the recovery arrives
+// later through development. That buys something the model did not have:
+// RECOVERY LAGS THE LOSS. The alternative — cede on the drawn occurrence while
+// booking the contracted one — is a split basis, and this branch has already
+// produced six.
+//
+// ===========================================================================
+// ⚠ RETIREMENT CONDITION, WRITTEN ON DAY ONE.
+//
+// ratemaking-loop-check asserts the ON arm and stays red until the loop is
+// finished. When it passes, this flag has nothing left to gate: remove its
+// EXPECTED_RED entry, delete the flag, and make forward booking unconditional.
+// The XPASS guard fails the sweep if the entry outlives the defect.
+//
+// THE ORDER, each commit turning named gates green:
+//   1. THIS — booking and drift on the flagged arm            (here)
+//   2. the ledger and the null tests                          (the E[..] move)
+//   3. the tower                                              (cession lags)
+//   4. the CLF tables, the opening band, the reserve margin    (the cascade)
+//   5. the stored triangle and the ten-year seed              (loop conditions 1, 2, 4)
+//   6. ratemaking-loop-check green; this flag and PRICING_TRIANGLE both go
+//
+// ===========================================================================
+// ⚠ WHAT THE FLAGGED ARM BREAKS, MEASURED BY RUNNING THE WHOLE SWEEP WITH THE
+// FLAG FORCED ON. 34/50 green, 11 red. Enumerated here BY NAME so commits 2-5
+// have a list rather than a discovery, and classified: BROKEN means the gate's
+// subject genuinely changed, MIS-SPECIFIED means the gate describes the old
+// mechanism and is a later commit's job. None was adjusted to make it pass.
+//
+//   COMMIT 2 — the ledger and the null tests
+//     claims-workbook-check   BROKEN. "Gross Incurred !== Drawn Occurrence" on
+//       every developing row. That IS the day-one-to-maturity move: booked gross
+//       is now the contracted register and the drawn occurrence is the target it
+//       develops towards. The workbook asserts they are equal at every age.
+//     audit-formula-check     BROKEN, downstream of the same divergence — 1,600
+//       defects and 1,600 hand-check findings, all rows that print a booked
+//       figure beside a drawn one.
+//     cohort-stock-check      BROKEN, and this one is a real bound rather than a
+//       label: WC open cohorts grow 12.7% between year 40 and 60 against a 10%
+//       limit, worst age seen 52 against a 60 bound. Forward booking keeps
+//       cohorts developing, so they close later and the stock plateaus higher.
+//       Needs the horizon to bound it, not the limit widened.
+//
+//   COMMIT 3 — the tower
+//     cession-uplift-basis    BROKEN, and it is ruling 1 working. Lifetime
+//       development cession against inception cession reads WC 391.5%, GL 610.0%,
+//       Property 162.7% against a 6% limit. The limit encodes a world where
+//       cession happened at inception; recovery now lags the loss by design.
+//     reinsurance-tower-check BROKEN on one assertion — Property fully declined
+//       no longer gives net === gross every year, because development cession
+//       arrives after inception.
+//     cession-path-independence  NOT A FAILURE — it printed "INCEPTION CESSION IS
+//       PATH-INDEPENDENT" and then hit the 30-minute timeout. A runtime casualty
+//       of the pre-game cost below, not a mechanism break.
+//
+//   COMMIT 4 — the opening band, the CLF tables, the reserve margin
+//     opening-centring-check  BROKEN. WC's unfiltered candidate median is 2.164
+//       against a band midpoint of 1.025 — 292% of the band's width and 58.2 SE;
+//       GL 2.469 against 1.510. Reserves fell 58-71%, so opening surplus over
+//       premium rose out of its band. RE-SOLVE K, per that gate's own instruction.
+//     pregame-acceptance-check BROKEN, and it is the one that matters most: WC
+//       exhausts all 500 attempts on 135 of 150 seeds and ships a closest-miss
+//       opening, mean attempts 239.59 against a bound of 12. ⚠ THE FLAGGED ARM
+//       CANNOT GENERATE A WC PAST TODAY. That is why this flag ships off and why
+//       commit 4 cannot be deferred past commit 5.
+//     pin-vs-band-check       BROKEN, same root: the pin is now setting the
+//       opening because the band no longer filters.
+//
+//   NOT BREAKS — every seed re-rolls on the flagged arm
+//     value-identity-check, solo-export-guard. Both GREEN on the shipped path and
+//     verified so at this commit. ⚠ DO NOT RECAPTURE THEM while the flag is off:
+//     a recapture taken on the flagged arm would silently move the shipped
+//     baseline. They recapture at the commit that turns the flag on for good.
+//
+// ⚠ AND THE SWEEP COSTS 148 CPU-MINUTES ON THE FLAGGED ARM AGAINST 11, ALL OF IT
+// THE PRE-GAME SEARCH. That is a symptom of the opening band, not a separate
+// problem, and it disappears with commit 4.
+// ===========================================================================
+export const FORWARD_BOOKING = { enabled: false };
+
 export const PRICING_TRIANGLE = { enabled: false };
 // ===========================================================================
 // ⚠ THIS FLAG HAS A RETIREMENT CONDITION AND IT IS WRITTEN ON DAY ONE.

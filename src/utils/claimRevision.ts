@@ -485,6 +485,25 @@ export interface CohortStep {
   balance: number;
   /** The step about to be taken, 1-based — the cohort's `age + 1`. */
   modelAge: number;
+  /**
+   * FORWARD BOOKING ONLY. The deterministic upward drift for this valuation,
+   * as a factor (1 = none). Absent or 1 on the shipped path, which is why the
+   * shipped arm is untouched.
+   *
+   * ⚠ DRIFT ON THE VALUE, DISPERSION ON THE RESERVE — SAME PROCESS AS
+   * claimTriangle.ts's walkClaim, NOT A COPY OF IT, AND THE DIFFERENCE IS
+   * DELIBERATE. The generator moves `value x drift x factor`, both terms on the
+   * whole value. This engine moves the stochastic term as `current x h x
+   * (factor - 1)` — a share of the RESERVE — because 72b0099 needed the delta
+   * bounded by the balance to close the ledger crossing. Copying the generator
+   * would reopen it.
+   *
+   * The drift can safely go on the whole value because it is UPWARD: it raises
+   * the ultimate and the unpaid together, so `netUnpaid >= 0` is not the binding
+   * constraint. Only downward movement needs the balance bound, and the
+   * stochastic term keeps it.
+   */
+  drift?: number;
 }
 
 export function reviseDevelopingSet(
@@ -494,6 +513,7 @@ export function reviseDevelopingSet(
   phi: number = CLAIM_REVISION_PHI,
 ): RevisionAllocation {
   const { untracked, untrackedFactor, balance, modelAge } = cohort;
+  const drift = cohort.drift ?? 1;
   const mass = Math.max(0, untracked);
   const register = tracked.reduce((a, t) => a + Math.max(0, t.current), 0) + mass;
   // Nothing to move, and nothing to move it out of. A non-positive balance is
@@ -513,11 +533,17 @@ export function reviseDevelopingSet(
   let applied = 0;
   for (const t of tracked) {
     const factor = revisionFactor(gameId, t.claimId, modelAge, { value: t.current, headroom: h }, phi);
-    const d = Math.max(0, t.current) * h * (factor - 1);
+    const v = Math.max(0, t.current);
+    // Drift on the value, dispersion on the reserve. See CohortStep.drift.
+    const d = v * (drift - 1) + v * h * (factor - 1);
     deltas.push(d);
     applied += d;
   }
-  const untrackedDelta = mass * h * (untrackedFactor - 1);
+  // The untracked mass drifts with everything else — it stands for ~490
+  // sub-retention occurrences that develop like any other claim, and leaving it
+  // behind would make the cohort's development depend on how much of it happens
+  // to be tracked, which is a storage decision.
+  const untrackedDelta = mass * (drift - 1) + mass * h * (untrackedFactor - 1);
   return { deltas, untrackedDelta, applied: applied + untrackedDelta, unallocated: 0 };
 }
 
