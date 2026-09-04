@@ -414,6 +414,23 @@ Things that were discovered expensively and live only in conversation memory. Re
   it legitimately — at 300 years a 99% gate on abuse is ±21%, at 1,500 years it is ±9.4%. Use 99%
   rather than 95% when several quantities are gated at once (four sub-coverages at 95% flag 18.5% of
   correct runs; at 99%, 3.9%). Third occurrence of this failure mode.
+- **A number quoted as a MECHANISM needs a different standard of evidence than the same number quoted
+  as a reading, and a commit must distinguish them.** Fourth occurrence. `220bb68`'s message flagged
+  heavy-tail sample instability *and*, in the same message, published a single-seed-family 30-game
+  median as a per-line mechanism with an attributed cause. Nothing about the number changed between
+  those two sentences; what changed was the claim being made on it. A reading may be quoted with its
+  sample size. A mechanism must be quoted with an interval, and the interval must be on the statistic
+  that carries the claim — which for a difference between methods is the PAIRED difference, not the
+  levels. Measured cost of getting that wrong: the GL method spread was dismissed as noise on the
+  strength of its levels' standard error (±2.8pt at n=30) when the paired spread was resolvable to
+  ±0.3pt at the same sample. Corollary: sizing a run from a small-sample sd is the same act one level
+  up — GL's required n read 3,623 at n=200 and 1,458 at n=6,000.
+
+  ⚠ AND THE FIX WAS NOT MORE GAMES. At n=30, paired, GL's spread was already resolvable; the sample was
+  in hand and the wrong estimator was used on it. Reaching for a bigger sample is the expensive reflex
+  and it belongs second — first ask whether the quantity being claimed is a DIFFERENCE, and if it is,
+  pair it. Measured at 12,000 games: per-game sd of the level ratio is 0.05-0.12, of the paired
+  difference 0.010-0.076, so pairing is worth up to 6x on the same draws.
 - **Say out loud which checks are gross-error detectors and which are precision instruments.** A
   CI gate wide enough to be honest about a heavy tail is, by construction, too wide to catch a subtle
   error — invariant 1 on GL abuse would not notice a 5% mis-specification. Precision for those
