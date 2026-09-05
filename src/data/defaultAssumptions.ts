@@ -3173,6 +3173,39 @@ export const PER_CLAIM_REVISION = { enabled: true, settlement: true };
 // whose median game is insolvent by year 7; re-centring the pre-game on top of
 // this would be calibrating against a mechanism error.
 //
+// ⚠ COMMIT 1a WAS ATTEMPTED AND REVERTED. Both halves of the fix were built and
+// measured; neither lands, and the combined fix makes two lines worse. Recorded
+// so the next attempt does not repeat it.
+//
+//   variant                                     WC       GL   Property
+//   shipped (commit 1)                        0.891    0.932    1.144
+//   + untracked mass drifts only while open   0.705    0.715    1.079
+//   + also develop to age 40, not to horizon  0.775    1.279    1.470*
+//
+//   * NOT A VALID READING. The instrument filters cohorts at `age >= horizon`,
+//     which meant "finished developing" only while the horizon was the stop. Once
+//     development runs past it the filter admits mid-climb cohorts, so that row
+//     mixes finished and unfinished and is not comparable to the two above it.
+//     Any re-attempt needs a completion test that does not reference the horizon.
+//
+// WHAT IS ESTABLISHED. The untracked-mass error is REAL and LOCALISED: the mass
+// is a scalar with no closure, and scaling its drift by the still-open share
+// moves Property 1.144 -> 1.079. That half is sound and can be lifted as-is.
+//
+// WHAT IS NOT. It does not explain WC or GL — removing it made both WORSE
+// (0.891 -> 0.705, 0.932 -> 0.715), which says the two errors were partly
+// cancelling and that the early stop dominates on the long-tail lines. An
+// analytic model of the current engine, over real registers with real closure
+// draws, reproduced Property (1.104 predicted against 1.144 measured) and FAILED
+// on WC (1.027 against 0.891) and GL (1.251 against 0.932) — so the
+// decomposition is confirmed in STRUCTURE (two errors, opposite signs, exposed
+// by removing one) and NOT in magnitude. Do not adopt it as arithmetic.
+//
+// AND ONE THING THE REVERT SETTLES: the tracked set never had the closed-claim
+// error. reselectDevelopingSet retires an occurrence the moment it closes, so
+// `live` holds only open claims and its drift is already on the claim's own
+// clock. The error was only ever in the untracked scalar.
+//
 // THE LIKELY CAUSE, NOT YET CONFIRMED: the generator compounds drift PER CLAIM
 // to that claim's own closure age, while this engine applies it PER COHORT
 // VALUATION bounded by IBNER_HORIZON (WC 5-12, GL 3-8, Property 2-4). Those are
