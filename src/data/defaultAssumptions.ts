@@ -3148,16 +3148,34 @@ export const PER_CLAIM_REVISION = { enabled: true, settlement: true };
 // ⚠ OPEN DEFECT — THE REALISED CLIMB DOES NOT MATCH THE CONTRACTION, PER LINE.
 // This blocks commit 4 and it is commit 1's to fix, not the pre-game's.
 //
-// Booking at c of the register is only sound if the cohort then develops up by
-// 1/c. Measured over 12 games x 18 years, cohorts at or past their horizon:
+// ⚠⚠ THE PER-LINE NUMBERS BELOW ARE RETRACTED. THE DEFECT IS REAL; ITS SIGN AND
+// ITS SIZE ARE NOT WHAT THIS BLOCK SAID, AND ON TWO LINES THE SIGN IS INVERTED.
+// Read forward-booking-climb-report.ts before acting on anything here. The
+// instrument that produced them admitted THREE finished WC cohorts in 12 games
+// x 20 years, and the finished subset is SELECTED ON CLOSURE SPEED — which is
+// the property the climb is made of, so it was biased as well as thin. Measured
+// on the partial-maturity instrument at 120 games x 20 years, game-clustered:
 //
-//   line      contraction c   target climb 1/c   realised   realised/target
-//   WC             0.4290          2.3308         2.0758         0.8906
-//   GL             0.2885          3.4661         3.2300         0.9319
-//   Property       0.7664          1.3048         1.4932         1.1444
+//   line      old reading   corrected      95% CI              1.000 inside
+//   WC           0.8906      1.0257    [1.0198, 1.0325]        no
+//   GL           0.9319      1.0192    [1.0033, 1.0386]        no
+//   Property     1.1444      1.2235    [1.2169, 1.2308]        no
 //
-// WC and GL under-develop by 11% and 7%; PROPERTY OVER-DEVELOPS BY 14%. The
-// error compounds over every accident year, and the consequence is not subtle.
+// SO: WC WAS NEVER UNDER-DEVELOPING and GL WAS NEVER UNDER-DEVELOPING. All
+// three lines over-develop; WC and GL by 2-3%, which is small but resolved, and
+// PROPERTY BY 22%, which is worse than the 14% recorded here. Commit 1a was
+// therefore aimed at a deficit on two lines that did not exist.
+//
+// The 11%/7%/14% shape below is what a 3-observation draw on the fastest-closing
+// cohorts looks like. It is left visible rather than deleted because two commits
+// were steered by it.
+//
+// WHAT SURVIVES: the surplus/premium table immediately below is an INDEPENDENT
+// reading and stands. Its EXPLANATION does not — WC's opening jump (0.97 -> 2.09)
+// is the booking level at c releasing reserve on day one, not a climb deficiency,
+// and "under-reserved, surplus runs away" is annotated wrong. Property's
+// insolvency is consistent with the corrected 1.22 and is the sharper problem.
+//
 // Median surplus/premium by played year, band disabled, 60 seeds:
 //
 //   line      arm   open    y4     y8     y12
@@ -3173,46 +3191,55 @@ export const PER_CLAIM_REVISION = { enabled: true, settlement: true };
 // whose median game is insolvent by year 7; re-centring the pre-game on top of
 // this would be calibrating against a mechanism error.
 //
-// ⚠ COMMIT 1a WAS ATTEMPTED AND REVERTED. Both halves of the fix were built and
-// measured; neither lands, and the combined fix makes two lines worse. Recorded
-// so the next attempt does not repeat it.
+// ⚠ COMMIT 1a WAS ATTEMPTED AND REVERTED, AND ITS READINGS ARE RETRACTED TOO.
+// Both halves were built and measured on the 3-cohort instrument. Re-measured
+// at 24 games on the partial-maturity instrument, same seeds, both arms:
 //
-//   variant                                     WC       GL   Property
-//   shipped (commit 1)                        0.891    0.932    1.144
-//   + untracked mass drifts only while open   0.705    0.715    1.079
-//   + also develop to age 40, not to horizon  0.775    1.279    1.470*
+//   variant                     WC                    GL              Property
+//   retracted 3-cohort reading
+//     shipped (commit 1)      0.891                 0.932               1.144
+//     + open base             0.705                 0.715               1.079
+//     + both                  0.775                 1.279               1.470*
+//   corrected, with CIs
+//     shipped (commit 1)      1.014 [1.003,1.026]   1.034 [0.987,1.084] 1.215 [1.199,1.231]
+//     + open base only        0.790 [0.781,0.799]   0.652 [0.635,0.671] 0.925 [0.915,0.936]
+//     + horizon stop only     1.214 [1.195,1.237]   1.128 [1.074,1.188] 1.282 [1.267,1.297]
+//     + both                  0.859 [0.850,0.868]   0.678 [0.659,0.700] 0.941 [0.929,0.954]
 //
-//   * NOT A VALID READING. The instrument filters cohorts at `age >= horizon`,
-//     which meant "finished developing" only while the horizon was the stop. Once
-//     development runs past it the filter admits mid-climb cohorts, so that row
-//     mixes finished and unfinished and is not comparable to the two above it.
-//     Any re-attempt needs a completion test that does not reference the horizon.
+//   * that row was already marked invalid — the `age >= horizon` filter meant
+//     "finished" only while the horizon WAS the stop, so moving the stop made the
+//     filter admit mid-climb cohorts. The horizon-free completion test replaces it.
 //
-// WHAT IS ESTABLISHED. The untracked-mass error is REAL and LOCALISED: the mass
-// is a scalar with no closure, and scaling its drift by the still-open share
-// moves Property 1.144 -> 1.079. That half is sound and can be lifted as-is.
+// ⚠ THE OPENBASE READING IN PARTICULAR WAS A DRAW. openBase-only on WC was
+// recorded as 0.624 and is 0.790 [0.781, 0.799] — a 27% error, and outside any
+// interval the old instrument could have quoted, because it quoted none.
 //
-// WHAT IS NOT. It does not explain WC or GL — removing it made both WORSE
-// (0.891 -> 0.705, 0.932 -> 0.715), which says the two errors were partly
-// cancelling and that the early stop dominates on the long-tail lines. An
-// analytic model of the current engine, over real registers with real closure
-// draws, reproduced Property (1.104 predicted against 1.144 measured) and FAILED
-// on WC (1.027 against 0.891) and GL (1.251 against 0.932) — so the
-// decomposition is confirmed in STRUCTURE (two errors, opposite signs, exposed
-// by removing one) and NOT in magnitude. Do not adopt it as arithmetic.
+// WHAT SURVIVES THE CORRECTION. The DIRECTION of both halves is unchanged and
+// each is now resolved rather than indicative: the open base pulls every line
+// DOWN (WC 1.014 -> 0.790, GL 1.034 -> 0.652, Property 1.215 -> 0.925) and the
+// horizon stop pushes every line UP. They are complementary, as recorded.
 //
-// AND ONE THING THE REVERT SETTLES: the tracked set never had the closed-claim
-// error. reselectDevelopingSet retires an occurrence the moment it closes, so
-// `live` holds only open claims and its drift is already on the claim's own
-// clock. The error was only ever in the untracked scalar.
+// WHAT DOES NOT. "It does not explain WC or GL — removing it made both WORSE"
+// was read off a deficit that was not there. Commit 1 does not have a WC or GL
+// deficit to explain; it has a 2-3% surplus on both and a 22% surplus on
+// Property. The analytic two-error model was reported as failing on WC (1.027
+// predicted against 0.891 measured) and GL (1.251 against 0.932) — against the
+// CORRECTED measurements of 1.026 and 1.019 it is right on WC to three decimals
+// and still wrong on GL. That is not a rehabilitation, it is one line agreeing;
+// it stays unadopted, but the reason for doubting it has changed.
 //
-// THE LIKELY CAUSE, NOT YET CONFIRMED: the generator compounds drift PER CLAIM
-// to that claim's own closure age, while this engine applies it PER COHORT
-// VALUATION bounded by IBNER_HORIZON (WC 5-12, GL 3-8, Property 2-4). Those are
-// different clocks. Property's horizon is short but sits where 2/(age+1) is
-// largest, so it over-develops; WC's is long but its claims close later still,
-// so it under-develops. Confirm before fixing — do not tune the drift constants
-// to close the gap, which would fit the symptom.
+// AND ONE THING THE REVERT DID NOT SETTLE, CORRECTED SEPARATELY: the claim that
+// "the tracked set never had the closed-claim error" is wrong. DevelopingClaim
+// carries a `closed` FLAG and reselectDevelopingSet stands an occurrence down
+// while keeping its place in the register (developmentAllocation.ts:595), so a
+// closed tracked occurrence is still in `live`. The error is in BOTH bases.
+//
+// THE REMAINING CAUSE, still not confirmed: the generator compounds drift PER
+// CLAIM to that claim's own closure age, while this engine applies it PER COHORT
+// VALUATION bounded by IBNER_HORIZON (WC 5-12, GL 3-8, Property 2-4). Different
+// clocks. Property's horizon is short but sits where 2/(age+1) is largest, which
+// is consistent with its 22%. Confirm before fixing — do not tune the drift
+// constants to close the gap, which would fit the symptom.
 // ============================================================================
 export const FORWARD_BOOKING = { enabled: false };
 
@@ -3261,10 +3288,10 @@ export const FORWARD_BOOKING = { enabled: false };
 // own, and reverted. The solve below is correct and stands; what blocked it was
 // the OTHER half, and the defect is located precisely.
 //
-// THE CLIMB, EACH HALF SEPARATELY, against target 1/c and a horizon-free
-// completion test (all tracked occurrences closed AND untracked open share at
-// zero — the previous filter referenced the horizon and invalidated itself the
-// moment the stop moved):
+// ⚠ THE TABLE THAT STOOD HERE IS RETRACTED — it was read on finished cohorts
+// only, of which WC had three. The corrected variant table with intervals is in
+// the FORWARD_BOOKING block above; the parenthesised ratios below are what it
+// replaces, kept only so the two can be compared.
 //
 //   variant                WC              GL          Property
 //   target 1/c            2.3308          3.4661        1.3048
@@ -3299,8 +3326,17 @@ export const FORWARD_BOOKING = { enabled: false };
 //
 // ⚠ AND THE ACCEPTANCE SAMPLE WAS TOO SMALL TO STEER BY EITHER — n=3 finished
 // WC cohorts in 12 games x 20 years, because the completion test is strict and
-// WC's horizon is 5-12. A re-attempt needs a longer run or seeded mature
-// cohorts before its climb reading means anything.
+// WC's horizon is 5-12.
+//
+// RESOLVED, and not by loosening the completion test. A cohort's ratio TO DATE is
+// measured against the development it SHOULD have received by that age, so every
+// accident year contributes at every age instead of only the finished ones —
+// 22,800 WC observations at 120 games where the old test found 196 rows. The two
+// statistics agree to within 0.7-4.0% ON THE SAME COHORTS and disagree across
+// their populations, because "finished" selects on closure speed. See
+// scripts/diagnostics/forward-booking-climb-report.ts. Sizing is printed every
+// run and is stable across a 5x sample change (games for +/-0.02: WC 7 -> 13,
+// GL 112 -> 98, Property 22 -> 17), unlike the M2 case in WORKING_PRACTICES.
 export const TRIANGLE_DEVELOPMENT_DRIFT_HORIZON: Record<string, number> = {
   WC: 0.33974,
   GL: 0.64423,

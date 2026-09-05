@@ -194,6 +194,7 @@ const SLOW: string[] = [
 const PROBES: Record<string, string> = {
   'clf-table-derive': 'derives the static CLF tables — a generator, not a check [240s]',
   'development-cession-size': 'the cession rate by allocation rule; the calibration table [20s]',
+  'forward-booking-climb-report': "the climb against the development a cohort SHOULD have received by its age — the acceptance instrument for every forward-booking attempt, replacing a 3-observation statistic with an all-observation one. A READING with no threshold: the mechanism it measures is not built. Prints its own per-game sd and required sample every run. GAMES=112 resolves GL to +/-0.02 and costs ~4.5 min; the 24-game default costs 57s [57s]",
   'investment-dominance-report': 'underwriting against investment income, per line, with the implied return. A design reading with no threshold — see its header [12s]',
   'ibner-clf-basis-report': 'reports the IBNER/CLF basis pairing; no threshold. Renamed from -check [17s]',
   'ibner-pregame-report': 'pre-game IBNER state report [64s]',
