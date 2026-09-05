@@ -1253,6 +1253,47 @@ export const SIZE_WEIGHTS = [0.55, 0.30, 0.12, 0.03];
 // DISPLACED BY: nothing. A real capital standard would displace the BAND, not
 // this. See the closed form recorded under the band below.
 // ============================================================================
+// ============================================================================
+// ⚠ K CANNOT CARRY THE FORWARD-BOOKING ARM. MEASURED, WITH A CONTROL, AND THIS
+// CONSTANT IS UNCHANGED BECAUSE OF IT.
+//
+// Commit 4 was to re-centre the pre-game on the flagged arm by moving the PIN,
+// not the band (2a051bb's ruling). Solved on the unfiltered candidate — attempt
+// 0, band disabled, per 995f6f9 — at 250 seeds per K, five K per line:
+//
+//   arm          line       fit: median ~ a + b K        R^2      K to centre
+//   SHIPPED      WC         0.0698 + 2.2052 K           1.0000       0.4332
+//   SHIPPED      GL         0.7273 + 2.6281 K           0.8965       0.2978
+//   SHIPPED      Property   0.2207 + 2.9324 K           0.9996       0.4073
+//   FLAGGED      WC         1.2273 + 2.1922 K           0.9996      -0.0923
+//   FLAGGED      GL         1.6427 + 2.7678 K           0.8965      -0.0479
+//   FLAGGED      Property   0.0744 + 2.8551 K           0.9995       0.4695
+//
+// The shipped column reproduces the shipped values inside their own noise, so
+// the method is sound and there is no pre-existing drift to confound this.
+//
+// ⚠ THE SLOPE IS INTACT; THE INTERCEPT MOVED. b changes by -0.6% / +5.3% /
+// -2.6%, so K's leverage per unit is unaffected. a moves +1.158 on WC and
+// +0.915 on GL. WC AND GL SOLVE NEGATIVE, and K is a capital-to-premium ratio.
+// Worse than negative-therefore-clamp: at K = 0 exactly, WC's unfiltered median
+// is 1.227, which is ABOVE THE TOP OF ITS BAND (1.22). WC cannot be brought
+// INSIDE its band at any admissible K, let alone centred on it.
+//
+// ⚠ AND THE DIAGNOSIS IS ONE STEP LATER THAN THE PLUG. The brief attributed it
+// to invested assets plugging against a pinned surplus. instanceGenerator does
+// the opposite — `invested = surplus + netReserve - cash` with
+// `ls.surplus = targetSurplus`, so assets DO fall with the reserve and the pin
+// lands the opening exactly on both arms. What moved is the THREE PRE-GAME
+// YEARS run on top of it: booking at 43% / 29% / 81% of register understates
+// incurred, so three years of income are overstated. That is the whole +1.158.
+//
+// ⚠ DO NOT RE-SOLVE THIS AGAINST THE FLAGGED ARM YET, EVEN ON PROPERTY, AND THE
+// REASON IS NOT THE BAND RULING. See FORWARD_BOOKING: the realised climb does
+// not match the contraction per line, so any K solved now is solved against a
+// target that is itself wrong and will move when that is fixed. Property's
+// 0.4695 is arithmetically fine and still must not ship for that reason — and
+// K is not flag-gated, so changing it would move the shipped path.
+// ============================================================================
 export const STARTING_CAPITAL_TO_PREMIUM: Record<string, number> = {
   WC: 0.41,
   GL: 0.27,
@@ -3103,6 +3144,43 @@ export const PER_CLAIM_REVISION = { enabled: true, settlement: true };
 // THE PRE-GAME SEARCH. That is a symptom of the opening band, not a separate
 // problem, and it disappears with commit 4.
 // ===========================================================================
+// ============================================================================
+// ⚠ OPEN DEFECT — THE REALISED CLIMB DOES NOT MATCH THE CONTRACTION, PER LINE.
+// This blocks commit 4 and it is commit 1's to fix, not the pre-game's.
+//
+// Booking at c of the register is only sound if the cohort then develops up by
+// 1/c. Measured over 12 games x 18 years, cohorts at or past their horizon:
+//
+//   line      contraction c   target climb 1/c   realised   realised/target
+//   WC             0.4290          2.3308         2.0758         0.8906
+//   GL             0.2885          3.4661         3.2300         0.9319
+//   Property       0.7664          1.3048         1.4932         1.1444
+//
+// WC and GL under-develop by 11% and 7%; PROPERTY OVER-DEVELOPS BY 14%. The
+// error compounds over every accident year, and the consequence is not subtle.
+// Median surplus/premium by played year, band disabled, 60 seeds:
+//
+//   line      arm   open    y4     y8     y12
+//   WC        off   0.97   1.66   2.51   3.98
+//   WC        ON    2.09   3.26   4.29   5.53     under-reserved, surplus runs away
+//   GL        off   1.60   2.27   3.36   3.88
+//   GL        ON    2.52   2.68   2.87   2.76     flattest — GL is the closest fit
+//   Property  off   1.50   1.91   2.53   3.09
+//   Property  ON    1.31   0.48  -0.66  -1.72     ⚠ MEDIAN GAME INSOLVENT BY YEAR 7
+//
+// ⚠ SO THE OPENING IS NOT A LEVEL TO CALIBRATE TO. It is the first year of a
+// divergence, and its sign differs by line. No pin and no band rescues a line
+// whose median game is insolvent by year 7; re-centring the pre-game on top of
+// this would be calibrating against a mechanism error.
+//
+// THE LIKELY CAUSE, NOT YET CONFIRMED: the generator compounds drift PER CLAIM
+// to that claim's own closure age, while this engine applies it PER COHORT
+// VALUATION bounded by IBNER_HORIZON (WC 5-12, GL 3-8, Property 2-4). Those are
+// different clocks. Property's horizon is short but sits where 2/(age+1) is
+// largest, so it over-develops; WC's is long but its claims close later still,
+// so it under-develops. Confirm before fixing — do not tune the drift constants
+// to close the gap, which would fit the symptom.
+// ============================================================================
 export const FORWARD_BOOKING = { enabled: false };
 
 export const PRICING_TRIANGLE = { enabled: false };
