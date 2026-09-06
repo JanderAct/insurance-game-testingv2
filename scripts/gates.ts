@@ -538,16 +538,22 @@ const EXPECTED_RED: Record<string, { code: number; why: string }> = {
   },
   'ratemaking-loop-check': {
     code: 1,
-    why: 'THE ACCEPTANCE TEST FOR THE RATEMAKING LOOP, WRITTEN BEFORE THE LOOP AND FAILING ON PURPOSE. '
-      + 'Play a year; four things must hold — (1) the triangle the pool priced off now contains that year '
-      + 'at age 1, (2) the oldest accident year is gone, (3) every remaining year developed one step ON '
-      + 'INCURRED, (4) the next year is priced off the updated triangle. All four fail today and the gate '
-      + 'reports 0/4 with the cause: LinePoolState.pricingTriangle does not exist, because S3 derives '
-      + 'factors on the fly from reserveDevelopment and stores no triangle. 1, 2 and 4 are wiring. 3 needs '
-      + 'the ENGINE to develop incurred, which it cannot: a claim is booked AT its drawn ultimate and the '
-      + 'revision law is mean-one, so played incurred age-to-age reads 0.997 / 0.995 / 1.000. FIX: book at '
-      + 'initialEstimate() and develop forward with drift, per claimTriangle.ts. The anchoring is verified '
-      + '— see that constant\'s block for the value-weighted measurement that makes it safe.',
+    why: 'THE ACCEPTANCE TEST FOR THE RATEMAKING LOOP, WRITTEN BEFORE THE LOOP. Play a year; four things '
+      + 'must hold — (1) the triangle the pool priced off now contains that year at age 1, (2) the oldest '
+      + 'accident year is gone, (3) every remaining year developed one step ON INCURRED, (4) the next year '
+      + 'is priced off the updated triangle. NOW 1 OF 4 EVALUABLE AND CONDITION 3 PASSES. ⚠ THE PREVIOUS '
+      + 'ENTRY SAID ALL FOUR FAIL AND THAT CONDITION 3 NEEDS AN ENGINE CHANGE. BOTH WERE WRONG. The gate '
+      + 'short-circuited at NOT BUILT and printed 0/4, which is four conditions NEVER REACHED, not four '
+      + 'failures — and reading it as failures aimed two commits at a mechanism blocker that did not '
+      + 'exist. The 0.997 / 0.995 / 1.000 quoted here was the SHIPPED arm. On the flagged arm the engine '
+      + 'has developed incurred since commit 1: within horizon, 1.1041 / 1.2599 / 1.1584. Condition 3 now '
+      + 'asserts a material value-weighted upward move (1.02x in >=75% of line-years, both numbers read '
+      + 'off the null arm) against reserveDevelopment, and SEPARATES THE ARMS on every line — shipped '
+      + '4.0% / 8.7% / 7.7%, flagged 89.3% / 90.0% / 93.2% at 20 games. Conditions 1, 2 and 4 print '
+      + 'UNEVALUATED rather than failed. RED because the loop is not built: they need one persistent '
+      + 'LinePoolState.pricingTriangle projected from reserveDevelopment (the seeding ruling is in the '
+      + 'gate\'s header — NOT from claimTriangle.ts, whose clock differs), a window rule, and the rate '
+      + 'stamped on the triangle. That is wiring.',
   },
   'experience-pricing-check': {
     code: 1,

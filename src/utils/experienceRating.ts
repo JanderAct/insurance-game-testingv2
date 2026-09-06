@@ -45,10 +45,22 @@
 //
 // The four-method design is therefore currently TWO methods, one of which is a
 // cheat. Making the choice real needs the ENGINE to produce incurred
-// development, and claimTriangle.ts is the reference implementation for how:
-// it draws an initial estimate and walks it forward to a terminal landing on
-// the severity fit (verified at 2.052 / 2.141 / 1.619). That is the follow-on
-// piece. It is not a fifth ledger-side mechanism and it is not this commit.
+// development.
+//
+// ⚠ AND THE ENGINE NOW DOES, ON THE FLAGGED ARM — the paragraph above describes
+// the SHIPPED arm and is no longer the whole picture. FORWARD_BOOKING books at
+// initialEstimate() and develops forward; measured within horizon, one-step
+// incurred runs 1.1041 / 1.2599 / 1.1584 against the shipped arm's 0.9985 /
+// 0.9993 / 0.9992, and ratemaking-loop-check's condition 3 separates the two on
+// every line. So the incurred chain ladder stops being exact by construction the
+// moment that flag ships, and the method choice becomes real.
+//
+// ⚠ WHAT DOES NOT FOLLOW: that claimTriangle.ts is the pricing path. It was the
+// BLUEPRINT for the engine's booking, and that blueprint has been spent. RULED:
+// the rolling window seeds from reserveDevelopment, because claimTriangle
+// compounds to each claim's CLOSURE age while the engine compounds to the
+// cohort's HORIZON — same cumulative, different shape, and a chain ladder over
+// both averages a pattern no book produces. See that file's header.
 //
 // ============================================================================
 // TWO CONSTRAINTS FOUND IN THE DATA, BOTH OF WHICH SHAPE THE ARITHMETIC BELOW.

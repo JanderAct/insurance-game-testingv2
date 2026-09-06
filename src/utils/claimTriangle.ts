@@ -17,13 +17,36 @@
 // nothing in src/ outside this file applies it — so GL's synthetic cumulative
 // of 3.60 stands against a played 0.9912.
 //
-// ⚠ WHY IT IS KEPT RATHER THAN DELETED. Its generator is the blueprint for
-// making the ENGINE develop incurred: it draws an INITIAL estimate and walks it
-// forward to a terminal landing on the severity fit, verified at 2.052 / 2.141
-// / 1.619. Giving the engine that behaviour is what turns S3's method selection
-// from a puzzle with one answer into a real choice — see experienceRating.ts's
-// one-sidedness note. That is the follow-on piece, and this file is the
-// reference for it. It is not dead code and it is not a fifth ledger mechanism.
+// ⚠ AND IT IS NOW UNUSED, NOT MERELY UNCALLED. RULED: the ten-year rolling
+// window seeds from reserveDevelopment, NOT from this file. Recorded here rather
+// than only at the gate, because "reference implementation" reads as a thing
+// with a pending consumer and this no longer has one.
+//
+// THE REASON IS A CLOCK MISMATCH, and it is the whole of the reason. This file
+// compounds developmentDrift to each CLAIM's own closure age; the engine
+// compounds it to the COHORT's IBNER_HORIZON (WC 5-12, GL 3-8, Property 2-4).
+// Same cumulative by construction, DIFFERENT AGE-TO-AGE SHAPE. Seeding a window
+// from here and extending it by play would make a chain ladder average two
+// patterns, and that average is a pattern no book produces. reserveDevelopment
+// has no such problem: it carries 7-8 rows at game start as a proper staircase
+// (ay-4 at age 1, ay-5 at age 2, ... ay-8 at age 5), passes ten within two or
+// three played years, and every factor in it is ENGINE-produced — seeded rows
+// included, because runPriorHistory calls processYear. Consistent end to end.
+//
+// ⚠ WHAT WOULD BRING IT BACK, precisely: re-solve this file's drift against the
+// HORIZON so its age-to-age shape matches the engine's — the same re-solve
+// TRIANGLE_DEVELOPMENT_DRIFT_HORIZON already performed on the engine side, and
+// which defaultAssumptions records as MUST-CLOSE before any ten-year seed lands.
+// Until that is done, nothing here may be seeded into a priced triangle.
+//
+// ⚠ WHY IT IS STILL KEPT. Its generator is the blueprint for making the ENGINE
+// develop incurred: it draws an INITIAL estimate and walks it forward to a
+// terminal landing on the severity fit, verified at 2.052 / 2.141 / 1.619. That
+// blueprint was USED — forward booking is built on it, and measured on the
+// flagged arm the engine now develops incurred within horizon at 1.1041 /
+// 1.2599 / 1.1584. So this file has already paid for itself as a design
+// document. It is not dead code, it is not a fifth ledger mechanism, and it is
+// not a pricing input.
 //
 // ============================================================================
 // THE PRICING TRIANGLE — S1. NOTHING READS THIS YET.
