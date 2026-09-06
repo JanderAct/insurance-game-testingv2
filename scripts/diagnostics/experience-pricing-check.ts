@@ -23,6 +23,24 @@
 // to stop pricing chasing the roster. S3 removes that protection and nothing
 // yet replaces it. Turning the flag on before arm 3 exists would ship an
 // ungated feedback loop, so the gate refuses to go green and says so.
+//
+// ============================================================================
+// ⚠ EVERY ARM BELOW RUNS ON THE SHIPPED ARM, AND ARM 1 MUST BE RE-MEASURED WITH
+// FORWARD_BOOKING ON BEFORE EITHER FLAG SHIPS. RECORDED, NOT DONE.
+//
+// This module chain-ladders PAID, and that choice was made because the played
+// INCURRED triangle was flat — cumulative 0.9857 / 0.9912 / 1.0005, a mean-one
+// law producing no development. That is a fact about the SHIPPED arm and it is
+// no longer true with FORWARD_BOOKING on: within horizon the engine develops
+// incurred at 1.1041 / 1.2599 / 1.1584, and ratemaking-loop-check's condition 3
+// separates the two arms on every line.
+//
+// So the method selection changes underneath this gate. On the flagged arm an
+// incurred chain ladder is no longer exact-by-construction, paid is no longer
+// the only honest basis, and arm 1's -2.0% / +1.7% / +2.6% is a reading of a
+// pricing basis the shipped game will not have. It is not this commit's to fix
+// — the loop had to exist before the arm could be re-run against it — but it is
+// a PRECONDITION for flipping either flag, alongside arm 3.
 // ============================================================================
 
 import { generateGameInstance } from '../../src/utils/instanceGenerator';
@@ -30,6 +48,7 @@ import { processYear, currentPurePremiumPer100 } from '../../src/utils/simulatio
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { experienceRatePer100, type ExperienceBasis } from '../../src/utils/experienceRating';
+import { windowRows } from '../../src/utils/pricingTriangle';
 import { wasActiveInLine } from '../../src/utils/membershipHistory';
 import { getMemberExposure } from '../../src/utils/lineHelpers';
 import type { CoverageLine, GameState, Member, ReserveDevelopmentRow } from '../../src/types/simulation';
@@ -73,8 +92,22 @@ for (let g = 0; g < GAMES; g++) {
       lines: Record<string, { reserveDevelopment?: ReserveDevelopmentRow[]; members: Member[] }>;
     };
     for (const line of LINES) {
+      // ⚠ WINDOWED, BECAUSE THE ENGINE IS. processLineYear builds its basis from
+      // windowRows(reserveDevelopment) — ten accident years — so a gate reading
+      // the FULL ledger would report on a rate the pool never charges. That is
+      // the panel/engine parity defect one layer out, and it appeared the moment
+      // the window landed rather than being latent.
+      //
+      // It is not cosmetic on WC. Windowed rate over full-ledger rate, 20 games:
+      //   WC 0.9348 shipped / 0.8882 flagged;  GL 1.0059 / 0.9762;
+      //   Property 0.9939 / 1.0006.
+      // WC alone moves, for the reason the window rule turns on: it is the only
+      // line with value still open when the window drops a year (23.9% at age
+      // 10, against GL 0.4% and Property 0.2%), so retiring mature accident
+      // years retires its most developed loss costs and leaves the level
+      // greener. GL and Property have nothing left to lose by then.
       const basis: ExperienceBasis = {
-        rows: S.lines[line]?.reserveDevelopment ?? [],
+        rows: windowRows(S.lines[line]?.reserveDevelopment ?? []),
         allMarketMembers: S.allMarketMembers,
         membershipHistory: S.membershipHistory,
       };
@@ -98,11 +131,17 @@ for (let g = 0; g < GAMES; g++) {
     lines: Record<string, { reserveDevelopment?: ReserveDevelopmentRow[]; members: Member[] }>;
   };
   for (const line of LINES) {
+    // ⚠ TWO DIFFERENT ROW SETS HERE, DELIBERATELY. The RATE is windowed because
+    // that is what the engine prices off. The REALISED loss cost is NOT: it is a
+    // statement about what the pool's accident years actually cost, and the
+    // window is a pricing convention rather than a fact about the losses. Using
+    // the window for both would compare the rate against a truth the window had
+    // already trimmed, and arm 1 would grade the estimate against itself.
     const basis: ExperienceBasis = {
       rows: S.lines[line]?.reserveDevelopment ?? [],
       allMarketMembers: S.allMarketMembers, membershipHistory: S.membershipHistory,
     };
-    const expNow = experienceRatePer100(line, basis);
+    const expNow = experienceRatePer100(line, { ...basis, rows: windowRows(basis.rows) });
     for (const r of basis.rows) {
       if (r.seeded) continue;
       const u = r.ultimateByValuation ?? [];

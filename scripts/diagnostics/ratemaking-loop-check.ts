@@ -6,10 +6,18 @@
 //   4. the next year is priced off the UPDATED triangle
 //
 // ============================================================================
-// ⚠ WRITTEN BEFORE THE LOOP EXISTS, DELIBERATELY. This gate is the deliverable's
-// definition, not a report on a component. Four components have each passed
-// their own gate while the loop stayed unbuilt, so this one is written first and
-// made to pass last.
+// ⚠ WRITTEN BEFORE THE LOOP EXISTED, AND IT NOW PASSES 4/4 ON THE FLAGGED ARM.
+// This gate is the deliverable's definition, not a report on a component. Four
+// components had each passed their own gate while the loop stayed unbuilt, so
+// this one was written first and made to pass last. It came out of EXPECTED_RED
+// at the commit that built LinePoolState.pricingTriangle.
+//
+// ⚠ PASSING DOES NOT MEAN SHIPPING. Conditions 3 and 4 are asserted with
+// FORWARD_BOOKING and PRICING_TRIANGLE on, and both flags still ship OFF —
+// PRICING_TRIANGLE because experience-pricing-check's loop-stability arm does
+// not exist, FORWARD_BOOKING because Property still over-develops by 22%. The
+// loop is BUILT and CORRECT; it is not yet CALIBRATED. Do not read a green
+// acceptance test as permission to flip either flag.
 //
 // ⚠ IT REPORTS UNEVALUATED SEPARATELY FROM FAILED, AND THE DISTINCTION IS THE
 // POINT. The first version asserted all four against LinePoolState.pricingTriangle,
@@ -28,23 +36,30 @@
 // claimTriangle.ts's synthetic ten-year history. The two compound development on
 // different clocks: the generator to each CLAIM's closure age, the engine to the
 // COHORT's IBNER_HORIZON. Mixing them makes a chain ladder average an age-to-age
-// pattern no book produces. reserveDevelopment carries 7-8 rows at game start
-// (a proper staircase: ay-4 at age 1, ay-5 at age 2, ... ay-8 at age 5) and
-// passes ten within two or three played years, and every factor in it — seeded
-// rows included — is engine-produced, because runPriorHistory calls processYear.
-// So the ledger is internally consistent end to end and the shape problem does
-// not arise.
+// pattern no book produces. reserveDevelopment opens as a proper staircase
+// (ay-4 at age 1, ay-5 at age 2, ... ay-8 at age 5) and every factor in it —
+// seeded rows included — is engine-produced, because runPriorHistory calls
+// processYear. So the ledger is internally consistent end to end and the shape
+// problem does not arise.
 //
-// Condition 3 is therefore evaluable TODAY, against the source the triangle will
-// project from. When conditions 1, 2 and 4 land, its bar is already proven.
+// ⚠ CORRECTED: "7-8 rows at game start, ten within two or three played years"
+// was written here and in claimTriangle.ts and is wrong on both halves.
+// Measured, flagged arm, 8 games: WC opens at 6.5 rows and reaches ten at
+// PLAYED YEAR 4; GL 7.0 and year 3; Property 7.5 and year 3. So the window is
+// short on every line for the first three years and shortest on WC — the pool
+// prices off a PARTIAL window before it prices off a full one, which is a real
+// property of the opening game rather than a warm-up to be papered over.
+//
+// Condition 3 is asserted against reserveDevelopment directly rather than
+// against the projection, so it measures the ENGINE rather than the window.
 // ============================================================================
 
 import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
-import { FORWARD_BOOKING, TRIANGLE_HISTORY_YEARS } from '../../src/data/defaultAssumptions';
-import type { CoverageLine, GameState, ReserveDevelopmentRow } from '../../src/types/simulation';
+import { FORWARD_BOOKING, PRICING_TRIANGLE, TRIANGLE_HISTORY_YEARS } from '../../src/data/defaultAssumptions';
+import type { CoverageLine, GameState, PricingTriangleState, ReserveDevelopmentRow } from '../../src/types/simulation';
 
 const RULE = '='.repeat(72);
 const LINES: CoverageLine[] = ['WC', 'GL', 'Property'];
@@ -110,21 +125,31 @@ const MIN_SHARE = 0.75;
 /** A line-year needs at least this many carried within-horizon years to count. */
 const MIN_CARRIED = 2;
 
-/** The shape conditions 1, 2 and 4 are about. Absent today; see the header. */
-interface PricingCell { accidentYear: number; age: number; incurred: number; paid: number }
-interface PricingTriangleState {
-  years: number;
-  cells: PricingCell[];
-  exposureByYear: Record<string, number>;
-  /** The rate this triangle produced, so condition 4 can be checked rather
-   *  than assumed — a rate recomputed by the harness would prove nothing. */
-  ratePer100?: number;
-}
-
+// ============================================================================
+// ⚠ THE ACCEPTANCE ARM IS BOTH FLAGS, AND THAT IS A FINDING RATHER THAN A
+// CONVENIENCE. Condition 4 says the next year is priced off the UPDATED
+// triangle. With PRICING_TRIANGLE off, currentPurePremiumPer100 returns the
+// HELD rate, which moves with the trend factors and WC's roster blend and never
+// reads the triangle at all — so the rate would move every year and condition 4
+// would pass while being false. FORWARD_BOOKING supplies condition 3 (incurred
+// development); PRICING_TRIANGLE supplies condition 4 (the triangle is the
+// pricing input). Both ship OFF and both are exercised here.
+//
+// PRICING_TRIANGLE's own retirement condition is unchanged and unaffected: it
+// stays off until experience-pricing-check's loop-stability arm exists and
+// passes. Turning it on in a gate is not turning it on.
+// ============================================================================
 function triangleOf(st: unknown, line: CoverageLine): PricingTriangleState | undefined {
   const s = st as { lines?: Record<string, { pricingTriangle?: PricingTriangleState }> };
   return s.lines?.[line]?.pricingTriangle;
 }
+const appliedRateOf = (st: unknown, line: CoverageLine): number | undefined => {
+  const s = st as { lines?: Record<string, { purePremiumPer100?: number }> };
+  return s.lines?.[line]?.purePremiumPer100;
+};
+const depthOf = (t: PricingTriangleState) => new Set(t.cells.map(c => c.accidentYear)).size;
+const cellAt = (t: PricingTriangleState, ay: number, age: number) =>
+  t.cells.find(c => c.accidentYear === ay && c.age === age);
 
 interface ArmResult {
   /** Per line: the share of line-years whose carried years developed materially. */
@@ -132,18 +157,22 @@ interface ArmResult {
   lineYears: Record<string, number>;
   /** Per line: the pooled value-weighted factor over every carried year. */
   pooled: Record<string, number>;
-  /** Line-years in which a pricingTriangle existed at all. */
-  triangleSeen: number;
-  triangleChecked: number;
+  /** Conditions 1, 2 and 4: passes and opportunities. */
+  c1: number; c2: number; c4: number; checked: number;
+  absent: number;
+  notes: string[];
 }
 
 function runArm(flagged: boolean): ArmResult {
-  const was = FORWARD_BOOKING.enabled;
+  const wasF = FORWARD_BOOKING.enabled, wasP = PRICING_TRIANGLE.enabled;
   FORWARD_BOOKING.enabled = flagged;
+  PRICING_TRIANGLE.enabled = flagged;
   // per line, key `${game}|${valuationYear}` -> that line-year's carried steps
   const cells: Record<string, Map<string, { from: number; to: number }[]>> = {};
   for (const l of LINES) cells[l] = new Map();
-  let triangleSeen = 0, triangleChecked = 0;
+  let c1 = 0, c2 = 0, c4 = 0, checked = 0, absent = 0;
+  const notes: string[] = [];
+  const note = (s: string) => { if (notes.length < 8) notes.push(s); };
 
   try {
     for (let g = 0; g < GAMES; g++) {
@@ -156,15 +185,69 @@ function runArm(flagged: boolean): ArmResult {
         poolState, lockedResults: [], currentDecisions: defaultDecisionSet(1), priorHistory,
       };
       let st: unknown = poolState;
+      // The triangle as it stood at the END of the previous year — which is the
+      // one that priced THIS year. Condition 4 is asserted against it.
+      let prev: Partial<Record<CoverageLine, PricingTriangleState>> = {};
 
       for (let y = 1; y <= YEARS; y++) {
+        const before: Partial<Record<CoverageLine, PricingTriangleState>> = {};
+        for (const line of LINES) {
+          const t = triangleOf(st, line);
+          if (t) before[line] = JSON.parse(JSON.stringify(t)) as PricingTriangleState;
+        }
+
         const p = processYear(gs, defaultDecisionSet(y));
         st = p.updatedPoolState;
         gs = { ...gs, currentYearNumber: y + 1, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result] };
+
+        // Assert only once every window slot is a PLAYED accident year.
+        if (y <= TRIANGLE_HISTORY_YEARS) { prev = before; continue; }
+
         for (const line of LINES) {
-          triangleChecked++;
-          if (triangleOf(st, line)) triangleSeen++;
+          const b = before[line], a = triangleOf(st, line);
+          checked++;
+          if (!b || !a) { absent++; continue; }
+
+          // --- 1. the played year is in the triangle at AGE 1 ----------------
+          // ⚠ AGE 1, NOT 0. The ledger registers a year written this year with
+          // ageAtFirstValuation 0; a triangle's first development column is age
+          // 1 by convention. projectPricingTriangle converts, and this is the
+          // assertion that would catch it if it stopped.
+          const fresh = cellAt(a, y, 1);
+          if (fresh && fresh.incurred > 0) c1++;
+          else note(`${line} y${y}: condition 1 — accident year ${y} is not in the triangle at age 1`);
+
+          // --- 2. the oldest accident year is gone, depth capped ------------
+          const oldestBefore = Math.min(...b.cells.map(c => c.accidentYear));
+          const stillThere = a.cells.some(c => c.accidentYear === oldestBefore);
+          const depth = depthOf(a);
+          if (!stillThere && depth === a.years) c2++;
+          else note(`${line} y${y}: condition 2 — oldest accident year ${oldestBefore} `
+            + `${stillThere ? 'is still present' : `went, but depth is ${depth} not ${a.years}`}`);
+
+          // --- 4. THIS year was priced off the triangle that preceded it -----
+          // ⚠ TWO PARTS, AND THE FIRST IS THE REAL ONE. (a) the rate the pool
+          // APPLIED this year equals the rate the PREVIOUS triangle stamped —
+          // that is what "priced off the triangle" means, and a harness that
+          // recomputed the rate for itself would prove nothing. (b) the stamped
+          // rate MOVED, which stops a constant satisfying (a) trivially.
+          // `b` IS the triangle that priced year y — it is the state as it
+          // stood when the year began. `prev` is the one before that, and is
+          // used only to establish that the stamp is not a constant.
+          const applied = appliedRateOf(st, line);
+          const stamped = b.ratePer100;
+          const moved = stamped !== undefined && prev[line]?.ratePer100 !== undefined
+            && stamped !== prev[line]!.ratePer100;
+          if (stamped !== undefined && applied !== undefined && moved
+            && Math.abs(applied - stamped) <= 1e-9 * Math.max(1, Math.abs(stamped))) c4++;
+          else if (stamped === undefined) note(`${line} y${y}: condition 4 — the triangle that priced this year stamped no rate`);
+          else if (applied === undefined) note(`${line} y${y}: condition 4 — no applied rate on the line state`);
+          else if (Math.abs(applied - stamped) > 1e-9 * Math.max(1, Math.abs(stamped))) {
+            note(`${line} y${y}: condition 4 — applied ${applied.toFixed(6)} is not the `
+              + `${stamped.toFixed(6)} the triangle that priced it stamped`);
+          } else note(`${line} y${y}: condition 4 — the stamped rate did not move from the year before`);
         }
+        prev = before;
       }
 
       // Condition 3, off the ledger the window will project from.
@@ -191,7 +274,7 @@ function runArm(flagged: boolean): ArmResult {
         }
       }
     }
-  } finally { FORWARD_BOOKING.enabled = was; }
+  } finally { FORWARD_BOOKING.enabled = wasF; PRICING_TRIANGLE.enabled = wasP; }
 
   const share: Record<string, number> = {}, lineYears: Record<string, number> = {}, pooled: Record<string, number> = {};
   for (const l of LINES) {
@@ -206,14 +289,14 @@ function runArm(flagged: boolean): ArmResult {
     }).length;
     share[l] = groups.length > 0 ? ok / groups.length : NaN;
   }
-  return { share, lineYears, pooled, triangleSeen, triangleChecked };
+  return { share, lineYears, pooled, c1, c2, c4, checked, absent, notes };
 }
 
 const shipped = runArm(false);
 const flagged = runArm(true);
 
-if (FORWARD_BOOKING.enabled !== false) {
-  console.log('⚠ FORWARD_BOOKING WAS NOT RESTORED — this gate mutates it and must put it back');
+if (FORWARD_BOOKING.enabled !== false || PRICING_TRIANGLE.enabled !== false) {
+  console.log('⚠ A FLAG WAS NOT RESTORED — this gate mutates both and must put them back');
   process.exitCode = 1;
 }
 
@@ -222,18 +305,46 @@ console.log('RATEMAKING LOOP — ACCEPTANCE TEST');
 console.log(RULE);
 console.log(`${GAMES} games x ${YEARS} years per arm, identical seeds.\n`);
 
-// --- conditions 1, 2, 4: UNEVALUATED, and said so -------------------------
-console.log('--- CONDITIONS 1, 2 AND 4: UNEVALUATED ---');
-console.log(`  LinePoolState.pricingTriangle was present in ${flagged.triangleSeen} of `
-  + `${flagged.triangleChecked} line-years on the flagged arm.`);
-console.log('  These three assert against a persistent rolling window that does not exist:');
-console.log('    1. the played year is in the triangle at age 1     UNEVALUATED — no triangle');
-console.log('    2. the oldest accident year is gone                UNEVALUATED — no triangle');
-console.log('    4. the stored rate moved with the triangle         UNEVALUATED — no triangle');
-console.log('  ⚠ UNEVALUATED IS NOT FAILED. Nothing here says the wiring is wrong; it says the');
-console.log('  wiring is absent. reserveDevelopment is append-only and never rolls off (WC runs');
-console.log('  8 -> 22 rows over 14 years), and experienceRating derives its rate on the fly and');
-console.log('  stores nothing, so conditions 2 and 4 have no referent to assert about.\n');
+// --- conditions 1, 2, 4 ---------------------------------------------------
+const failures: string[] = [];
+console.log('--- CONDITIONS 1, 2 AND 4: THE ROLLING WINDOW ---');
+console.log(`  ${flagged.checked} line-years asserted on the flagged arm, from year `
+  + `${TRIANGLE_HISTORY_YEARS + 1} so every window slot is a PLAYED accident year.`);
+if (flagged.absent > 0) {
+  console.log(`  ⚠ ${flagged.absent} of them had NO pricingTriangle — UNEVALUATED, not failed.`);
+}
+const c124 = [
+  ['1. the played year is in the triangle at age 1', flagged.c1],
+  ['2. the oldest accident year is gone, depth capped', flagged.c2],
+  ['4. this year was priced off the triangle before it', flagged.c4],
+] as const;
+for (const [label, n] of c124) {
+  const ok = n === flagged.checked && flagged.checked > 0;
+  console.log(`    ${label.padEnd(52)} ${String(n).padStart(4)} / ${flagged.checked}   ${ok ? 'PASS' : 'FAIL'}`);
+  if (!ok) failures.push(`${label} — ${n} of ${flagged.checked} line-years`);
+}
+if (flagged.notes.length > 0) {
+  console.log('  first failures:');
+  for (const n of flagged.notes) console.log(`    - ${n}`);
+}
+// ⚠ THE SHIPPED ARM HAS A TRIANGLE AND MUST NOT BE PRICED BY IT, WHICH IS THE
+// DISTINCTION THAT MATTERS. The projection is DERIVED and runs on both arms —
+// it is a view of a ledger that already exists and moves no value. What must
+// not reach the shipped path is the triangle as a PRICING INPUT, and with
+// PRICING_TRIANGLE off currentPurePremiumPer100 returns the held rate. So
+// condition 4 must FAIL on the shipped arm, exactly as condition 3 does, and
+// conditions 1 and 2 must PASS on both because they are wiring rather than
+// mechanism. Value identity on the shipped path is asserted by
+// value-identity-check and the export hash, not by the absence of a field.
+console.log(`  shipped arm: 1 ${shipped.c1 === shipped.checked ? 'PASS' : 'fail'}`
+  + `, 2 ${shipped.c2 === shipped.checked ? 'PASS' : 'fail'}`
+  + `, 4 ${shipped.c4} / ${shipped.checked} — condition 4 MUST fail here: the held rate`);
+console.log('  prices that arm, so a triangle-stamped rate it matched would be a coincidence.');
+if (shipped.c4 > 0) {
+  failures.push(`CONDITION 4 passed on ${shipped.c4} SHIPPED line-years. With PRICING_TRIANGLE off `
+    + 'the held rate is applied, so the triangle cannot be what priced them. Investigate before accepting.');
+}
+console.log('');
 
 // --- condition 3: EVALUATED, on both arms ---------------------------------
 console.log('--- CONDITION 3: EVALUATED, BOTH ARMS ---');
@@ -241,7 +352,6 @@ console.log('  Carried accident years WITHIN THEIR HORIZON develop upward, value
 console.log(`  line-year, by at least ${MATERIAL_FACTOR.toFixed(2)}x in at least `
   + `${(100 * MIN_SHARE).toFixed(0)}% of line-years.\n`);
 console.log('  line       line-years   SHIPPED share   pooled     FLAGGED share   pooled     verdict');
-const failures: string[] = [];
 for (const line of LINES) {
   const s = shipped.share[line], f = flagged.share[line];
   // The rewrite's own test: RED on the arm with no mechanism, GREEN on the one with.
@@ -265,19 +375,23 @@ for (const line of LINES) {
 console.log('');
 console.log(RULE);
 if (failures.length > 0) {
-  console.log(`CONDITION 3 FAILING (${failures.length}):`);
+  console.log(`FAILING (${failures.length}):`);
   for (const f of failures) console.log(`  - ${f}`);
   console.log(RULE);
   process.exitCode = 1;
 } else {
-  console.log('CONDITION 3 HOLDS on the flagged arm and is RED on the shipped arm, which is the');
-  console.log('test of the assertion as well as of the mechanism. 1 of 4 conditions evaluable.');
+  console.log('THE RATEMAKING LOOP HOLDS — ALL FOUR CONDITIONS, EVERY LINE, EVERY YEAR PAST');
+  console.log('THE WINDOW DEPTH.');
   console.log('');
-  console.log('THE LOOP IS NOT BUILT. Conditions 1, 2 and 4 need one persistent');
-  console.log('LinePoolState.pricingTriangle, projected each valuation from reserveDevelopment');
-  console.log('(see the seeding ruling in this file\'s header), a window rule that retires the');
-  console.log('oldest accident year, and the produced rate stamped on the triangle so condition 4');
-  console.log('has something to read. That is wiring. Condition 3 is done.');
+  console.log('  1. the year the pool played is in the triangle that priced it, at age 1');
+  console.log('  2. the oldest accident year is gone and the window stays ten deep');
+  console.log('  3. every carried year within its horizon developed upward, materially');
+  console.log('  4. the rate applied IS the rate the preceding triangle stamped, and it moved');
+  console.log('');
+  console.log('⚠ ON THE FLAGGED ARM — FORWARD_BOOKING for condition 3, PRICING_TRIANGLE for');
+  console.log('condition 4. Both still ship OFF. PRICING_TRIANGLE\'s retirement condition is');
+  console.log('unchanged: experience-pricing-check\'s loop-stability arm does not exist, and');
+  console.log('until it does the held rate stays the shipped path. Exercising a flag in a gate');
+  console.log('is not turning it on.');
   console.log(RULE);
-  process.exitCode = 1;
 }

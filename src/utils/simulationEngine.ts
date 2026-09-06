@@ -33,6 +33,7 @@ import {
 import { isClaimClosed } from './claimClosure';
 import { reviseDevelopingSet, settleClosingSet } from './claimRevision';
 import { experienceRatePer100, type ExperienceBasis } from './experienceRating';
+import { projectPricingTriangle, windowRows } from './pricingTriangle';
 import { developmentDrift, initialEstimate } from './claimTriangle';
 import { poolYearFactor, wcGenerationInputs, glGenerationInputs, propertyGenerationInputs } from './claimGeneration';
 import {
@@ -564,8 +565,18 @@ export function processLineYear(
   // panel see the same basis. `rows` is the pool's OWN played triangle; the
   // roster and history are what reconstruct each accident year's exposure,
   // which reserveDevelopment does not carry.
+  //
+  // ⚠ WINDOWED TO TEN ACCIDENT YEARS, AND THAT IS WHAT MAKES "PRICED OFF THE
+  // TRIANGLE" TRUE RATHER THAN MERELY PLAUSIBLE. The ledger is append-only and
+  // never prunes — WC runs 8 rows to 22 over fourteen years — so pricing off
+  // `rows` unwindowed would price off the pool's WHOLE history while the
+  // triangle it is supposed to be reading holds ten years. The acceptance
+  // test's condition 4 would then pass against a triangle that was not the
+  // input, which is the failure family this project keeps finding. windowRows
+  // is a SELECTION, never a mutation: reserveDevelopment keeps every row it
+  // ever had, and only PRICING is windowed.
   const experienceBasis: ExperienceBasis = {
-    rows: lineState.reserveDevelopment ?? [],
+    rows: windowRows(lineState.reserveDevelopment ?? []),
     allMarketMembers: ctx.allMarketMembers,
     membershipHistory: ctx.membershipHistory,
   };
@@ -2282,13 +2293,50 @@ export function processYear(
     lenderState.investedAssets = entry.result.endingInvestments;
   }
 
+  // ============================================================================
+  // THE PRICING TRIANGLE — projected here, at the POOL level, and the placement
+  // is forced rather than stylistic.
+  //
+  // ⚠ IT CANNOT BE BUILT INSIDE processLineYear. Each accident year's exposure
+  // comes from membershipHistory, and the intervals for THIS year are opened by
+  // the roster diff above — after every line has returned. Projecting inside the
+  // line would read a history in which the year just written has no members
+  // enrolled, so the newest accident year's exposure would be 0 and its loss
+  // cost would be dropped from the rate. Built here, against the membership
+  // history the year actually ended with.
+  //
+  // ⚠ DERIVED, NOT STORED. `pricingTriangle` is in SAVE_STRIPPED_KEYS; this line
+  // is what rebuilds it after a reload. Nothing reads it that could not
+  // recompute it, and no save carries it.
+  //
+  // THE STAMPED RATE IS THE APPLIED ONE. `ratePer100` is what THIS window
+  // produces, which is the rate the NEXT accident year is priced at — the
+  // acceptance test's condition 4 asks exactly that, and a rate recomputed by
+  // the reader would answer a different question. Undefined when the window
+  // cannot price itself, which is the same null experienceRatePer100 returns and
+  // the same fallback to the held rate.
+  // ============================================================================
+  const withTriangles: Record<string, LinePoolState> = {};
+  for (const [line, st] of Object.entries(updatedLineStates)) {
+    const rows = st.reserveDevelopment ?? [];
+    const basis = { allMarketMembers: currentAllMarketMembers, membershipHistory };
+    const triangle = projectPricingTriangle(line as CoverageLine, rows, basis);
+    const rate = experienceRatePer100(line as CoverageLine, {
+      rows: windowRows(rows), allMarketMembers: currentAllMarketMembers, membershipHistory,
+    });
+    withTriangles[line] = {
+      ...st,
+      pricingTriangle: rate !== null && rate > 0 ? { ...triangle, ratePer100: rate } : triangle,
+    };
+  }
+
   const updatedPoolState: PoolState = {
     cash: sharedCash,
     unearnedPremium: sharedUnearnedPremium,
     allMarketMembers: currentAllMarketMembers,
     lines: {
       ...poolState.lines,
-      ...updatedLineStates,
+      ...withTriangles,
     },
     interLineLoans,
     membershipHistory,

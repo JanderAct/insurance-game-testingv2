@@ -536,34 +536,41 @@ const EXPECTED_RED: Record<string, { code: number; why: string }> = {
       + 'inconsistent — it prints a blank next to a value that moved. FIX: S3, which has to settle what '
       + 'maturity means once pricing reads a triangle whose claims develop to closure.',
   },
-  'ratemaking-loop-check': {
-    code: 1,
-    why: 'THE ACCEPTANCE TEST FOR THE RATEMAKING LOOP, WRITTEN BEFORE THE LOOP. Play a year; four things '
-      + 'must hold — (1) the triangle the pool priced off now contains that year at age 1, (2) the oldest '
-      + 'accident year is gone, (3) every remaining year developed one step ON INCURRED, (4) the next year '
-      + 'is priced off the updated triangle. NOW 1 OF 4 EVALUABLE AND CONDITION 3 PASSES. ⚠ THE PREVIOUS '
-      + 'ENTRY SAID ALL FOUR FAIL AND THAT CONDITION 3 NEEDS AN ENGINE CHANGE. BOTH WERE WRONG. The gate '
-      + 'short-circuited at NOT BUILT and printed 0/4, which is four conditions NEVER REACHED, not four '
-      + 'failures — and reading it as failures aimed two commits at a mechanism blocker that did not '
-      + 'exist. The 0.997 / 0.995 / 1.000 quoted here was the SHIPPED arm. On the flagged arm the engine '
-      + 'has developed incurred since commit 1: within horizon, 1.1041 / 1.2599 / 1.1584. Condition 3 now '
-      + 'asserts a material value-weighted upward move (1.02x in >=75% of line-years, both numbers read '
-      + 'off the null arm) against reserveDevelopment, and SEPARATES THE ARMS on every line — shipped '
-      + '4.0% / 8.7% / 7.7%, flagged 89.3% / 90.0% / 93.2% at 20 games. Conditions 1, 2 and 4 print '
-      + 'UNEVALUATED rather than failed. RED because the loop is not built: they need one persistent '
-      + 'LinePoolState.pricingTriangle projected from reserveDevelopment (the seeding ruling is in the '
-      + 'gate\'s header — NOT from claimTriangle.ts, whose clock differs), a window rule, and the rate '
-      + 'stamped on the triangle. That is wiring.',
-  },
+  // ⚠ ratemaking-loop-check IS GONE FROM THIS MAP AND THAT IS THE HEADLINE OF
+  // ITS COMMIT. It was entered red on the day it was written, as the loop's own
+  // definition, and it now passes 4/4 on the flagged arm. Its three lives here
+  // are worth keeping because each was a different kind of wrong:
+  //
+  //   1st entry — "all four fail". FALSE. The gate short-circuited at NOT BUILT
+  //     and printed 0/4, which is four conditions NEVER REACHED. Reading it as
+  //     four failures aimed two commits at a mechanism blocker that did not
+  //     exist.
+  //   2nd entry — "1 of 4 evaluable, condition 3 passes". True when written.
+  //     Conditions 1, 2 and 4 were UNEVALUATED for want of a triangle.
+  //   removed — LinePoolState.pricingTriangle exists, projected from
+  //     reserveDevelopment and windowed to ten accident years.
+  //
+  // ⚠ AND GREEN IS NOT PERMISSION TO SHIP. Conditions 3 and 4 are asserted with
+  // FORWARD_BOOKING and PRICING_TRIANGLE on; both still ship OFF. The loop is
+  // built and correct, not calibrated — Property over-develops by 22% and
+  // PRICING_TRIANGLE's loop-stability arm does not exist. If this gate goes red
+  // again, it is a regression in the loop and not a calibration drift.
   'experience-pricing-check': {
     code: 1,
     why: 'THE RETIREMENT CONDITION FOR PRICING_TRIANGLE, ENTERED THE DAY THE FLAG WAS CREATED. Three '
       + 'arms; when all three pass, this entry comes out and the flag goes with it. ARM 1 (does it price '
-      + 'sanely) PASSES on all three lines — the experience rate lands +5.1% / +0.9% / +3.0% from the '
-      + 'REALISED ultimate loss cost, while the held rate it replaces is 27-46% heavy against the same '
-      + 'measure. ARM 2 (year-to-year movement) passes on WC (0.2% of years move >20%) and Property '
-      + '(0.9%) and FAILS on GL at 9.6%, which is GL\'s 3.2x first paid factor developing an immature '
-      + 'year. ARM 3 (loop stability) IS NOT BUILT, deliberately: the held pure premium is what stopped '
+      + 'sanely) PASSES on all three lines — the experience rate lands -2.0% / +1.7% / +2.6% from the '
+      + 'REALISED ultimate loss cost, while the held rate it replaces is 24-46% heavy against the same '
+      + 'measure. ⚠ THOSE MOVED FROM +5.1% / +0.9% / +3.0% WHEN THE TEN-YEAR WINDOW LANDED. The gate now '
+      + 'windows its basis because the ENGINE does; reading the full ledger would report on a rate the '
+      + 'pool never charges. Only WC moved — windowed/full rate 0.9348 against GL 1.0059 and Property '
+      + '0.9939 — because WC is the only line with value still open when the window retires a year: '
+      + '23.9% at age 10, against GL 0.4% and Property 0.2%. WC moved CLOSER to realised, not further. '
+      + 'The REALISED side is deliberately NOT windowed: it is what the years actually cost, and grading '
+      + 'the estimate against a truth the window already trimmed would grade it against itself. '
+      + 'ARM 2 (year-to-year movement) passes on WC (0.4% of years move >20%) and Property '
+      + '(0.9%) and FAILS on GL at 11.3% (was 9.6%), which is GL\'s 3.2x first paid factor developing an '
+      + 'immature year. ARM 3 (loop stability) IS NOT BUILT, deliberately: the held pure premium is what stopped '
       + 'pricing chasing the roster (finding 17), S3 removes it, and nothing replaces it yet. The flag '
       + 'therefore ships OFF. Do not enable PRICING_TRIANGLE until arm 3 exists and passes — turning it '
       + 'on moves every line\'s rate down 24-46% AND removes an ungated feedback loop\'s only damping.',

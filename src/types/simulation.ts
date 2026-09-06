@@ -697,6 +697,45 @@ export interface ReserveDevelopmentRow {
   seeded: boolean;
 }
 
+// ============================================================================
+// THE PRICING TRIANGLE — the windowed view of the ledger above that PRICING
+// reads. Projected by pricingTriangle.ts at each valuation; see that file for
+// the window rule, the tail it truncates and why it seeds where it does.
+// ============================================================================
+
+/**
+ * One cell. ⚠ `age` IS 1-BASED — an accident year at its first valuation is at
+ * age 1, the twelve-month column, by actuarial convention. ReserveDevelopmentRow
+ * is 0-BASED (ageAtFirstValuation is 0 for a year written this year). The two
+ * clocks meet in projectPricingTriangle and nowhere else.
+ */
+export interface PricingCell {
+  accidentYear: number;
+  age: number;
+  incurred: number;
+  paid: number;
+}
+
+export interface PricingTriangleState {
+  /** The window depth this triangle was cut to — TRIANGLE_HISTORY_YEARS. */
+  years: number;
+  cells: PricingCell[];
+  /** 0 on seeded accident years, whose exposure is not reconstructable. */
+  exposureByYear: Record<string, number>;
+  /**
+   * The prospective rate per $100 THIS window produces — the rate the next
+   * accident year is priced at.
+   *
+   * ⚠ STAMPED BY THE ENGINE WITH THE APPLIED FIGURE, not recomputed by a
+   * reader. Condition 4 of the acceptance test asks whether the next year is
+   * priced off the updated triangle, and a rate the harness derived for itself
+   * would answer a different question. Undefined when the window cannot price
+   * itself (no accident year with both a paid figure and a known exposure), in
+   * which case the engine falls back to the held rate.
+   */
+  ratePer100?: number;
+}
+
 // Full result for one completed simulation year
 export interface ResultSet {
   yearNumber: number;
@@ -1203,6 +1242,13 @@ export interface LinePoolState {
   // Actuarial memorandum existed do not carry it; read it as `?? []` and the
   // exhibit is simply empty on those, which is honest rather than invented.
   reserveDevelopment?: ReserveDevelopmentRow[];
+  // The ten-year rolling window PRICING reads, projected from the ledger above
+  // at each valuation. ⚠ DERIVED AND NOT PERSISTED — it is in SAVE_STRIPPED_KEYS
+  // and processYear rebuilds it, the same treatment LineResultSet.claims gets,
+  // so this commit adds no field the save round trip must carry or assert. See
+  // pricingTriangle.ts for the window rule, the 1-based age convention, and why
+  // it seeds from reserveDevelopment rather than from claimTriangle.ts.
+  pricingTriangle?: PricingTriangleState;
   // WC ONLY, empty on GL and Property. Claims drawn but not yet reported.
   //
   members: Member[];

@@ -86,8 +86,18 @@ export const SAVE_KEY = 'riskpool_gamestate_v10';
  * been, the save would have been keeping the pre-game detail while discarding
  * the game's own, which is backwards, and it would have been inside the figure
  * save-size-check asserts against.
+ *
+ * ⚠ `pricingTriangle` IS HERE FOR A DIFFERENT REASON FROM THE OTHERS — not size,
+ * but DERIVABILITY. It is a pure projection of LinePoolState.reserveDevelopment
+ * plus the roster and membership history, every one of which the save already
+ * carries, and processYear rebuilds it on the far side of a reload. Persisting
+ * it would put a second copy of the ledger in the save, and a second copy is a
+ * thing that can disagree with the first. Store the inputs, not the output —
+ * Ruling 8, and the same argument claimRegeneration.ts makes for the register.
  */
-export const SAVE_STRIPPED_KEYS: readonly string[] = ['claims', 'occurrences', 'marketMemberLossResults'];
+export const SAVE_STRIPPED_KEYS: readonly string[] = [
+  'claims', 'occurrences', 'marketMemberLossResults', 'pricingTriangle',
+];
 
 /** Measured against a real Chromium — see the header. Not a spec figure. */
 export const MEASURED_QUOTA_CHARS = 5_242_613;
