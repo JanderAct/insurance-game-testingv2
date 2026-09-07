@@ -3284,7 +3284,64 @@ export const FORWARD_BOOKING = { enabled: false };
 // played game does not reproduce, which is the defect this whole sequence
 // exists to remove.
 // ============================================================================
-// ⚠ SOLVED AND NOT YET WIRED. Commit 1a built both halves, measured each on its
+// ⚠⚠ WIRED, MEASURED, AND REVERTED. THE SOLVE BELOW IS WRONG IN DIRECTION ON
+// ALL THREE LINES. DO NOT WIRE IT. The claim two paragraphs down that "the solve
+// below is correct and stands" is RETRACTED — it was never tested against the
+// engine, only against its own derivation.
+//
+// It was wired at the maturity-anchor commit (engineDevelopmentDrift, reading
+// this constant, replacing developmentDrift at the cohort revision call) and
+// measured on maturity-anchor-check. The gross climb against 1/c, value-weighted,
+// cohorts with room for the longest horizon:
+//
+//   line        with g (shipped)   with g' (this constant)
+//   WC              +3.3%                  +31.4%
+//   GL             +26.4%                  +42.8%
+//   Property       +35.1%                  +45.1%
+//
+// Worse on every line. Reverted the same session; src/ is code-identical to
+// 9f0756a and only this record was kept.
+//
+// ⚠ WHY IT FAILS, AND THE REASONING ERROR IS ONE SENTENCE IN THIS BLOCK. The
+// solve's stated premise is "same target, SHORTER window, therefore a HIGHER
+// rate". The engine's effective window is LONGER, not shorter, on every line —
+// and on WC that is true even though its mean horizon (8.5) is below its
+// value-weighted closure age (10.8). The reason is that the two objects are not
+// both "a window":
+//
+//     generator   value-weighted MEAN OVER CLAIMS of prod to that claim's own
+//                 closure — so the many claims that close at age 1-2 contribute
+//                 a cumulative of 1.0 and drag the mean down
+//     engine      prod over the FULL cohort horizon, applied to the whole cohort
+//                 value including the value of claims that closed in year one
+//
+// The drift is front-loaded (2/(age+1)), so most of the cumulative is earned in
+// the first few steps — exactly the steps the early-closing claims should not
+// receive and the engine gives them anyway. Measured, same g:
+//
+//   line      1/c      value-wtd cum to closure   E[cum to horizon]
+//   WC       2.3813            2.4656                  2.5013
+//   GL       3.4972            3.2810                  4.5944
+//   Property 1.2258            1.2498                  1.6672
+//
+// The middle column is what g was solved for and it lands (+3.5% / -6.2% /
+// +2.0%). The right column is what the engine realises. The gap is the clock,
+// and no re-solve of a single per-step rate in the UPWARD direction can close it.
+//
+// ⚠ WHAT WOULD LAND, DIAGNOSTIC ONLY AND DELIBERATELY NOT ADOPTED. Bisecting for
+// the rate that makes E[cum to horizon] equal 1/c gives WC 0.24848, GL 0.47068,
+// Property 0.09875 — BELOW g on every line, against this constant's values which
+// are above it. Property's would fall 62%. These are not written into the
+// codebase and should not be: a rate solved to make a cohort-level compounding
+// hit a claim-level target is fitting the symptom, which is the objection this
+// block already raises about tuning the drift constants. The defect is that the
+// engine has no per-claim clock; the fix belongs at the clock, not at the rate.
+//
+// ============================================================================
+// ⚠ THE ORIGINAL 1a NOTE FOLLOWS, WITH ITS "the solve below is correct and
+// stands" NOW KNOWN FALSE. Kept because two commits were reasoned from it.
+//
+// SOLVED AND NOT YET WIRED. Commit 1a built both halves, measured each on its
 // own, and reverted. The solve below is correct and stands; what blocked it was
 // the OTHER half, and the defect is located precisely.
 //

@@ -86,6 +86,7 @@ const FAST: string[] = [
   'gl-supplied-clf-check',           //  44s
   'ibner-null-check',                //  40s
   'marketplace-generation-check',    //  28s   200 seeds — the sample size IS the claim, see its header
+  'maturity-anchor-check',           //  40s   EXPECTED RED — the cohort overshoots its register on 2 lines
   'member-loss-history-check',       //   2s
   'net-funding-fields-check',        //   6s
   'opening-centring-check',          //  30s
@@ -555,6 +556,25 @@ const EXPECTED_RED: Record<string, { code: number; why: string }> = {
   // built and correct, not calibrated — Property over-develops by 22% and
   // PRICING_TRIANGLE's loop-stability arm does not exist. If this gate goes red
   // again, it is a regression in the loop and not a calibration drift.
+  'maturity-anchor-check': {
+    code: 1,
+    why: 'ADDED AT THIS COMMIT AND RED FROM ITS FIRST RUN — the defect is three commits old and nothing '
+      + 'was watching. Forward booking books a cohort at the CONTRACTED estimate of its claims and must '
+      + 'develop it back to what those claims were DRAWN at, so the climb must be 1/c. Measured '
+      + 'value-weighted on cohorts with room to mature, flagged arm: WC +3.3% (PASS), GL +26.4% and '
+      + 'Property +35.1% (FAIL, 10% bound). The shipped-arm null passes on all three (0.9903-0.9955), so '
+      + 'nothing has leaked onto the shipped path. ⚠ ITS ABSENCE IS WHY THIS SURVIVED: the identity '
+      + 'netUltimate + cededDevelopmentToDate === registerSum is written in types/simulation.ts as '
+      + 'standing and was asserted NOWHERE, and terminal-severity-check — the gate that sounds like it '
+      + 'would catch this — runs the generator and the revision law with no engine, no horizon and no '
+      + 'tower, and anchors a log-SD, which is a SPREAD where this is a LEVEL. CAUSE: one clock '
+      + 'mismatch. c integrates the drift over each CLAIM\'s open life; the engine compounds it over the '
+      + 'COHORT horizon and applies it to the whole cohort value, including value belonging to claims '
+      + 'that closed in year one. FIX NOT AVAILABLE AS A CONSTANT: TRIANGLE_DEVELOPMENT_DRIFT_HORIZON was '
+      + 'wired at this commit and made every line WORSE (+31.4% / +42.8% / +45.1%) because its solve '
+      + 'assumed a shorter window and the engine\'s is longer — see that constant\'s block for the '
+      + 'measurement and the retraction. The fix belongs at the clock, not the rate.',
+  },
   'experience-pricing-check': {
     code: 1,
     why: 'THE RETIREMENT CONDITION FOR PRICING_TRIANGLE, ENTERED THE DAY THE FLAG WAS CREATED. Three '
