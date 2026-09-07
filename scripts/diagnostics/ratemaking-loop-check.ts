@@ -58,7 +58,8 @@ import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
-import { FORWARD_BOOKING, PRICING_TRIANGLE, TRIANGLE_HISTORY_YEARS } from '../../src/data/defaultAssumptions';
+import { FORWARD_BOOKING, PRICING_TRIANGLE, TRIANGLE_HISTORY_YEARS, openShareAtStep } from '../../src/data/defaultAssumptions';
+import { developmentDrift } from '../../src/utils/claimTriangle';
 import type { CoverageLine, GameState, PricingTriangleState, ReserveDevelopmentRow } from '../../src/types/simulation';
 
 const RULE = '='.repeat(72);
@@ -124,6 +125,10 @@ const MATERIAL_FACTOR = 1.02;
 const MIN_SHARE = 0.75;
 /** A line-year needs at least this many carried within-horizon years to count. */
 const MIN_CARRIED = 2;
+
+/** The deterministic move step `age` is meant to make, open-share scaled. */
+const intendedStep = (line: CoverageLine, age: number) =>
+  1 + (developmentDrift(line, age) - 1) * openShareAtStep(line, age);
 
 // ============================================================================
 // ⚠ THE ACCEPTANCE ARM IS BOTH FLAGS, AND THAT IS A FINDING RATHER THAN A
@@ -266,7 +271,24 @@ function runArm(flagged: boolean): ArmResult {
             // "every carried year" wording read 11.0% on BOTH arms, unmoved by
             // the flag. Years past their horizon are OUT OF SCOPE, said here
             // rather than left for the reader to infer from a low number.
+            // ⚠ AND THE STEP MUST BE ONE THE MECHANISM INTENDS TO MAKE. Once
+            // the drift is scaled by the open-share curve, a step's
+            // DETERMINISTIC component is 1 + (drift-1) x openShare, and on
+            // Property that falls to 1.0121 by step 4 — inside a horizon of
+            // 2-4. Demanding a 1.02x move from a step whose intended move is
+            // 1.012x asserts against the mechanism rather than about it, and it
+            // dropped Property to 63.5% the moment the curve landed.
+            //
+            // ⚠ THIS IS A SCOPE CORRECTION, NOT A LOOSENED BAR. The bar is
+            // still 1.02 and MIN_SHARE is still 0.75. What changed is which
+            // steps are in scope, and the rule is DERIVED rather than chosen: a
+            // step is in scope iff its own deterministic drift clears the same
+            // bar the step is judged against. "within horizon" was the right
+            // scope while the drift ran on the horizon clock; it is the wrong
+            // scope now that it runs on the open-share clock, which is the same
+            // defect the drift itself had.
             if (!(u[k] > 0) || age < 1 || age >= r.horizon) continue;
+            if (intendedStep(line, age + 1) < MATERIAL_FACTOR) continue;
             const key = `${g}|${r.yearNumber + age}`;      // the VALUATION year
             if (!cells[line].has(key)) cells[line].set(key, []);
             cells[line].get(key)!.push({ from: u[k], to: u[k + 1] });

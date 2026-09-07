@@ -3931,3 +3931,54 @@ export const PROPERTY_HELD_PURE_PREMIUM_PER_100 = 0.0962;
 // held constant is NOT carrying. `catAssertedRetired` is deliberately NOT summed
 // into the held constant anywhere.
 export const PROPERTY_PURE_PREMIUM_SPLIT = { nonCatDerived: 0.0962, catAssertedRetired: 0.0247 };
+
+// ===========================================================================
+// THE OPEN-SHARE CURVE — the share of a cohort's VALUE still able to develop,
+// by step age. Derived by scripts/diagnostics/open-share-derive.ts.
+//
+// ⚠ WHAT IT FIXES. Forward booking drifts a cohort's WHOLE value once a year,
+// so a claim that closed at age 1 keeps receiving development — and the drift
+// is front-loaded at 2/(age+1), so those are the largest steps. That is the
+// clock mismatch behind BOTH open symptoms: a crossing age profile against
+// T(a), and a terminal overshoot against 1/c of +26.4% on GL and +35.1% on
+// Property. Scaling each step by this curve gives the cohort a per-claim clock
+// with no per-claim state, which is the constraint that killed the alternatives.
+//
+// ⚠ IT IS AN IDENTITY, NOT AN APPROXIMATION, AND THE DERIVER ASSERTS IT:
+//     V(a) = V(a-1) . (1 + g . 2/(a+1) . s_a) = V(a-1) + g . 2/(a+1) . (open value)
+// which is exactly the sum of the per-claim steps over the open claims.
+// Measured, cohort compounding against per-claim mean-of-products: 0.9966 /
+// 1.0000 / 1.0000.
+//
+// ⚠ INDEXED BY STEP, NOT BY AGE. s[a-1] applies to STEP a, which carries value
+// from age a-1 to age a. It is weighted on value AT AGE a-1 and a claim takes
+// that step iff its closure age exceeds a. Pairing a step with the share at its
+// LANDING age instead under-corrects by 10-27%; that was got wrong once.
+//
+// ⚠ AND WEIGHTED ON DRIFTED VALUE, NOT ON THE OPENING. A claim still open at
+// age 5 has drifted for five steps and carries more weight than its booked
+// value implies.
+//
+// ⚠ NOT resolveClosureCurve(line, 0), WHICH WAS TRIED AND IS 3x TO 1000x TOO
+// SMALL. That picks the smallest SIZE BAND while the untracked mix runs to the
+// retention. Proxy / true open share when it was tried at 1a: WC 0.285 / 0.178
+// / 0.063 at ages 1 / 3 / 8, GL 0.189 / 0.034 / 0.001, Property 0.257 / 0.264 /
+// 0.343. The curve must be derived over each line's own size mix.
+// ===========================================================================
+/** Longest step age the curve covers. Past this a cohort is treated as shut. */
+export const OPEN_SHARE_MAX_AGE = 30;
+export const TRIANGLE_OPEN_SHARE: Record<string, number[]> = {
+  WC: [0.86258, 0.82467, 0.78769, 0.76222, 0.71714, 0.68891, 0.65333, 0.61143, 0.56521, 0.50685, 0.47240, 0.44290, 0.40227, 0.37789, 0.34817, 0.31772, 0.29584, 0.27102, 0.24176, 0.21277, 0.18430, 0.16808, 0.14813, 0.12680, 0.11458, 0.10241, 0.09293, 0.07437, 0.06754, 0.05858],
+  GL: [0.94631, 0.87055, 0.72865, 0.57629, 0.40315, 0.27479, 0.14659, 0.06373, 0.02955, 0.01481, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000],
+  Property: [0.52466, 0.29882, 0.19019, 0.11598, 0.08596, 0.04007, 0.01998, 0.01506, 0.00645, 0.00398, 0.00302, 0.00315, 0.00027, 0.00029, 0.00030, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000, 0.00000],
+};
+
+/**
+ * The share applying to STEP `age` — the step that carries a cohort's value
+ * from age-1 to age. Zero past the table, which is what shuts a cohort down.
+ */
+export function openShareAtStep(line: string, age: number): number {
+  const c = TRIANGLE_OPEN_SHARE[line];
+  if (!c || age < 1 || age > c.length) return 0;
+  return c[age - 1];
+}

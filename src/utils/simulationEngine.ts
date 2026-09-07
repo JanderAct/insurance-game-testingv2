@@ -24,7 +24,7 @@ function mergeShockRecords(lineResults: LineResultSet[]): ShockRecord[] | undefi
   return merged.size > 0 ? [...merged.values()] : undefined;
 }
 import { SeededRandom, deriveSubRng } from './random';
-import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, IBNER_BOOKING_BIAS_COEFF, IBNER_HORIZON, IBNER_STEP_MIXTURE, IBNER_TOTAL_SD, IBNER_UNWIND_DECAY, LINE_PAYOUT_PATTERN, FORWARD_BOOKING, PER_CLAIM_REVISION, PRICING_TRIANGLE, MEMBER_LOSS_VOLATILITY, OPERATING_CASH_PCT_OF_PREMIUM, PROPERTY_HELD_PURE_PREMIUM_PER_100, RISK_CONTROL_PARAMS, resolveClosureCurve } from '../data/defaultAssumptions';
+import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, IBNER_BOOKING_BIAS_COEFF, IBNER_HORIZON, IBNER_STEP_MIXTURE, IBNER_TOTAL_SD, IBNER_UNWIND_DECAY, LINE_PAYOUT_PATTERN, FORWARD_BOOKING, PER_CLAIM_REVISION, PRICING_TRIANGLE, MEMBER_LOSS_VOLATILITY, OPERATING_CASH_PCT_OF_PREMIUM, PROPERTY_HELD_PURE_PREMIUM_PER_100, RISK_CONTROL_PARAMS, resolveClosureCurve, openShareAtStep } from '../data/defaultAssumptions';
 import type { TowerLine } from '../data/reinsuranceTower';
 import {
   DEVELOPMENT_ALLOCATION, DEVELOPMENT_CESSION_ENABLED, STOCHASTIC_ALLOCATION_MODE,
@@ -3118,7 +3118,19 @@ function processIbner(
       // development are separate clocks: the horizon governs how long the
       // ESTIMATE is uncertain, the line's payout pattern governs how fast it is
       // settled.
-      const developing = c.age < c.horizon;
+      // ⚠ TWO CLOCKS WOULD BE ONE TOO MANY. The open-share curve IS a stopping
+      // rule — it reaches zero once the line's claims have closed — so on the
+      // forward-booking arm the cohort horizon is a SECOND truncation sitting on
+      // top of it, cutting development the claims would still be taking.
+      // Measured with the curve in and the horizon retained: WC -14.8% and
+      // GL -11.9% against 1/c, where the curve alone lands within a few points.
+      // The residual was entirely this.
+      //
+      // ⚠ FLAG-GATED, SO THE SHIPPED PATH CANNOT MOVE. With FORWARD_BOOKING off
+      // this reads `c.age < c.horizon` exactly as before, and value identity on
+      // the shipped arm holds by construction rather than by measurement.
+      const developing = c.age < c.horizon
+        || (FORWARD_BOOKING.enabled && openShareAtStep(line, c.age + 1) > 0);
       let developingClaimsOut = c.developingClaims;
       let cededToDate = c.cededDevelopmentToDate ?? 0;
       let untrackedOut = c.untrackedTotal;
@@ -3418,7 +3430,18 @@ function processIbner(
                 // FORWARD BOOKING: the deterministic climb back towards the
                 // register. developmentDrift is claimTriangle's own curve, read
                 // rather than restated so the two cannot drift apart.
-                drift: FORWARD_BOOKING.enabled ? developmentDrift(line, c.age + 1) : 1,
+                //
+                // ⚠ SCALED BY THE OPEN SHARE, WHICH IS THE FIX FOR THE CLOCK
+                // MISMATCH. The drift moves the cohort's WHOLE value, so value
+                // belonging to claims that closed at age 1 was still receiving
+                // development — and 2/(age+1) is front-loaded, so those were
+                // the largest steps. Multiplying by the share still open makes
+                // the step land only on value that could still move, which is
+                // arithmetically the sum of the per-claim steps. See
+                // TRIANGLE_OPEN_SHARE; the deriver asserts that identity.
+                drift: FORWARD_BOOKING.enabled
+                  ? 1 + (developmentDrift(line, c.age + 1) - 1) * openShareAtStep(line, c.age + 1)
+                  : 1,
               })
               : allocateDevelopment(live, untracked, step.amount, step.mode);
             const res = cedeDevelopment(line as TowerLine, live, alloc.deltas, alloc.untrackedDelta, placed);

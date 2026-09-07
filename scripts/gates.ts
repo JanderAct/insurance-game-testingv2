@@ -86,7 +86,7 @@ const FAST: string[] = [
   'gl-supplied-clf-check',           //  44s
   'ibner-null-check',                //  40s
   'marketplace-generation-check',    //  28s   200 seeds — the sample size IS the claim, see its header
-  'maturity-anchor-check',           //  40s   EXPECTED RED — the cohort overshoots its register on 2 lines
+  'maturity-anchor-check',           //  40s   the cohort must develop back to its own register, both arms
   'member-loss-history-check',       //   2s
   'net-funding-fields-check',        //   6s
   'opening-centring-check',          //  30s
@@ -97,7 +97,7 @@ const FAST: string[] = [
   'pool-aggregation-check',          //   2s
   'pregame-acceptance-check',        //  55s   STAGE 1 BLOCKER — the search must still accept on the shipped path
   'property-claim-check',            //   3s
-  'ratemaking-loop-check',           //  55s   EXPECTED RED — THE ACCEPTANCE TEST for the loop
+  'ratemaking-loop-check',           //  55s   EXPECTED RED — condition 3 on Property; see the entry
   'ratio-basis-check',               //   7s
   'cohort-ledger-check',             //  35s   three ledger identities, BOTH arms — green since the headroom fix
   'reinsurance-tower-check',         //   2s   PROMOTED at this commit
@@ -195,6 +195,7 @@ const SLOW: string[] = [
 const PROBES: Record<string, string> = {
   'clf-table-derive': 'derives the static CLF tables — a generator, not a check [240s]',
   'development-cession-size': 'the cession rate by allocation rule; the calibration table [20s]',
+  'open-share-derive': "derives TRIANGLE_OPEN_SHARE and asserts the identity that justifies it — cohort compounding against the per-claim mean-of-products, 0.9966 / 1.0000 / 1.0000. A GENERATOR, but one that exits non-zero if the curve stops reproducing the per-claim clock [25s]",
   'forward-booking-climb-report': "the climb against the development a cohort SHOULD have received by its age — the acceptance instrument for every forward-booking attempt, replacing a 3-observation statistic with an all-observation one. A READING with no threshold: the mechanism it measures is not built. Prints its own per-game sd and required sample every run. GAMES=112 resolves GL to +/-0.02 and costs ~4.5 min; the 24-game default costs 57s [57s]",
   'investment-dominance-report': 'underwriting against investment income, per line, with the implied return. A design reading with no threshold — see its header [12s]',
   'ibner-clf-basis-report': 'reports the IBNER/CLF basis pairing; no threshold. Renamed from -check [17s]',
@@ -556,24 +557,29 @@ const EXPECTED_RED: Record<string, { code: number; why: string }> = {
   // built and correct, not calibrated — Property over-develops by 22% and
   // PRICING_TRIANGLE's loop-stability arm does not exist. If this gate goes red
   // again, it is a regression in the loop and not a calibration drift.
-  'maturity-anchor-check': {
+  // ⚠ maturity-anchor-check IS OUT OF THIS MAP — it went green at the commit that
+  // derived TRIANGLE_OPEN_SHARE. Gross climb against 1/c now reads WC -2.0%,
+  // GL -3.0%, Property +3.9%, from +3.3% / +26.4% / +35.1%. No constant was
+  // fitted: g is untouched and the fix is the open-share curve plus dropping the
+  // now-redundant horizon truncation. If it goes red again that is a regression
+  // in the booking mechanism, not calibration drift.
+  'ratemaking-loop-check': {
     code: 1,
-    why: 'ADDED AT THIS COMMIT AND RED FROM ITS FIRST RUN — the defect is three commits old and nothing '
-      + 'was watching. Forward booking books a cohort at the CONTRACTED estimate of its claims and must '
-      + 'develop it back to what those claims were DRAWN at, so the climb must be 1/c. Measured '
-      + 'value-weighted on cohorts with room to mature, flagged arm: WC +3.3% (PASS), GL +26.4% and '
-      + 'Property +35.1% (FAIL, 10% bound). The shipped-arm null passes on all three (0.9903-0.9955), so '
-      + 'nothing has leaked onto the shipped path. ⚠ ITS ABSENCE IS WHY THIS SURVIVED: the identity '
-      + 'netUltimate + cededDevelopmentToDate === registerSum is written in types/simulation.ts as '
-      + 'standing and was asserted NOWHERE, and terminal-severity-check — the gate that sounds like it '
-      + 'would catch this — runs the generator and the revision law with no engine, no horizon and no '
-      + 'tower, and anchors a log-SD, which is a SPREAD where this is a LEVEL. CAUSE: one clock '
-      + 'mismatch. c integrates the drift over each CLAIM\'s open life; the engine compounds it over the '
-      + 'COHORT horizon and applies it to the whole cohort value, including value belonging to claims '
-      + 'that closed in year one. FIX NOT AVAILABLE AS A CONSTANT: TRIANGLE_DEVELOPMENT_DRIFT_HORIZON was '
-      + 'wired at this commit and made every line WORSE (+31.4% / +42.8% / +45.1%) because its solve '
-      + 'assumed a shorter window and the engine\'s is longer — see that constant\'s block for the '
-      + 'measurement and the retraction. The fix belongs at the clock, not the rate.',
+    why: 'BACK IN THIS MAP AT THE OPEN-SHARE COMMIT, AND ONLY CONDITION 3 ON PROPERTY. Conditions 1, 2 '
+      + 'and 4 hold 36/36 and condition 3 SEPARATES the arms on WC (1.1% shipped against 85.6% flagged) '
+      + 'and GL (6.7% against 89.9%). Property reads 67.9% against a 75% bar. ⚠ THE BAR IS CALIBRATED '
+      + 'AGAINST THE OLD MECHANISM, NOT BROKEN BY THE NEW ONE, AND IT IS NOT BEING MOVED. Property\'s '
+      + 'claims close by age 2, so once the drift is scaled by the open share its INTENDED steps are '
+      + '1.137 / 1.052 / 1.025 at ages 1-3 — genuine development of 2.5-5% at the later ages, against a '
+      + 'MATERIAL_FACTOR of 1.02 that was read off the shipped arm\'s noise tail. The signal and the '
+      + 'noise floor are now the same size on that line, so an absolute bar cannot separate them however '
+      + 'it is set. The old engine cleared 94% on Property only by developing value whose claims had '
+      + 'closed, which is the +35.1% overshoot maturity-anchor-check was built to catch. A scope '
+      + 'correction was applied and was NOT enough on its own (63.5% -> 67.9%): a step whose own '
+      + 'deterministic drift is below 1.02 is now out of scope, because asserting a 1.02x move on a '
+      + '1.012x intended step asserts against the mechanism. FIX: condition 3 needs a PAIRED statistic — '
+      + 'flagged against shipped on the same seeds and the same line-years — which resolves a small '
+      + 'signal where an absolute bar cannot. Not done here; the brief scoped this commit to the curve.',
   },
   'experience-pricing-check': {
     code: 1,
