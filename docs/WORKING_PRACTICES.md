@@ -431,6 +431,27 @@ Things that were discovered expensively and live only in conversation memory. Re
   and it belongs second — first ask whether the quantity being claimed is a DIFFERENCE, and if it is,
   pair it. Measured at 12,000 games: per-game sd of the level ratio is 0.05-0.12, of the paired
   difference 0.010-0.076, so pairing is worth up to 6x on the same draws.
+
+  ⚠ FOURTH APPEARANCE, AND THE FIRST OF A DIFFERENT KIND: SOMETIMES PAIRED IS NOT CHEAPER, IT IS THE
+  ONLY ESTIMATOR THAT EXISTS. The cases above are all "the same answer on less sample" — cession 5x,
+  M2 5x, and the forward-booking climb instrument only 1.2x, which was CHECKED rather than assumed
+  and is why that one was sized on levels. Ratemaking condition 3 is the case where an absolute test
+  is IMPOSSIBLE rather than expensive. A fixed bar has to sit above the noise and below the signal;
+  once the drift was scaled by the open-share curve, Property's intended steps were 1.137 / 1.052 /
+  1.025 against a materiality bar of 1.02 that had itself been read off the null arm's 95th
+  percentile. There was no gap left to sit in. Paired removes the noise instead of clearing it — the
+  shipped arm is the null for that exact cell — and Property went from 67.9% against a 75% bar to a
+  sign-test p of 9.2e-9. **So the question is not only "is this a difference, and can I pair it" but
+  "is the smallest real signal larger than the noise floor at all"; when it is not, no absolute
+  threshold is honest however it is set.** The tuned constant disappears with it: a sign test against
+  p=0.5 has no bar to pick.
+
+  ⚠ AND A PAIRED TEST NEEDS ITS OWN NULL CONTROLS, because it can fall into the family it was brought
+  in to fix. Condition 3's first version was a float inequality that passed 73.7% of line-years on the
+  arm where nothing develops. Two controls now run every time: the arm paired with ITSELF (difference
+  identically zero, so the test cannot fire) and two runs of the null arm on DISJOINT seeds (real
+  noise, no mechanism — measured 57.8% / 50.0% / 41.3% positive at p 0.09 / 0.54 / 0.91, correctly
+  silent). A control that passes fails the gate.
 - **Say out loud which checks are gross-error detectors and which are precision instruments.** A
   CI gate wide enough to be honest about a heavy tail is, by construction, too wide to catch a subtle
   error — invariant 1 on GL abuse would not notice a 5% mis-specification. Precision for those

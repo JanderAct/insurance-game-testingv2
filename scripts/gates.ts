@@ -97,7 +97,7 @@ const FAST: string[] = [
   'pool-aggregation-check',          //   2s
   'pregame-acceptance-check',        //  55s   STAGE 1 BLOCKER — the search must still accept on the shipped path
   'property-claim-check',            //   3s
-  'ratemaking-loop-check',           //  55s   EXPECTED RED — condition 3 on Property; see the entry
+  'ratemaking-loop-check',           //  80s   THE ACCEPTANCE TEST — 4/4; condition 3 is paired with two null controls
   'ratio-basis-check',               //   7s
   'cohort-ledger-check',             //  35s   three ledger identities, BOTH arms — green since the headroom fix
   'reinsurance-tower-check',         //   2s   PROMOTED at this commit
@@ -563,24 +563,18 @@ const EXPECTED_RED: Record<string, { code: number; why: string }> = {
   // fitted: g is untouched and the fix is the open-share curve plus dropping the
   // now-redundant horizon truncation. If it goes red again that is a regression
   // in the booking mechanism, not calibration drift.
-  'ratemaking-loop-check': {
-    code: 1,
-    why: 'BACK IN THIS MAP AT THE OPEN-SHARE COMMIT, AND ONLY CONDITION 3 ON PROPERTY. Conditions 1, 2 '
-      + 'and 4 hold 36/36 and condition 3 SEPARATES the arms on WC (1.1% shipped against 85.6% flagged) '
-      + 'and GL (6.7% against 89.9%). Property reads 67.9% against a 75% bar. ⚠ THE BAR IS CALIBRATED '
-      + 'AGAINST THE OLD MECHANISM, NOT BROKEN BY THE NEW ONE, AND IT IS NOT BEING MOVED. Property\'s '
-      + 'claims close by age 2, so once the drift is scaled by the open share its INTENDED steps are '
-      + '1.137 / 1.052 / 1.025 at ages 1-3 — genuine development of 2.5-5% at the later ages, against a '
-      + 'MATERIAL_FACTOR of 1.02 that was read off the shipped arm\'s noise tail. The signal and the '
-      + 'noise floor are now the same size on that line, so an absolute bar cannot separate them however '
-      + 'it is set. The old engine cleared 94% on Property only by developing value whose claims had '
-      + 'closed, which is the +35.1% overshoot maturity-anchor-check was built to catch. A scope '
-      + 'correction was applied and was NOT enough on its own (63.5% -> 67.9%): a step whose own '
-      + 'deterministic drift is below 1.02 is now out of scope, because asserting a 1.02x move on a '
-      + '1.012x intended step asserts against the mechanism. FIX: condition 3 needs a PAIRED statistic — '
-      + 'flagged against shipped on the same seeds and the same line-years — which resolves a small '
-      + 'signal where an absolute bar cannot. Not done here; the brief scoped this commit to the curve.',
-  },
+  // ⚠ ratemaking-loop-check IS OUT OF THIS MAP AGAIN, and this time condition 3
+  // is PAIRED. It re-entered for one line: Property read 67.9% against a 75%
+  // absolute bar once the open-share curve removed the +35.1% overshoot that
+  // had been earning it 94%. The bar was not moved. The STATISTIC was replaced
+  // — flagged minus shipped on the same seeds and the same line-years,
+  // sign-tested against p=0.5, no tuned constant anywhere in it. Property now
+  // reads 88.2% positive at p 9.2e-9; WC 90.0% at 6.4e-16; GL 91.0% at 1.3e-16.
+  // Two null controls run every time and BOTH must stay silent: the arm paired
+  // with itself, and two runs of the null arm on disjoint seeds (57.8% / 50.0%
+  // / 41.3% positive, p 0.09 / 0.54 / 0.91). A control that fires fails the
+  // gate. See WORKING_PRACTICES on the paired lesson's fourth appearance — the
+  // first where paired is not cheaper but is the only estimator that works.
   'experience-pricing-check': {
     code: 1,
     why: 'THE RETIREMENT CONDITION FOR PRICING_TRIANGLE, ENTERED THE DAY THE FLAG WAS CREATED. Three '

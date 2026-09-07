@@ -58,8 +58,7 @@ import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
-import { FORWARD_BOOKING, PRICING_TRIANGLE, TRIANGLE_HISTORY_YEARS, openShareAtStep } from '../../src/data/defaultAssumptions';
-import { developmentDrift } from '../../src/utils/claimTriangle';
+import { FORWARD_BOOKING, PRICING_TRIANGLE, TRIANGLE_HISTORY_YEARS } from '../../src/data/defaultAssumptions';
 import type { CoverageLine, GameState, PricingTriangleState, ReserveDevelopmentRow } from '../../src/types/simulation';
 
 const RULE = '='.repeat(72);
@@ -78,57 +77,66 @@ const GAMES = Number(process.env.GAMES ?? 6);
 const YEARS = Number(process.env.YEARS ?? TRIANGLE_HISTORY_YEARS + 2);
 
 // ============================================================================
-// CONDITION 3'S TWO THRESHOLDS, BOTH MEASURED RATHER THAN PICKED.
+// CONDITION 3 IS PAIRED, AND ON THIS GATE THAT IS NOT A TIGHTENING — IT IS THE
+// ONLY ESTIMATOR THAT WORKS AT ALL.
 //
-// ⚠ THE OLD TEST WAS `nowCell.incurred !== prevCell.incurred` AND IT COULD NOT
-// FAIL. On the SHIPPED arm — where the revision law is mean-one and cumulative
-// incurred development is 0.9857 / 0.9912 / 1.0005, i.e. nothing develops —
-// 100% of within-horizon steps satisfied it and whole line-years passed at WC
-// 73.7% and GL 59.6%. A float inequality is satisfied by dispersion noise. A
-// test that cannot go red on the arm with no mechanism is not a test.
+// ⚠ THE FOURTH APPEARANCE OF THE PAIRED LESSON, AND THE FIRST OF ITS KIND.
+// Cession bought 5x. M2 bought 5x. The climb instrument bought only 1.2x and
+// that was CHECKED rather than assumed. Three times pairing was CHEAPER — the
+// same question answered on less sample. Here an absolute test is IMPOSSIBLE,
+// not merely expensive, and the distinction is worth having written down.
 //
-// ⚠ AND "EVERY CARRIED YEAR MOVES UP" IS NOT ACHIEVABLE, WHICH IS A CORRECTION
-// TO THE OBVIOUS FIX RATHER THAN A WEAKENING OF IT. The revision law is drift
-// PLUS a mean-one dispersion term, so individual accident years come in below
-// their prior estimate — as they do in a real book. Measured on the FLAGGED
-// arm, per cohort, within horizon, 12 games x 20 years:
+// ⚠ WHY NO ABSOLUTE BAR CAN WORK. A fixed bar must sit above the noise and
+// below the signal. Once the drift is scaled by the open-share curve,
+// Property's INTENDED steps are 1.137 / 1.052 / 1.025 at ages 1-3, while
+// MATERIAL_FACTOR was 1.02 read off the shipped arm's own 95th percentile.
+// There is no gap left to sit in: the smallest real signal and the noise floor
+// are the same size. Property read 94% under the old engine and 67.9% under the
+// fixed one — and the 94% was earned by developing value whose claims had
+// closed, which is the +35.1% overshoot maturity-anchor-check now forbids. The
+// gate was green BECAUSE of the defect.
 //
-//     share of one-step factors above 1.00   WC 91.3%   GL 95.2%   Property 96.1%
+// ⚠ PAIRING REMOVES THE NOISE RATHER THAN CLEARING IT. Same seeds, same
+// line-years, both arms: the shipped arm IS the null for that exact cell. A
+// 1.025 intended step against a paired null of 1.000 is a 2.5% signal on
+// near-zero noise, not a 0.5% margin over a 2% floor. And the tuned constant
+// disappears — the question becomes whether flagged minus shipped is positive
+// more often than chance, which is a sign test and has no bar to pick.
 //
-// A universal quantifier would fail the flagged arm ~5-9% of the time for a
-// CORRECT reason, which is the same defect family as the wording it replaces.
-// Condition 3 is therefore a POPULATION statement, and it is asserted on the
-// VALUE-WEIGHTED aggregate of each line-year's carried years — which is also
-// what catches the failure the original header worried about, a total rising
-// because the new year was added while every carried year sat still.
+// ⚠ SIGNIFICANCE, NOT A SHARE. PASS requires the one-sided sign test against
+// p=0.5 to clear MAX_P. That is a stringent threshold rather than a
+// conventional 0.05 because three lines are tested at once and because this
+// repo's history is of under-powered readings believed too early. It is not
+// tuned to the answer: it is the same number whatever the lines read.
 //
-// ⚠ MATERIAL_FACTOR = 1.02 IS THE SHIPPED ARM'S OWN UPPER TAIL. Per line-year,
-// value-weighted, the shipped arm's 95th percentile runs 1.017 / 1.030 / 1.021.
-// So 1.02 is roughly where noise alone tops out: it clears that bar in 4.7% /
-// 6.9% / 7.1% of line-years. Anything clearing 1.02 systematically is not noise,
-// and the number is read off the null arm rather than chosen to be passed.
+// ⚠ AND IT MUST STILL FAIL WHERE THERE IS NO MECHANISM. The ORIGINAL condition
+// 3 was a float inequality that passed 73.7% of SHIPPED line-years where
+// nothing develops; the absolute bar fixed that; a paired version could fall
+// into the same hole a third time. TWO CONTROLS RUN EVERY TIME:
 //
-// ⚠ MIN_SHARE = 0.75 IS SET FOR HEADROOM ON BOTH SIDES, and the headroom below
-// is deliberate. Measured share of line-years clearing 1.02, 12 games x 20 years:
+//   SHIPPED vs SHIPPED, same seeds — the difference is identically zero, so no
+//     cell is positive and the sign test cannot fire. Catches a statistic that
+//     reads signal out of a pairing with itself.
+//   SHIPPED vs SHIPPED, DISJOINT seeds — genuine noise with no mechanism in it.
+//     The share positive must sit near 0.5 and the test must NOT clear MAX_P.
+//     This is the control that would catch a one-sided estimator.
 //
-//     arm        WC      GL   Property
-//     shipped   4.7%    6.9%     7.1%      <- must stay RED
-//     flagged  93.8%   92.4%    94.1%      <- must stay GREEN
+// Both are asserted, not merely printed. A control that passes fails the gate.
 //
-// 0.75 is more than 10x the noise rate and leaves 17 points under the flagged
-// arm's worst line. THE HEADROOM IS NOT SLACK: Property still over-develops by
-// 22% and GL's age profile CROSSES (0.950 at age 2 to 1.387 at age 10). Neither
-// is what this condition measures, and neither must be able to turn it red — a
-// calibration item failing a wiring gate is how a bar becomes a target.
+// ⚠ THE SCOPE CORRECTION FROM THE PREVIOUS COMMIT IS RETIRED, ON ITS OWN
+// MERITS AND NOT BECAUSE PAIRING SUCCEEDED. It excluded steps whose own
+// deterministic drift was under 1.02, because demanding a 1.02x move from a
+// 1.012x intended step asserts against the mechanism. That incoherence was a
+// property of the ABSOLUTE bar. A paired test is coherent for any positive
+// intended step however small, so the correction now solves a problem the
+// statistic does not have — and excluding cells would cost power and could hide
+// a real failure at the ages where development is smallest.
 // ============================================================================
-const MATERIAL_FACTOR = 1.02;
-const MIN_SHARE = 0.75;
+/** One-sided sign-test threshold. Three lines are tested; 0.05 is too loose. */
+const MAX_P = 0.001;
 /** A line-year needs at least this many carried within-horizon years to count. */
 const MIN_CARRIED = 2;
 
-/** The deterministic move step `age` is meant to make, open-share scaled. */
-const intendedStep = (line: CoverageLine, age: number) =>
-  1 + (developmentDrift(line, age) - 1) * openShareAtStep(line, age);
 
 // ============================================================================
 // ⚠ THE ACCEPTANCE ARM IS BOTH FLAGS, AND THAT IS A FINDING RATHER THAN A
@@ -157,18 +165,15 @@ const cellAt = (t: PricingTriangleState, ay: number, age: number) =>
   t.cells.find(c => c.accidentYear === ay && c.age === age);
 
 interface ArmResult {
-  /** Per line: the share of line-years whose carried years developed materially. */
-  share: Record<string, number>;
-  lineYears: Record<string, number>;
-  /** Per line: the pooled value-weighted factor over every carried year. */
-  pooled: Record<string, number>;
+  /** Per line, per (game|valuation year): that cell's value-weighted factor. */
+  factor: Record<string, Map<string, number>>;
   /** Conditions 1, 2 and 4: passes and opportunities. */
   c1: number; c2: number; c4: number; checked: number;
   absent: number;
   notes: string[];
 }
 
-function runArm(flagged: boolean): ArmResult {
+function runArm(flagged: boolean, seedOffset = 0, tag = ''): ArmResult {
   const wasF = FORWARD_BOOKING.enabled, wasP = PRICING_TRIANGLE.enabled;
   FORWARD_BOOKING.enabled = flagged;
   PRICING_TRIANGLE.enabled = flagged;
@@ -181,8 +186,8 @@ function runArm(flagged: boolean): ArmResult {
 
   try {
     for (let g = 0; g < GAMES; g++) {
-      const id = `RL${flagged ? 'F' : 'S'}${g}`;
-      const instance = generateGameInstance(id, 9_100_000 + g * 7919);
+      const id = `RL${flagged ? 'F' : 'S'}${tag}${g}`;
+      const instance = generateGameInstance(id, 9_100_000 + seedOffset + g * 7919);
       const setup = { poolName: 'L', gameLength: YEARS, startingYear: 2026, instanceId: id, activeLines: LINES };
       const { poolState, priorHistory } = runPriorHistory(instance, setup as never);
       let gs: GameState = {
@@ -271,24 +276,7 @@ function runArm(flagged: boolean): ArmResult {
             // "every carried year" wording read 11.0% on BOTH arms, unmoved by
             // the flag. Years past their horizon are OUT OF SCOPE, said here
             // rather than left for the reader to infer from a low number.
-            // ⚠ AND THE STEP MUST BE ONE THE MECHANISM INTENDS TO MAKE. Once
-            // the drift is scaled by the open-share curve, a step's
-            // DETERMINISTIC component is 1 + (drift-1) x openShare, and on
-            // Property that falls to 1.0121 by step 4 — inside a horizon of
-            // 2-4. Demanding a 1.02x move from a step whose intended move is
-            // 1.012x asserts against the mechanism rather than about it, and it
-            // dropped Property to 63.5% the moment the curve landed.
-            //
-            // ⚠ THIS IS A SCOPE CORRECTION, NOT A LOOSENED BAR. The bar is
-            // still 1.02 and MIN_SHARE is still 0.75. What changed is which
-            // steps are in scope, and the rule is DERIVED rather than chosen: a
-            // step is in scope iff its own deterministic drift clears the same
-            // bar the step is judged against. "within horizon" was the right
-            // scope while the drift ran on the horizon clock; it is the wrong
-            // scope now that it runs on the open-share clock, which is the same
-            // defect the drift itself had.
             if (!(u[k] > 0) || age < 1 || age >= r.horizon) continue;
-            if (intendedStep(line, age + 1) < MATERIAL_FACTOR) continue;
             const key = `${g}|${r.yearNumber + age}`;      // the VALUATION year
             if (!cells[line].has(key)) cells[line].set(key, []);
             cells[line].get(key)!.push({ from: u[k], to: u[k + 1] });
@@ -298,24 +286,25 @@ function runArm(flagged: boolean): ArmResult {
     }
   } finally { FORWARD_BOOKING.enabled = wasF; PRICING_TRIANGLE.enabled = wasP; }
 
-  const share: Record<string, number> = {}, lineYears: Record<string, number> = {}, pooled: Record<string, number> = {};
+  // Per-cell value-weighted factor, keyed so the two arms pair exactly.
+  const factor: Record<string, Map<string, number>> = {};
   for (const l of LINES) {
-    const groups = [...cells[l].values()].filter(v => v.length >= MIN_CARRIED);
-    let a = 0, b = 0;
-    for (const v of groups) for (const c of v) { a += c.from; b += c.to; }
-    lineYears[l] = groups.length;
-    pooled[l] = a > 0 ? b / a : NaN;
-    const ok = groups.filter(v => {
-      const from = v.reduce((s, c) => s + c.from, 0), to = v.reduce((s, c) => s + c.to, 0);
-      return from > 0 && to / from >= MATERIAL_FACTOR;
-    }).length;
-    share[l] = groups.length > 0 ? ok / groups.length : NaN;
+    factor[l] = new Map();
+    for (const [key, v] of cells[l]) {
+      if (v.length < MIN_CARRIED) continue;
+      const from = v.reduce((t, c) => t + c.from, 0), to = v.reduce((t, c) => t + c.to, 0);
+      if (from > 0) factor[l].set(key, to / from);
+    }
   }
-  return { share, lineYears, pooled, c1, c2, c4, checked, absent, notes };
+  return { factor, c1, c2, c4, checked, absent, notes };
 }
 
 const shipped = runArm(false);
 const flagged = runArm(true);
+// ⚠ THE DISJOINT-SEED CONTROL. Genuine noise, no mechanism. Pairing cell-for-cell
+// against `shipped` is then meaningless by construction, which is the point: the
+// sign test must NOT fire on it.
+const shippedB = runArm(false, 5_000_000, 'B');
 
 if (FORWARD_BOOKING.enabled !== false || PRICING_TRIANGLE.enabled !== false) {
   console.log('⚠ A FLAG WAS NOT RESTORED — this gate mutates both and must put them back');
@@ -368,29 +357,77 @@ if (shipped.c4 > 0) {
 }
 console.log('');
 
-// --- condition 3: EVALUATED, on both arms ---------------------------------
-console.log('--- CONDITION 3: EVALUATED, BOTH ARMS ---');
-console.log('  Carried accident years WITHIN THEIR HORIZON develop upward, value-weighted per');
-console.log(`  line-year, by at least ${MATERIAL_FACTOR.toFixed(2)}x in at least `
-  + `${(100 * MIN_SHARE).toFixed(0)}% of line-years.\n`);
-console.log('  line       line-years   SHIPPED share   pooled     FLAGGED share   pooled     verdict');
-for (const line of LINES) {
-  const s = shipped.share[line], f = flagged.share[line];
-  // The rewrite's own test: RED on the arm with no mechanism, GREEN on the one with.
-  const shippedRed = !(s >= MIN_SHARE);
-  const flaggedGreen = f >= MIN_SHARE;
-  const verdict = shippedRed && flaggedGreen ? 'SEPARATES' : shippedRed ? 'FLAGGED FAILS' : 'SHIPPED PASSES ⚠';
-  console.log(`  ${line.padEnd(10)} ${String(flagged.lineYears[line]).padStart(10)}   `
-    + `${(100 * s).toFixed(1).padStart(12)}%   ${shipped.pooled[line].toFixed(4)}   `
-    + `${(100 * f).toFixed(1).padStart(12)}%   ${flagged.pooled[line].toFixed(4)}   ${verdict}`);
-  if (!flaggedGreen) {
-    failures.push(`CONDITION 3 ${line}: the flagged arm develops materially in only `
-      + `${(100 * f).toFixed(1)}% of line-years, under the ${(100 * MIN_SHARE).toFixed(0)}% bar.`);
+// --- condition 3: PAIRED, plus two controls -------------------------------
+/**
+ * One-sided sign test: P(X >= k) for X ~ Binomial(n, 0.5). Exact, summed in the
+ * shorter tail so it stays stable at the n this gate runs at.
+ */
+function signTestP(k: number, n: number): number {
+  if (n === 0) return 1;
+  let logC = 0, total = 0;
+  for (let i = 0; i < k; i++) logC += Math.log((n - i) / (i + 1));
+  // walk down from k accumulating the upper tail
+  let term = logC;
+  for (let i = k; i <= n; i++) {
+    total += Math.exp(term - n * Math.LN2);
+    term += Math.log((n - i) / (i + 1));
   }
-  if (!shippedRed) {
-    failures.push(`CONDITION 3 ${line}: THE SHIPPED ARM PASSES at ${(100 * s).toFixed(1)}%. `
-      + 'The shipped revision law is mean-one and develops nothing, so a bar it clears is measuring '
-      + 'noise. This is the defect the rewrite exists to remove — retighten, do not accept.');
+  return Math.min(1, total);
+}
+
+/** Pair two arms cell-for-cell and sign-test the difference. */
+function paired(a: ArmResult, b: ArmResult, line: string) {
+  let pos = 0, n = 0, sum = 0;
+  for (const [key, fa] of a.factor[line]) {
+    const fb = b.factor[line].get(key);
+    if (fb === undefined) continue;
+    n++; sum += fa - fb;
+    if (fa - fb > 0) pos++;
+  }
+  return { pos, n, mean: n > 0 ? sum / n : NaN, p: signTestP(pos, n) };
+}
+
+console.log('--- CONDITION 3: PAIRED, flagged minus shipped on the SAME seeds ---');
+console.log('  Is the paired difference positive more often than chance? No absolute bar —');
+console.log(`  a one-sided sign test against p=0.5, passing at p < ${MAX_P}.\n`);
+console.log('  line       cells   positive   share    mean diff    sign-test p     verdict');
+for (const line of LINES) {
+  const r = paired(flagged, shipped, line);
+  const ok = r.n > 0 && r.p < MAX_P;
+  console.log(`  ${line.padEnd(10)} ${String(r.n).padStart(5)}   ${String(r.pos).padStart(8)}   `
+    + `${(100 * r.pos / Math.max(1, r.n)).toFixed(1).padStart(5)}%   ${(r.mean >= 0 ? '+' : '') + r.mean.toFixed(4)}   `
+    + `${r.p.toExponential(2).padStart(11)}     ${ok ? 'PASS' : 'FAIL'}`);
+  if (!ok) {
+    failures.push(`CONDITION 3 ${line}: paired flagged-minus-shipped is positive in `
+      + `${r.pos} of ${r.n} line-years, sign-test p ${r.p.toExponential(2)} against ${MAX_P}.`);
+  }
+}
+
+console.log('\n  --- CONTROL 1: shipped vs shipped, SAME seeds. Difference is identically');
+console.log('      zero, so nothing can be positive and the test cannot fire. ---');
+for (const line of LINES) {
+  const r = paired(shipped, shipped, line);
+  const fired = r.n > 0 && r.p < MAX_P;
+  console.log(`  ${line.padEnd(10)} ${String(r.n).padStart(5)} cells, ${r.pos} positive, `
+    + `p ${r.p.toExponential(2)}   ${fired ? 'FIRED ⚠' : 'silent'}`);
+  if (fired) {
+    failures.push(`CONTROL 1 ${line}: the paired statistic FIRED on an arm paired with ITSELF. `
+      + 'That is signal read out of nothing and the statistic is wrong.');
+  }
+}
+
+console.log('\n  --- CONTROL 2: shipped vs shipped, DISJOINT seeds. Real noise, no');
+console.log('      mechanism. The share must sit near 0.5 and the test must not fire. ---');
+for (const line of LINES) {
+  const r = paired(shippedB, shipped, line);
+  const fired = r.n > 0 && r.p < MAX_P;
+  console.log(`  ${line.padEnd(10)} ${String(r.n).padStart(5)} cells, `
+    + `${(100 * r.pos / Math.max(1, r.n)).toFixed(1)}% positive, mean `
+    + `${(r.mean >= 0 ? '+' : '') + r.mean.toFixed(4)}, p ${r.p.toExponential(2)}   ${fired ? 'FIRED ⚠' : 'silent'}`);
+  if (fired) {
+    failures.push(`CONTROL 2 ${line}: the paired statistic FIRED on two runs of the arm with NO `
+      + 'mechanism. It is detecting something other than development — the same defect family as the '
+      + 'float inequality and the noise-clearing bar before it.');
   }
 }
 
@@ -407,7 +444,8 @@ if (failures.length > 0) {
   console.log('');
   console.log('  1. the year the pool played is in the triangle that priced it, at age 1');
   console.log('  2. the oldest accident year is gone and the window stays ten deep');
-  console.log('  3. every carried year within its horizon developed upward, materially');
+  console.log('  3. carried years develop MORE than the same years on the same seeds without');
+  console.log('     the mechanism — paired, sign-tested, with both null controls silent');
   console.log('  4. the rate applied IS the rate the preceding triangle stamped, and it moved');
   console.log('');
   console.log('⚠ ON THE FLAGGED ARM — FORWARD_BOOKING for condition 3, PRICING_TRIANGLE for');
