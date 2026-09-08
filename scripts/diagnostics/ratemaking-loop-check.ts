@@ -156,10 +156,28 @@ function triangleOf(st: unknown, line: CoverageLine): PricingTriangleState | und
   const s = st as { lines?: Record<string, { pricingTriangle?: PricingTriangleState }> };
   return s.lines?.[line]?.pricingTriangle;
 }
-const appliedRateOf = (st: unknown, line: CoverageLine): number | undefined => {
-  const s = st as { lines?: Record<string, { purePremiumPer100?: number }> };
-  return s.lines?.[line]?.purePremiumPer100;
-};
+/**
+ * The RETAINED rate the pool actually charged this year — pool premium's own
+ * basis, before the CLF.
+ *
+ * ⚠ NET, NOT lineState.purePremiumPer100, AND THAT IS THE BASIS THE STAMP IS
+ * ON. The triangle chain-ladders ReserveDevelopmentRow, whose ultimate and paid
+ * series are both NET of reinsurance, so `pricingTriangle.ratePer100` is a
+ * RETAINED loss cost. The engine grosses it up before pricing (see
+ * grossUpRetainedPurePremium) precisely so the net-funding subtraction removes
+ * cession once rather than twice — which means the applied GROSS rate is the
+ * stamp plus a year of expected cession and is no longer the quantity to
+ * compare. `netPurePremiumPer100` is the stamp again, and the round trip is
+ * exact by construction of the gross-up's fixed point.
+ *
+ * This read used to be lineState.purePremiumPer100, and it matched only because
+ * the rate was applied on the wrong basis. Comparing against it now would be
+ * asserting the defect.
+ */
+const chargedRetainedRateOf = (
+  results: { line: CoverageLine; result: { netPurePremiumPer100?: number } }[],
+  line: CoverageLine,
+): number | undefined => results.find(r => r.line === line)?.result.netPurePremiumPer100;
 const depthOf = (t: PricingTriangleState) => new Set(t.cells.map(c => c.accidentYear)).size;
 const cellAt = (t: PricingTriangleState, ay: number, age: number) =>
   t.cells.find(c => c.accidentYear === ay && c.age === age);
@@ -237,23 +255,28 @@ function runArm(flagged: boolean, seedOffset = 0, tag = ''): ArmResult {
 
           // --- 4. THIS year was priced off the triangle that preceded it -----
           // ⚠ TWO PARTS, AND THE FIRST IS THE REAL ONE. (a) the rate the pool
-          // APPLIED this year equals the rate the PREVIOUS triangle stamped —
+          // CHARGED this year equals the rate the PREVIOUS triangle stamped —
           // that is what "priced off the triangle" means, and a harness that
           // recomputed the rate for itself would prove nothing. (b) the stamped
           // rate MOVED, which stops a constant satisfying (a) trivially.
           // `b` IS the triangle that priced year y — it is the state as it
           // stood when the year began. `prev` is the one before that, and is
           // used only to establish that the stamp is not a constant.
-          const applied = appliedRateOf(st, line);
+          //
+          // ⚠ "CHARGED" IS THE NET RATE — see chargedRetainedRateOf. Both sides
+          // of this equality are retained; the applied gross rate is the stamp
+          // plus a year of expected cession and matching against it would be
+          // asserting the double-deduction defect back into place.
+          const applied = chargedRetainedRateOf(p.lineResults, line);
           const stamped = b.ratePer100;
           const moved = stamped !== undefined && prev[line]?.ratePer100 !== undefined
             && stamped !== prev[line]!.ratePer100;
           if (stamped !== undefined && applied !== undefined && moved
             && Math.abs(applied - stamped) <= 1e-9 * Math.max(1, Math.abs(stamped))) c4++;
           else if (stamped === undefined) note(`${line} y${y}: condition 4 — the triangle that priced this year stamped no rate`);
-          else if (applied === undefined) note(`${line} y${y}: condition 4 — no applied rate on the line state`);
+          else if (applied === undefined) note(`${line} y${y}: condition 4 — no charged net rate on this year's line result`);
           else if (Math.abs(applied - stamped) > 1e-9 * Math.max(1, Math.abs(stamped))) {
-            note(`${line} y${y}: condition 4 — applied ${applied.toFixed(6)} is not the `
+            note(`${line} y${y}: condition 4 — charged net ${applied.toFixed(6)} is not the `
               + `${stamped.toFixed(6)} the triangle that priced it stamped`);
           } else note(`${line} y${y}: condition 4 — the stamped rate did not move from the year before`);
         }
@@ -446,7 +469,7 @@ if (failures.length > 0) {
   console.log('  2. the oldest accident year is gone and the window stays ten deep');
   console.log('  3. carried years develop MORE than the same years on the same seeds without');
   console.log('     the mechanism — paired, sign-tested, with both null controls silent');
-  console.log('  4. the rate applied IS the rate the preceding triangle stamped, and it moved');
+  console.log('  4. the rate CHARGED, net, IS the rate the preceding triangle stamped, and it moved');
   console.log('');
   console.log('⚠ ON THE FLAGGED ARM — FORWARD_BOOKING for condition 3, PRICING_TRIANGLE for');
   console.log('condition 4. Both still ship OFF. PRICING_TRIANGLE\'s retirement condition is');

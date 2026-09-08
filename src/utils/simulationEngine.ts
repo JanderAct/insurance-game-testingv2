@@ -54,7 +54,7 @@ import { hasStaticClf, staticClf } from '../data/clfTables';
 import { computeKGl, deriveNeutralGlPurePremiumPer100, expectedGlGrossLossForPricing, generateGlClaims, glCappedSeverityTrend } from './glClaimEngine';
 import { computeKPr, generatePropertyClaims } from './propertyClaimEngine';
 import { generateNarrative } from './narrativeEngine';
-import { quoteLineRates } from './linePricing';
+import { grossUpRetainedPurePremium, quoteLineRates, type CessionBasis } from './linePricing';
 import { getMemberExposure } from './lineHelpers';
 import { wageFactor } from '../data/exposureTrend';
 import { getPredefinedMarketMembers } from '../data/memberCatalog';
@@ -222,6 +222,12 @@ export function currentPurePremiumPer100(
   // each accident year's exposure. Optional because a caller that cannot supply
   // it gets the held path, which is the honest fallback rather than a guess.
   experience?: ExperienceBasis,
+  // S3, AND REQUIRED WHENEVER `experience` IS SUPPLIED WITH THE FLAG ON. What
+  // the experience path needs to put its retained rate back on the gross basis
+  // this function's whole contract is. Optional in the TYPE only because the
+  // held path genuinely does not need it; supplying `experience` without it
+  // throws below rather than quietly returning a net rate.
+  cession?: CessionBasis,
 ): number {
   // ⚠ S3 — THE POOL PRICES OFF ITS OWN EXPERIENCE, AND THE HELD RATE BELOW IS
   // THE FALLBACK, NOT THE DEFAULT, ONCE THIS FLAG IS ON.
@@ -233,16 +239,47 @@ export function currentPurePremiumPer100(
   // is still correct. What retires it is that the protection was ALREADY
   // PARTIAL — WC's rate is the exposure-weighted blend of four held class rates
   // over the ENROLLED book (see wcBlendedRatePer100 above), so WC has chased
-  // the roster through its class mix all along — and that the held rate is
-  // measurably heavy: against realised ultimate loss cost on mature accident
-  // years, realised/held reads WC 0.745, GL 0.585, Property 0.744.
+  // the roster through its class mix all along.
+  //
+  // ⚠ THE SECOND HALF OF THAT ARGUMENT WAS A BASIS ERROR AND IS RETRACTED. This
+  // comment used to read "and the held rate is measurably heavy: against
+  // realised ultimate loss cost on mature accident years, realised/held reads
+  // WC 0.745, GL 0.585, Property 0.744." Those figures divide a NET realised
+  // loss cost — ReserveDevelopmentRow.ultimateByValuation is net, see its own ⚠
+  // — by a GROSS held rate, so they measure the reinsurance programme and not
+  // the held rate's adequacy. On a single basis — what the held arm CHARGES,
+  // retained, against what its own accident years cost, retained —
+  // experience-pricing-check's arm 1 reads 1.024 / 1.038 / 0.994. The held rate
+  // is close to right, and "the held rate is itself heavy" was never a reason
+  // to price off the triangle. The reason that survives is the one this project
+  // actually wants — a pool that prices off its own developing experience
+  // rather than off a constant.
   //
   // ⚠ WHAT STANDS IN FOR THE PROTECTION IS MEASUREMENT 3 AT PRICING_TRIANGLE,
   // AND IT IS NOT MEASURED YET. That is why the flag is off. Do not turn it on
   // until experience-pricing-check's loop-stability arm exists and passes.
+  //
+  // ⚠ THE EXPERIENCE RATE IS RETAINED AND THIS FUNCTION RETURNS GROSS, SO IT IS
+  // GROSSED UP HERE — see grossUpRetainedPurePremium's header for the whole
+  // argument. It is done at the SOURCE rather than at the subtraction so that
+  // every consumer of this function's return value — expectedLoss, the
+  // aggregate's attachment basis, the reserve basis, the admin base, the panel
+  // — sees one basis, the same one the held path returns. Without it the
+  // net-funding step removes cession a second time from a rate that never had
+  // it in.
   if (PRICING_TRIANGLE.enabled && experience) {
     const rate = experienceRatePer100(line, experience);
-    if (rate !== null && rate > 0) return rate;
+    if (rate !== null && rate > 0) {
+      if (!cession) {
+        throw new Error(
+          `currentPurePremiumPer100: ${line} year ${yearNumber} was given an experience `
+          + 'basis with PRICING_TRIANGLE on but no cession basis. The experience rate is '
+          + 'RETAINED and this function returns GROSS; returning it unconverted would '
+          + 'deduct cession twice downstream. Pass the cession basis or omit the experience.',
+        );
+      }
+      return grossUpRetainedPurePremium(line, yearNumber, rate, cession);
+    }
   }
   return line === 'WC'
     ? wcBlendedRatePer100(members, yearNumber)
@@ -580,12 +617,31 @@ export function processLineYear(
     allMarketMembers: ctx.allMarketMembers,
     membershipHistory: ctx.membershipHistory,
   };
-  const newPurePremiumPer100 = currentPurePremiumPer100(line, yearNumber, currentActiveMembers, experienceBasis);
-
   // Preliminary contribution estimate used only for member movement.
   // Final premium is recalculated after member movement because exposure changes.
   // (currentActiveMembers is now declared above, ahead of the CLF lookup.)
+  //
+  // ⚠ HOISTED ABOVE THE RATE, because the rate now needs it. The experience
+  // path is a RETAINED rate and is grossed up inside currentPurePremiumPer100,
+  // which needs the cession basis — and the per-$100 divisor in that basis is
+  // this exposure. Pure reduce over the pre-movement book; moving it earlier
+  // changes no value.
   const estimatedExposure = currentActiveMembers.reduce((s, m) => s + getMemberExposure(m, line, yearNumber), 0);
+
+  // ⚠ THE SAME CESSION THE PRE-MOVEMENT QUOTE WILL SUBTRACT. quoteLineRates is
+  // called below with exactly these members, this exposure and these decisions,
+  // so the gross-up here and the subtraction there are inverse. Passing a
+  // different book to either would reintroduce the double deduction in a form
+  // no gate would name.
+  const estimatedCession: CessionBasis = {
+    members: currentActiveMembers,
+    exposure: estimatedExposure,
+    layersPlaced: lineDecisions.layersPlaced,
+    aggregateStopLevel: lineDecisions.aggregateStopLevel,
+  };
+  const newPurePremiumPer100 = currentPurePremiumPer100(
+    line, yearNumber, currentActiveMembers, experienceBasis, estimatedCession,
+  );
 
   // --- THE PRICE SIGNAL MEMBERS RESPOND TO ---------------------------------
   //
@@ -735,7 +791,22 @@ export function processLineYear(
   // measured worst error 10.8% on a single line-year, mean 0.18%. Caught by
   // asserting the composition residual is exactly zero, which is the check that
   // only becomes possible once four rates are exact.
-  const pricedPurePremiumPer100 = currentPurePremiumPer100(line, yearNumber, memberResult.activeMembers, experienceBasis);
+  //
+  // ⚠ THE CESSION BASIS IS THE MISMATCHED PAIR THE SUBTRACTION BELOW USES, AND
+  // THAT IS DELIBERATE. `towerQuote` is REUSED from the pre-movement quote and
+  // the aggregate is quoted on `currentActiveMembers`, while
+  // `expectedCededPer100` divides by the POST-movement `activeExposure`. The
+  // gross-up has to invert that exact combination, so it is handed the same
+  // one: pre-movement members, post-movement exposure. See CessionBasis.
+  const pricedCession: CessionBasis = {
+    members: currentActiveMembers,
+    exposure: activeExposure,
+    layersPlaced: lineDecisions.layersPlaced,
+    aggregateStopLevel: lineDecisions.aggregateStopLevel,
+  };
+  const pricedPurePremiumPer100 = currentPurePremiumPer100(
+    line, yearNumber, memberResult.activeMembers, experienceBasis, pricedCession,
+  );
 
   const totalMarketExposure = memberResult.totalMarketExposure;
   const marketShare = activeExposure / Math.max(totalMarketExposure, 0.01);
@@ -2309,12 +2380,22 @@ export function processYear(
   // is what rebuilds it after a reload. Nothing reads it that could not
   // recompute it, and no save carries it.
   //
-  // THE STAMPED RATE IS THE APPLIED ONE. `ratePer100` is what THIS window
+  // THE STAMPED RATE IS THE CHARGED ONE. `ratePer100` is what THIS window
   // produces, which is the rate the NEXT accident year is priced at — the
   // acceptance test's condition 4 asks exactly that, and a rate recomputed by
   // the reader would answer a different question. Undefined when the window
   // cannot price itself, which is the same null experienceRatePer100 returns and
   // the same fallback to the held rate.
+  //
+  // ⚠ RETAINED, NOT GROSS, AND CONDITION 4 COMPARES IT AGAINST
+  // netPurePremiumPer100. This stamp is the raw experience rate, which is a
+  // retained loss cost because the ledger behind it is net (see
+  // grossUpRetainedPurePremium). The engine grosses it up to price with, so the
+  // APPLIED purePremiumPer100 is this stamp plus a year of expected cession.
+  // The two are equal again only after the net-funding subtraction — which is
+  // the whole point of grossing up rather than skipping the subtraction, and is
+  // why matching this against the applied gross rate would be asserting the
+  // double deduction back into place.
   // ============================================================================
   const withTriangles: Record<string, LinePoolState> = {};
   for (const [line, st] of Object.entries(updatedLineStates)) {

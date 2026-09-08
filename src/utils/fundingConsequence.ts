@@ -171,7 +171,20 @@ function ratesAt(
   // S3: the panel must reach the engine's number, so it needs the same
   // experience basis. Optional on the book for the same reason it is optional
   // on the engine function — a caller that cannot supply it gets the held path.
-  const purePremiumPer100 = currentPurePremiumPer100(line, book.yearNumber, book.members, book.experience);
+  // ⚠ AND THE CESSION BASIS, WHICH IS THE ONE quoteLineRates BELOW SUBTRACTS
+  // WITH, FIELD FOR FIELD. On the experience path the rate is RETAINED and is
+  // grossed up against it; handing the panel a different book here than the
+  // quote below gets would put the panel back off parity with the engine on
+  // exactly the quantity this file exists to keep in step.
+  const purePremiumPer100 = currentPurePremiumPer100(
+    line, book.yearNumber, book.members, book.experience,
+    {
+      members: book.members,
+      exposure: book.exposure,
+      layersPlaced: book.layersPlaced,
+      aggregateStopLevel: book.aggregateStopLevel,
+    },
+  );
   const clf = clfFor(line, confidenceLevel, atExpected);
   const q = quoteLineRates({
     line,

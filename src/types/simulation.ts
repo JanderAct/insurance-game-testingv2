@@ -823,8 +823,8 @@ export interface ResultSet {
   // precision instead of float precision.
   //
   // NOT COLLAPSIBLE TO ONE FIELD. netPurePremiumPer100 = Math.max(0,
-  // purePremiumPer100 - expectedCededPer100) — a floor that has never bound in
-  // measurement, but deriving one from the other via that formula would only
+  // purePremiumPer100 - expectedCededPer100) — a floor that has never bound on
+  // the shipped path, but deriving one from the other via that formula would only
   // reproduce the un-rounded purePremiumPer100 exactly, and the only copy of
   // that on this type is rounded. Both are stored so the identity holds from
   // stored fields alone.
@@ -835,6 +835,17 @@ export interface ResultSet {
   // Property's expectedCededPer100 is a measured quantity like WC's and GL's
   // (~25% of gross pure premium at the default placement) and only reaches 0
   // if the player declines the layer AND the aggregate.
+  //
+  // ⚠ THE FLOOR HAS BOUND, AND WHEN IT DOES THE LINE CHARGES NOTHING SILENTLY.
+  // Not on the shipped path — there the held rate is gross and the subtraction
+  // is one deduction from a rate that had cession in it. It bound on the
+  // PRICING_TRIANGLE arm before the double-cession fix, because the experience
+  // rate is RETAINED and cession was being removed from it a second time: GL's
+  // expected ceded overtook its whole priced rate in 104 of 600 line-years and
+  // the pool billed zero pure premium, funding the year out of surplus with no
+  // error anywhere. experience-pricing-check's arm 1 now counts floored
+  // line-years and fails on any of them, because a level test cannot catch this
+  // — it sees a small number where there is an absent one.
   expectedCededPer100: number;
   netPurePremiumPer100: number;
   writtenExposure: number;      // payroll exposure in $M

@@ -122,6 +122,14 @@ function exposureFor(basis: TriangleBasis, line: CoverageLine, ay: number): numb
  * `ratePer100` is NOT set here. The engine stamps it with the rate the window
  * actually produces, so condition 4 reads a rate the pool used rather than one
  * the harness recomputed — see the acceptance test's note on that distinction.
+ *
+ * ⚠ THE STAMP IS A RETAINED RATE. It is chain-laddered off ReserveDevelopmentRow,
+ * whose ultimate and paid series are both NET of reinsurance, so it is a
+ * retained loss cost and not the gross rate the engine applies. The engine
+ * grosses it up before pricing (see grossUpRetainedPurePremium) so the
+ * net-funding step removes cession once rather than twice. What comes back out
+ * of that round trip is the stamp again — so it is `netPurePremiumPer100` that
+ * equals this, not `purePremiumPer100`, and condition 4 compares against that.
  */
 export function projectPricingTriangle(
   line: CoverageLine,
