@@ -410,10 +410,19 @@ export const WC_LOSS_MODEL = {
   // per-component pDelayed fields above went with it. See the note in
   // simulationEngine where the IBNR provision used to be computed.
   //
-  // ⚠ AND ITS ABSENCE HAS NOW BEEN REDISCOVERED FIVE TIMES, SO IT IS WRITTEN
-  // DOWN HERE RATHER THAN FOUND AGAIN. The model has NO late reporting on any
-  // line: every claim is in the register from its accident year. The source's
-  // reported COUNTS grow 6.5% by age 2 and are still moving 0.25% at age 5.
+  // ⚠ AND ITS ABSENCE HAS NOW BEEN REDISCOVERED SIX TIMES. The model has NO late
+  // reporting on any line: every claim is in the register from its accident
+  // year. The source's reported COUNTS grow 6.5% by age 2 and are still moving
+  // 0.25% at age 5.
+  //
+  // ⚠ THE SIXTH SIGHTING CAME WITH A MEASUREMENT AND STARTED A REPAIR. A printed
+  // triangle showed the claim register moving ZERO times across every valuation
+  // of every accident year on both arms, with GL's AY3 running $10.2M to $27.0M
+  // on the same 397 claims — so every age-to-age factor the model produces is
+  // severity on files already open, against a pool whose own first factor is
+  // 1.872 where the model's is 1.448. LINE_REPORTING_PATTERN is step 2 of the
+  // five-step repair: a curve, a judgement and a deriver, wired to nothing. The
+  // absence this paragraph describes is still the shipped behaviour.
   //
   // It is small, and it is a real absence rather than a simplification with a
   // ruling behind it. What it costs is specific: a triangle built from this
@@ -1712,6 +1721,17 @@ export const LINE_PAYOUT_PATTERN: Record<string, PayoutPattern> = FITTED_PAYOUT_
 // there is a fifth, the assumption deserves one commit that states everywhere it
 // is load-bearing.
 //
+// ⚠⚠ THERE WAS A FIFTH AND A SIXTH, THE MECHANIC IS NOW BEING BUILT, AND THIS
+// CORRECTION IS ON A COLLISION COURSE WITH IT. LINE_REPORTING_PATTERN below
+// reintroduces exactly the late reporting these curves were corrected for, and
+// the 0.8916 above IS reportedShareAtAge(line, 1) there — the same quantity,
+// derived twice from the same 12.16%. Wire the pattern into the engine without
+// undoing this correction and the adjustment lands twice: these curves already
+// assume a full denominator, and late reporting makes the denominator fill
+// again. NOT FIXED YET, deliberately — the pattern is read by nothing. Whoever
+// wires it up re-fits these curves on the raw basis or removes the correction,
+// and needs BOTH constants: 0.8916 at age 1, decaying at 0.4421 per step.
+//
 // ⚠ CLOSURE IS SLOWER THAN PAYMENT AND THE TWO ARE SEPARATE FITS. Compare the
 // k's against FITTED_PAYOUT_PATTERN's — WC closure 0.670 against payout 0.64, GL
 // closure 1.410 against payout 1.88. Genuinely different, not one number wearing
@@ -1853,6 +1873,226 @@ export function resolveClosureCurve(line: string, grossUltimate: number): Closur
   }
   return FITTED_CLOSURE_CURVE[line] ?? FITTED_CLOSURE_CURVE.GL;
 }
+
+// ===========================================================================
+// THE REPORTING PATTERN — LATE REPORTING, STEP 2 OF 5. READ BY NOTHING.
+//
+// ⚠ WIRED TO NOTHING AND FLAG-GATED OFF. This commit ships a curve, a judgement
+// and a deriver. No engine value moves; no claim carries a reportedYear; no
+// cohort books on a reported subset. Those are steps 3 and 4. If you are here
+// because something reads LINE_REPORTING_PATTERN, that is new.
+//
+// ===========================================================================
+// WHY IT EXISTS — THE SIXTH SIGHTING, NOW WITH A MEASURED CONSEQUENCE.
+//
+// The model has no late reporting: every claim is in the register from its
+// accident year and the count never moves. That absence has been rediscovered
+// six times (a stale WC header, understated workbook counts, the closure
+// discrepancy, the closure-curve basis correction, the report-lag deletion note
+// below at `reportLag IS GONE`, and now this). What is new is that it is no
+// longer only an absence — it is the named cause of a measured gap:
+//
+//   the printed triangle: the claim REGISTER MOVED 0 TIMES across every
+//   valuation of every accident year on both arms, and GL's AY3 runs from
+//   $10.2M to $27.0M on the same 397 claims. Every age-to-age factor the model
+//   produces is severity on files already open.
+//
+//   the pool's own book develops 3.91x cumulative against the model's 2.63x,
+//   and the gap concentrates in the first step: 1.872 against 1.448.
+//
+// ===========================================================================
+// THE THREE FIGURES ARE THE WHOLE EVIDENCE BASE, AND THEY ARE COUNT FIGURES.
+//
+//   reported counts grow  6.5%  by age 2
+//   reported counts grow 12.16% from age 1 to ultimate
+//   reported counts still moving 0.25% at age 5
+//
+// The curve below has exactly three free parameters and is solved EXACTLY
+// against those three — there is no fitting freedom left, which is the point.
+// A two-parameter family cannot do it: a Weibull matched on ages 1 and 2 lands
+// at 0.61% at age 5 and a single geometric at 0.59%, against a recorded 0.25%.
+// Reporting completes FASTER than either, and that is a property of the source
+// figures rather than a modelling choice. report-lag-derive.ts re-solves the
+// three constants and FAILS if they stop reproducing their own targets.
+//
+// ⚠ POOL-LEVEL, NOT PER LINE. The three figures come from one extract across
+// the whole book. This is keyed by line so a future per-line fit has somewhere
+// to land; today all three lines carry identical numbers. Do not read the
+// keying as evidence of a per-line split. There is none.
+//
+// ⚠ AND THE THIRD FIGURE HAS THREE READINGS. "Still moving 0.25% at age 5" is
+// taken as a GROWTH RATE, R(5)/R(4) - 1, because that is how the 6.5% is
+// stated. As an increment of ultimate count it gives laterStepDecay 0.258475,
+// within 0.2%. As the share STILL UNREPORTED at age 5 it gives 0.367271 — 42%
+// higher and a materially fatter tail. Named, not resolved; no further evidence
+// exists to resolve it with.
+// ===========================================================================
+export interface ReportingPattern {
+  /** Share of an accident year's ULTIMATE claim count not yet reported at age 1. */
+  unreportedAtAge1: number;
+  /** What survives of that share into age 2. */
+  firstStepDecay: number;
+  /** What survives per step from age 2 on. */
+  laterStepDecay: number;
+}
+
+export const LINE_REPORTING_PATTERN: Record<string, ReportingPattern> = {
+  WC: { unreportedAtAge1: 0.108417, firstStepDecay: 0.465461, laterStepDecay: 0.257949 },
+  GL: { unreportedAtAge1: 0.108417, firstStepDecay: 0.465461, laterStepDecay: 0.257949 },
+  Property: { unreportedAtAge1: 0.108417, firstStepDecay: 0.465461, laterStepDecay: 0.257949 },
+};
+
+/** Share of ultimate COUNT still unreported at `age` (1-based, actuarial). */
+export function unreportedShareAtAge(line: string, age: number): number {
+  const p = LINE_REPORTING_PATTERN[line] ?? LINE_REPORTING_PATTERN.GL;
+  if (age <= 1) return p.unreportedAtAge1;
+  return p.unreportedAtAge1 * p.firstStepDecay * Math.pow(p.laterStepDecay, age - 2);
+}
+
+/** Share of ultimate COUNT reported by `age`. R(1) = 0.8916. */
+export function reportedShareAtAge(line: string, age: number): number {
+  return 1 - unreportedShareAtAge(line, age);
+}
+
+// ===========================================================================
+// THE SEVERITY TILT — AND WHAT IT DOES AND DOES NOT BUY.
+//
+// Lag is drawn CONDITIONAL ON SEVERITY, which is the causal direction: a claim
+// reports late because nobody knew it was a claim — a latent injury, an
+// occupational disease, an abuse allegation, a construction defect. Severity
+// does not follow from lateness; both follow from the claim being the kind of
+// thing that takes years to surface.
+//
+//     odds(late | s) = w . F(s)^BETA,   P = odds / (1 + odds)
+//
+// F(s) is the claim's QUANTILE in its own line's severity distribution; w is
+// solved per line so the expected late COUNT share equals unreportedAtAge1.
+//
+// ⚠ THE TILT IS ON RANK, NOT SIZE, AND THE SIZE VERSION WAS MEASURED AND
+// REJECTED. `odds ∝ (s/s_median)^BETA` is the obvious form and it is unusable
+// on these distributions: GL is Pareto with alpha 1.3, so s/median runs to five
+// figures in the tail and odds proportional to it make every large claim late
+// with certainty. At BETA = 1 it returns E[s|late]/E[s|timely] of 49.1x on GL
+// and 30.7x on WC with 86% of dollars in late claims — not a late-reporting
+// assumption, a restatement of the tail. F(s) is uniform whatever the tail
+// does. Do not "simplify" this back to the size form; the deriver prints both.
+//
+// ⚠ THE MULTIPLIER IS AN OUTPUT, BUT THE JUDGEMENT IS NOT REMOVED — IT IS
+// RELOCATED, AND THAT IS WORTH STATING PLAINLY. There is exactly ONE degree of
+// freedom the recorded data does not pin, and BETA, the multiplier, the late
+// value share and an odds ratio between size bands are all different coordinates
+// on that same number. All three recorded figures are COUNT figures; they carry
+// no severity information and no care with them will produce any.
+//
+// What the causal form does buy: the SHAPE of how the judgement distributes
+// across claims is defensible, the multiplier VARIES BY LINE off each line's own
+// severity mix rather than being imposed uniformly, and BETA = 1 has a natural
+// reading on a rank scale — the odds of reporting late scale linearly with where
+// the claim sits in its own size distribution — where no multiplier has a
+// natural default. BETA is a judgement of exactly the same standing as
+// CLAIM_REVISION_PHI, IBNER_TOTAL_SD and the drift constants.
+//
+// ⚠ LAG LENGTH IS NOT ALSO TILTED, deliberately and conservatively. Causally it
+// should be (a latent claim is both bigger and slower), but the count curve is
+// already pinned, so a second severity channel would add a parameter without
+// adding evidence. Leaving it out UNDERSTATES the multiplier.
+//
+// WHAT IT COMES OUT AT, derived over each line's own drawn population,
+// 40 accident years, at the shipped BETA = 1.0:
+//
+//   line       E[s|late]/E[s|timely]   late VALUE share   emergence at age 2
+//   WC                  2.003                19.58%            1.1280
+//   GL                  2.011                19.65%            1.1276
+//   Property            1.902                18.79%            1.1211
+//
+// ===========================================================================
+// ⚠ AND THE VERDICT IT IMPLIES ON THE MODEL'S SEVERITY DEVELOPMENT. RECORD THE
+// RANGE, NOT THE PICK. GL's age 1->2 factor is 1.448 in the model and PURE
+// severity; the pool's 1.872 is severity x emergence. Crediting the emergence
+// this pattern supplies leaves:
+//
+//   BETA   emergence at age 2   severity required   the model's 1.448 is...
+//   0.00          1.0650              1.7577              17.6% short
+//   0.50          1.0959              1.7081              15.2% short
+//   1.00          1.1276              1.6602              12.8% short   <-- SHIPPED
+//   2.00          1.1926              1.5697               7.8% short
+//   4.00          1.3303              1.4072               2.9% over
+//
+// So on the shipped judgement, late reporting accounts for rather less than half
+// the first-step gap and the model's severity development is still about an
+// eighth short. NOTHING HERE WAS SIZED TO CLOSE THAT GAP — BETA was chosen a
+// priori and the column is reported, not aimed at. At no BETA in the sweep does
+// emergence alone account for it.
+//
+// ===========================================================================
+// ⚠⚠ THE CLOSURE CURVES ALREADY CARRY A CORRECTION FOR THE THING THIS PATTERN
+// REINTRODUCES, AND WIRING THIS UP WITHOUT UNDOING IT DOUBLE-COUNTS.
+//
+// CLOSURE_BY_SIZE and FITTED_CLOSURE_CURVE above were fitted on a NO-LATE-
+// REPORTING BASIS ON PURPOSE. The source measures closed over the count
+// REPORTED SO FAR, which is still filling; each source age's closed share was
+// therefore DIVIDED by that age's reported development factor before fitting.
+// The two constants that reproduce the whole adjustment are recorded at that
+// block: AGE 1 CARRIES 0.8916 AND THE CORRECTION DECAYS AT 0.4421 PER STEP.
+//
+// 0.8916 is exactly reportedShareAtAge(line, 1) above — the same quantity,
+// derived twice from the same 12.16%. So the closure curves are already stated
+// on a full-denominator basis. Give the model late reporting and the
+// denominator starts filling again, and that correction is applied twice.
+//
+// NOT FIXED HERE, deliberately: this commit moves no engine value. Step 5 of the
+// plan re-fits the closure curves on the raw basis, or removes the correction.
+// Whoever does it needs BOTH numbers and they are now in one place.
+//
+// ===========================================================================
+// ⚠ AND THE PREVIOUS IMPLEMENTATION'S COST RECORD, MOVED HERE FROM WHERE IT WAS
+// ORPHANED. This text sat in types/simulation.ts above `ReserveCohort`, which is
+// not what it describes — it is the header of the DELETED delayed-claim
+// inventory, left behind when the type went. Seventh sighting. It is the only
+// record of what the deleted design actually cost, so it is kept rather than
+// dropped, and it is the direct input to step 3's design:
+//
+//   "⚠ THIS IS PERSISTED TO localStorage, AND THAT IS AN EXCEPTION TO RULING 8
+//    WITH A REASON, not an oversight. Ruling 8 keeps `ResultSet.claims` out of
+//    storage because the claim log is an UNBOUNDED FLOW: ~1,800 claims/yr
+//    reaches ~7MB by year 10 and blows the quota. This inventory is a BOUNDED
+//    STOCK — at ~151 delayed claims/yr full-market and a ~3.5-year mean lag it
+//    holds ~530 records and stops growing, because 78%+ clear within four
+//    years. At ~150 bytes a record that is ~80KB, about 1.6% of a 5MB quota.
+//
+//    AND IT CANNOT BE REGENERATED. Every draw is a pure function of
+//    (seed, member, year), so replaying year 3 in year 9 is architecturally
+//    available. Three reasons not to, the third decisive:
+//      1. O(years^2) work.
+//      2. It would have to replay that year's exact kLine, enrolment and
+//         risk-control inputs.
+//      3. A RETROACTIVE SHOCK CHANGES PARAMETERS, so replaying a prior year
+//         under current parameters would silently restate history. The pinned
+//         original draw is precisely what gives a retroactive shock its force."
+//
+// ⚠ STEP 3 SHOULD NOT NEED ANY OF THAT, and the difference is worth naming. The
+// deleted design deferred a claim's EXISTENCE, so it had to hold an inventory of
+// claims that did not yet exist anywhere else. Deferring VISIBILITY instead —
+// draw the whole register at inception as now, draw each claim's lag alongside
+// it, and let the cohort see only the arrived subset — keeps the register a pure
+// function of the line-year's stored inputs, so claimRegeneration still redraws
+// it exactly and nothing new is persisted. `ResultSet.claims` is already in
+// SAVE_STRIPPED_KEYS, so a reportedYear field costs zero bytes.
+// ===========================================================================
+
+/** THE JUDGEMENT. See the tilt block above; the recorded figures cannot pin it. */
+export const REPORT_LAG_SEVERITY_BETA = 1.0;
+
+/**
+ * LATE REPORTING — off, and read by nothing at this commit.
+ *
+ * Step 3 puts `reportedYear` on the claim behind this. Step 4 makes the cohort
+ * book on the reported subset. Do not flip it before maturity-anchor-check's
+ * target is re-derived (it asserts a climb of 1/c that emergence changes to
+ * 1/c x 1/reportedShareAtAge(line, 1)) and the closure correction above is
+ * undone.
+ */
+export const LATE_REPORTING = { enabled: false };
 
 // ===========================================================================
 // IBNER — INCURRED BUT NOT ENOUGH REPORTED.

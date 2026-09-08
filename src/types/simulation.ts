@@ -501,27 +501,23 @@ export interface BenchClaim {
 // Annual reserve cohort for simplified development. NET basis: losses enter
 // net of reinsurance recoveries (recovery cash arrives in lockstep with the
 // claim payments it offsets, so there is no separate recoverable receivable).
-// A claim DRAWN but NOT YET REPORTED — the IBNR inventory.
+// ⚠ THE PARAGRAPHS THAT STOOD HERE DESCRIBED A DIFFERENT TYPE AND ARE GONE FROM
+// THIS FILE. They opened "A claim DRAWN but NOT YET REPORTED — the IBNR
+// inventory" and went on about a localStorage exception, ~530 delayed-claim
+// records, ~80KB, and why the inventory could not be regenerated. That is the
+// header of the DELETED delayed-claim type, left behind above ReserveCohort when
+// the type went — a header describing something that no longer exists, sitting
+// above something it never described. Seventh sighting of the removed report
+// lag.
 //
-// ⚠ THIS IS PERSISTED TO localStorage, AND THAT IS AN EXCEPTION TO RULING 8
-// WITH A REASON, not an oversight. Ruling 8 keeps `ResultSet.claims` out of
-// storage because the claim log is an UNBOUNDED FLOW: ~1,800 claims/yr reaches
-// ~7MB by year 10 and blows the quota. This inventory is a BOUNDED STOCK — at
-// ~151 delayed claims/yr full-market and a ~3.5-year mean lag it holds ~530
-// records and stops growing, because 78%+ clear within four years. At ~150
-// bytes a record that is ~80KB, about 1.6% of a 5MB quota.
+// It was worth keeping, because it is the only record of what the deleted design
+// cost, so it MOVED rather than being dropped: see LINE_REPORTING_PATTERN in
+// defaultAssumptions.ts, quoted in full beside the pattern that would
+// reintroduce such an inventory. Nothing about ReserveCohort is in it.
 //
-// AND IT CANNOT BE REGENERATED. Every draw is a pure function of
-// (seed, member, year), so replaying year 3 in year 9 is architecturally
-// available. Three reasons not to, the third decisive:
-//   1. O(years^2) work.
-//   2. It would have to replay that year's exact kLine, enrolment and
-//      risk-control inputs.
-//   3. A RETROACTIVE SHOCK CHANGES PARAMETERS, so replaying a prior year under
-//      current parameters would silently restate history. The pinned original
-//      draw is precisely what gives a retroactive shock its force.
-//
-// Fields are exactly what re-emitting the claim needs, and no more.
+// ReserveCohort IS persisted, and its boundedness is a real argument with a real
+// gate behind it — cohort-stock-check — but that argument is about cohorts, not
+// about delayed claims, and it lives at that gate.
 export interface ReserveCohort {
   yearNumber: number;
   calendarYear: number;
