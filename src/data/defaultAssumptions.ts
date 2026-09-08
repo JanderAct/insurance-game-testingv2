@@ -3402,49 +3402,60 @@ export const TRIANGLE_DEVELOPMENT_DRIFT_HORIZON: Record<string, number> = {
 
 export const PRICING_TRIANGLE = { enabled: false };
 // ===========================================================================
-// ⚠ THIS FLAG HAS A RETIREMENT CONDITION AND IT IS WRITTEN ON DAY ONE.
+// ⚠ THIS FLAG HAD A RETIREMENT CONDITION, WRITTEN ON DAY ONE, AND IT IS NOW MET.
 //
 // It exists for ONE reason: so the held rate and the experience rate can be
-// measured on identical seeds. It does not exist afterwards. PER_CLAIM_REVISION
-// lasted weeks because there was always one more thing to measure, so this one
-// gets its ending written down before its first use.
+// measured on identical seeds. PER_CLAIM_REVISION lasted weeks because there was
+// always one more thing to measure, so this one had its ending written down
+// before its first use, as an EXPECTED_RED entry on experience-pricing-check.
+// That entry is GONE. All three arms pass:
 //
-// THE THREE MEASUREMENTS, and then it goes. experience-pricing-check is the
-// gate; it is entered in EXPECTED_RED so the XPASS guard retires the entry the
-// moment all three pass, and the flag goes with it.
+//   1. DOES THE POOL CHARGE SANELY?  The RETAINED pure premium it bills lands
+//      -2.2% / +1.9% / +2.9% from the realised retained cost of the same
+//      accident years, and no line-year charges nothing.
+//   2. WHAT DOES THE RATE DO YEAR TO YEAR?  0.4% / 3.8% / 2.0% of years move
+//      more than 20%, against a 5% bound.
+//   3. DOES THE LOOP STAY STABLE?  A price shock decays. The pricing half of
+//      the loop attenuates at A = 0.26 / 0.28 / 0.45 against a bar of 1.0, and
+//      the measured loop gain A x B is 0.033 / 0.016 / 0.043.
 //
-//   1. DOES THE TRIANGLE PRICE SANELY? Rate off the triangle against the
-//      current held path, per line, identical seeds.
-//      MEASURED AT THIS COMMIT — and the answer is better than the question
-//      assumed. Against the REALISED ultimate loss cost on mature accident
-//      years (50 games, 20 years), the HELD rate is heavy on every line:
-//        realised / held    WC 0.745    GL 0.585    Property 0.744
-//      and the experience rate lands at
-//        experience / held  WC 0.764    GL 0.483    Property 0.776
-//      So on WC and Property the triangle is within 2-3 points of the truth
-//      while the held rate is ~25% above it, and on GL the triangle is ~17%
-//      light against a held rate that is ~71% heavy. MEASUREMENT 1 PASSES.
+// ⚠ THE FIRST TWO OF THOSE REPLACED READINGS THAT WERE WRONG, AND THE WRONG ONES
+// LIVED HERE. This block used to say the held rate is heavy — "realised/held WC
+// 0.745, GL 0.585, Property 0.744" — and that turning the flag on "moves every
+// line's rate down 24% to 52%". Both came from dividing a NET realised loss cost
+// by a GROSS held rate. On one basis the held arm charges 1.024 / 1.038 / 0.994
+// of what its years cost: the held rate is close to right, it is not heavy, and
+// the level cascade those sentences feared does not exist. What the flag
+// actually costs is surplus, not level — see below.
 //
-//   2. WHAT DOES THE RATE DO YEAR TO YEAR? A rolling window should give a few
-//      points of movement from experience, not twenty.
-//      MEASURED — and it decided the estimator. With a fitted log-linear trend
-//      the rate moves >20% in 9.2% / 26.1% / 28.8% of years; with the window
-//      mean, 0.1% / 9.4% / 1.2%. The window mean ships. GL is MARGINAL at
-//      9.4% and that is not yet a pass — see the gate.
+// ============================================================================
+// ⚠ A GREEN RETIREMENT CONDITION IS NOT PERMISSION TO FLIP THIS FLAG, AND THE
+// GATE CANNOT GIVE THAT PERMISSION. Three things stand in the way, none of them
+// measurement 3:
 //
-//   3. DOES THE LOOP STAY STABLE? Price chases the roster and the roster
-//      chases price, and nothing in the repo gates it. NOT YET MEASURED.
-//      This is the one the held rate existed to prevent, and it is the reason
-//      the flag ships OFF at this commit rather than on.
+//   BOTH FLAGS, OR NEITHER — AND THIS IS THE STRUCTURAL ONE. Arms 1 and 3 run
+//     FORWARD_BOOKING and PRICING_TRIANGLE together, because that is the ledger
+//     the flags actually produce: arm 1 grades a triangle chain-laddered off a
+//     forward-booked ledger, and arm 3's decay is measured on it. PRICING_
+//     TRIANGLE ALONE IS A CONFIGURATION NOTHING HAS MEASURED. And FORWARD_
+//     BOOKING is not ready — Property still over-develops, see
+//     ratemaking-loop-check's header.
 //
-// ⚠ WHY IT SHIPS OFF, AND THIS IS A DEVIATION FROM THE BRIEF, STATED. Turning
-// it on moves every line's rate down 24% to 52%. That is not a flagged
-// experiment, it is a re-levelling of the whole game, and the CLF tables, the
-// opening band, the reserve margin and the surplus fields are all percentiles
-// of a distribution it changes. Shipping the level and the cascade together
-// before measurement 3 exists would put the recalibration on top of an
-// ungated feedback loop. The old arm is a baseline, not a shipped path — so
-// flag-off bit-identity is proved ONCE, here, and not required again.
+//   THE FUNDING SLIDER IS MISLABELLED — clf-label-backtest-check is red, with
+//     GL's table off by up to 14.7pp because it reads GL_SUPPLIED rather than
+//     anything derived from this engine. Pricing off the triangle THROUGH a
+//     mislabelled confidence level stacks two errors whose sum nobody has read.
+//
+//   IT COSTS SURPLUS, AND THAT IS A DESIGN CALL RATHER THAN A CORRECTNESS ONE.
+//     Paired on 30 instances: ending surplus over opening, median 2.068 against
+//     the shipped 3.081, p10 1.577 against 1.286, p90 2.882 against 4.083. The
+//     distribution is TIGHTER AND LOWER, not broken — the pool charges its own
+//     experience instead of a constant that happens to be generous, so it stops
+//     compounding surplus it never earned. Whether the game wants that is not
+//     the gate's decision and not this commit's.
+//
+// The old arm is a baseline, not a shipped path — so flag-off bit-identity is
+// proved ONCE, at the commit that built this, and not required again.
 // ===========================================================================
 
 // Ten years is ordinary practice and the window is a weak lever, so it is not

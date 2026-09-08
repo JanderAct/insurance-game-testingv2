@@ -77,7 +77,7 @@ const FAST: string[] = [
   'development-cession-check',       //  14s
   'ending-position-check',           //   6s
   'enrolment-independence-check',    //   2s
-  'experience-pricing-check',        //  75s   EXPECTED RED — PRICING_TRIANGLE's retirement condition
+  'experience-pricing-check',        //  66s   PRICING_TRIANGLE's retirement condition — GREEN, see the flag
   'export-number-format-check',      //  12s
   'funding-basis-check',             //  10s
   'funding-expected-check',          //   2s
@@ -575,37 +575,6 @@ const EXPECTED_RED: Record<string, { code: number; why: string }> = {
   // / 41.3% positive, p 0.09 / 0.54 / 0.91). A control that fires fails the
   // gate. See WORKING_PRACTICES on the paired lesson's fourth appearance — the
   // first where paired is not cheaper but is the only estimator that works.
-  'experience-pricing-check': {
-    code: 1,
-    why: 'THE RETIREMENT CONDITION FOR PRICING_TRIANGLE, ENTERED THE DAY THE FLAG WAS CREATED. Three '
-      + 'arms; when all three pass, this entry comes out and the flag goes with it. ⚠ ONLY ARM 3 IS RED '
-      + 'NOW, and this entry is the last thing holding the flag. '
-      + 'ARM 1 (does the pool CHARGE sanely) PASSES on all three lines: the RETAINED pure premium the pool '
-      + 'bills lands -2.2% / +1.9% / +2.9% from the realised retained loss cost of the same accident '
-      + 'years, and no line-year floors at zero. ⚠ ARM 1 WAS REWRITTEN AT THE DOUBLE-CESSION FIX AND ITS '
-      + 'OLD PASS WAS FALSE. It compared experienceRatePer100 — the gate\'s own observer reading, on an '
-      + 'arm where the flag was OFF — against realised. Both sides were net, so it read -2.0% / +1.7% / '
-      + '+2.6% and passed while the engine, which treated that retained rate as gross and subtracted '
-      + 'cession from it again, was billing GL 21% of its correct rate with 104 of 600 line-years '
-      + 'charging nothing at all. The arm now runs both flags ON and grades netPurePremiumPer100. On the '
-      + 'pre-fix engine it fails at -45.5% / -79.3% / -32.4%. '
-      + '⚠ AND "THE HELD RATE IS 24-46% HEAVY" IS RETRACTED, NOT RESTATED. That came from dividing a NET '
-      + 'realised loss cost by a GROSS held rate; it measured the reinsurance programme. On one basis the '
-      + 'held arm charges 1.024 / 1.038 / 0.994 of what its years cost. The held rate is close to right, '
-      + 'and it was never the argument for this flag — pricing off the pool\'s own developing experience '
-      + 'is. '
-      + 'ARM 2 (year-to-year movement) now passes on all three: 0.4% / 3.8% / 2.0% of years move >20% on '
-      + 'the FLAGGED ledger. GL read 11.3% while the arm observed the SHIPPED ledger; the gate prints '
-      + 'both columns so that drop cannot be mistaken for the fix — the estimator is unchanged and is '
-      + 'reading a ledger FORWARD_BOOKING has already developed. '
-      + 'ARM 3 (loop stability) IS NOT BUILT, deliberately: the held pure premium is what stopped '
-      + 'pricing chasing the roster (finding 17), S3 removes it, and nothing replaces it yet. The flag '
-      + 'therefore ships OFF. Do not enable PRICING_TRIANGLE until arm 3 exists and passes — it removes '
-      + 'an ungated feedback loop\'s only damping, and it still costs surplus: paired on the same 30 '
-      + 'instances, ending-over-opening median 2.068 against the shipped arm\'s 3.081, p10 1.577 against '
-      + '1.286, p90 2.882 against 4.083. Retained loss ratio 1.011 against 0.978 — a distribution that is '
-      + 'tighter and lower, not a broken one, which is what the pre-fix -1.863 median was.',
-  },
   'clf-label-backtest-check': {
     code: 1,
     why: 'ADDED AT THIS COMMIT, RED FROM ITS FIRST RUN, AND ITS RED IS OLDER THAN THE COMMIT. Nothing '

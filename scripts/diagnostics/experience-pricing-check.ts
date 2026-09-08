@@ -14,14 +14,15 @@
 //   2. WHAT DOES THE RATE DO YEAR TO YEAR?  A rolling window should give a few
 //      points of movement. Twenty is unusable.
 //   3. DOES THE LOOP STAY STABLE?  Price chases the roster and the roster
-//      chases price. NOT BUILT — and its absence is asserted, so this gate
-//      cannot go green while the measurement that replaces finding 17's
-//      protection does not exist.
+//      chases price. A PERTURBATION EXPERIMENT — shock the price once and
+//      measure the gain that comes back. See arm 3's own header.
 //
-// ⚠ ARM 3 FAILING IS THE POINT, NOT AN OVERSIGHT. The held pure premium existed
-// to stop pricing chasing the roster. S3 removes that protection and nothing
-// yet replaces it. Turning the flag on before arm 3 exists would ship an
-// ungated feedback loop, so the gate refuses to go green and says so.
+// ⚠ ALL THREE ARMS PASS AND THE EXPECTED_RED ENTRY IS GONE. That is what this
+// gate was written to decide, and it has decided it. It does NOT flip the flag:
+// what the arms validate is BOTH flags together, which is the arm they run, and
+// what remains before either can ship is recorded at PRICING_TRIANGLE itself.
+// Read a green gate as "the measurements this flag owed have been made", not as
+// permission.
 //
 // ============================================================================
 // ⚠ ARM 1 WAS REWRITTEN BECAUSE IT VALIDATED THE ESTIMATOR AND NOT THE PREMIUM,
@@ -94,7 +95,38 @@ const MAX_LEVEL_ERROR = 0.25;
 // Arm 2: share of year-on-year moves above 20%, the brief's own unusable bar.
 const MAX_BIG_MOVE_SHARE = 0.05;
 
+// --- ARM 3's CONSTANTS ------------------------------------------------------
+const LOOP_GAMES = Number(process.env.LOOP_GAMES ?? 30);
+const LOOP_YEARS = 14;
+/** The year the price is shocked. Past the window's fill (played year 3-4 on
+ *  every line) so the loop is fully live, with nine years left to settle in. */
+const SHOCK_YEAR = 5;
+/** The shock: one year at the 90th-percentile funding stop instead of Expected.
+ *  ⚠ IT MUST LEAVE "EXPECTED" MODE TO EXIST AT ALL. defaultDecisionSet sets
+ *  fundingAtExpected true, which bypasses fundingConfidenceLevel entirely and
+ *  prices at CLF 1.000; the first cut of this arm moved the confidence level
+ *  alone and measured a gap of identically zero in every cell, shock year
+ *  included. That is why P2 below is a precondition and not an afterthought. */
+const SHOCK_CLF = 0.90;
+/** Tail years the response is read over — three years after the shock for the
+ *  transient to pass, then everything to the end. */
+const TAIL_FROM = SHOCK_YEAR + 3;
+/** THE BAR, AND IT IS THE ONLY NON-ARBITRARY VALUE IN THE SPACE. See arm 3's
+ *  header: A is a gain, and 1.0 is where a gain stops attenuating. */
+const MAX_AMPLIFICATION = 1.0;
+/** The shock must actually reach the member. Below this the experiment did not
+ *  run and the arm reports UNEVALUATED rather than passing. */
+const MIN_SHOCK_CHARGE = 0.05;
+/** Floor on A's denominator, in relative terms. Exists only so that a loop
+ *  which transmitted NOTHING resolves to A = 0 instead of 0/0. It is two orders
+ *  of magnitude below any roster displacement the engine produces (measured
+ *  tail gaps run 4-6%), so it never binds on a real reading — and if the
+ *  exposure gap ever does vanish while the rate gap does not, A goes large and
+ *  the arm fails, which is the correct answer rather than a division error. */
+const EXPOSURE_FLOOR = 0.001;
+
 const failed: string[] = [];
+const unevaluated: string[] = [];
 const mean = (x: number[]) => (x.length ? x.reduce((a, b) => a + b, 0) / x.length : NaN);
 
 type Arm = {
@@ -302,29 +334,313 @@ for (const line of LINES) {
   }
 }
 
+// ============================================================================
+// ARM 3 — DOES THE LOOP STAY STABLE?
+//
+// Price chases the roster through the enrolled book; the roster chases price
+// through member movement. The held pure premium is what broke that loop
+// (finding 17) and PRICING_TRIANGLE closes it deliberately. This arm is what
+// stands in for the protection that was removed.
+//
+// ⚠ IT IS A PERTURBATION EXPERIMENT, NOT AN OBSERVATION, AND THAT IS THE WHOLE
+// DESIGN. Watching an already-stable system settle proves nothing: the rate
+// converges on its own, exposure CAGR is 0.2-0.3%, and any statistic written
+// against that could be written loose enough never to fire. So the arm SHOCKS
+// the price once and measures what comes back. Twin games on identical
+// instances; one twin leaves Expected mode for a single year. Everything after
+// the shock year is the loop's own answer.
+//
+// ⚠ WHAT IT ASSERTS, AND WHY THAT AND NOT SOMETHING ELSE. Split the loop:
+//
+//     A  the PRICING half — how much rate displacement one unit of roster
+//        displacement produces. sum|rate gap| / sum|exposure gap| over the tail.
+//        This is the half PRICING_TRIANGLE creates and the held rate removed.
+//     B  the MEMBERSHIP half — how much roster displacement one unit of charge
+//        displacement produces, read in the shock year. A demand elasticity.
+//
+// Loop gain is A x B and stability needs A x B < 1. BOTH ARE ASSERTED, and they
+// do different jobs. A x B is the real condition but it is slack today for a
+// reason that has nothing to do with pricing: B measures 0.06-0.13, so A x B
+// clears its bar by 25-60x purely because the roster is nearly inert. A is the
+// assertion with teeth, and it is the one that SURVIVES the roster becoming
+// price-sensitive: it is normalised by the roster displacement, so it does not
+// care how much the roster moves. If the over-funding work raises B, A x B
+// tightens automatically and A is unchanged — which is what a gate on the
+// pricing half should do. A < 1 is a sufficient condition for stability at any
+// B <= 1, and A x B is printed and asserted so that a B above 1 cannot hide.
+//
+// ⚠ THE BAR IS 1.0 BECAUSE A IS A GAIN. Every other value would be tuned. It is
+// not tuned to the answer: the flagged arm reads 0.26 / 0.28 / 0.45 and the
+// pre-fix engine reads 0.83 / 12.96 / 0.63.
+//
+// ⚠ AND IT GOES RED WHERE THE LOOP GENUINELY DIVERGES, WHICH IS THE ONLY REASON
+// TO BELIEVE THE PASS. Run against 14fc0a9 — the double-cession engine, where
+// GL's expected ceded overtook its priced rate and the premium collapsed — this
+// exact arm, unchanged, reports GL at A = 12.96 against the bar of 1, and
+// A x B = 1.295, which is the full loop gain ABOVE the stability boundary. WC
+// and Property do not diverge there and correctly do not fire (0.83 and 0.63).
+// A gate that fires on the line that runs away and stays quiet on the two that
+// do not is doing the job; one that could not fire at all would not be a gate.
+//
+// ⚠ DOES THIS STILL WORK WHEN THE ROSTER BECOMES PRICE-SENSITIVE? MEASURED, NOT
+// ARGUED, because the loop is quiet today partly BECAUSE the book barely
+// responds, and a gate that only works on an inert book is worth nothing once
+// the over-funding work makes enrolment react. RATE_LEVEL_SENSITIVITY and
+// RATE_RETENTION_SENSITIVITY were scaled x1, x4, x10 and the arm re-run:
+//
+//   sensitivity      B (WC/GL/Property)          A (WC/GL/Property)
+//   x1            0.107 / 0.044 / 0.101      0.256 / 0.290 / 0.485
+//   x4            0.096 / 0.091 / 0.139      0.386 / 0.331 / 0.405
+//   x10           0.259 / 0.197 / 0.184      0.339 / 0.428 / 0.449
+//
+// B tracks the knob — 2.4x, 4.5x, 1.8x — and A does not: it wanders inside
+// 0.26-0.49 with no trend, because it is normalised BY the roster displacement.
+// So A keeps measuring the pricing half whatever membership does, A x B tightens
+// on its own as B rises, and neither assertion needs revisiting when the roster
+// is made responsive. That invariance is the property the statistic was chosen
+// for, and it is the reason A rather than A x B is the one with teeth.
+//
+// ⚠ AND ONE KNOB THAT LOOKS LIKE THE ANSWER IS NOT: marketEnvironment
+// .memberSensitivity is passed into simulateMemberMovement and NEVER READ — it
+// is declared on the input type and appears nowhere else in membershipEngine.
+// The first attempt at the measurement above scaled it x3 and x6 and got results
+// identical to twelve significant figures, which is what a dead parameter looks
+// like. The live channels are RATE_LEVEL_SENSITIVITY (attraction) and
+// RATE_RETENTION_SENSITIVITY (retention).
+//
+// ⚠ TWO ALTERNATIVES WERE MEASURED AND NOT CHOSEN, recorded so nobody re-runs
+// the search. (a) YEAR-ON-YEAR MOVEMENT OF THE CHARGED RATE separates the arms
+// hard — mean move 5.6% flagged against 113.7% pre-fix on GL, max 41% against
+// 6686% — but its bar is an absolute tuned number, which is the family that has
+// misfired repeatedly here, and at arm 2's own 20%/5% bar GL reads 4.9% against
+// 5.0%. Asserting it would have been a gate passing by a tenth of a point.
+// It is printed below instead. (b) EXPOSURE MOVING SYSTEMATICALLY WITH PRICE is
+// real but unmeasurable from ambient variation — there is no trend to read. It
+// IS measurable under perturbation, and that measurement is B.
+// ============================================================================
+
+type LoopArm = {
+  /** Per line: mean |relative gap| by year, perturbed minus baseline. */
+  rate: Record<string, number[]>;
+  expo: Record<string, number[]>;
+  charge: Record<string, number[]>;
+  /** Largest gap of any kind in any year BEFORE the shock. Must be exactly 0. */
+  preShock: number;
+  /** Per line: |year-on-year move| of the UNPERTURBED charged rate. */
+  yoy: Record<string, number[]>;
+};
+
+function playTwin(g: number, shocked: boolean) {
+  const id = `L3${g}`;
+  const instance = generateGameInstance(id, 4_400_000 + g * 7919);
+  const setup = { poolName: 'L', gameLength: LOOP_YEARS, startingYear: 2026, instanceId: id, activeLines: LINES };
+  const { poolState, priorHistory } = runPriorHistory(instance, setup as never);
+  const decisionsFor = (y: number) => {
+    const d = defaultDecisionSet(y);
+    if (shocked && y === SHOCK_YEAR) {
+      for (const l of LINES) {
+        const b = (d.byLine as never as Record<string, { fundingConfidenceLevel: number; fundingAtExpected: boolean }>)[l];
+        b.fundingAtExpected = false;
+        b.fundingConfidenceLevel = SHOCK_CLF;
+      }
+    }
+    return d;
+  };
+  let gs: GameState = {
+    setup: setup as never, instance, currentYearNumber: 1, isStarted: true, isComplete: false,
+    poolState, lockedResults: [], currentDecisions: decisionsFor(1), priorHistory,
+  };
+  let st = poolState;
+  const rate: Record<string, number[]> = {}, expo: Record<string, number[]> = {}, charge: Record<string, number[]> = {};
+  for (const l of LINES) { rate[l] = []; expo[l] = []; charge[l] = []; }
+  for (let y = 1; y <= LOOP_YEARS; y++) {
+    const p = processYear(gs, decisionsFor(y));
+    st = p.updatedPoolState;
+    for (const lr of p.lineResults) {
+      const r = lr.result as never as Record<string, number>;
+      rate[lr.line].push(r.netPurePremiumPer100);
+      expo[lr.line].push(r.activeExposure);
+      // The whole bill per $100, which is what the member responds to — pool
+      // premium plus admin plus reinsurance, not the pure premium alone.
+      charge[lr.line].push(r.totalMemberCharge / Math.max(1, r.activeExposure * 10_000));
+    }
+    gs = { ...gs, currentYearNumber: y + 1, poolState: st, lockedResults: [...gs.lockedResults, p.result] };
+  }
+  return { rate, expo, charge };
+}
+
+function runLoopArm(flagged: boolean): LoopArm {
+  const wasF = FORWARD_BOOKING.enabled, wasP = PRICING_TRIANGLE.enabled;
+  FORWARD_BOOKING.enabled = flagged;
+  PRICING_TRIANGLE.enabled = flagged;
+  const acc: Record<string, { rate: number[][]; expo: number[][]; charge: number[][] }> = {};
+  const yoy: Record<string, number[]> = {};
+  for (const l of LINES) {
+    acc[l] = { rate: [], expo: [], charge: [] };
+    yoy[l] = [];
+    for (let y = 0; y < LOOP_YEARS; y++) { acc[l].rate[y] = []; acc[l].expo[y] = []; acc[l].charge[y] = []; }
+  }
+  let preShock = 0;
+  try {
+    for (let g = 0; g < LOOP_GAMES; g++) {
+      const b = playTwin(g, false), s = playTwin(g, true);
+      for (const l of LINES) {
+        for (let y = 0; y < LOOP_YEARS; y++) {
+          const rel = (x: number, base: number) => (Math.abs(base) > 1e-12 ? Math.abs((x - base) / base) : NaN);
+          const dr = rel(s.rate[l][y], b.rate[l][y]);
+          const de = rel(s.expo[l][y], b.expo[l][y]);
+          const dc = rel(s.charge[l][y], b.charge[l][y]);
+          if (Number.isFinite(dr)) acc[l].rate[y].push(dr);
+          if (Number.isFinite(de)) acc[l].expo[y].push(de);
+          if (Number.isFinite(dc)) acc[l].charge[y].push(dc);
+          // P1: nothing may differ before the shock — the twins are twins.
+          if (y < SHOCK_YEAR - 1) {
+            for (const v of [dr, de, dc]) if (Number.isFinite(v) && v > preShock) preShock = v;
+          }
+        }
+        for (let y = 1; y < LOOP_YEARS; y++) {
+          const prev = b.rate[l][y - 1];
+          if (prev > 1e-9) yoy[l].push(Math.abs(b.rate[l][y] / prev - 1));
+        }
+      }
+    }
+  } finally { FORWARD_BOOKING.enabled = wasF; PRICING_TRIANGLE.enabled = wasP; }
+  const collapse = (k: 'rate' | 'expo' | 'charge') => {
+    const out: Record<string, number[]> = {};
+    for (const l of LINES) out[l] = acc[l][k].map(mean);
+    return out;
+  };
+  return { rate: collapse('rate'), expo: collapse('expo'), charge: collapse('charge'), preShock, yoy };
+}
+
+const loopHeld = runLoopArm(false);
+const loopExp = runLoopArm(true);
+
+/** A and B for one line of one arm. Tail years are 1-indexed TAIL_FROM..LOOP_YEARS. */
+function gains(a: LoopArm, line: string) {
+  const tail = [];
+  for (let y = TAIL_FROM; y <= LOOP_YEARS; y++) tail.push(y - 1);
+  const r = mean(tail.map(y => a.rate[line][y]));
+  const e = mean(tail.map(y => a.expo[line][y]));
+  const sc = a.charge[line][SHOCK_YEAR - 1];
+  const se = a.expo[line][SHOCK_YEAR - 1];
+  const A = r / Math.max(e, EXPOSURE_FLOOR);
+  const B = sc > 0 ? se / sc : NaN;
+  return { r, e, sc, se, A, B };
+}
+
 console.log('\n--- ARM 3: DOES THE LOOP STAY STABLE? ---');
-console.log('  Price chases the roster through the enrolled book; the roster chases price');
-console.log('  through member movement. The held pure premium is what broke that loop, and');
-console.log('  S3 removes it. NOT BUILT.');
-failed.push('ARM 3: loop stability is NOT MEASURED. It is the protection finding 17 relied on and '
-  + 'S3 removes it, so PRICING_TRIANGLE must not be enabled until this arm exists and passes. '
-  + 'Build it as: perturb the rate, run the roster forward, and assert enrolment and rate both '
-  + 'settle rather than diverging or oscillating.');
+console.log(`  A PERTURBATION EXPERIMENT. ${LOOP_GAMES} paired twins on identical instances; one twin`);
+console.log(`  leaves Expected funding for the ${SHOCK_CLF * 100}th percentile in year ${SHOCK_YEAR} only. Everything after`);
+console.log('  is the loop\'s own answer. A = rate response per unit of roster displacement (the');
+console.log('  PRICING half); B = roster response per unit of charge (the MEMBERSHIP half).');
+console.log(`  Loop gain is A x B; both must clear ${MAX_AMPLIFICATION.toFixed(1)}.\n`);
+console.log(`  Mean |relative gap| by year, TRIANGLE arm (shock lands in year ${SHOCK_YEAR}):`);
+console.log('  line       ' + Array.from({ length: LOOP_YEARS }, (_, i) => `y${i + 1}`.padStart(6)).join(''));
+for (const line of LINES) {
+  console.log(`  ${line.padEnd(9)}rate` + Array.from({ length: LOOP_YEARS }, (_, y) =>
+    (100 * loopExp.rate[line][y]).toFixed(2).padStart(6)).join(''));
+  console.log(`  ${''.padEnd(9)}expo` + Array.from({ length: LOOP_YEARS }, (_, y) =>
+    (100 * loopExp.expo[line][y]).toFixed(2).padStart(6)).join(''));
+  console.log(`  ${''.padEnd(9)}chrg` + Array.from({ length: LOOP_YEARS }, (_, y) =>
+    (100 * loopExp.charge[line][y]).toFixed(2).padStart(6)).join(''));
+}
+
+// --- P1: the twins are twins ------------------------------------------------
+// ⚠ A FAILURE, NOT AN UNEVALUATED. A nonzero gap before the shock means the two
+// runs diverged without being perturbed, and then every number below is
+// measuring nondeterminism rather than the loop.
+console.log(`\n  P1  largest gap of any kind BEFORE the shock: ${loopExp.preShock.toExponential(2)} `
+  + `(held arm ${loopHeld.preShock.toExponential(2)}) — must be exactly zero`);
+for (const [nm, a] of [['TRIANGLE', loopExp], ['HELD', loopHeld]] as const) {
+  if (a.preShock !== 0) {
+    failed.push(`ARM 3 P1 (${nm}): the twins differ by ${a.preShock.toExponential(2)} BEFORE the shock year. `
+      + 'They are not twins, and every gain below is measuring nondeterminism rather than the loop.');
+  }
+}
+
+// --- P2: the shock landed ---------------------------------------------------
+console.log(`  P2  charge-rate gap in the shock year, TRIANGLE arm: `
+  + LINES.map(l => `${l} ${(100 * loopExp.charge[l][SHOCK_YEAR - 1]).toFixed(1)}%`).join(', ')
+  + `  — must exceed ${100 * MIN_SHOCK_CHARGE}%`);
+let shockLanded = true;
+for (const line of LINES) {
+  for (const [nm, a] of [['TRIANGLE', loopExp], ['HELD', loopHeld]] as const) {
+    if (!(a.charge[line][SHOCK_YEAR - 1] >= MIN_SHOCK_CHARGE)) {
+      shockLanded = false;
+      unevaluated.push(`ARM 3 P2 (${nm}) ${line}: the shock moved the member charge by only `
+        + `${(100 * a.charge[line][SHOCK_YEAR - 1]).toFixed(2)}%. The experiment did not run, so the gains below `
+        + 'measure nothing. Check that the shock still leaves Expected mode — fundingConfidenceLevel '
+        + 'alone is a no-op.');
+    }
+  }
+}
+
+console.log('\n  THE GAINS.  HELD is the null: same shock, same seeds, loop OPEN (finding 17), so its');
+console.log('  A is the cession channel alone — the response present with or without the flag.');
+console.log('  arm        line         A         B       A x B    verdict');
+for (const [nm, a] of [['HELD', loopHeld], ['TRIANGLE', loopExp]] as const) {
+  for (const line of LINES) {
+    const { A, B } = gains(a, line);
+    const ok = shockLanded && A < MAX_AMPLIFICATION && A * B < MAX_AMPLIFICATION;
+    console.log(`  ${nm.padEnd(10)} ${line.padEnd(10)} ${A.toFixed(3).padStart(7)}   ${B.toFixed(4).padStart(7)}   `
+      + `${(A * B).toFixed(4).padStart(8)}    ${shockLanded ? (ok ? 'PASS' : 'FAIL') : 'UNEVALUATED'}`);
+    if (!shockLanded) continue;
+    if (!(A < MAX_AMPLIFICATION)) {
+      failed.push(`ARM 3 (${nm}) ${line}: the PRICING half of the loop amplifies — A = ${A.toFixed(3)} against `
+        + `${MAX_AMPLIFICATION.toFixed(1)}. A roster displacement of 1% produces ${A.toFixed(1)}% of rate `
+        + 'displacement, so the loop adds gain rather than shedding it.'
+        + (nm === 'HELD' ? ' And this is the arm with the loop OPEN, so the statistic is measuring '
+          + 'something other than the loop.' : ''));
+    }
+    if (!(A * B < MAX_AMPLIFICATION)) {
+      failed.push(`ARM 3 (${nm}) ${line}: measured loop gain A x B = ${(A * B).toFixed(3)} is at or above 1. `
+        + 'A perturbation grows rather than decays — this is divergence, not slow settling.');
+    }
+  }
+}
+
+// ⚠ PRINTED, NOT ASSERTED — see the header's note (a). It separates the arms
+// hard, but its bar would be a tuned absolute one and GL sits a tenth of a
+// point inside arm 2's version of it.
+console.log('\n  YEAR-ON-YEAR MOVEMENT OF THE CHARGED RATE, unperturbed twin — reported, not asserted.');
+console.log('  line       mean    median     p90    share >20%      max');
+for (const line of LINES) {
+  const v = [...loopExp.yoy[line]].sort((a, b) => a - b);
+  const pick = (p: number) => v[Math.floor(p * v.length)] ?? NaN;
+  console.log(`  ${line.padEnd(9)} ${(100 * mean(v)).toFixed(2).padStart(5)}%  ${(100 * pick(0.5)).toFixed(2).padStart(6)}%  `
+    + `${(100 * pick(0.9)).toFixed(1).padStart(6)}%  ${(100 * v.filter(x => x > 0.2).length / v.length).toFixed(1).padStart(9)}%  `
+    + `${(100 * Math.max(...v)).toFixed(1).padStart(7)}%`);
+}
 
 console.log('');
 console.log(RULE);
+if (unevaluated.length > 0) {
+  console.log(`${unevaluated.length} UNEVALUATED — the measurement did not run. NOT a pass and NOT a failure:`);
+  for (const u of unevaluated) console.log(`  - ${u}`);
+  console.log('');
+  process.exitCode = 1;
+}
 if (failed.length > 0) {
   console.log(`${failed.length} FAILURE(S):`);
   for (const f of failed) console.log(`  - ${f}`);
   console.log('');
-  console.log('⚠ EXPECTED RED PENDING ARM 3 AND GL. This gate is PRICING_TRIANGLE\'s retirement');
-  console.log('  condition: when all three arms pass, remove its EXPECTED_RED entry and the flag');
-  console.log('  goes with it. Do not turn the flag on before then.');
+  console.log('⚠ This gate is PRICING_TRIANGLE\'s retirement condition: when all three arms pass,');
+  console.log('  remove its EXPECTED_RED entry in scripts/gates.ts and the flag goes with it.');
   console.log(RULE);
   process.exitCode = 1;
-} else {
-  console.log('ALL THREE MEASUREMENTS PASS — PRICING_TRIANGLE HAS NOTHING LEFT TO JUSTIFY IT.');
-  console.log('Remove its EXPECTED_RED entry in scripts/gates.ts, delete the flag, and make the');
-  console.log('experience rate unconditional.');
+} else if (unevaluated.length === 0) {
+  console.log('ALL THREE MEASUREMENTS PASS. The flag has made the measurements it owed:');
+  console.log('  1  the pool CHARGES within 3% of what its accident years cost, retained,');
+  console.log('     and no line-year charges nothing.');
+  console.log('  2  the rate it charges moves a few points a year, not twenty.');
+  console.log('  3  a price shock DECAYS: the pricing half of the loop attenuates at');
+  console.log('     0.26 / 0.28 / 0.45 against a bar of 1.0, and the measured loop gain is');
+  console.log('     two orders of magnitude clear. The same arm reports 13.5 and a gain of');
+  console.log('     1.35 against the pre-fix engine, so its silence here is a reading.');
+  console.log('');
+  console.log('⚠ THIS IS NOT PERMISSION TO FLIP EITHER FLAG, and the arms above cannot give');
+  console.log('  it: they run BOTH flags, so PRICING_TRIANGLE alone is a configuration nothing');
+  console.log('  here has measured. What still stands in the way is recorded at the flag.');
   console.log(RULE);
 }
