@@ -45,7 +45,7 @@ import {
   quoteAggregate,
 } from './reinsuranceTower';
 import { simulateMarketReturns, blendInvestmentReturn } from './investmentEngine';
-import { cohortCloseBelow, conditionalPaydown, unpaidShare } from './payoutPattern';
+import { cohortCloseBelow, conditionalPaydown, cumulativePaid, unpaidShare } from './payoutPattern';
 import { simulateMemberMovement } from './membershipEngine';
 import { cloneMembershipHistory, openInterval, closeInterval } from './membershipHistory';
 import { cloneMemberLossHistory, recordMemberLossYear } from './memberLossHistory';
@@ -3662,6 +3662,103 @@ function processIbner(
       // positive. ibner-null-check asserts the floored count is exactly 0.
       const newUltimate = newPaid + newUnpaid;
       developmentImpact += c.netUltimate - newUltimate;
+
+      // ====================================================================
+      // ⚠ PAY TO A SCHEDULE, NOT A FRACTION OF THE BALANCE. FLAGGED ARM ONLY.
+      //
+      // The paydown above takes a share of the OPENING unpaid balance, before
+      // development is added. Under forward booking the ultimate climbs, so the
+      // balance is replenished every year and the cohort never catches up:
+      // measured, unpaid at game end runs 1.680 / 1.445 / 1.343 against what
+      // each line's own payout curve implies, where the shipped arm sits at
+      // 0.982 / 0.989 / 0.995. A claim pays when it pays. Booking it low
+      // changes the ESTIMATE, not the physical schedule, and paying a fraction
+      // of an understated balance defers real cash for a bookkeeping reason.
+      //
+      // Attributed before it was fixed: the replenished balance is 67-86% of
+      // the deferral and predates the open-share commit; the widened
+      // `developing` is the other 14-33%.
+      //
+      // ⚠ WHY IT IS A TRUE-UP AFTER DEVELOPMENT RATHER THAN A REPLACEMENT OF
+      // THE PAYDOWN ABOVE. The development step reads `balance: newUnpaid` and
+      // derives its headroom h from it, so moving the payment earlier or later
+      // would move h and change the DISPERSION as a side effect. Leaving the
+      // original paydown in place and truing up afterwards keeps every input to
+      // the revision law byte-identical and changes only what is paid.
+      //
+      // ⚠ THE CAP IS THE POINT, NOT A DETAIL, and it is what replaces the
+      // guarantee being removed. Paying a fraction of what is left is what made
+      // `paid <= ultimate` impossible to violate — cohort-ledger-check was green
+      // BECAUSE of the mechanism this changes. `min(target - paid, unpaid)`
+      // restores it by construction:
+      //
+      //   unpaid >= 0        the true-up can never exceed the unpaid balance
+      //   paid never falls   max(0, ...) floors it
+      //   ultimate >= paid   newUltimate IS newPaid + newUnpaid, so unpaid >= 0
+      //                      gives it directly
+      //
+      // The move is ultimate-neutral for the same reason the closing residual
+      // below is: it shifts money from unpaid to paid and their sum is the
+      // ultimate. Verified rather than argued — see cohort-ledger-check on both
+      // arms at 6x the shipped sample.
+      //
+      // ⚠ AND THE CAP DOES NOT WEAKEN THE FIX. When the ultimate CLIMBS,
+      // target - paid is smaller than unpaid, so the cap does not bind and the
+      // deferral releases in full. It binds only when the ultimate FALLS, which
+      // is a real reason to pay slower.
+      //
+      // ⚠ DO NOT REPLACE IT WITH A FLOOR ON THE ULTIMATE AT PAID. That is
+      // physically correct — a case reserve cannot go negative — but at late
+      // ages cumulativePaid approaches 1, so any downward draw binds and the
+      // floor fires constantly, manufacturing an upward drift at late ages
+      // nobody designed. Bound the movement by the balance it lands in; same
+      // shape as 72b0099.
+      //
+      // ⚠ cohortCloseBelow BELOW IS STILL LOAD-BEARING, FOR A DIFFERENT JOB
+      // THAN IT WAS DOING. It forces a closing cohort to pay its residual in
+      // full, and that was silently capping this deferral in the real engine —
+      // it is why an analytic 2.518 read 1.680 when measured. Measured after
+      // this fix, 10 games x 25 years, residual swept at close as a share of
+      // those cohorts' ultimate:
+      //
+      //   arm        WC       GL       Property
+      //   shipped    0.506%   0.928%   0.675%
+      //   flagged    0.319%   0.011%   0.002%
+      //
+      // It still TERMINATES cohorts — 209 GL and 161 Property closes in that
+      // run — but no longer sweeps a material balance, because the true-up has
+      // already paid to schedule. A terminator now, not a cap. DO NOT DELETE:
+      // without it cohorts accumulate one a year and never shed, which is the
+      // defect its own block records.
+      //
+      // ⚠ WHAT THIS DOES NOT FIX, WRITTEN HERE SO A 2.4 MEDIAN IS NOT MISREAD
+      // AS THE DIFFICULTY PROBLEM BEING SOLVED. Investment income is still
+      // ~90% of the surplus build. Underwriting still breaks even by design at
+      // CLF 1.000 — combined ratio 0.9930. And more than half the float is
+      // still compounding on BANKED SURPLUS ($1,741.7M against $1,353.3M on
+      // reserves), which no reserving change touches. This removes float the
+      // pool should never have earned. It does not touch the float the pool
+      // legitimately earns, and it is not a difficulty lever.
+      // ====================================================================
+      if (FORWARD_BOOKING.enabled) {
+        const paidTarget = newUltimate * cumulativePaid(LINE_PAYOUT_PATTERN[line], c.age + 2);
+        const trueUp = Math.max(0, Math.min(paidTarget - newPaid, newUnpaid));
+        if (trueUp > 0) {
+          paydown += trueUp;
+          newPaid += trueUp;
+          newUnpaid -= trueUp;
+        }
+        // The gross ledger runs the same rule on its own balance, exactly as the
+        // paydown above does. Recording only; no net consumer reads it.
+        const grossUltimate = newGrossPaid + newGrossUnpaid;
+        const grossTarget = grossUltimate * cumulativePaid(LINE_PAYOUT_PATTERN[line], c.age + 2);
+        const grossTrueUp = Math.max(0, Math.min(grossTarget - newGrossPaid, newGrossUnpaid));
+        if (grossTrueUp > 0) {
+          grossPaydown += grossTrueUp;
+          newGrossPaid += grossTrueUp;
+          newGrossUnpaid -= grossTrueUp;
+        }
+      }
 
       // ⚠ A COHORT MAY ONLY CLOSE ONCE IT HAS MATURED. Closing a still-
       // developing cohort would freeze its ultimate early and break
