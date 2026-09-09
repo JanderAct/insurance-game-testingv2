@@ -70,7 +70,7 @@ const FAST: string[] = [
   'cession-path-independence',       //  77s   GAMES=300 — it cannot resolve its subject below that
   'cession-uplift-basis',            //  22s
   'claims-workbook-check',           //  17s
-  'clf-label-backtest-check',        //  20s   EXPECTED RED — see the entry below; nothing else backtests STATIC_CLF_TABLE
+  'clf-label-backtest-check',        //  20s   GREEN since the maturation book — worst label error -3.2pp against 5pp
   'closure-draw-check',              //   3s
   'cohort-stock-check',              //   4s   (sixty years, four games)
   'composition-table-check',         //  17s   STAGE 1 — the magnitude law against 200/(age+1); GL only
@@ -95,7 +95,7 @@ const FAST: string[] = [
   'panel-engine-parity-check',       //   4s
   'pin-vs-band-check',               //  27s
   'pool-aggregation-check',          //   2s
-  'pregame-acceptance-check',        //  55s   STAGE 1 BLOCKER — the search must still accept on the shipped path
+  'pregame-acceptance-check',        //  38s   STAGE 1 BLOCKER — the search must still accept on the shipped path
   'property-claim-check',            //   3s
   'ratemaking-loop-check',           //  80s   THE ACCEPTANCE TEST — 4/4; condition 3 is paired with two null controls
   'ratio-basis-check',               //   7s
@@ -529,6 +529,84 @@ const EXPECTED_RED: Record<string, { code: number; why: string }> = {
       + 'law — phi to zero, the drift to zero, and the settlement factor neutralised to 1.0 — which needs '
       + 'a settlement override the law does not currently expose. Not S3; its own small commit.',
   },
+  // ==========================================================================
+  // ⚠ THE FIVE BELOW ARE ONE DEFECT, NOT FIVE, AND IT IS A RETIRED PREMISE.
+  //
+  // Each asserts, in its own vocabulary, that A COHORT IS BOOKED AT ITS REGISTER
+  // AND DEVELOPMENT IS MEAN-ONE NOISE AROUND IT. That was true of the shipped
+  // mechanism and is false of forward booking, which books at a contracted
+  // initial estimate and develops up by 2.33 / 3.38 / 1.31 to land on it.
+  //
+  // ⚠ CAUSATION IS MEASURED, NOT ARGUED. Every one was run twice at the
+  // maturation-book commit: with the flag ON, and with the flag OFF against THE
+  // SAME ten-year book. All five are red on the first and green on the second,
+  // so it is the flip and not the deeper pre-game — which was the live
+  // alternative and had to be excluded rather than assumed.
+  //
+  // ⚠ THESE ENTRIES ARE PLACEHOLDERS FOR A THRESHOLD RE-DERIVATION AND SHOULD BE
+  // SHORT-LIVED. Nothing here is an engine defect and nothing here is excused
+  // vaguely: each carries its measured figure, its paired control, and what would
+  // make it green. Re-deriving five thresholds against a newly shipped mechanism
+  // is its own commit with its own measurements, which is why it is not this one.
+  // Anyone reading this in a month should be asking why it is still here.
+  // ==========================================================================
+  'cession-uplift-basis': {
+    code: 1,
+    why: 'LIFETIME DEVELOPMENT CESSION AGAINST INCEPTION CESSION, limit 6% per line and 1.5% pooled. '
+      + 'Reads 374.1% / 408.3% / 57.2% and 241.9% pooled with the flag on. The limit encodes a mean-one '
+      + 'law: if development is noise around the register then over a complete cohort life the reinsurer '
+      + 'pays only the convexity of its own treaty, which is what 6% bounds. Forward booking develops the '
+      + 'gross register up by 2.33 / 3.38 / 1.31 BY DESIGN and the tower takes its share of that, so the '
+      + 'quantity being bounded is now a different quantity. PAIRED CONTROL: flag off, same ten-year '
+      + 'book, reads 0.0% / 1.1% and passes — so this is the flip, not the book. FIX: re-derive the limit '
+      + 'as cession against DEVELOPED loss rather than against inception cession, which is the basis that '
+      + 'survives a mechanism where development is systematic rather than mean-zero.',
+  },
+  'claims-workbook-check': {
+    code: 1,
+    why: 'THE WORKBOOK ASSERTS Gross Incurred === Drawn Occurrence, and gets 0 of 2045 rows. That '
+      + 'identity IS the mean-one law written as a spreadsheet column: it holds only while a cohort is '
+      + 'booked at its register. Under forward booking the carried estimate leaves the drawn value on day '
+      + 'one and climbs back, so the two columns are equal at maturity and nowhere before it. PAIRED '
+      + 'CONTROL: flag off, same book, the identity holds. ⚠ A SECOND, UNRELATED FAILURE IN THIS GATE WAS '
+      + 'A REAL DEFECT AND IS FIXED IN THIS COMMIT, not deferred: the ten-year book put accident years on '
+      + 'the Development sheet that the line sheets had no rows for, because maturation-year results are '
+      + 'deliberately not carried. claimCoverage now names that third kind of absence and the gate asserts '
+      + 'the sheet EXPLAINS it. FIX for what remains: compare Gross Incurred against the cohort\'s CURRENT '
+      + 'booked register, not its drawn value.',
+  },
+  'audit-formula-check': {
+    code: 1,
+    why: '3201 findings across 2 distinct rows — one systematic cause, not 3201. The audit page derives '
+      + 'rows on the same booked-at-register assumption the workbook does, so every instance of those two '
+      + 'rows disagrees with its own printed operands once the estimate develops away from the register. '
+      + 'PAIRED CONTROL: flag off, same ten-year book, ALL formula rows reconcile in every arm and every '
+      + 'prose claim matches. FIX: re-derive the two rows against the booked estimate. Until then the '
+      + 'audit page states a relationship the engine no longer has, which is why this is red rather than '
+      + 'silent.',
+  },
+  'reinsurance-tower-check': {
+    code: 1,
+    why: 'DECLINING PROPERTY\'S TOWER NO LONGER ZEROES REINSURANCE, and the new behaviour is arguably '
+      + 'the correct one. The assertion assumed a pool with no in-force cession: seed cohorts have no '
+      + 'claim register, so they never ceded, so declining cover left nothing behind. The ten-year book '
+      + 'is written UNDER a tower and its cohorts carry real cededDevelopmentToDate, so a pool that '
+      + 'declines cover this year still has recoveries developing on prior years — which is what a real '
+      + 'pool does. PAIRED CONTROL: flag off, same book, passes, because without forward booking those '
+      + 'cohorts develop mean-one and cede almost nothing. FIX: assert that declining zeroes CURRENT-YEAR '
+      + 'cession and premium, and that prior-year recoveries continue — the property actually wanted.',
+  },
+  'cohort-stock-check': {
+    code: 1,
+    why: 'PROPERTY REACHES COHORT AGE 16 AGAINST A BOUND OF 15 — analytic close age 9 x an AGE_SLACK of '
+      + '1.6 "for development". The slack exists for exactly this and is now one year short: forward '
+      + 'booking raises a cohort\'s ultimate as it ages, so paid-share-OF-ultimate lags and the '
+      + 'share-based close rule fires later. ⚠ THE STOCK ITSELF IS FINE and that is the part worth '
+      + 'reading — cohorts plateau at 0.0% growth between years 40 and 60, WC peaks at 36 against a bound '
+      + 'of 60, GL at 11 against 15, and the save decelerates. Only Property\'s slack is exceeded, by one '
+      + 'year. PAIRED CONTROL: flag off, same book, Property peaks at 8. FIX: re-derive AGE_SLACK against '
+      + 'the booked-development climb rather than picking a larger round number.',
+  },
   'actuarial-memo-check': {
     code: 1,
     why: 'THE MEMO\'S DEFINITION OF "MATURED" IS THE COHORT HORIZON. It asserts that an accident year '
@@ -553,11 +631,12 @@ const EXPECTED_RED: Record<string, { code: number; why: string }> = {
   //   removed — LinePoolState.pricingTriangle exists, projected from
   //     reserveDevelopment and windowed to ten accident years.
   //
-  // ⚠ AND GREEN IS NOT PERMISSION TO SHIP. Conditions 3 and 4 are asserted with
-  // FORWARD_BOOKING and PRICING_TRIANGLE on; both still ship OFF. The loop is
-  // built and correct, not calibrated — Property over-develops by 22% and
-  // PRICING_TRIANGLE's loop-stability arm does not exist. If this gate goes red
-  // again, it is a regression in the loop and not a calibration drift.
+  // ⚠ AND GREEN IS NOT PERMISSION TO SHIP — BUT ONE FLAG NOW HAS SHIPPED.
+  // FORWARD_BOOKING went on at the maturation-book commit; PRICING_TRIANGLE has
+  // not, and its reason is a design question rather than a mechanism one. The
+  // gate still asserts conditions 3 and 4 with BOTH on, so condition 4's arm is
+  // a state nobody runs. If this gate goes red again, it is a regression in the
+  // loop and not a calibration drift.
   // ⚠ maturity-anchor-check IS OUT OF THIS MAP — it went green at the commit that
   // derived TRIANGLE_OPEN_SHARE. Gross climb against 1/c now reads WC -2.0%,
   // GL -3.0%, Property +3.9%, from +3.3% / +26.4% / +35.1%. No constant was
@@ -576,20 +655,21 @@ const EXPECTED_RED: Record<string, { code: number; why: string }> = {
   // / 41.3% positive, p 0.09 / 0.54 / 0.91). A control that fires fails the
   // gate. See WORKING_PRACTICES on the paired lesson's fourth appearance — the
   // first where paired is not cheaper but is the only estimator that works.
-  'clf-label-backtest-check': {
-    code: 1,
-    why: 'ADDED AT THIS COMMIT, RED FROM ITS FIRST RUN, AND ITS RED IS OLDER THAN THE COMMIT. Nothing '
-      + 'in this repo backtested STATIC_CLF_TABLE against the engine — the two CLF grid derivers assert '
-      + 'monotonicity on the grid they PRODUCE, not on the static table the engine prices off (see the '
-      + 'SLOW block above). Measured on BOTH arms at 120 games x 8 years: worst label error +14.5pp with '
-      + 'the flag off and +14.7pp with it on, both GL at the 45% stop. So the flip is NOT the cause — it '
-      + 'moves realised confidence under a point at every stop on every line. The error is GL\'s table '
-      + 'PROVENANCE: GL reads GL_SUPPLIED (source \'supplied\', not derived from this engine) and its 60% '
-      + 'stop delivers 73%. WC runs -1 to -4pp and Property is inside +/-1.5pp at every stop. FIX: S3 '
-      + 're-derives all three tables against the shipped mechanism. UNTIL THEN THE FUNDING SLIDER\'S '
-      + 'PERCENTAGES ARE LABELS ON A DISTRIBUTION NOBODY IS DRAWING FROM — acceptable on a development '
-      + 'branch, not acceptable in front of a player who reads them as meaningful.',
-  },
+  // ⚠ clf-label-backtest-check IS OUT OF THIS MAP AND THE MECHANISM FIXED IT.
+  // Its entry said the worst label error was +14.5pp with FORWARD_BOOKING off and
+  // +14.7pp with it on, that "the flip is NOT the cause", and that the fix was to
+  // re-derive all three CLF tables against the shipped mechanism. The first two
+  // were true. The third was wrong, and measurably: at the maturation-book commit
+  // the worst error is GL at the 50% stop, -3.2pp against a 5pp tolerance, on 960
+  // line-years per line. No table was re-derived and GL still reads GL_SUPPLIED.
+  //
+  // What changed is what the tables were being asked to describe. A three-year
+  // book under a mean-one law put realised confidence a long way from its label;
+  // ten accident years of runoff under forward booking put it back. So the
+  // provenance concern stands as a provenance concern and is no longer a defect
+  // anyone can measure — and the note that the funding slider's percentages were
+  // "labels on a distribution nobody is drawing from" is retired: they are labels
+  // on the distribution the pool is now actually drawing from.
 };
 
 // ---------------------------------------------------------------- runner

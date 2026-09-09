@@ -165,9 +165,13 @@ function runArm(flagged: boolean): Record<string, Arm> {
   return acc;
 }
 
-const shipped = runArm(false);
-const flagged = runArm(true);
-if (FORWARD_BOOKING.enabled !== false) {
+// ⚠ NAMED BY THE FLAG, NOT BY WHICH ARM SHIPS. They were `shipped` and
+// `flagged`, and at the flip both names started saying the opposite of what
+// they held — the same inversion pregame-acceptance-check's bounds note records
+// and the reason a gate should never encode which arm is current.
+const flagOff = runArm(false);
+const flagOn = runArm(true);
+if (FORWARD_BOOKING.enabled !== true) {
   console.log('⚠ FORWARD_BOOKING WAS NOT RESTORED — this gate mutates it and must put it back');
   process.exitCode = 1;
 }
@@ -178,11 +182,11 @@ console.log('MATURITY ANCHOR — DOES THE COHORT DEVELOP BACK TO ITS REGISTER?')
 console.log(RULE);
 console.log(`${GAMES} games x ${YEARS} years per arm, identical seeds. Value-weighted throughout.\n`);
 
-console.log('--- THE ASSERTION: gross climb against 1/c, flagged arm ---');
+console.log('--- THE ASSERTION: gross climb against 1/c, SHIPPED arm (flag ON) ---');
 console.log('  line       1/c value-wtd   (1/c count-wtd)   GROSS climb      gap    verdict');
 for (const line of LINES) {
   const t = targetClimb(line);
-  const a = flagged[line];
+  const a = flagOn[line];
   if (a.n === 0 || !(a.gOpen > 0)) {
     failures.push(`${line}: no matured cohorts with room for horizon ${IBNER_HORIZON[line].max} — raise YEARS`);
     continue;
@@ -199,18 +203,18 @@ for (const line of LINES) {
   }
 }
 
-console.log('\n--- THE NULL: the shipped arm must not develop ---');
+console.log('\n--- THE NULL: the RETIRED arm (flag OFF) must not develop ---');
 console.log('  line       GROSS climb   verdict');
 for (const line of LINES) {
-  const a = shipped[line];
+  const a = flagOff[line];
   if (!(a.gOpen > 0)) continue;
   const climb = a.gTerm / a.gOpen;
   const ok = Math.abs(climb - 1) <= MAX_SHIPPED_DRIFT;
   console.log(`  ${line.padEnd(9)} ${climb.toFixed(4).padStart(11)}   ${ok ? 'PASS' : 'FAIL'}`);
   if (!ok) {
-    failures.push(`${line}: the SHIPPED arm developed to ${climb.toFixed(4)}. Its revision law is mean-one `
-      + 'and a matured cohort must end where it started. A forward-booking change has leaked onto the '
-      + 'shipped path — never excused.');
+    failures.push(`${line}: the RETIRED arm developed to ${climb.toFixed(4)}. Its revision law is mean-one `
+      + 'and a matured cohort must end where it started. Forward booking has leaked into the code that '
+      + 'runs when the flag is OFF, so the flag no longer isolates the mechanism — never excused.');
   }
 }
 
@@ -218,7 +222,7 @@ for (const line of LINES) {
 console.log('\n--- READING, NOT ASSERTED: the net side and the tower ---');
 console.log('  line       NET climb    net gap   ceded/open   absorption');
 for (const line of LINES) {
-  const t = targetClimb(line), a = flagged[line];
+  const t = targetClimb(line), a = flagOn[line];
   if (!(a.nOpen > 0)) continue;
   const nClimb = a.nTerm / a.nOpen;
   const nGap = nClimb / t.value - 1;

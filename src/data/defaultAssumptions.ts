@@ -1263,50 +1263,79 @@ export const SIZE_WEIGHTS = [0.55, 0.30, 0.12, 0.03];
 // this. See the closed form recorded under the band below.
 // ============================================================================
 // ============================================================================
-// ⚠ K CANNOT CARRY THE FORWARD-BOOKING ARM. MEASURED, WITH A CONTROL, AND THIS
-// CONSTANT IS UNCHANGED BECAUSE OF IT.
+// ⚠ K COULD NOT CARRY THE FORWARD-BOOKING ARM, AND THE FIX WAS NOT K. RESOLVED
+// AT THE MATURATION-BOOK COMMIT; THE HISTORY IS KEPT BECAUSE IT IS THE ARGUMENT.
 //
-// Commit 4 was to re-centre the pre-game on the flagged arm by moving the PIN,
-// not the band (2a051bb's ruling). Solved on the unfiltered candidate — attempt
-// 0, band disabled, per 995f6f9 — at 250 seeds per K, five K per line:
+// WHAT THE PROBLEM WAS. Solved on the unfiltered candidate — attempt 0, band
+// disabled, per 995f6f9 — at 250 seeds per K, five K per line, against a THREE
+// YEAR pre-game:
 //
-//   arm          line       fit: median ~ a + b K        R^2      K to centre
-//   SHIPPED      WC         0.0698 + 2.2052 K           1.0000       0.4332
-//   SHIPPED      GL         0.7273 + 2.6281 K           0.8965       0.2978
-//   SHIPPED      Property   0.2207 + 2.9324 K           0.9996       0.4073
-//   FLAGGED      WC         1.2273 + 2.1922 K           0.9996      -0.0923
-//   FLAGGED      GL         1.6427 + 2.7678 K           0.8965      -0.0479
-//   FLAGGED      Property   0.0744 + 2.8551 K           0.9995       0.4695
+//   arm                     line       fit: median ~ a + b K     R^2    K to centre
+//   3-year, FB off          WC         0.1618 + 2.1269 K        0.9996     0.4058
+//   3-year, FB off          GL         0.6927 + 3.3927 K        0.9752     0.2409
+//   3-year, FB off          Property   0.3384 + 2.7791 K        0.9763     0.3874
+//   3-year, FB ON           WC         1.3037 + 2.1662 K        0.9999    -0.1287
+//   3-year, FB ON           GL         1.6283 + 3.5978 K        0.9707    -0.0329
+//   3-year, FB ON           Property   0.3946 + 2.8268 K        0.9756     0.3610
 //
-// The shipped column reproduces the shipped values inside their own noise, so
-// the method is sound and there is no pre-existing drift to confound this.
+// The FB-off column reproduced the then-shipped 0.41 / 0.27 / 0.41 inside its
+// own noise, so the method was sound and there was no drift confounding it. The
+// slope was intact — K's leverage per unit barely moved — and THE INTERCEPT had
+// gone. WC and GL solved NEGATIVE, and worse than negative-therefore-clamp: at
+// K = 0 exactly, with no starting capital at all, WC's unfiltered median was
+// 1.303 against a band ceiling of 1.22 and GL's was 1.844 against 1.80. Neither
+// line could be brought INSIDE its band at any admissible K.
 //
-// ⚠ THE SLOPE IS INTACT; THE INTERCEPT MOVED. b changes by -0.6% / +5.3% /
-// -2.6%, so K's leverage per unit is unaffected. a moves +1.158 on WC and
-// +0.915 on GL. WC AND GL SOLVE NEGATIVE, and K is a capital-to-premium ratio.
-// Worse than negative-therefore-clamp: at K = 0 exactly, WC's unfiltered median
-// is 1.227, which is ABOVE THE TOP OF ITS BAND (1.22). WC cannot be brought
-// INSIDE its band at any admissible K, let alone centred on it.
+// ⚠ AND THE EARLIER READING OF THE SAME MEASUREMENT WAS SOLVED ON BOTH FLAGS ON,
+// WHICH IS A STATE NOBODY RUNS. Re-measured on FB alone the wall is HIGHER, not
+// lower — 1.303 against the both-flags 0.871, which today solves at K = 0.0610.
+// PRICING_TRIANGLE was holding part of it up by re-pricing, so premium rose with
+// the booking release and the ratio's denominator absorbed it. That is why the
+// old note's conclusion has to be read as being about the flagged arm only.
 //
-// ⚠ AND THE DIAGNOSIS IS ONE STEP LATER THAN THE PLUG. The brief attributed it
-// to invested assets plugging against a pinned surplus. instanceGenerator does
-// the opposite — `invested = surplus + netReserve - cash` with
-// `ls.surplus = targetSurplus`, so assets DO fall with the reserve and the pin
-// lands the opening exactly on both arms. What moved is the THREE PRE-GAME
-// YEARS run on top of it: booking at 43% / 29% / 81% of register understates
-// incurred, so three years of income are overstated. That is the whole +1.158.
+// WHY IT WAS NEVER K'S JOB. Booking a cohort at its contracted initial estimate
+// understates incurred while the book is YOUNG. A pool in runoff equilibrium
+// does not have that problem — the development of its older years offsets the
+// under-booking of its newest — and a three-year book is nowhere near
+// equilibrium, so three years of income were overstated and the opening ran away
+// with them. That is a property of the BOOK'S AGE PROFILE, and K is a scalar on
+// the starting capital: it moves the slope term and cannot touch the intercept
+// the age profile sets.
 //
-// ⚠ DO NOT RE-SOLVE THIS AGAINST THE FLAGGED ARM YET, EVEN ON PROPERTY, AND THE
-// REASON IS NOT THE BAND RULING. See FORWARD_BOOKING: the realised climb does
-// not match the contraction per line, so any K solved now is solved against a
-// target that is itself wrong and will move when that is fixed. Property's
-// 0.4695 is arithmetically fine and still must not ship for that reason — and
-// K is not flag-gated, so changing it would move the shipped path.
+// THE FIX IS THE BOOK. See MATURATION_YEARS in priorHistoryEngine: the pre-game
+// now plays seven maturation years before its three declared ones, so ten
+// accident years exist at game start, and re-pins surplus at the boundary so
+// what carries forward is the book rather than the profit that built it.
+// Re-solved against the shipped configuration afterwards — FB on, PT off, the
+// same method, 250 seeds per K and a Newton step on 800 INDEPENDENT seeds:
+//
+//   line       fit: median ~ a + b K     R^2      K*      Newton     lands   off by
+//   WC         0.3568 + 2.4219 K        0.9997   0.2759   0.2906     1.030   +0.005
+//   GL         0.0130 + 2.9722 K        0.9997   0.5037   0.5007     1.564   +0.054
+//   Property  -0.0650 + 2.1983 K        0.9998   0.6732   0.6231     1.385   -0.030
+//
+// The intercept fell 1.3037 -> 0.3568 on WC and 1.6283 -> 0.0130 on GL. All
+// three solve, all three are admissible, and every line centres.
+//
+// ⚠ GL's NEWTON STEP IS THE NOISIEST OF THE THREE AND IS RECORDED HONESTLY. At
+// K* = 0.5037 the median read 1.519 against a target of 1.510 — already there —
+// and the step to 0.5007 read 1.564 on a third independent base. Lowering K
+// cannot raise the median, so the two readings differ by sampling noise (~1.7
+// bootstrap SE at 800 seeds, against the recorded 0.031) and not by mechanism.
+// The fitted value is kept rather than either reading, per the basin note above.
+// opening-centring-check asserts the property at 400 seeds against a tolerance
+// of 0.25 band widths, which on GL is 0.145 — the real test, and it is the gate.
+//
+// ⚠ GL AND PROPERTY ROSE AND WC FELL, WHICH IS THE SHAPE TO EXPECT. The mature
+// book pushes every line's opening DOWN, so two lines now need MORE starting
+// capital to reach their midpoints, not less. Reading a higher K here as "the
+// pool got richer" is backwards: it is the pin compensating for a book that now
+// carries ten accident years of runoff.
 // ============================================================================
 export const STARTING_CAPITAL_TO_PREMIUM: Record<string, number> = {
-  WC: 0.41,
-  GL: 0.27,
-  Property: 0.41,
+  WC: 0.2906,
+  GL: 0.5007,
+  Property: 0.6231,
 };
 
 // Pre-game acceptance band: the line's Year-1 opening surplus must land within
@@ -3426,10 +3455,38 @@ export const PER_CLAIM_REVISION = { enabled: true, settlement: true };
 //   Property  off   1.50   1.91   2.53   3.09
 //   Property  ON    1.31   0.48  -0.66  -1.72     ⚠ MEDIAN GAME INSOLVENT BY YEAR 7
 //
-// ⚠ SO THE OPENING IS NOT A LEVEL TO CALIBRATE TO. It is the first year of a
-// divergence, and its sign differs by line. No pin and no band rescues a line
-// whose median game is insolvent by year 7; re-centring the pre-game on top of
-// this would be calibrating against a mechanism error.
+// ⚠ THAT TABLE'S CONCLUSION WAS WRONG AND THE TABLE IS KEPT SO THE CORRECTION
+// HAS SOMETHING TO POINT AT. It read: "SO THE OPENING IS NOT A LEVEL TO
+// CALIBRATE TO. It is the first year of a divergence, and its sign differs by
+// line. No pin and no band rescues a line whose median game is insolvent by
+// year 7; re-centring the pre-game on top of this would be calibrating against a
+// mechanism error."
+//
+// The divergence was real; its attribution was not. It was not an error in the
+// booking law — it was a THREE-YEAR BOOK asked to behave like a mature one.
+// Forward booking understates incurred only while a book is YOUNG; a pool in
+// runoff equilibrium books incurred equal to ultimate written, because the
+// development of its older years offsets the under-booking of its newest. So the
+// fix was neither the pin nor the band: it was giving the pool ten accident years
+// of runoff (MATURATION_YEARS, in priorHistoryEngine), and the pin was then
+// re-solved on top of it — the thing the old paragraph says cannot be done.
+//
+// RE-MEASURED ON THE SHIPPED CONFIGURATION — flag ON, PRICING_TRIANGLE off, ten
+// accident years, band IN FORCE, at the re-solved pin, 25 games x 12 years:
+//
+//   line       y1     y4     y8    y12    p10 at y12   games EVER insolvent
+//   WC        1.14   1.40   1.81   2.20      1.19             0%
+//   GL        1.71   2.02   2.56   2.89      1.80             4%
+//   Property  1.34   1.53   1.25   1.40      0.02            20%
+//
+// Property's median goes nowhere near insolvent — it sits between 1.24 and 1.95
+// for twelve years. What IS true is that PROPERTY IS THE WEAK LINE AND ITS TAIL
+// IS THIN: one game in five touches insolvency somewhere in twelve years, and its
+// p10 decays to 0.02x premium while the other two lines' p10 climbs. That is a
+// live downside rather than a defect — the same order as the 22% the shipped arm
+// carried once investment income was switched off, and removing it is precisely
+// what PRICING_TRIANGLE was held back for. Worth watching in playtest; not a
+// reason to hold the flag.
 //
 // ⚠ COMMIT 1a WAS ATTEMPTED AND REVERTED, AND ITS READINGS ARE RETRACTED TOO.
 // Both halves were built and measured on the 3-cohort instrument. Re-measured
@@ -3481,7 +3538,7 @@ export const PER_CLAIM_REVISION = { enabled: true, settlement: true };
 // is consistent with its 22%. Confirm before fixing — do not tune the drift
 // constants to close the gap, which would fit the symptom.
 // ============================================================================
-export const FORWARD_BOOKING = { enabled: false };
+export const FORWARD_BOOKING = { enabled: true };
 
 // ============================================================================
 // THE DRIFT RATE SOLVED AGAINST THE HORIZON, not against closure age.

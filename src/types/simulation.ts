@@ -551,6 +551,18 @@ export interface ReserveCohort {
   // payoutPattern.ts — so `age` and the line are the whole state it needs.
   closed: boolean;
 
+  // True on a cohort apportioned by generateStartingReserveCohorts rather than
+  // written by a simulated year. Absent (falsy) on every engine-born cohort.
+  //
+  // ⚠ THIS FIELD DID NOT EXIST AND SOMETHING WAS ALREADY FILTERING ON IT.
+  // maturity-anchor-check declares `seeded?: boolean` on its own local cohort
+  // type and skips rows where it is set — a filter that has never once fired,
+  // because the flag lived only on ReserveDevelopmentRow. The gate was silently
+  // measuring apportioned seeds alongside real cohorts, which is exactly the
+  // contamination the filter was written to prevent. Adding the field makes the
+  // filter do what it says; it does not add a new rule.
+  seeded?: boolean;
+
   // --- IBNER (see defaultAssumptions.ts's IBNER_* block) -------------------
   // ⚠ `developmentFactor` IS GONE. It was written at two sites and READ AT
   // NONE — processReserveDevelopment drew its own factor fresh and ignored the

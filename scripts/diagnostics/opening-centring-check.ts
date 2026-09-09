@@ -89,12 +89,10 @@
 // silence it exists to break.
 // ============================================================================
 
-import { generateGameInstance, generateStartingPoolState } from '../../src/utils/instanceGenerator';
-import { processYear } from '../../src/utils/simulationEngine';
-import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
-import { PRE_GAME_YEARS } from '../../src/utils/priorHistoryEngine';
+import { generateGameInstance } from '../../src/utils/instanceGenerator';
+import { PRE_GAME_DEPTH, simulateLineCandidate } from '../../src/utils/priorHistoryEngine';
 import { OPENING_SURPLUS_TO_PREMIUM_BAND, STARTING_CAPITAL_TO_PREMIUM } from '../../src/data/defaultAssumptions';
-import type { CoverageLine, GameInstance, GameState, GameSetupSettings, LineResultSet } from '../../src/types/simulation';
+import type { CoverageLine, GameInstance, GameSetupSettings } from '../../src/types/simulation';
 
 const LINES: CoverageLine[] = ['WC', 'GL', 'Property'];
 const SEEDS = Number(process.env.SEEDS ?? 400);
@@ -104,25 +102,22 @@ const TOL_BAND_WIDTHS = 0.25;
 const failed: string[] = [];
 const RULE = '='.repeat(72);
 
-// ⚠ ATTEMPT 0 OF THE REAL SEARCH, REPRODUCED — the same bootstrap, the same
-// cohort relabelling, the same solo setup, the same year loop. It is not the
-// real runLinePreGame because that function's whole job is to REJECT, and this
-// needs the candidate before rejection. Kept adjacent to it deliberately: if
-// priorHistoryEngine's candidate construction changes, this must change with it.
+// ⚠ ATTEMPT 0 OF THE REAL SEARCH — THE REAL FUNCTION, NOT A COPY OF IT.
+//
+// This used to reimplement priorHistoryEngine's candidate construction, with a
+// note saying the two must be changed together. They were changed together
+// exactly once, at the maturation-book commit, and the copy is gone instead:
+// simulateLineCandidate is now exported and called directly at attempt 0, which
+// is the candidate BEFORE rejection — the thing runLinePreGame cannot hand back
+// because rejecting is its whole job.
+//
+// The duplicate was a real hazard rather than a tidiness point. A gate that
+// reproduces the construction it measures goes on passing after that
+// construction changes, and reports centring for a pre-game the game no longer
+// runs. That is the same class of silence this file exists to break.
 function unfilteredMultiple(instance: GameInstance, setup: GameSetupSettings, line: CoverageLine): number {
-  const D = PRE_GAME_YEARS;
-  const solo: GameSetupSettings = { ...setup, activeLines: [line] };
-  const { poolState: boot } = generateStartingPoolState(instance, setup.startingYear - D, [line], -(D - 1));
-  boot.lines[line].reserveCohorts = boot.lines[line].reserveCohorts.map(c => ({ ...c, yearNumber: c.yearNumber - D }));
-  let gs: GameState = {
-    setup: solo, instance, currentYearNumber: -(D - 1), isStarted: true, isComplete: false,
-    poolState: boot, lockedResults: [], currentDecisions: defaultDecisionSet(-(D - 1)), priorHistory: [],
-  };
-  for (let y = -(D - 1); y <= 0; y++) {
-    const p = processYear(gs, defaultDecisionSet(y));
-    gs = { ...gs, currentYearNumber: y + 1, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result] };
-  }
-  const last = gs.lockedResults[gs.lockedResults.length - 1].byLine[line] as LineResultSet;
+  const c = simulateLineCandidate(instance, setup, line, 0);
+  const last = c.lineResults[c.lineResults.length - 1];
   return last.endingSurplus / Math.max(last.poolPremium, 1);
 }
 
@@ -132,7 +127,7 @@ const q = (a: number[], p: number) => {
 };
 
 console.log('=== OPENING CENTRING: the unfiltered candidate median against the band midpoint ===');
-console.log(`${SEEDS} seeds per line, pre-game depth ${PRE_GAME_YEARS}, band disabled (attempt 0 only).`);
+console.log(`${SEEDS} seeds per line, pre-game depth ${PRE_GAME_DEPTH}, band disabled (attempt 0 only).`);
 console.log(`tolerance ${TOL_BAND_WIDTHS} x each band's own width\n`);
 console.log('  line       K       band            midpoint   unfiltered median   offset    tol     share of         candidates');
 console.log('                                                                              band width  offset/SE   above / below');

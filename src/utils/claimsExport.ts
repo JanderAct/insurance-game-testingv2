@@ -456,6 +456,19 @@ interface ClaimCoverage {
   missing: { yearNumber: number; reason: string }[];
   /** True when this line produced no claim detail in any year (aggregate path). */
   neverProduced: boolean;
+  /** ⚠ A THIRD ABSENCE, AND IT IS NEITHER OF THE TWO ABOVE.
+   *
+   *  MATURATION years: simulated through processYear to build the pool's opening
+   *  book, so they have real registers and real development — and deliberately
+   *  NOT part of the declared past, so their results are never carried into
+   *  priorHistory and there is nothing to regenerate a register from.
+   *
+   *  They are not SEED cohorts (those never had a register) and not a SESSION
+   *  loss (nothing was lost — it was never kept). Without this third category the
+   *  Development sheet listed accident years the line sheets had no rows for and
+   *  the workbook said nothing about why, which is the exact silence the other
+   *  two categories exist to break. */
+  unretained: number[];
 }
 
 // ⚠ "MISSING" NARROWED FROM "NOT IN THE SAVE" TO "CANNOT BE REDRAWN". Before
@@ -469,6 +482,7 @@ function claimCoverage(
   priorHistory: ResultSet[],
   instance: GameInstance,
   line: CoverageLine,
+  poolState?: PoolState,
 ): ClaimCoverage {
   const present: number[] = [];
   const missing: { yearNumber: number; reason: string }[] = [];
@@ -478,7 +492,17 @@ function claimCoverage(
     if (reg instanceof ClaimRegenerationError) missing.push({ yearNumber: r.yearNumber, reason: reg.message });
     else present.push(r.yearNumber);
   }
-  return { present, missing, neverProduced: present.length === 0 && missing.length === 0 };
+  // The maturation years: carried as cohorts WITH a register (so they reach the
+  // Development sheet) but with no result behind them (so no line-sheet rows).
+  // A seed cohort has no developingClaims at all and is excluded by that test,
+  // which is what keeps the two absences apart.
+  const known = new Set([...present, ...missing.map(m => m.yearNumber)]);
+  const unretained = [...new Set(
+    (poolState?.lines?.[line]?.reserveCohorts ?? [])
+      .filter(c => !c.seeded && !known.has(c.yearNumber))
+      .map(c => c.yearNumber),
+  )].sort((a, b) => a - b);
+  return { present, missing, neverProduced: present.length === 0 && missing.length === 0, unretained };
 }
 
 /** The sheet note describing that coverage. Empty when there is nothing to say. */
@@ -489,11 +513,22 @@ function coverageNote(cov: ClaimCoverage): string {
     + 'reserve total at generation, with no claim register behind them — so they can never appear on '
     + 'this sheet. They are the Actuarial exhibit\'s collapsed Prior row, and their absence is '
     + 'permanent rather than a gap.';
+  // ⚠ SAID PLAINLY BECAUSE THE DEVELOPMENT SHEET WILL SHOW THESE YEARS. They have
+  // registers, so their occurrences develop and appear there; they have no
+  // result, so they have no rows here. A reader who totals one sheet against the
+  // other must be told that before they do it, not after.
+  const maturationNote = cov.unretained.length === 0 ? '' :
+    ` Accident years ${Math.min(...cov.unretained)} to ${Math.max(...cov.unretained)} were SIMULATED to `
+    + 'build the pool\'s opening book and are not part of its declared past. They have real claim '
+    + 'registers — their development is on the Development sheet — but their per-year results are not '
+    + 'carried, so there is nothing to rebuild their claim rows from and they cannot appear on this '
+    + 'sheet. That is a deliberate boundary, not a lost save: see MATURATION_YEARS in '
+    + 'priorHistoryEngine.';
   if (cov.missing.length === 0) {
     const from = Math.min(...cov.present), to = Math.max(...cov.present);
     return `Claim detail covers accident years ${from} to ${to}, pre-game years included. Years not kept in `
       + 'the save are redrawn exactly from the roster and rates recorded for them, so a reloaded game shows '
-      + `the same rows as one played straight through. ${seedNote}`;
+      + `the same rows as one played straight through. ${seedNote}${maturationNote}`;
   }
   const years = cov.missing.map(m => m.yearNumber);
   const reasons = [...new Set(cov.missing.map(m => m.reason))];
@@ -503,7 +538,7 @@ function coverageNote(cov: ClaimCoverage): string {
     + 'absent and could not be regenerated from what the save recorded. Reason: '
     + reasons.join(' / ')
     + '. This is a property of the save, not of those years — the losses happened and are in every '
-    + `aggregate figure; only the per-claim rows are unavailable. ${seedNote}`
+    + `aggregate figure; only the per-claim rows are unavailable. ${seedNote}${maturationNote}`
   );
 }
 
@@ -974,7 +1009,7 @@ export function buildClaimsWorkbook(
     const rows = collectLineClaims(lockedResults, priorHistory, instance, line);
     const dev = devByLine.get(line) ?? new Map<string, OccDevelopment>();
     const view = buildPaidLedgerView(rows, lockedResults, priorHistory, poolState, line, instanceId);
-    const coverage = coverageNote(claimCoverage(lockedResults, priorHistory, instance, line));
+    const coverage = coverageNote(claimCoverage(lockedResults, priorHistory, instance, line, poolState));
     const ws = XLSX.utils.aoa_to_sheet(builder.rows(rows, dev, years, view, coverage));
     applyFormats(ws, builder.formats(years), builder.noteRows + 1);
     XLSX.utils.book_append_sheet(wb, ws, line);
@@ -989,7 +1024,7 @@ export function buildClaimsWorkbook(
     // rows for some reason internal to the register. The marker is taken across
     // every active line, since this sheet is not per-line.
     const devCoverage = orderedLines
-      .map(l => claimCoverage(lockedResults, priorHistory, instance, l))
+      .map(l => claimCoverage(lockedResults, priorHistory, instance, l, poolState))
       .filter(c => c.missing.length > 0);
     const devYears = devCoverage.flatMap(c => c.missing.map(m => m.yearNumber));
     const devNote = devCoverage.length === 0 ? '' : (

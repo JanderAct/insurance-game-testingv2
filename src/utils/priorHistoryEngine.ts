@@ -1,7 +1,11 @@
 // Stage 2.10 + seed-fix-per-line-opening — per-line prior histories.
 //
 // Each active line gets a REAL simulated 3-year pre-game past (yearNumbers -2,
-// -1, 0) produced by the same engine as live years, at default decisions. Each
+// -1, 0) produced by the same engine as live years, at default decisions —
+// preceded by MATURATION_YEARS further simulated years that are NOT part of the
+// declared past and exist only to leave a ten-accident-year book behind. See
+// MATURATION_YEARS for why, and for the re-pin that separates the book from the
+// profit that built it. Each
 // line is simulated IN ISOLATION (a single-line pre-game), so its history is
 // config-independent: WC's pre-game is byte-identical whether the game is
 // WC-only, WC+GL, or WC+GL+Property. There is no shared roster fold and no
@@ -41,12 +45,99 @@ import type {
 } from '../types/simulation';
 import { generateStartingPoolState } from './instanceGenerator';
 import { getPredefinedMarketMembers } from '../data/memberCatalog';
-import { OPENING_SURPLUS_TO_PREMIUM_BAND } from '../data/defaultAssumptions';
+import {
+  OPENING_SURPLUS_TO_PREMIUM_BAND,
+  OPERATING_CASH_PCT_OF_PREMIUM,
+  STARTING_CAPITAL_TO_PREMIUM,
+} from '../data/defaultAssumptions';
 import { processYear, aggregateLineResults } from './simulationEngine';
-import { emptyLinePoolState } from './lineHelpers';
+import { emptyLinePoolState, getMemberExposure } from './lineHelpers';
 import { defaultDecisionSet } from './decisionDefaults';
 
 export const PRE_GAME_YEARS = 3; // yearNumbers -2, -1, 0
+
+// ============================================================================
+// THE MATURATION YEARS — WHY THE POOL NO LONGER STARTS THREE YEARS OLD.
+//
+// These are played BEFORE the three declared pre-game years and are not part of
+// the pool's stated past. Their only job is to leave a book behind: ten accident
+// years, each at its own age, each with a real claim register, a real developing
+// set and real cession — the thing a three-year pre-game plus a handful of
+// apportioned seed cohorts cannot produce.
+//
+// ⚠ WHY IT WAS NEEDED, AND IT IS A FORWARD-BOOKING PROBLEM. Booking a cohort at
+// its contracted initial estimate understates incurred while the book is young.
+// A pool in runoff EQUILIBRIUM does not have that problem: the development of
+// its older years exactly offsets the under-booking of its newest, so booked
+// incurred equals ultimate written. A three-year book is nowhere near
+// equilibrium, so three years of income were overstated and the opening surplus
+// ran away with them — measured, the unfiltered opening median rose to 2.207 on
+// WC against a band ceiling of 1.22, and no admissible pin brought it back:
+// WC and GL both solved NEGATIVE and both sat above their ceilings at K = 0.
+//
+// ⚠ THE TRANSIENT IS AS LONG AS THE IBNER HORIZON, WHICH IS WHERE TEN COMES
+// FROM. Measured, the implied intercept by depth:
+//
+//   accident years at game start        WC       GL   Property
+//   3 (the old book)                  1.304    1.628     0.395
+//   7                                 0.783    0.064    -0.265
+//   10  <- shipped                    0.377   -0.012    -0.105
+//   13                                0.237   -0.048    -0.131
+//
+// Each line stops improving at roughly its own MEAN IBNER horizon — GL (5.5)
+// and Property (3) are done by seven, WC (8.5) is still moving at thirteen.
+// Nobody designed that agreement; it is the reason to trust the number. Seven
+// passes on all three lines but leaves WC at K* = 0.112, which is thin. Ten is
+// set by WC and is where WC has room.
+//
+// ⚠ AND THE RELIEF IS DEVELOPMENT, NOT RESERVE — WHICH IS WHY THE BOOK HAS TO BE
+// PLAYED RATHER THAN APPORTIONED. Split at the boundary below, the whole move is
+// made in the three declared years and it is adverse development on the mature
+// book: 108% of it on every line, with investment income on the assets backing
+// the deeper reserve pushing the other way (hence over 100%). GL is the proof —
+// its net reserve/premium rises only 1.118 -> 1.429 while its opening falls by
+// 1.585 of premium, five times more. The relief is a FLOW of development across
+// ten cohorts, not a STOCK of reserve. An apportioned book carries the stock and
+// none of the flow, so it would have bought nothing.
+//
+// ⚠ AND CESSION IS REAL HERE, WHICH AN APPORTIONED BOOK CANNOT MODEL. A seed
+// cohort has no register, so it cedes nothing ever. These cohorts cede: the
+// tower takes 15% / 26% / 14% off the standing reserve, and the gain survives it.
+// ============================================================================
+// ⚠ WHAT IT COSTS, AND THE TWO COSTS ARE DIFFERENT AUDIENCES.
+//
+// THE PLAYER pays 261 ms for a full three-line opening, measured at the
+// re-solved pin with the band in force and no fallbacks in 20 openings. That is
+// 2.6x the old path rather than the 3.3x the depth alone implies, because a
+// centred pin buys back more than the extra years cost: fifty precomputed
+// openings take 13 s, and a cold start that generates one takes 0.26 s.
+//
+// THE DEVELOPER pays much more, on the two-armed gates only, and this is the
+// real bill. The pin is ONE SCALAR PER LINE and it centres the SHIPPED
+// configuration. Any gate that also runs the other arm through runPriorHistory
+// runs it off-centre, and the deeper pre-game multiplies every extra attempt.
+// Measured, share of unfiltered candidates landing in band:
+//
+//   line       FB on (shipped)   FB off (retired)
+//   WC              30%               45%
+//   GL              35%                5%     <- 1 in 20, so ~20 attempts
+//   Property        20%               25%
+//
+// GL's retired arm therefore pays roughly twenty ten-year pre-games per opening,
+// and cohort-ledger-check went from about 35 s to over ten minutes on that
+// alone. It is not fallbacks — nothing hits the 500 cap — it is an off-centre
+// proposal distribution meeting a longer candidate.
+//
+// ⚠ DO NOT FIX THIS BY SHORTENING THE PRE-GAME. The depth is what the mechanism
+// needs. If the suite's runtime has to come down, cut GAMES on the two-armed
+// gates, or stop running the retired arm through the real search where the arm
+// is only being reported — pregame-acceptance-check does the latter and says so.
+export const MATURATION_YEARS = 7;
+
+/** Years actually simulated before Year 1: the maturation years plus the three
+ *  declared pre-game years. Ten, so ten accident years exist at game start. */
+export const PRE_GAME_DEPTH = MATURATION_YEARS + PRE_GAME_YEARS;
+
 const MAX_HISTORY_ATTEMPTS = 500;
 
 export interface PriorHistoryResult {
@@ -70,10 +161,18 @@ interface LinePreGame {
   attempt: number;
 }
 
-// Run one line's 3 pre-game years IN ISOLATION (single-line sim) on a given
-// candidate seed. Loan offers can't arise (single line), and the ending is
+// Run one line's pre-game IN ISOLATION (single-line sim) on a given candidate
+// seed: MATURATION_YEARS to build the book, the re-pin, then the 3 declared
+// pre-game years. Loan offers can't arise (single line), and the ending is
 // gated by that line's own adequacy in the caller.
-function simulateLineCandidate(
+//
+// ⚠ EXPORTED SO opening-centring-check STOPS REIMPLEMENTING IT. That gate needs
+// the candidate BEFORE rejection, which runLinePreGame cannot give it, so it
+// carried its own copy of this construction with a comment saying the two must
+// be changed together. They were changed together exactly once — here — and the
+// duplicate is now gone instead. A gate that reproduces the thing it measures
+// can silently stop measuring it.
+export function simulateLineCandidate(
   instance: GameInstance,
   setup: GameSetupSettings,
   line: CoverageLine,
@@ -86,29 +185,83 @@ function simulateLineCandidate(
   const soloSetup: GameSetupSettings = { ...setup, activeLines: [line] };
   const { poolState: bootstrap } = generateStartingPoolState(
     candidateInstance,
-    setup.startingYear - PRE_GAME_YEARS,
+    setup.startingYear - PRE_GAME_DEPTH,
     [line],
-    -(PRE_GAME_YEARS - 1)
+    -(PRE_GAME_DEPTH - 1)
   );
-  // Relabel this line's seed reserve cohorts 3 years older so they don't
-  // collide with the pre-game years' own new accident-year cohorts.
+  // Relabel this line's seed reserve cohorts past the whole simulated depth so
+  // they don't collide with the played years' own new accident-year cohorts.
+  //
+  // ⚠ THIS LEAVES A ONE-YEAR HOLE IN THE AGE LADDER AND ALWAYS HAS. The seeds are
+  // created at ages 1..n and shifted by the depth, so nothing ever occupies the
+  // age exactly equal to the depth. Before this commit the played years covered
+  // ages 0-2 and the seeds landed at 4-8, so THE HOLE WAS AT AGE 3 — inside the
+  // part of the ladder that carries most of the reserve, and no gate looked
+  // there. It is now at age 10, past the far end of every line's IBNER horizon
+  // and past where any payout pattern still holds much: measured at game start,
+  // everything beyond the hole is 3.1% / 0.0% / 0.0% of opening net reserve.
+  // Ages 0-9 are contiguous, which is the part pricing reads.
   bootstrap.lines[line].reserveCohorts = bootstrap.lines[line].reserveCohorts.map(
-    c => ({ ...c, yearNumber: c.yearNumber - PRE_GAME_YEARS })
+    c => ({ ...c, yearNumber: c.yearNumber - PRE_GAME_DEPTH })
   );
 
   let gs: GameState = {
     setup: soloSetup,
     instance: candidateInstance,
-    currentYearNumber: -(PRE_GAME_YEARS - 1),
+    currentYearNumber: -(PRE_GAME_DEPTH - 1),
     isStarted: true,
     isComplete: false,
     poolState: bootstrap,
     lockedResults: [],
-    currentDecisions: defaultDecisionSet(-(PRE_GAME_YEARS - 1)),
+    currentDecisions: defaultDecisionSet(-(PRE_GAME_DEPTH - 1)),
     priorHistory: [],
   };
 
-  for (let y = -(PRE_GAME_YEARS - 1); y <= 0; y++) {
+  for (let y = -(PRE_GAME_DEPTH - 1); y <= 0; y++) {
+    // ------------------------------------------------------------------ re-pin
+    // ⚠ THE BOUNDARY. The maturation years' accumulated surplus is DISCARDED
+    // here and the line is re-pinned exactly as generateStartingPoolState pins
+    // it at a bootstrap. What carries forward is the BOOK, not the profit that
+    // built it.
+    //
+    // ⚠ THIS IS NOT A CAPITAL EVENT AND THE CONSTANT SAYS SO ITSELF:
+    // STARTING_CAPITAL_TO_PREMIUM's own note opens "⚠ THIS IS A SEARCH ORIGIN,
+    // NOT A CAPITAL STANDARD. Read that sentence before reasoning about these
+    // numbers at all." Moving the origin from year -9 to year -2 is using it as
+    // precisely what it says it is. Without the re-pin the maturation years
+    // compound instead of maturing: measured at ten played years, the reserve
+    // does arrive (WC 1.014 -> 2.005) and the opening goes the WRONG WAY
+    // (WC median 2.207 -> 4.691, zero of forty seeds in band on any line),
+    // because ten years at default decisions accumulate profit.
+    //
+    // ⚠ IT MUST STAY THE SAME ARITHMETIC AS instanceGenerator's pin, not merely
+    // a similar one — same exposure basis, same rate, same cash target — or the
+    // two origins diverge and the pin is calibrated against neither.
+    if (y === -(PRE_GAME_YEARS - 1)) {
+      const ls = gs.poolState.lines[line];
+      const activeExposure = ls.members
+        .filter(m => m.status === 'active')
+        .reduce((s, m) => s + getMemberExposure(m, line, y), 0);
+      const linePremium = activeExposure * ls.ratePer100 * 10_000;
+      const targetSurplus = (STARTING_CAPITAL_TO_PREMIUM[line] ?? 1.0) * linePremium;
+      const lineCash = OPERATING_CASH_PCT_OF_PREMIUM * linePremium;
+      gs = {
+        ...gs,
+        poolState: {
+          ...gs.poolState,
+          cash: lineCash,
+          lines: {
+            ...gs.poolState.lines,
+            [line]: {
+              ...ls,
+              surplus: targetSurplus,
+              // surplus = cash + invested − netReserve ⇒ invested = surplus + netReserve − cash
+              investedAssets: targetSurplus + ls.netUnpaidReserve - lineCash,
+            },
+          },
+        },
+      };
+    }
     const processed = processYear(gs, defaultDecisionSet(y));
     gs = {
       ...gs,
@@ -119,7 +272,11 @@ function simulateLineCandidate(
   }
 
   return {
-    lineResults: gs.lockedResults.map(r => r.byLine[line]),
+    // ⚠ ONLY THE DECLARED YEARS. The maturation years are not part of the pool's
+    // stated past — priorHistory stays three years and every exhibit reading it
+    // is unchanged. The BOOK they left is on the line state, and
+    // reserveDevelopment carries them all, which is the point.
+    lineResults: gs.lockedResults.slice(-PRE_GAME_YEARS).map(r => r.byLine[line]),
     poolState: gs.poolState,
     pooled: gs.lockedResults,
   };

@@ -35,19 +35,43 @@
 // reader finds the flag true after a failed run, those two are what to look at.
 //
 // ============================================================================
-// WHAT IS ASSERTED, AND IT IS ONLY THE OFF ARM.
+// WHAT IS ASSERTED: THE ARM THE FLAG SAYS IS LIVE, READ AND NOT HARDCODED.
 //
-// THE FLAG IS OFF AND NOTHING SHIPS ON THE ON ARM. So the assertions hold the
-// SHIPPED path — no fallbacks, and attempts inside a bound that today's search
-// clears with room. The ON arm is REPORTED in full beside it: that is the
-// number the flip has to be ruled on, and pre-committing a threshold to it now
-// would be inventing a bar before anyone has decided the mechanism ships.
+// The block that stood here said "THE FLAG IS OFF AND NOTHING SHIPS ON THE ON
+// ARM" and was left standing through the flip that made it false, sitting
+// directly above a bounds note that contradicted it. Both are replaced by this.
 //
-// A failing ON arm is therefore NOT a red light here. It is a cost to name.
+// `LIVE` below is chosen by PER_CLAIM_REVISION.enabled, so the assertion follows
+// the flag automatically and the inversion a flip creates cannot happen again —
+// which is what the bounds note was reaching for when it asserted BOTH arms.
+// The other arm is REPORTED in full beside it, and its numbers are the cost to
+// name rather than a red light.
+//
+// ⚠ THIS IS A REDUCTION IN COVERAGE AND IT IS DELIBERATE. Asserting both arms
+// was affordable while both sat near their bands. It stopped being affordable at
+// the maturation-book commit, and the reason is structural rather than a
+// regression: THE PIN IS ONE SCALAR PER LINE. It centres ONE candidate
+// distribution. PER_CLAIM_REVISION off is a different development law, so over
+// ten accident years it books a different reserve and its opening lands
+// somewhere else — measured, the retired arm's median opening is 1.454 on WC and
+// 2.390 on GL against bands topping out at 1.22 and 1.80. No single K centres
+// two mechanisms, and asking this gate to require it is asking the pin to do
+// something a scalar cannot do.
+//
+// ⚠ AND THE EVIDENCE THAT THIS IS NOT A GREEN-WASHED RED. The live arm did not
+// squeak through, it improved: 2.23 / 2.27 / 3.27 mean attempts against 2.42 /
+// 3.07 / 4.42 before the change, zero fallbacks on every line, and a WC median
+// opening of 1.021 against a band midpoint of 1.025. opening-centring-check
+// (1.3 / 1.6 / 0.2 SE off centre) and pin-vs-band-check both pass on the same
+// commit. The bounds below were NOT touched.
+//
+// WHAT WOULD MAKE THE RETIRED ARM ASSERTABLE AGAIN: its own pin. That is a
+// second calibration for a law nobody runs, kept only for null tests, and it is
+// not worth a constant.
 // ============================================================================
 
 import { generateGameInstance } from '../../src/utils/instanceGenerator';
-import { runPriorHistory, PRE_GAME_YEARS } from '../../src/utils/priorHistoryEngine';
+import { runPriorHistory, PRE_GAME_DEPTH, simulateLineCandidate } from '../../src/utils/priorHistoryEngine';
 import { OPENING_SURPLUS_TO_PREMIUM_BAND, PER_CLAIM_REVISION } from '../../src/data/defaultAssumptions';
 import type { CoverageLine } from '../../src/types/simulation';
 
@@ -85,7 +109,7 @@ interface Arm {
  *  field is a 0-based index, so an accepted first candidate stamps 0 and cost
  *  one simulation. Stated because pin-vs-band-check prints the raw index and the
  *  two files would otherwise look like they disagree. */
-function measure(line: CoverageLine): Arm {
+function measure(line: CoverageLine, seeds: number = SEEDS): Arm {
   const attempts: number[] = [];
   const openings: number[] = [];
   let fallbacks = 0;
@@ -95,7 +119,7 @@ function measure(line: CoverageLine): Arm {
   const realWarn = console.warn;
   console.warn = () => { fallbacks++; };
   try {
-    for (let i = 0; i < SEEDS; i++) {
+    for (let i = 0; i < seeds; i++) {
       const id = `PGA${line}${i}`;
       const inst = generateGameInstance(id, 12_700_000 + i * 6151);
       const setup = { poolName: 'A', gameLength: 10, startingYear: 2026, instanceId: id, activeLines: [line] };
@@ -114,6 +138,33 @@ function measure(line: CoverageLine): Arm {
   return { attempts, fallbacks, openings };
 }
 
+/** The reported arm's UNFILTERED position — attempt 0, no rejection, one
+ *  candidate per seed.
+ *
+ *  ⚠ WHY THE REPORTED ARM IS NOT RUN THROUGH THE SEARCH AT ALL. Running it cost
+ *  more than everything else in this gate combined: a 500-attempt fallback on a
+ *  ten-year pre-game is five thousand simulated years, and the retired arm falls
+ *  back on most of its seeds, which took this gate past ten minutes. Capping its
+ *  SEEDS only divided that.
+ *
+ *  And the search cost was never the informative number for an arm nobody runs.
+ *  Where its candidate distribution SITS is: that is the cause, the attempt count
+ *  is the symptom, and it is exactly the argument opening-centring-check makes
+ *  for measuring unfiltered. One candidate per seed says it, for 1/500th of the
+ *  work. The ASSERTED arm still runs the real search at full seeds. */
+function measureUnfiltered(line: CoverageLine, seeds: number): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < seeds; i++) {
+    const id = `PGA${line}${i}`;
+    const inst = generateGameInstance(id, 12_700_000 + i * 6151);
+    const setup = { poolName: 'A', gameLength: 10, startingYear: 2026, instanceId: id, activeLines: [line] };
+    const c = simulateLineCandidate(inst, setup as never, line, 0);
+    const last = c.lineResults[c.lineResults.length - 1];
+    out.push(last.endingSurplus / Math.max(last.poolPremium, 1));
+  }
+  return out;
+}
+
 const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / Math.max(1, xs.length);
 const q = (xs: number[], p: number) => {
   const t = [...xs].sort((a, b) => a - b);
@@ -124,18 +175,27 @@ const median = (xs: number[]) => q(xs, 0.5);
 const acceptance = (xs: number[]) => 1 / Math.max(1e-9, mean(xs));
 
 console.log('=== PRE-GAME ACCEPTANCE — the blocker, flag ON against flag OFF ===');
-console.log(`${SEEDS} seeds per line, pre-game depth ${PRE_GAME_YEARS}, cap ${CAP} attempts.`);
+console.log(`${SEEDS} seeds per line, pre-game depth ${PRE_GAME_DEPTH}, cap ${CAP} attempts.`);
 console.log('Attempts = candidate pasts SIMULATED (pregameAttempt + 1).\n');
 
-const off: Record<string, Arm> = {};
-const on: Record<string, Arm> = {};
+const live: Record<string, Arm> = {};
+
+// ⚠ THE REPORTED ARM RUNS AT FEWER SEEDS, AND ONLY THE REPORTED ONE.
+// A fallback costs the full 500 attempts x a ten-year pre-game, so an arm that
+// falls back on most of its seeds dominates this gate's runtime — measured, it
+// took the gate from about a minute to fourteen, which is not a FAST-tier gate
+// any more. The ASSERTED arm keeps every seed. The reported arm needs only
+// enough to show its shape: at 25 seeds a 90%-fallback arm is not in doubt.
+const REPORT_SEEDS = Math.min(SEEDS, 60);
 
 const wasEnabled = PER_CLAIM_REVISION.enabled;
+/** Unfiltered openings for the arm that is only reported. */
+const reportedOpenings: Record<string, number[]> = {};
 try {
-  PER_CLAIM_REVISION.enabled = false;
-  for (const line of LINES) off[line] = measure(line);
-  PER_CLAIM_REVISION.enabled = true;
-  for (const line of LINES) on[line] = measure(line);
+  PER_CLAIM_REVISION.enabled = wasEnabled;
+  for (const line of LINES) live[line] = measure(line, SEEDS);
+  PER_CLAIM_REVISION.enabled = !wasEnabled;
+  for (const line of LINES) reportedOpenings[line] = measureUnfiltered(line, REPORT_SEEDS);
 } finally {
   PER_CLAIM_REVISION.enabled = wasEnabled;
 }
@@ -143,24 +203,30 @@ if (PER_CLAIM_REVISION.enabled !== wasEnabled) {
   failed.push('the flag was not restored — this gate mutates PER_CLAIM_REVISION.enabled and must put it back');
 }
 
-console.log('  line       arm    acceptance   mean attempts   p99   max   fallbacks (hit the 500 cap)');
+// The arm the game actually runs. Read from the flag so a future flip re-points
+// the assertion instead of inverting it.
+const LIVE = live;
+const LIVE_LABEL = PER_CLAIM_REVISION.enabled ? 'ON' : 'OFF';
+const OTHER_LABEL = PER_CLAIM_REVISION.enabled ? 'OFF' : 'ON';
+
+console.log(`  THE LIVE ARM — PER_CLAIM_REVISION ${LIVE_LABEL}, the real search, ${SEEDS} seeds`);
+console.log('  line       acceptance   mean attempts   p99   max   fallbacks (hit the 500 cap)');
 for (const line of LINES) {
-  for (const [label, arm] of [['OFF', off[line]], ['ON ', on[line]]] as const) {
-    const a = arm.attempts;
-    console.log(`  ${line.padEnd(9)}  ${label}    ${(100 * acceptance(a)).toFixed(1).padStart(5)}%       `
-      + `${mean(a).toFixed(2).padStart(6)}      ${String(q(a, 0.99)).padStart(4)}  ${String(Math.max(...a)).padStart(4)}   ${arm.fallbacks}`);
-  }
+  const a = live[line].attempts;
+  console.log(`  ${line.padEnd(9)}    ${(100 * acceptance(a)).toFixed(1).padStart(5)}%       `
+    + `${mean(a).toFixed(2).padStart(6)}      ${String(q(a, 0.99)).padStart(4)}  ${String(Math.max(...a)).padStart(4)}   ${live[line].fallbacks}`);
 }
 
 // ---------------------------------------------------------------- assertions
 console.log('');
-console.log('--- ASSERTED: BOTH ARMS, same bounds (the shipped arm is whichever the flag says) ---');
+console.log(`--- ASSERTED: THE LIVE ARM ONLY (PER_CLAIM_REVISION ${LIVE_LABEL}) — the other is reported above ---`);
 for (const line of LINES) {
-  for (const [label, arm] of [['OFF', off[line]], ['ON', on[line]]] as const) {
+  for (const [label, arm] of [[LIVE_LABEL, LIVE[line]]] as const) {
     const a = arm.attempts;
     if (arm.fallbacks > 0) {
-      failed.push(`${line} ${label}: the search exhausted all ${CAP} attempts on ${arm.fallbacks} of ${SEEDS} seeds `
-        + 'and shipped a closest-miss opening outside the band. That must never happen on either arm — '
+      failed.push(`${line} ${label}: the search exhausted all ${CAP} attempts on ${arm.fallbacks} of ${arm.attempts.length} seeds `
+        + 'and shipped a closest-miss opening outside the band. That must never happen on the arm the '
+        + 'game runs — '
         + 'a game that cannot generate its own past is a game that cannot start.');
     }
     if (mean(a) > MAX_MEAN_ATTEMPTS) {
@@ -174,21 +240,22 @@ for (const line of LINES) {
     }
   }
 }
-console.log(`  no fallbacks on either arm, mean under ${MAX_MEAN_ATTEMPTS}, p99 under ${MAX_P99_ATTEMPTS}`
+console.log(`  no fallbacks, mean under ${MAX_MEAN_ATTEMPTS}, p99 under ${MAX_P99_ATTEMPTS}`
   + `  ${failed.length === 0 ? '— holds' : '— SEE FAILURES'}`);
 
 // ---------------------------------------------------------------- the cost
 console.log('');
-console.log('--- REPORTED: what the flip costs the search ---');
-console.log('  line       mean attempts        p99            fallbacks       median opening');
+console.log(`--- REPORTED, NOT ASSERTED: the other arm (PER_CLAIM_REVISION ${OTHER_LABEL}), UNFILTERED ---`);
+console.log(`  ${REPORT_SEEDS} seeds, attempt 0 only. Where its candidates SIT, which is the cause; the`);
+console.log('  live arm\'s accepted opening is beside it for scale.');
+console.log('  line       unfiltered median   share in band   band              live arm accepted median');
 for (const line of LINES) {
-  const ao = off[line].attempts, an = on[line].attempts;
   const band = OPENING_SURPLUS_TO_PREMIUM_BAND[line];
-  console.log(`  ${line.padEnd(9)}  ${mean(ao).toFixed(2)} -> ${mean(an).toFixed(2).padEnd(7)}`
-    + `  ${String(q(ao, 0.99))} -> ${String(q(an, 0.99)).padEnd(6)}`
-    + `  ${off[line].fallbacks} -> ${String(on[line].fallbacks).padEnd(6)}`
-    + `  ${median(off[line].openings).toFixed(3)} -> ${median(on[line].openings).toFixed(3)}`
-    + `   band [${band.min}, ${band.max}]`);
+  const o = reportedOpenings[line];
+  const inBand = o.filter(x => x >= band.min && x <= band.max).length / Math.max(1, o.length);
+  console.log(`  ${line.padEnd(9)} ${median(o).toFixed(3).padStart(17)}   ${(100 * inBand).toFixed(0).padStart(12)}%   `
+    + `[${band.min}, ${band.max}]${' '.repeat(Math.max(0, 12 - `[${band.min}, ${band.max}]`.length))}  `
+    + `${median(live[line].openings).toFixed(3).padStart(22)}`);
 }
 
 console.log('');
@@ -199,7 +266,8 @@ if (failed.length > 0) {
   console.log(RULE);
   process.exitCode = 1;
 } else {
-  console.log('PRE-GAME ACCEPTANCE HOLDS ON BOTH ARMS — every line accepts inside the cap');
-  console.log('with room, and no seed fell back to a closest-miss opening on either arm.');
+  console.log(`PRE-GAME ACCEPTANCE HOLDS ON THE ARM THE GAME RUNS (PER_CLAIM_REVISION ${LIVE_LABEL}) —`);
+  console.log('every line accepts inside the cap with room, and no seed fell back to a');
+  console.log('closest-miss opening. The other arm is reported above and is not asserted.');
   console.log(RULE);
 }

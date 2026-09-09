@@ -12,12 +12,17 @@
 // this one was written first and made to pass last. It came out of EXPECTED_RED
 // at the commit that built LinePoolState.pricingTriangle.
 //
-// ⚠ PASSING DOES NOT MEAN SHIPPING. Conditions 3 and 4 are asserted with
-// FORWARD_BOOKING and PRICING_TRIANGLE on, and both flags still ship OFF —
-// PRICING_TRIANGLE because experience-pricing-check's loop-stability arm does
-// not exist, FORWARD_BOOKING because Property still over-develops by 22%. The
-// loop is BUILT and CORRECT; it is not yet CALIBRATED. Do not read a green
-// acceptance test as permission to flip either flag.
+// ⚠ ONE FLAG NOW SHIPS AND ONE DOES NOT, SO READ THE ARMS CAREFULLY.
+// FORWARD_BOOKING SHIPS as of the maturation-book commit: Property's 22%
+// over-development was closed by the open-share curve, and the opening position
+// it broke was fixed by giving the pool ten accident years of runoff rather than
+// three — see MATURATION_YEARS. PRICING_TRIANGLE still ships OFF, and its reason
+// is now a design question rather than a mechanism one: measured with
+// investments off it removes the game's downside.
+//
+// So conditions 3 and 4 are asserted with BOTH on, which is a state nobody runs.
+// Condition 3's arm is now the shipped mechanism; condition 4's is not. A green
+// acceptance test is still not permission to flip PRICING_TRIANGLE.
 //
 // ⚠ IT REPORTS UNEVALUATED SEPARATELY FROM FAILED, AND THE DISTINCTION IS THE
 // POINT. The first version asserted all four against LinePoolState.pricingTriangle,
@@ -329,7 +334,7 @@ const flagged = runArm(true);
 // sign test must NOT fire on it.
 const shippedB = runArm(false, 5_000_000, 'B');
 
-if (FORWARD_BOOKING.enabled !== false || PRICING_TRIANGLE.enabled !== false) {
+if (FORWARD_BOOKING.enabled !== true || PRICING_TRIANGLE.enabled !== false) {
   console.log('⚠ A FLAG WAS NOT RESTORED — this gate mutates both and must put them back');
   process.exitCode = 1;
 }

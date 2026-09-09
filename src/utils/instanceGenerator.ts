@@ -152,7 +152,21 @@ function generateStartingReserveCohorts(
   // what that produces directly is a per-accident-year ULTIMATE. `U =
   // drawnReserve / sum(unpaidShare(a))` is the analytic stand-in for exactly
   // that quantity, so when the deep pre-game lands this function deletes and
-  // nothing downstream changes. The 1/(i+1) weights were a stand-in for nothing
+  // nothing downstream changes.
+  //
+  // ⚠ THE DEEP PRE-GAME HAS LANDED AND THAT CLAIM WAS TESTED RATHER THAN TAKEN.
+  // MATURATION_YEARS gives every line ten engine-born accident years with real
+  // registers, and this function now seeds only the bootstrap that sits ten years
+  // BEFORE the opening. Measured at game start, the cohorts it produces carry
+  // 3.12% of WC's opening net reserve and 0.00% of GL's and Property's. So the
+  // claim is right on two lines and nearly right on the third, and it is NOT yet
+  // exactly right — deleting this function today would move WC's opening by
+  // about three per cent of its reserve, which is a re-solve of the pin, not a
+  // no-op. It stays until someone wants that re-solve.
+  //
+  // ⚠ AND seedWeight / seedPaidRatio ARE NOT ORPHANED BY THAT, for now. They
+  // exist to keep value-identity-check's legacy geometric control alive (see
+  // payoutPattern.ts), and they die with this function rather than before it. The 1/(i+1) weights were a stand-in for nothing
   // and would simply have been thrown away.
   //
   // ⚠ WHAT THIS DOES NOT DO: make a seed indistinguishable from an old game-born
@@ -227,6 +241,10 @@ function generateStartingReserveCohorts(
       grossPaid: netPaid,
       grossUnpaid: cohortNetUnpaid,
       closed: false,
+      // The one thing that distinguishes these from an engine-born cohort at a
+      // glance. See ReserveCohort.seeded — a gate was already filtering on this
+      // and the filter had never fired.
+      seeded: true,
       registerSum: netUltimate,
       horizon,
       age,

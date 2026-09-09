@@ -44,6 +44,7 @@ import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { buildClaimsWorkbook } from '../../src/utils/claimsExport';
+import { PRIOR_BOUNDARY } from '../../src/utils/actuarialMemo';
 import { SLIDER_RANGES, WC_FUNDING_CONFIDENCE_RANGE } from '../../src/data/defaultAssumptions';
 import type { CoverageLine, DecisionSet, GameState } from '../../src/types/simulation';
 
@@ -368,8 +369,33 @@ for (const arm of ARMS) {
     for (const pre of [-2, -1, 0]) {
       if (!ys.has(pre)) fail(`pre-game: ${line} has no accident year ${pre} — priorHistory is not reaching the line sheets`);
     }
+    // ⚠ THE RULE SPLITS AT PRIOR_BOUNDARY NOW, AND IT IS STRICTER EITHER SIDE.
+    //
+    // Inside the DECLARED past (>= PRIOR_BOUNDARY) the old rule stands: a year on
+    // the Development sheet must have claim rows on the line sheet, no excuses.
+    //
+    // Older than it are the MATURATION years — simulated to build the opening
+    // book, real registers, deliberately not part of the declared past, so their
+    // results are never carried and there is nothing to rebuild rows from. They
+    // reach the Development sheet because they genuinely developed. Requiring
+    // rows for them would be requiring a fiction; letting them pass silently is
+    // the gap this whole block exists to close. So the sheet must EXPLAIN them,
+    // and that is what is asserted.
+    const mat = [...devYears].filter(y => y < PRIOR_BOUNDARY && !ys.has(y)).sort((a, b) => a - b);
     for (const y of devYears) {
-      if (!ys.has(y)) fail(`pre-game: Development lists accident year ${y} on ${line} but the line sheet has no rows for it`);
+      if (y >= PRIOR_BOUNDARY && !ys.has(y)) {
+        fail(`pre-game: Development lists accident year ${y} on ${line} but the line sheet has no rows for it`);
+      }
+    }
+    if (mat.length > 0) {
+      const note = noteOf(full, line);
+      if (!note.includes('were SIMULATED to build the pool')) {
+        fail(`pre-game: ${line} has Development years ${mat.join(', ')} with no line-sheet rows and no `
+          + 'sentence on the sheet saying why — an unexplained absence is the defect, not the absence');
+      }
+      if (!note.includes(String(Math.min(...mat))) || !note.includes(String(Math.max(...mat)))) {
+        fail(`pre-game: ${line}'s coverage note does not name the range ${Math.min(...mat)} to ${Math.max(...mat)}`);
+      }
     }
     if (noteOf(full, line).includes(WARN)) {
       fail(`pre-game: ${line} carries the incomplete-detail warning on a straight-through game`);
