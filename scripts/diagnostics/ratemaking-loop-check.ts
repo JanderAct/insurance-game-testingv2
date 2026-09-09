@@ -327,6 +327,7 @@ function runArm(flagged: boolean, seedOffset = 0, tag = ''): ArmResult {
   return { factor, c1, c2, c4, checked, absent, notes };
 }
 
+const FLAGS_AT_ENTRY = { fb: FORWARD_BOOKING.enabled, pt: PRICING_TRIANGLE.enabled };
 const shipped = runArm(false);
 const flagged = runArm(true);
 // ⚠ THE DISJOINT-SEED CONTROL. Genuine noise, no mechanism. Pairing cell-for-cell
@@ -334,7 +335,14 @@ const flagged = runArm(true);
 // sign test must NOT fire on it.
 const shippedB = runArm(false, 5_000_000, 'B');
 
-if (FORWARD_BOOKING.enabled !== true || PRICING_TRIANGLE.enabled !== false) {
+// ⚠ CAPTURED, NOT HARDCODED — THIS INVERTED TWICE BEFORE IT WAS FIXED.
+// It read `!== false` on both flags, then `!== true || !== false` after
+// FORWARD_BOOKING shipped, and would have needed editing again at every future
+// flip. What it is actually asserting is that this gate PUTS THE FLAGS BACK,
+// which is a statement about the gate and not about which arm ships. Comparing
+// against the values captured before any arm ran says that directly and cannot
+// go stale.
+if (FORWARD_BOOKING.enabled !== FLAGS_AT_ENTRY.fb || PRICING_TRIANGLE.enabled !== FLAGS_AT_ENTRY.pt) {
   console.log('⚠ A FLAG WAS NOT RESTORED — this gate mutates both and must put them back');
   process.exitCode = 1;
 }
@@ -477,9 +485,11 @@ if (failures.length > 0) {
   console.log('  4. the rate CHARGED, net, IS the rate the preceding triangle stamped, and it moved');
   console.log('');
   console.log('⚠ ON THE FLAGGED ARM — FORWARD_BOOKING for condition 3, PRICING_TRIANGLE for');
-  console.log('condition 4. Both still ship OFF. PRICING_TRIANGLE\'s retirement condition is');
-  console.log('unchanged: experience-pricing-check\'s loop-stability arm does not exist, and');
-  console.log('until it does the held rate stays the shipped path. Exercising a flag in a gate');
-  console.log('is not turning it on.');
+  console.log('condition 4. BOTH NOW SHIP ON, so the flagged arm is the shipped one and the');
+  console.log('other arm is the control. This paragraph used to say they ship OFF and that');
+  console.log('PRICING_TRIANGLE was waiting on a loop-stability arm that did not exist — the');
+  console.log('arm is these four conditions, they pass, and the flag flipped. A gate that');
+  console.log('states WHICH ARM SHIPS goes stale at every flip; what stays true is that');
+  console.log('exercising a flag here is not turning it on.');
   console.log(RULE);
 }

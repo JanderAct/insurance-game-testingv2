@@ -211,6 +211,41 @@ function wcBlendedRatePer100(members: Member[], yearNumber: number): number {
   return exposure > 0 ? weighted / exposure : WC_HELD_PURE_PREMIUM_PER_100;
 }
 
+/**
+ * THE RATE THE AGGREGATE'S TERMS ARE AGREED AGAINST — the one place that decides
+ * whether this line-year is priced off the triangle at all.
+ *
+ * Returns the triangle's developed RETAINED loss cost per $100 when the pool is
+ * pricing off its own experience, and `undefined` when it is not — flag off, no
+ * triangle, or a triangle too thin to produce a rate. That `undefined` is what
+ * puts every held-path caller back on arithmetic bit-identical to what shipped.
+ *
+ * ⚠ IT EXISTS SO THE DECISION IS TAKEN ONCE. `currentPurePremiumPer100` needs it
+ * to choose a path, the cession basis needs it so the SUBTRACTION uses the
+ * treaty the SOLVE used, and processLineYear's own aggregate quotes — the ones
+ * that set what the pool actually RECOVERS — need it so the contract the year
+ * was priced on is the contract it is settled on. Four readers, one rule; a
+ * second copy of `PRICING_TRIANGLE.enabled && experience && rate > 0` anywhere
+ * is the drift this module keeps finding.
+ *
+ * ⚠ AND THE TRIANGLE'S RETAINED IS NET OF THE AGGREGATE TOO, NOT ONLY THE
+ * OCCURRENCE LAYERS. ReserveDevelopmentRow is net of all reinsurance (see the ⚠
+ * at paidByValuation), so this basis sits BELOW the "loss retained after the
+ * occurrence layers" the attachment multiples nominally apply to, by the
+ * expected aggregate recovery. The understatement is deliberate and is the price
+ * of the figure being one the pool ALREADY HAS. Correcting it would mean adding
+ * back a recovery computed from the terms being set, which is the circularity
+ * this whole change removed.
+ */
+export function aggregateTermsRetainedPer100(
+  line: CoverageLine,
+  experience?: ExperienceBasis,
+): number | undefined {
+  if (!PRICING_TRIANGLE.enabled || !experience) return undefined;
+  const rate = experienceRatePer100(line, experience);
+  return rate !== null && rate > 0 ? rate : undefined;
+}
+
 export function currentPurePremiumPer100(
   line: CoverageLine,
   yearNumber: number,
@@ -262,24 +297,27 @@ export function currentPurePremiumPer100(
   // ⚠ THE EXPERIENCE RATE IS RETAINED AND THIS FUNCTION RETURNS GROSS, SO IT IS
   // GROSSED UP HERE — see grossUpRetainedPurePremium's header for the whole
   // argument. It is done at the SOURCE rather than at the subtraction so that
-  // every consumer of this function's return value — expectedLoss, the
-  // aggregate's attachment basis, the reserve basis, the admin base, the panel
-  // — sees one basis, the same one the held path returns. Without it the
-  // net-funding step removes cession a second time from a rate that never had
-  // it in.
-  if (PRICING_TRIANGLE.enabled && experience) {
-    const rate = experienceRatePer100(line, experience);
-    if (rate !== null && rate > 0) {
-      if (!cession) {
-        throw new Error(
-          `currentPurePremiumPer100: ${line} year ${yearNumber} was given an experience `
-          + 'basis with PRICING_TRIANGLE on but no cession basis. The experience rate is '
-          + 'RETAINED and this function returns GROSS; returning it unconverted would '
-          + 'deduct cession twice downstream. Pass the cession basis or omit the experience.',
-        );
-      }
-      return grossUpRetainedPurePremium(line, yearNumber, rate, cession);
+  // every consumer of this function's return value — expectedLoss, the reserve
+  // basis, the admin base, the panel — sees one basis, the same one the held
+  // path returns. Without it the net-funding step removes cession a second time
+  // from a rate that never had it in.
+  //
+  // ⚠ THE AGGREGATE'S ATTACHMENT USED TO BE ON THAT LIST AND IS NO LONGER. It is
+  // set from `aggregateTermsRetainedPer100` above — the triangle's own retained
+  // estimate, in hand before the solve — because a treaty that re-priced itself
+  // off the rate under solve left the gross-up with no root to find at all. See
+  // grossUpRetainedPurePremium's header for the measurement.
+  const rate = aggregateTermsRetainedPer100(line, experience);
+  if (rate !== undefined) {
+    if (!cession) {
+      throw new Error(
+        `currentPurePremiumPer100: ${line} year ${yearNumber} was given an experience `
+        + 'basis with PRICING_TRIANGLE on but no cession basis. The experience rate is '
+        + 'RETAINED and this function returns GROSS; returning it unconverted would '
+        + 'deduct cession twice downstream. Pass the cession basis or omit the experience.',
+      );
     }
+    return grossUpRetainedPurePremium(line, yearNumber, rate, cession);
   }
   return line === 'WC'
     ? wcBlendedRatePer100(members, yearNumber)
@@ -628,6 +666,15 @@ export function processLineYear(
   // changes no value.
   const estimatedExposure = currentActiveMembers.reduce((s, m) => s + getMemberExposure(m, line, yearNumber), 0);
 
+  // ⚠ THE AGGREGATE'S TERMS, AGREED ONCE FOR THE WHOLE LINE-YEAR, BEFORE ANY
+  // RATE IS SOLVED. Undefined on the held path, where the rate is a constant and
+  // terms derived from it are already terms in hand. Computed here, at the top,
+  // and read by everything below that quotes the aggregate — the two pricing
+  // passes and the recovery — so that the treaty the year is PRICED on is the
+  // treaty it is SETTLED on. Deriving it separately at any of those sites would
+  // be the same class of split-basis defect this file has produced six times.
+  const termsRetainedPer100 = aggregateTermsRetainedPer100(line, experienceBasis);
+
   // ⚠ THE SAME CESSION THE PRE-MOVEMENT QUOTE WILL SUBTRACT. quoteLineRates is
   // called below with exactly these members, this exposure and these decisions,
   // so the gross-up here and the subtraction there are inverse. Passing a
@@ -638,6 +685,7 @@ export function processLineYear(
     exposure: estimatedExposure,
     layersPlaced: lineDecisions.layersPlaced,
     aggregateStopLevel: lineDecisions.aggregateStopLevel,
+    aggregateTermsRetainedPer100: termsRetainedPer100,
   };
   const newPurePremiumPer100 = currentPurePremiumPer100(
     line, yearNumber, currentActiveMembers, experienceBasis, estimatedCession,
@@ -803,6 +851,7 @@ export function processLineYear(
     exposure: activeExposure,
     layersPlaced: lineDecisions.layersPlaced,
     aggregateStopLevel: lineDecisions.aggregateStopLevel,
+    aggregateTermsRetainedPer100: termsRetainedPer100,
   };
   const pricedPurePremiumPer100 = currentPurePremiumPer100(
     line, yearNumber, memberResult.activeMembers, experienceBasis, pricedCession,
@@ -831,6 +880,14 @@ export function processLineYear(
   // not move the loss quantities.
   const expectedLoss = activeExposure * pricedPurePremiumPer100 * 10_000;
 
+  // The agreed treaty basis in dollars, on the SAME post-movement exposure
+  // `expectedLoss` uses — the book the contract is actually written over.
+  // Undefined on the held path, where the aggregate's terms come off
+  // `expectedLoss` exactly as they always did.
+  const aggregateTermsRetained = termsRetainedPer100 === undefined
+    ? undefined
+    : activeExposure * termsRetainedPer100 * 10_000;
+
   // The WC/Property aggregate, priced on the REAL post-movement expectedLoss.
   // Its expected ceded is netted out of the pool premium below alongside the
   // occurrence layers'.
@@ -845,7 +902,7 @@ export function processLineYear(
   const aggregateQuote = isAggregateLine && placedForCost && aggLevel >= 0
     ? quoteAggregate(
         line as 'WC' | 'Property', placedForCost, currentActiveMembers,
-        expectedLoss, aggLevel, yearNumber,
+        expectedLoss, aggLevel, yearNumber, aggregateTermsRetained,
       )
     : null;
 
@@ -1309,6 +1366,9 @@ export function processLineYear(
     // price can never disagree about whether an aggregate exists.
     const cededAggLevel = normalizeAggregateStopLevel(towerLine, placed, lineDecisions.aggregateStopLevel);
     if ((towerLine === 'WC' || towerLine === 'Property') && cededAggLevel >= 0) {
+      // ⚠ THE SAME AGREED TERMS THE YEAR WAS PRICED ON. This quote is what the
+      // pool RECOVERS against; pricing on one attachment and settling on another
+      // would be the split-basis failure in its most expensive form.
       const quote = quoteAggregate(
         towerLine,
         placed,
@@ -1316,6 +1376,7 @@ export function processLineYear(
         expectedLoss,
         cededAggLevel,
         yearNumber,
+        aggregateTermsRetained,
       );
       aggregatePremium = quote.premium;
       aggregateAttachment = quote.attachment;

@@ -133,6 +133,23 @@ interface Arm {
   decisions: (d: DecisionSet, lines: CoverageLine[]) => DecisionSet;
   /** Accept every inter-line loan offer the year produced. See the LOANS arm. */
   authorizeLoans?: boolean;
+  /**
+   * A LONGER HORIZON FOR THIS ARM ONLY, when its coverage needs one. Defaults to
+   * YEARS.
+   *
+   * ⚠ IT EXISTS BECAUSE OF A MEASURED COVERAGE LOSS, NOT AS A KNOB. The loans arm
+   * asserts that repayment fires in the years AFTER origination. At four years it
+   * did, on the held rate: a $26.45M deficit repaid across four scope-years. On
+   * the SHIPPED configuration — pricing off the triangle — the pool corrects its
+   * own rate after a bad year, the deficit that reaches a loan is $8.03M instead,
+   * and at the default repayment aggressiveness nothing repays before year seven.
+   * Four years reached origination and nothing else, which is the arm measuring
+   * half of what it claims while reporting itself covered.
+   *
+   * Lengthening this one arm rather than YEARS keeps the cost where the coverage
+   * is: every other arm's reach was already proven at four.
+   */
+  years?: number;
 }
 const ARMS: Arm[] = [
   {
@@ -198,6 +215,9 @@ const ARMS: Arm[] = [
     why: 'every layer declined to force deficits, and EVERY loan offer authorized — the only arm '
       + 'in which applyLoanAuthorizations runs at all',
     authorizeLoans: true,
+    // See `years` on Arm: origination is reached at four, repayment is not once
+    // the pool prices off its own triangle.
+    years: 8,
     decisions: (d, lines) => ({
       ...d,
       byLine: Object.fromEntries(lines.map(l => [l, {
@@ -644,13 +664,14 @@ for (const { lines, name } of CONFIGS) {
   for (let g = 0; g < GAMES; g++) {
     const id = `AFC${name}${g}`;
     const inst = generateGameInstance(id, 1_700_000 + g * 9173);
-    const setup = { poolName: 'A', gameLength: YEARS, startingYear: 2026, instanceId: id, activeLines: lines };
+    const setup = { poolName: 'A', gameLength: arm.years ?? YEARS, startingYear: 2026, instanceId: id, activeLines: lines };
     const { poolState, priorHistory } = runPriorHistory(inst, setup as never);
     let gs: GameState = {
       setup: setup as never, instance: inst, currentYearNumber: 1, isStarted: true, isComplete: false,
       poolState, lockedResults: [], currentDecisions: defaultDecisionSet(1), priorHistory,
     };
-    for (let y = 1; y <= YEARS; y++) {
+    const armYears = arm.years ?? YEARS;
+    for (let y = 1; y <= armYears; y++) {
       const p = processYear(gs, arm.decisions(defaultDecisionSet(y), lines));
       // ⚠ AUTHORIZE BEFORE READING ANYTHING. applyLoanAuthorizations mutates the
       // line results in place and returns a RE-AGGREGATED pool result, so the

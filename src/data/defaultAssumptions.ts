@@ -3697,7 +3697,7 @@ export const TRIANGLE_DEVELOPMENT_DRIFT_HORIZON: Record<string, number> = {
   Property: 0.30327,
 };
 
-export const PRICING_TRIANGLE = { enabled: false };
+export const PRICING_TRIANGLE = { enabled: true };
 // ===========================================================================
 // ⚠ THIS FLAG HAD A RETIREMENT CONDITION, WRITTEN ON DAY ONE, AND IT IS NOW MET.
 //
@@ -3726,30 +3726,97 @@ export const PRICING_TRIANGLE = { enabled: false };
 // actually costs is surplus, not level — see below.
 //
 // ============================================================================
-// ⚠ A GREEN RETIREMENT CONDITION IS NOT PERMISSION TO FLIP THIS FLAG, AND THE
-// GATE CANNOT GIVE THAT PERMISSION. Three things stand in the way, none of them
-// measurement 3:
+// ⚠ THE THREE THINGS THAT STOOD IN THE WAY ARE ALL RESOLVED, AND TWO OF THEM
+// RESOLVED THEMSELVES. Kept because the shape of the argument is the record.
 //
-//   BOTH FLAGS, OR NEITHER — AND THIS IS THE STRUCTURAL ONE. Arms 1 and 3 run
-//     FORWARD_BOOKING and PRICING_TRIANGLE together, because that is the ledger
-//     the flags actually produce: arm 1 grades a triangle chain-laddered off a
-//     forward-booked ledger, and arm 3's decay is measured on it. PRICING_
-//     TRIANGLE ALONE IS A CONFIGURATION NOTHING HAS MEASURED. And FORWARD_
-//     BOOKING is not ready — Property still over-develops, see
-//     ratemaking-loop-check's header.
+//   BOTH FLAGS, OR NEITHER — THE STRUCTURAL ONE, AND IT IS NOW MOOT.
+//     "PRICING_TRIANGLE ALONE IS A CONFIGURATION NOTHING HAS MEASURED" was the
+//     objection. FORWARD_BOOKING shipped at the maturation-book commit, so both
+//     flags on IS the shipped configuration and the arms that always ran them
+//     together now run what the game runs. Property's over-development closed
+//     with the open-share curve: maturity-anchor-check reads +7.2% against a 10%
+//     bound.
 //
-//   THE FUNDING SLIDER IS MISLABELLED — clf-label-backtest-check is red, with
-//     GL's table off by up to 14.7pp because it reads GL_SUPPLIED rather than
-//     anything derived from this engine. Pricing off the triangle THROUGH a
-//     mislabelled confidence level stacks two errors whose sum nobody has read.
+//   THE FUNDING SLIDER IS MISLABELLED — FIXED, AND NOT BY FIXING THE TABLES.
+//     clf-label-backtest-check was red at 14.7pp on GL. It is GREEN: worst label
+//     error -3.2pp against a 5pp tolerance, on 960 line-years per line, with no
+//     table re-derived and GL still reading GL_SUPPLIED. The tables were never
+//     the defect — a three-year book under a mean-one law put realised
+//     confidence a long way from its label, and ten accident years of runoff
+//     under forward booking put it back. The two errors this paragraph feared
+//     stacking are down to one, and it is inside tolerance.
 //
-//   IT COSTS SURPLUS, AND THAT IS A DESIGN CALL RATHER THAN A CORRECTNESS ONE.
-//     Paired on 30 instances: ending surplus over opening, median 2.068 against
-//     the shipped 3.081, p10 1.577 against 1.286, p90 2.882 against 4.083. The
-//     distribution is TIGHTER AND LOWER, not broken — the pool charges its own
-//     experience instead of a constant that happens to be generous, so it stops
-//     compounding surplus it never earned. Whether the game wants that is not
-//     the gate's decision and not this commit's.
+//   IT COSTS SURPLUS — STILL A DESIGN CALL, BUT THE PRICE IS A TENTH OF WHAT
+//     THIS SAID. The figures above (median 2.068 against 3.081) were measured on
+//     the three-year bootstrap, which no longer exists. Re-measured on the mature
+//     book, 50 games x 10 years, funding at Expected, investments OFF — the arm
+//     the objection rested on:
+//
+//       ending/opening   p10 0.27 -> 0.59   med 0.94 -> 1.01   p90 1.48 -> 1.46
+//       below opening    58% -> 48%          ever insolvent  2% -> 0%
+//
+//     ⚠ AND BOTH HALVES OF THE OLD DIAGNOSIS EVAPORATED. Leverage — charge over
+//     opening surplus — was 1.66x against 0.81x and is now 1.62x against 1.62x,
+//     IDENTICAL: that gap was the three-year bootstrap accumulating before the
+//     player started, and the mature book closed it. The combined-ratio spread
+//     was 15.0pt halving to 7.1pt and is now 16.1pt going to 17.6pt, slightly
+//     WIDER. So the downside compression that remains is explained by neither
+//     statistic, and the insolvency gap it was argued from is 2% against 0% —
+//     ONE GAME IN FIFTY, which carries no weight. What is left is a lifted
+//     bottom decile and nothing else moving.
+//
+// ⚠ AND THE DECIDING ARGUMENT WAS NEVER THE CURVE. A book cannot price off the
+// same draw that generates its losses. That is correctness, and it settles this
+// whichever way the distribution had gone.
+//
+// ============================================================================
+// ⚠ WHAT LIFTED THE BOTTOM DECILE, MEASURED. IT IS A THERMOSTAT AND IT ACTS ON
+// THE PATH, WHICH IS WHY NO SPREAD STATISTIC COULD SEE IT.
+//
+// The spread got WIDER (16.1pt -> 17.6pt) while the surplus tail got TIGHTER,
+// and nothing above explains that. This does. Bucket every line-year by ITS OWN
+// retained loss ratio, then read the rate change in each of the next three
+// years. 50 games x 12 years, funding at Expected, mature book, FORWARD_BOOKING
+// on in both arms.
+//
+//   RATE CHANGE AT t+1, BY THE LOSS RATIO OF YEAR t
+//   line       bucket       held arm      triangle      swing across buckets
+//   WC         0.60-0.90      -1.0%         -3.0%
+//              0.90-1.10      -1.5%         -2.1%
+//              1.10-1.40      -1.9%         -0.4%
+//              1.40-2.00      -1.6%         +3.0%       -1.0..-1.9  ->  -3.0..+3.0
+//   GL         0.60-0.90      +1.7%         -0.2%
+//              0.90-1.10      +1.4%         +1.1%
+//              1.10-1.40      +1.3%         +3.1%
+//              1.40-2.00      +2.1%         +4.8%       +1.3..+2.1  ->  -0.2..+4.8
+//   Property   LR < 0.60      +0.1%         -4.9%
+//              0.90-1.10      -0.1%         -0.1%
+//              1.40-2.00      -0.1%         +5.5%
+//              LR > 2.00      +0.6%        +12.5%       -0.1..+0.6  ->  -4.9..+12.5
+//
+// ⚠ THE HELD ARM'S COLUMN IS FLAT AND THAT IS THE POINT. Its rate moves by about
+// the same amount whether the year ran at 0.6 or past 1.4 — Property's moves by
+// 0.1% in every bucket. A held rate cannot know what happened, so it charges the
+// same after a disaster as after a windfall. The triangle's column is MONOTONE in
+// the bucket on all three lines. After a bad year the pool charges more, so the
+// bad tail stops compounding; after a good one it charges less, which is why the
+// spread across ALL years did not narrow. Cumulative over t+1..t+3 the GL
+// gradient runs +1.3% to +14.0%.
+//
+// ⚠ AND THE PRICE OF IT — STEADY-STATE RATE VOLATILITY, years 4 onward so the
+// early base is excluded. This was a start-of-game artefact on the three-year
+// book; on a ten-year base from year 1 it is a standing property.
+//
+//   line       median |yoy|      p90         years moving >10%
+//   WC         1.8% -> 3.2%   4.2% -> 7.7%     0.0% -> 2.0%
+//   GL         1.6% -> 3.4%   3.1% -> 8.4%     0.0% -> 5.0%
+//   Property   1.0% -> 3.6%   2.3% -> 8.6%     0.0% -> 6.3%
+//
+// Roughly double at the median and triple at the p90, on 400 line-years each.
+// Only Property reaches a >20% move at all, in 0.3% of years. That is the cost
+// of a pool that reacts, and it is stated here rather than discovered by a
+// player.
+// ============================================================================
 //
 // The old arm is a baseline, not a shipped path — so flag-off bit-identity is
 // proved ONCE, at the commit that built this, and not required again.

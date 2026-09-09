@@ -25,6 +25,9 @@ interface DecisionsPageProps {
   onChange: (d: DecisionSet) => void;
   yearNumber: number;
   estimatedExpectedLoss: number;
+  /** The agreed aggregate terms in dollars for the line being edited, or
+   *  undefined on the held path. See TowerControls' own field. */
+  estimatedAggregateTermsRetained?: number;
   disabled?: boolean;
   // 'pool' hosts the two pool-wide decisions (investment allocation, risk
   // control); each coverage line's tab edits that line's own decisions.
@@ -81,7 +84,7 @@ function resetLineToDefaults(decisions: DecisionSet, line: CoverageLine): Decisi
   };
 }
 
-export default function DecisionsPage({ decisions, onChange, yearNumber, estimatedExpectedLoss, disabled = false, lineView, lineLoanInfo, lastLineResult, fundingConsequence, activeMembers }: DecisionsPageProps) {
+export default function DecisionsPage({ decisions, onChange, yearNumber, estimatedExpectedLoss, estimatedAggregateTermsRetained, disabled = false, lineView, lineLoanInfo, lastLineResult, fundingConsequence, activeMembers }: DecisionsPageProps) {
   // Pool tab: the two pool-wide decisions. One allocation policy and one
   // risk-control intensity for the whole pool — each line applies them to its
   // OWN base (own segregated portfolio / own premium).
@@ -203,6 +206,7 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
               setMany={setMany}
               disabled={disabled}
               expectedLoss={estimatedExpectedLoss}
+              aggregateTermsRetained={estimatedAggregateTermsRetained}
               members={activeMembers}
               yearNumber={yearNumber}
             />
@@ -624,7 +628,7 @@ function DataRow({ label, value }: { label: string; value: string }) {
 // market but real, and choosing which bands to keep is the point.
 // ===========================================================================
 function TowerControls({
-  line, d, set, setMany, disabled, expectedLoss, members, yearNumber,
+  line, d, set, setMany, disabled, expectedLoss, aggregateTermsRetained, members, yearNumber,
 }: {
   line: CoverageLine;
   d: LineDecisionSet;
@@ -632,6 +636,13 @@ function TowerControls({
   setMany: (patch: Partial<LineDecisionSet>) => void;
   disabled: boolean;
   expectedLoss: number;
+  /** The agreed aggregate terms in dollars — undefined on the held path, where
+   *  the attachment comes off `expectedLoss` as it always did. Threaded so the
+   *  tile quotes the treaty the engine will actually write: once the pool prices
+   *  off its triangle, the engine's attachment is set from the triangle's own
+   *  retained estimate, and a panel deriving it from a rate instead would show a
+   *  layer nobody buys. See quoteAggregate's header. */
+  aggregateTermsRetained?: number;
   members: Member[];
   yearNumber: number;
 }) {
@@ -672,7 +683,7 @@ function TowerControls({
   // without it, "decline everything and buy the aggregate" is free volatility
   // transfer.
   const aggQuote = hasAggregate && aggLevel >= 0
-    ? quoteAggregate(line as 'WC' | 'Property', placed, members, expectedLoss, aggLevel, yearNumber)
+    ? quoteAggregate(line as 'WC' | 'Property', placed, members, expectedLoss, aggLevel, yearNumber, aggregateTermsRetained)
     : null;
   const totalCost = occCost + (aggQuote?.premium ?? 0);
 
@@ -774,7 +785,7 @@ function TowerControls({
               // Priced even while unavailable, so the disabled button still
               // shows what the cover WOULD cost once a layer is placed —
               // greying out a blank tile reads as a broken control.
-              const q = quoteAggregate(line, placed, members, expectedLoss, lv, yearNumber);
+              const q = quoteAggregate(line, placed, members, expectedLoss, lv, yearNumber, aggregateTermsRetained);
               const off = disabled || !aggAvailable;
               return (
                 <button

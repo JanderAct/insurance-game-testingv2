@@ -65,6 +65,12 @@ export interface LineRateInputs {
   pricingAdjustment: number;
   layersPlaced: boolean[];
   aggregateStopLevel: number;
+  /** The agreed aggregate terms — see CessionBasis's field of the same name.
+   *  Undefined on the held path. It has to be here as well as on the basis
+   *  because the SUBTRACTION below builds its own basis, and a subtraction that
+   *  used different terms than the gross-up solved against would stop being its
+   *  inverse. */
+  aggregateTermsRetainedPer100?: number;
 }
 
 /**
@@ -85,6 +91,28 @@ export interface CessionBasis {
   exposure: number;
   layersPlaced: boolean[];
   aggregateStopLevel: number;
+  /**
+   * THE RETAINED RATE THE AGGREGATE'S TERMS ARE AGREED AGAINST, per $100 —
+   * undefined on the held path.
+   *
+   * ⚠ THE ATTACHMENT MUST NOT DEPEND ON THE RATE BEING SOLVED. A real tower is
+   * negotiated before the year on figures already in hand; one that re-prices
+   * itself while the rate is being calculated is a modelling artefact. When this
+   * is set, the aggregate's attachment and limit come off
+   * `exposure * this * 10_000` and stay put; only the loss distribution the
+   * treaty sits on moves with the rate.
+   *
+   * ⚠ IT IS SET ONLY WHERE THE RATE IS UNKNOWN. On the held path the rate IS a
+   * figure in hand, so terms derived from it are already agreed in advance and
+   * there is nothing to break — those callers leave this undefined and get
+   * arithmetic bit-identical to what shipped.
+   *
+   * ⚠ AND IT MUST REACH THE SUBTRACTION, NOT ONLY THE SOLVE. `quoteLineRates`
+   * subtracts what the gross-up added; if the two disagreed about the treaty
+   * they would stop being inverse and the double deduction would come back in a
+   * form no gate names. It rides on this basis for exactly that reason.
+   */
+  aggregateTermsRetainedPer100?: number;
 }
 
 export interface CessionQuote {
@@ -109,7 +137,7 @@ export function expectedCededPer100For(
   grossPurePremiumPer100: number,
   cession: CessionBasis,
 ): CessionQuote {
-  const { members, exposure, layersPlaced, aggregateStopLevel } = cession;
+  const { members, exposure, layersPlaced, aggregateStopLevel, aggregateTermsRetainedPer100 } = cession;
 
   const isWcClaimLine = line === 'WC';
   const isPropertyClaimLine = line === 'Property';
@@ -129,11 +157,18 @@ export function expectedCededPer100For(
   const aggLevel = placedForCost
     ? normalizeAggregateStopLevel(line as TowerLine, placedForCost, aggregateStopLevel)
     : -1;
+  // The agreed treaty basis in DOLLARS, on this call's own exposure — the same
+  // denominator the rate itself is quoted in, so the terms and the price
+  // describe one book. Undefined here means "set the terms from the rate", which
+  // is what the held path wants and what this function always did.
+  const termsRetained = aggregateTermsRetainedPer100 === undefined
+    ? undefined
+    : exposure * aggregateTermsRetainedPer100 * 10_000;
   const aggregateQuote = isAggregateLine && placedForCost && aggLevel >= 0
     ? quoteAggregate(
         line as 'WC' | 'Property', placedForCost, members,
         exposure * grossPurePremiumPer100 * 10_000,
-        aggLevel, yearNumber,
+        aggLevel, yearNumber, termsRetained,
       )
     : null;
 
@@ -171,23 +206,101 @@ export function expectedCededPer100For(
 // solved against the very function the subtraction calls, so the two are
 // inverse by construction and cannot drift apart. The occurrence tower's ceded
 // does not depend on the rate at all (occurrenceProgramCost reads only the book
-// and the year), so on GL — which has no aggregate — this converges on the
-// first pass to the exact additive answer g = retained + ceded. WC and Property
-// need the iteration because their aggregate's attachment and limit are
-// multiples of expected RETAINED loss, so their ceded moves with the rate. That
-// dependence is linear with a small slope, so the map is a contraction and
-// settles in a few passes. That is not assumed — it is asserted, and throws.
+// and the year), so on GL — which has no aggregate — this lands on the exact
+// additive answer g = retained + ceded immediately. WC and Property need a solve
+// because their aggregate sits on the year's retained LOSS DISTRIBUTION, whose
+// mean is the gross rate less what the occurrence layers cede — so what the
+// aggregate expects to pay moves with the rate even though its terms do not.
+//
+// ============================================================================
+// ⚠⚠ AND THE EQUATION ONLY HAS A ROOT BECAUSE THE TOWER IS AGREED IN ADVANCE.
+// THIS TOOK THREE ATTEMPTS AND THE FIRST TWO DIAGNOSES WERE BOTH WRONG. THE
+// MEASUREMENTS ARE KEPT BECAUSE THE WRONG ONES ARE THE INSTRUCTIVE PART.
+//
+// ATTEMPT 1 — "linear with a small slope, so the map is a contraction." Linear
+// was right. SMALL was never checked. The aggregate attaches at a multiple of
+// expected RETAINED loss, so raising the gross rate raises the attachment and
+// the aggregate cedes less, and the old solver was a fixed-point iteration
+// `g <- retained + ceded(g)` that threw at twenty passes. That throw is the only
+// reason any of this was found rather than shipped.
+//
+// ATTEMPT 2 — "the slope is -0.9995, so the iteration is a REFLECTION and needs
+// a root-find rather than a fixed point." Measured on Property year 1 from a
+// retained rate of 0.075812, the iterates orbit between 0.124334 and 0.126335,
+// and across that cycle
+//
+//     d(ceded)/d(gross) = (0.048523 - 0.050523) / (0.126335 - 0.124334) = -0.9995
+//
+// ⚠ THAT NUMBER IS A CHORD ACROSS A DISCONTINUITY, NOT A DERIVATIVE, AND THE
+// CONCLUSION DRAWN FROM IT WAS WRONG. Sampling h(g) = g - ceded(g) - retained on
+// a fine grid through the same region shows what the two-cycle was really doing:
+//
+//     g=0.124331  ceded=0.050521  h=-0.002002
+//     g=0.125848  ceded=0.051621  h=-0.001585
+//     g=0.127364  ceded=0.049239  h=+0.002313    <-- h JUMPED THE ZERO
+//
+// ceded(g) was a SAWTOOTH — rising at about +0.72 and dropping ~0.0024 every
+// 0.0075812 of g — so h was a rising staircase that stepped OVER zero and
+// h(g) = 0 HAD NO ROOT AT ALL. The local behaviour was +0.72 with periodic
+// drops; -0.9995 was the chord over one of the drops. No solver fixes a missing
+// root, and the fixed-point was orbiting the gap rather than a reflection.
+//
+// ⚠ THE DROPS WERE THE CIRCULARITY. The aggregate's attachment was being
+// recomputed from the very rate the solve was looking for, and
+// propertyAggregate rounds it to whole millions (`Math.round(x / 1e6) * 1e6`,
+// which is how attachments are actually written — BIN at $25k was chosen against
+// exactly that convention). So each million the rounded attachment stepped, the
+// treaty re-priced itself mid-solve and ceded fell off a cliff.
+//
+// ATTEMPT 3, AND THE ONE IN THE CODE — THE TOWER IS AGREED BEFORE THE YEAR.
+// The attachment and the limit are set from what the pool already knows, the
+// triangle's own estimate of RETAINED loss, and the rate is then solved once
+// against fixed terms. That is what a real treaty is; an attachment that
+// re-prices itself while the rate is being calculated is a modelling artefact.
+// See `aggregateTermsRetainedPer100` on CessionBasis above, and quoteAggregate's
+// header in reinsuranceTower.
+//
+// With the terms fixed, the drops are gone and only the +0.72 remains: ceded now
+// rises CONTINUOUSLY and MONOTONICALLY with g, because a higher gross rate means
+// a bigger loss distribution under an unchanged layer. So
+//
+//     h'(g) = 1 - ceded'(g) ~ +0.28
+//
+// h is continuous and strictly increasing, and the root exists and is unique.
+//
+// ⚠ THE $1M ROUNDING STAYS AND SO DOES BIN. Rounding to $25k would have shrunk
+// the gap 40x and left the loop in place to return on a tower change, a
+// different rate level, or another line. The circularity was the defect; the
+// rounding was only where it bit.
+//
+// ⚠ SO THE SOLVER IS A SECANT ROOT-FIND ON h, AND IT IS KEPT EVEN THOUGH THE MAP
+// WAS NEVER THE PROBLEM. It is the right solver for a continuous map, it needs
+// no constant, and it is BIT-IDENTICAL to the old fixed-point iteration — max
+// relative difference 0.000e+0 across 2844 solves — everywhere that one
+// converged.
+//
+// ⚠ DAMPING WAS THE OBVIOUS FIX AND WAS ALWAYS THE WRONG ONE. Averaging
+// successive iterates turns a slope of -1 into 0 and would have passed on the
+// day, but it is tuned to a slope that was not even real, and it would have
+// buried a discontinuity instead of removing it.
+//
+// The convergence assertion STAYS and still throws. A solver that quietly
+// returns a rate nobody solved for is the failure this whole block exists to
+// prevent.
 // ============================================================================
 
-/** Relative tolerance on the round trip. Tight enough that gross-then-subtract
- *  returns the retained rate to float noise at the magnitudes involved, loose
- *  enough that the iteration always terminates. */
+/** Relative tolerance on the RESIDUAL h(g) = g - ceded(g) - retained. Tight
+ *  enough that gross-then-subtract returns the retained rate to float noise at
+ *  the magnitudes involved, loose enough that the solve always terminates. */
 const GROSS_UP_TOL = 1e-12;
-/** Convergence is geometric at the aggregate's marginal cession rate, which is
- *  far under 1. Twenty passes is well past where it settles; exhausting them
- *  means the contraction the header derives is false, so it throws rather than
- *  returning a rate nobody solved for. */
+/** The secant is superlinear (order ~1.618) and the map is very nearly linear,
+ *  so it lands in a handful of steps from either starting point. Twenty is far
+ *  past that; exhausting them means the root is not where the secant can reach
+ *  it, and that throws rather than returning a rate nobody solved for. */
 const GROSS_UP_MAX_ITER = 20;
+/** Below this the secant's denominator carries no information — h has not moved
+ *  between the two iterates — and stepping on it would divide into noise. */
+const SECANT_MIN_DENOM = 1e-15;
 
 export function grossUpRetainedPurePremium(
   line: CoverageLine,
@@ -195,17 +308,56 @@ export function grossUpRetainedPurePremium(
   retainedPurePremiumPer100: number,
   cession: CessionBasis,
 ): number {
-  let gross = retainedPurePremiumPer100;
+  // ⚠ THE AGREED TERMS ARE REQUIRED, NOT DEFAULTED, AND THE CHECK IS THE WHOLE
+  // GUARANTEE. This function could set the basis from its own argument and
+  // always solve — but then a caller that forgot to put it on the cession would
+  // subtract with terms the solve never used, the two directions would stop
+  // being inverse, and the double deduction this module exists to prevent would
+  // come back silently. Refusing to solve is what forces solve and subtraction
+  // onto one agreement.
+  if (cession.aggregateTermsRetainedPer100 !== retainedPurePremiumPer100) {
+    throw new Error(
+      `grossUpRetainedPurePremium: ${line} year ${yearNumber} was asked to solve from a `
+      + `retained rate of ${retainedPurePremiumPer100} against a cession basis whose agreed `
+      + `aggregate terms are ${cession.aggregateTermsRetainedPer100}. The tower is agreed in `
+      + 'advance and the subtraction must use the same agreement — set '
+      + 'aggregateTermsRetainedPer100 on the basis to the rate being grossed up.',
+    );
+  }
+
+  const h = (g: number) =>
+    g - expectedCededPer100For(line, yearNumber, g, cession).expectedCededPer100 - retainedPurePremiumPer100;
+
+  // Two starting points. The first is the retained rate — h there is minus the
+  // whole cession, so it is well below the root. The second is ONE fixed-point
+  // step off it, which is the old solver's first pass; with the terms agreed the
+  // map is a genuine contraction (ceded'(g) ~ +0.72 < 1) so that step lands close
+  // to the root from the same side, and the secant closes the rest in a few
+  // passes. Neither point has to bracket: h is continuous and strictly
+  // increasing here, so the secant converges from either side.
+  let g0 = retainedPurePremiumPer100;
+  let h0 = h(g0);
+  if (Math.abs(h0) <= GROSS_UP_TOL * Math.max(1, Math.abs(g0))) return g0;
+  let g1 = retainedPurePremiumPer100
+    + expectedCededPer100For(line, yearNumber, g0, cession).expectedCededPer100;
+  let h1 = h(g1);
+
   for (let i = 0; i < GROSS_UP_MAX_ITER; i++) {
-    const { expectedCededPer100 } = expectedCededPer100For(line, yearNumber, gross, cession);
-    const next = retainedPurePremiumPer100 + expectedCededPer100;
-    if (Math.abs(next - gross) <= GROSS_UP_TOL * Math.max(1, Math.abs(next))) return next;
-    gross = next;
+    if (Math.abs(h1) <= GROSS_UP_TOL * Math.max(1, Math.abs(g1))) return g1;
+    const denom = h1 - h0;
+    if (!Number.isFinite(denom) || Math.abs(denom) < SECANT_MIN_DENOM) break;
+    const g2 = g1 - h1 * (g1 - g0) / denom;
+    if (!Number.isFinite(g2)) break;
+    g0 = g1; h0 = h1;
+    g1 = g2; h1 = h(g1);
   }
   throw new Error(
     `grossUpRetainedPurePremium: ${line} year ${yearNumber} did not converge in `
-    + `${GROSS_UP_MAX_ITER} passes from a retained rate of ${retainedPurePremiumPer100}. `
-    + 'The cession-against-rate map is no longer the contraction the header derives.',
+    + `${GROSS_UP_MAX_ITER} secant steps from a retained rate of ${retainedPurePremiumPer100} `
+    + `(last iterate ${g1}, residual ${h1}). With the aggregate's terms agreed in advance `
+    + 'h is continuous and strictly increasing and this should not happen — see this '
+    + "function's header for the discontinuity that used to make it happen, and check "
+    + 'whether something has put the attachment back on the rate under solve.',
   );
 }
 
@@ -233,7 +385,7 @@ export interface LineRateQuote {
 export function quoteLineRates(input: LineRateInputs): LineRateQuote {
   const {
     line, yearNumber, members, exposure, purePremiumPer100, clf,
-    pricingAdjustment, layersPlaced, aggregateStopLevel,
+    pricingAdjustment, layersPlaced, aggregateStopLevel, aggregateTermsRetainedPer100,
   } = input;
 
   // ADMIN STAYS ON THE GROSS PURE PREMIUM, matching the engine. The pool
@@ -248,7 +400,7 @@ export function quoteLineRates(input: LineRateInputs): LineRateQuote {
   // header for why one definition is the whole point.
   const { towerQuote, aggregateQuote, expectedCededPer100 } = expectedCededPer100For(
     line, yearNumber, purePremiumPer100,
-    { members, exposure, layersPlaced, aggregateStopLevel },
+    { members, exposure, layersPlaced, aggregateStopLevel, aggregateTermsRetainedPer100 },
   );
   const netPurePremiumPer100 =
     Math.max(0, purePremiumPer100 - expectedCededPer100);

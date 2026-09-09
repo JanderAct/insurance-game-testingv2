@@ -165,13 +165,17 @@ function runArm(flagged: boolean): Record<string, Arm> {
   return acc;
 }
 
+const FB_AT_ENTRY = FORWARD_BOOKING.enabled;
 // ⚠ NAMED BY THE FLAG, NOT BY WHICH ARM SHIPS. They were `shipped` and
 // `flagged`, and at the flip both names started saying the opposite of what
 // they held — the same inversion pregame-acceptance-check's bounds note records
 // and the reason a gate should never encode which arm is current.
 const flagOff = runArm(false);
 const flagOn = runArm(true);
-if (FORWARD_BOOKING.enabled !== true) {
+// ⚠ CAPTURED, NOT HARDCODED, for the reason ratemaking-loop-check records: a
+// literal here asserts WHICH ARM SHIPS, which is a ruling, when what is meant is
+// that this gate puts the flag back.
+if (FORWARD_BOOKING.enabled !== FB_AT_ENTRY) {
   console.log('⚠ FORWARD_BOOKING WAS NOT RESTORED — this gate mutates it and must put it back');
   process.exitCode = 1;
 }

@@ -24,7 +24,7 @@ import {
 import type { GameState, GameSetupSettings, DecisionSet, StartingFinancials, Member, LinePoolState, CoverageLine, LineView } from './types/simulation';
 import { getPredefinedMarketMembers } from './data/memberCatalog';
 import { generateGameInstance } from './utils/instanceGenerator';
-import { processYear, applyLoanAuthorizations, type ProcessYearResult } from './utils/simulationEngine';
+import { processYear, applyLoanAuthorizations, aggregateTermsRetainedPer100, type ProcessYearResult } from './utils/simulationEngine';
 import { runPriorHistory, toHistoricalYear } from './utils/priorHistoryEngine';
 import { defaultDecisionSet } from './utils/decisionDefaults';
 import { SAVE_KEY, writeSave, type SaveOutcome } from './utils/gameSave';
@@ -418,6 +418,32 @@ export default function App() {
     return exposure * lineState.purePremiumPer100 * 10_000;
   }, [gameState, decisionLine]);
 
+  // ⚠ THE AGGREGATE'S AGREED TERMS, FOR THE TOWER TILE ONLY. Once the pool
+  // prices off its own triangle the engine sets the attachment from the
+  // triangle's retained estimate rather than from the rate (see quoteAggregate's
+  // header), so a tile deriving it from `estimatedExpectedLoss` would quote a
+  // layer the engine will not write. Undefined on the held path, which restores
+  // the tile's previous arithmetic exactly.
+  //
+  // ⚠ AND `estimatedExpectedLoss` ABOVE IS STILL LAST YEAR'S RATE. That
+  // approximation is older than this and is deliberate — the tile is indicative
+  // and re-renders live off the CURRENT placements — but it is the reason the
+  // tile's E[R] and the engine's differ even when the terms agree.
+  const estimatedAggregateTermsRetained = React.useMemo(() => {
+    if (!gameState) return undefined;
+    const lineState = gameState.poolState.lines[decisionLine];
+    const rate = aggregateTermsRetainedPer100(decisionLine, {
+      rows: lineState.reserveDevelopment ?? [],
+      allMarketMembers: gameState.poolState.allMarketMembers,
+      membershipHistory: gameState.poolState.membershipHistory,
+    });
+    if (rate === undefined) return undefined;
+    const exposure = lineState.members
+      .filter(m => m.status === 'active')
+      .reduce((s, m) => s + getMemberExposure(m, decisionLine, gameState.currentYearNumber), 0);
+    return exposure * rate * 10_000;
+  }, [gameState, decisionLine]);
+
   // The last computed result for the line currently being edited — pool
   // accounting fields the consequence panel surfaces are not carried on
   // LinePoolState itself (excessCapitalRatio, capitalAdequacyStatus), only on
@@ -578,6 +604,7 @@ export default function App() {
             onChange={handleDecisionsChange}
             yearNumber={gameState.currentYearNumber}
             estimatedExpectedLoss={estimatedExpectedLoss}
+            estimatedAggregateTermsRetained={estimatedAggregateTermsRetained}
             disabled={gameState.isComplete}
             lineView={effectiveLineView}
             lineLoanInfo={lineLoanInfo}

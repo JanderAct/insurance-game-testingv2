@@ -218,12 +218,23 @@ export function quotePropertyAggregate(
   level: number,
   attachmentMultiples: readonly number[],
   layerExpectedCeded: number,
+  termsRetained?: number,
 ): AggregateQuote {
   // E[R] is DERIVED from the layer price, exactly like WC: retained = gross -
   // everything the occurrence layer cedes. Kept on the caller's actual basis so
   // this cannot drift from the engine's own funding numbers.
   const purchased = placed[0] === true;
   const expectedRetained = Math.max(1, expectedGrossLoss - (purchased ? layerExpectedCeded : 0));
+
+  // ⚠ THE TREATY IS AGREED IN ADVANCE AND E[R] IS NOT. `termsBasis` sets the
+  // attachment and the limit; `expectedRetained` sets the DISTRIBUTION those
+  // terms sit on. They are the same number on the held path (nothing is passed)
+  // and they differ on the experience path, where the gross rate is the unknown
+  // of a root-find and an attachment riding on it re-prices itself mid-solve.
+  // The $1M rounding below is exactly what turns that circularity into a
+  // discontinuity — see quoteAggregate's header in reinsuranceTower for the
+  // sawtooth it produces and the grid it was measured on.
+  const termsBasis = Math.max(1, termsRetained ?? expectedRetained);
 
   // ACTUAL-BASIS frequency sufficient statistics (real RQ, real kPr baked into
   // each member's own lambda via expectedPropertyGrossLoss's own formula,
@@ -247,8 +258,8 @@ export function quotePropertyAggregate(
   // guard defensively rather than assert, since a zero-member book is a valid
   // (if unplayed) state.
   if (sumLambda <= 0) {
-    const attachment = Math.round((expectedRetained * attachmentMultiples[level]) / 1e6) * 1e6;
-    const limit = expectedRetained * AGG_LIMIT_MULTIPLE;
+    const attachment = Math.round((termsBasis * attachmentMultiples[level]) / 1e6) * 1e6;
+    const limit = termsBasis * AGG_LIMIT_MULTIPLE;
     return { attachment, limit, expectedRetained, sdRetained: 0, expectedCeded: 0, premium: 0 };
   }
   const beta = sumLambdaSq / (PM.memberFrequencyNoise.shape * sumLambda);
@@ -267,8 +278,8 @@ export function quotePropertyAggregate(
   for (let s = 0; s <= MAX_BINS; s++) panjerMean += g[s] * s * BIN;
   const scale = panjerMean > 0 ? expectedRetained / panjerMean : 1;
 
-  const attachment = Math.round((expectedRetained * attachmentMultiples[level]) / 1e6) * 1e6;
-  const limit = expectedRetained * AGG_LIMIT_MULTIPLE;
+  const attachment = Math.round((termsBasis * attachmentMultiples[level]) / 1e6) * 1e6;
+  const limit = termsBasis * AGG_LIMIT_MULTIPLE;
   const top = attachment + limit;
 
   let eCeded = 0, eCeded2 = 0;

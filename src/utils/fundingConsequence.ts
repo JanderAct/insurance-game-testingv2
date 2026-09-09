@@ -32,7 +32,7 @@
 // pretending it is zero.
 
 import { SLIDER_RANGES } from '../data/defaultAssumptions';
-import { lookupCLF, currentPurePremiumPer100 } from './simulationEngine';
+import { lookupCLF, currentPurePremiumPer100, aggregateTermsRetainedPer100 } from './simulationEngine';
 import type { ExperienceBasis } from './experienceRating';
 import { hasStaticClf, staticClf, staticClfCrossing } from '../data/clfTables';
 import { quoteLineRates } from './linePricing';
@@ -176,6 +176,13 @@ function ratesAt(
   // grossed up against it; handing the panel a different book here than the
   // quote below gets would put the panel back off parity with the engine on
   // exactly the quantity this file exists to keep in step.
+  // ⚠ AND THE AGREED AGGREGATE TERMS, ON BOTH CALLS BELOW. The gross-up solves
+  // against a treaty set from the triangle's own retained estimate rather than
+  // from the rate being solved, and the subtraction inside quoteLineRates has to
+  // use that same treaty or the two stop being inverse — which on this path
+  // would show up as the panel quoting a price the engine does not charge.
+  // Resolved once, from the one function that decides it.
+  const aggregateTerms = aggregateTermsRetainedPer100(line, book.experience);
   const purePremiumPer100 = currentPurePremiumPer100(
     line, book.yearNumber, book.members, book.experience,
     {
@@ -183,6 +190,7 @@ function ratesAt(
       exposure: book.exposure,
       layersPlaced: book.layersPlaced,
       aggregateStopLevel: book.aggregateStopLevel,
+      aggregateTermsRetainedPer100: aggregateTerms,
     },
   );
   const clf = clfFor(line, confidenceLevel, atExpected);
@@ -196,6 +204,7 @@ function ratesAt(
     pricingAdjustment: book.pricingAdjustment,
     layersPlaced: book.layersPlaced,
     aggregateStopLevel: book.aggregateStopLevel,
+    aggregateTermsRetainedPer100: aggregateTerms,
   });
   return {
     clf,

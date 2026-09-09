@@ -237,6 +237,40 @@ function layerMoments(mean: number, cv: number, a: number, b: number) {
 // noise that the stored table could not represent. retainedRiskMoments carries
 // that noise analytically (the B2 term), so multiplying by 1.05 on top would now
 // double-count it.
+//
+// ============================================================================
+// ⚠ `termsRetained` — THE TOWER IS AGREED IN ADVANCE, AND THAT IS A CONTRACT
+// FACT BEFORE IT IS A NUMERICAL ONE.
+//
+// The attachment and the limit are the TREATY. They are negotiated before the
+// year on figures already in hand, and they do not move again. Everything else
+// this function computes — E[R], SD[R], the ceded expectation, the premium — is
+// the pool's CURRENT view of the loss it is buying cover against, and that view
+// is allowed to move.
+//
+// Default (`undefined`) keeps the terms on `expectedRetained`, which is derived
+// from the caller's `expectedGrossLoss`. On the HELD pricing path that is not
+// circular: the held rate is a constant in hand before the year, so terms set
+// from it are terms set in advance. Every held-path call passes nothing here and
+// gets bit-identical arithmetic to what this function always did.
+//
+// It is supplied on the EXPERIENCE path, where the rate is being SOLVED. There
+// the gross rate is the unknown of `grossUpRetainedPurePremium`'s root-find, and
+// letting the attachment ride on it makes the treaty re-price itself while the
+// rate is being calculated. That is a modelling artefact with a measured
+// consequence: with the $1M attachment rounding at propertyAggregate.ts:270,
+// ceded(g) becomes a SAWTOOTH — rising at about +0.72 within a tooth, dropping
+// ~0.0024 whenever the rounded attachment steps a million — so
+// h(g) = g - ceded(g) - retained is a rising staircase that steps OVER zero and
+// the equation the gross-up solves HAS NO ROOT. Fixing the terms removes the
+// drops and leaves the +0.72 slope, so h' is about +0.28 and the root exists and
+// is unique. See grossUpRetainedPurePremium's header for the grid this was
+// measured on.
+//
+// ⚠ THE ROUNDING STAYS. It is how attachments are actually written and BIN
+// ($25k) was chosen against it. The circularity was the defect; the rounding was
+// only where it happened to bite, and a finer lattice would have left the loop
+// in place to return on a tower change or a different rate level.
 // ============================================================================
 export function quoteAggregate(
   line: 'WC' | 'Property',
@@ -245,6 +279,7 @@ export function quoteAggregate(
   expectedGrossLoss: number,
   level: number,
   yearNumber: number,
+  termsRetained?: number,
 ): AggregateQuote {
   if (line === 'Property') {
     // ONE moment pass for the (single) layer, at neutral basis — same role as
@@ -253,7 +288,7 @@ export function quoteAggregate(
     const layerMoms = allLayerRiskMoments('Property', members, yearNumber);
     return quotePropertyAggregate(
       placed, members, expectedGrossLoss, level,
-      AGG_ATTACHMENT_LEVELS.Property, layerMoms[0].expected,
+      AGG_ATTACHMENT_LEVELS.Property, layerMoms[0].expected, termsRetained,
     );
   }
 
@@ -272,8 +307,11 @@ export function quoteAggregate(
   const retained = retainedRiskMoments('WC', effective, members, yearNumber);
   const sdRetained = expectedRetained * retained.sdOverExpected;
 
-  const attachment = expectedRetained * AGG_ATTACHMENT_LEVELS.WC[level];
-  const limit = expectedRetained * AGG_LIMIT_MULTIPLE;
+  // THE TREATY, off the agreed basis — see the ⚠ in this function's header.
+  // Identical to `expectedRetained` whenever no basis is supplied.
+  const termsBasis = Math.max(1, termsRetained ?? expectedRetained);
+  const attachment = termsBasis * AGG_ATTACHMENT_LEVELS.WC[level];
+  const limit = termsBasis * AGG_LIMIT_MULTIPLE;
   const { expected, sd } = layerMoments(expectedRetained, sdRetained / expectedRetained, attachment, attachment + limit);
 
   return {
