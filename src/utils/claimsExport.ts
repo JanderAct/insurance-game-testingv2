@@ -494,13 +494,21 @@ function claimCoverage(
   }
   // The maturation years: carried as cohorts WITH a register (so they reach the
   // Development sheet) but with no result behind them (so no line-sheet rows).
-  // A seed cohort has no developingClaims at all and is excluded by that test,
-  // which is what keeps the two absences apart.
+  //
+  // ⚠ READ FROM developmentByOccurrence, THE SAME LOOKUP THE DEVELOPMENT SHEET
+  // READS, and not from a second traversal of the cohorts. The first version
+  // walked reserveCohorts directly and disagreed with the sheet on two lines out
+  // of three — GL named nothing at all and Property named a shorter range than
+  // the sheet showed — because a cohort reaches that sheet only if it still
+  // carries developingClaims, and "has a register" and "has a live developing
+  // set" are not the same predicate. Deriving the explanation from one source and
+  // the thing it explains from another is how the two drifted, which is the
+  // failure this file's own header warns about two sheets away.
   const known = new Set([...present, ...missing.map(m => m.yearNumber)]);
   const unretained = [...new Set(
-    (poolState?.lines?.[line]?.reserveCohorts ?? [])
-      .filter(c => !c.seeded && !known.has(c.yearNumber))
-      .map(c => c.yearNumber),
+    [...developmentByOccurrence(poolState, line).values()]
+      .map(d => d.accidentYear)
+      .filter(y => !known.has(y)),
   )].sort((a, b) => a - b);
   return { present, missing, neverProduced: present.length === 0 && missing.length === 0, unretained };
 }

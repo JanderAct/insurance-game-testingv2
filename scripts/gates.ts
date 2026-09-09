@@ -551,62 +551,64 @@ const EXPECTED_RED: Record<string, { code: number; why: string }> = {
   // Anyone reading this in a month should be asking why it is still here.
   // ==========================================================================
   'cession-uplift-basis': {
-    code: 1,
-    why: 'LIFETIME DEVELOPMENT CESSION AGAINST INCEPTION CESSION, limit 6% per line and 1.5% pooled. '
-      + 'Reads 374.1% / 408.3% / 57.2% and 241.9% pooled with the flag on. The limit encodes a mean-one '
-      + 'law: if development is noise around the register then over a complete cohort life the reinsurer '
-      + 'pays only the convexity of its own treaty, which is what 6% bounds. Forward booking develops the '
-      + 'gross register up by 2.33 / 3.38 / 1.31 BY DESIGN and the tower takes its share of that, so the '
-      + 'quantity being bounded is now a different quantity. PAIRED CONTROL: flag off, same ten-year '
-      + 'book, reads 0.0% / 1.1% and passes — so this is the flip, not the book. FIX: re-derive the limit '
-      + 'as cession against DEVELOPED loss rather than against inception cession, which is the basis that '
-      + 'survives a mechanism where development is systematic rather than mean-zero.',
-  },
-  'claims-workbook-check': {
-    code: 1,
-    why: 'THE WORKBOOK ASSERTS Gross Incurred === Drawn Occurrence, and gets 0 of 2045 rows. That '
-      + 'identity IS the mean-one law written as a spreadsheet column: it holds only while a cohort is '
-      + 'booked at its register. Under forward booking the carried estimate leaves the drawn value on day '
-      + 'one and climbs back, so the two columns are equal at maturity and nowhere before it. PAIRED '
-      + 'CONTROL: flag off, same book, the identity holds. ⚠ A SECOND, UNRELATED FAILURE IN THIS GATE WAS '
-      + 'A REAL DEFECT AND IS FIXED IN THIS COMMIT, not deferred: the ten-year book put accident years on '
-      + 'the Development sheet that the line sheets had no rows for, because maturation-year results are '
-      + 'deliberately not carried. claimCoverage now names that third kind of absence and the gate asserts '
-      + 'the sheet EXPLAINS it. FIX for what remains: compare Gross Incurred against the cohort\'s CURRENT '
-      + 'booked register, not its drawn value.',
+    code: 2,
+    why: 'THE DENOMINATOR IS THE RETIRED QUANTITY, NOT THE LIMIT. It divides lifetime development '
+      + 'cession by INCEPTION cession — scale-free under a mean-one law, where development is noise about '
+      + 'the register and anything the reinsurer pays on it is option value, which 6% bounds. Forward '
+      + 'booking books at the CONTRACTED register, so inception cession is computed on a deliberately '
+      + 'small number and the whole climb back — 2.33x / 3.38x / 1.31x — arrives as development. Reads '
+      + '374.1% / 408.3% / 57.2% and 241.9% pooled, and none of it is a free lunch: it is the same treaty '
+      + 'on the loss the cohort always had, recognised later. PAIRED CONTROL: flag off, same ten-year '
+      + 'book, 0.0% / 1.1%, passes. SUCCESSOR, named at the gate: normalise by cede(matured register) - '
+      + 'cede(contracted register), which is ~1 under symmetric routing and reads the existing 6% directly '
+      + 'as option value on top. That needs the tower re-run over each cohort matured register, which the '
+      + 'file does not carry — a measurement commit, not a re-pointing. ⚠ EXIT 2: the four uplift limits '
+      + 'are the ONLY assertions in this file, so a generic code would make the whole file unwatchable. '
+      + 'Anything that is not one of those four still exits 1.',
   },
   'audit-formula-check': {
-    code: 1,
-    why: '3201 findings across 2 distinct rows — one systematic cause, not 3201. The audit page derives '
-      + 'rows on the same booked-at-register assumption the workbook does, so every instance of those two '
-      + 'rows disagrees with its own printed operands once the estimate develops away from the register. '
-      + 'PAIRED CONTROL: flag off, same ten-year book, ALL formula rows reconcile in every arm and every '
-      + 'prose claim matches. FIX: re-derive the two rows against the booked estimate. Until then the '
-      + 'audit page states a relationship the engine no longer has, which is why this is red rather than '
-      + 'silent.',
+    code: 2,
+    why: 'ONE IDENTITY, AND IT ACCOUNTS FOR ALL 3201 FINDINGS. `netUltimateLoss = grossUltimateLoss - '
+      + 'reinsuranceRecovery` is false on the shipped mechanism: the engine computes `bookedGrossUltimate '
+      + '- reinsuranceRecovery`, where bookedGrossUltimate is grossUltimateLoss put through the booking '
+      + 'contraction — and that intermediate is NOT RECORDED on the result. Two row names carry it (Net '
+      + 'Ultimate Loss + LAE, and Provision for claims net, which sums it) and both are out by '
+      + '86,806,261.5843 to the cent in every arm and scope, which is the proof they are one cause. '
+      + '⚠ THIS IS A PLAYER-FACING DEFECT, NOT ONLY A STALE ASSERTION: the audit page prints a Gross and '
+      + 'a Net differing by 3.54x at pool scope with no row between them saying why, so the booking '
+      + 'markdown is invisible to the reader. FIX: record bookedGrossUltimate and give it a row, beside '
+      + 'the "Recovery deferred by optimistic booking" row that already exists for its cession twin. That '
+      + 'is an engine field and a new player-facing row, so it is its own commit. PAIRED CONTROL: flag '
+      + 'off, same ten-year book, all formula rows reconcile in every arm. ⚠ EXIT 2, classified on two '
+      + 'metric names and one identity label — a finding on ANY other row exits 1 and is not excused.',
   },
-  'reinsurance-tower-check': {
-    code: 1,
-    why: 'DECLINING PROPERTY\'S TOWER NO LONGER ZEROES REINSURANCE, and the new behaviour is arguably '
-      + 'the correct one. The assertion assumed a pool with no in-force cession: seed cohorts have no '
-      + 'claim register, so they never ceded, so declining cover left nothing behind. The ten-year book '
-      + 'is written UNDER a tower and its cohorts carry real cededDevelopmentToDate, so a pool that '
-      + 'declines cover this year still has recoveries developing on prior years — which is what a real '
-      + 'pool does. PAIRED CONTROL: flag off, same book, passes, because without forward booking those '
-      + 'cohorts develop mean-one and cede almost nothing. FIX: assert that declining zeroes CURRENT-YEAR '
-      + 'cession and premium, and that prior-year recoveries continue — the property actually wanted.',
-  },
-  'cohort-stock-check': {
-    code: 1,
-    why: 'PROPERTY REACHES COHORT AGE 16 AGAINST A BOUND OF 15 — analytic close age 9 x an AGE_SLACK of '
-      + '1.6 "for development". The slack exists for exactly this and is now one year short: forward '
-      + 'booking raises a cohort\'s ultimate as it ages, so paid-share-OF-ultimate lags and the '
-      + 'share-based close rule fires later. ⚠ THE STOCK ITSELF IS FINE and that is the part worth '
-      + 'reading — cohorts plateau at 0.0% growth between years 40 and 60, WC peaks at 36 against a bound '
-      + 'of 60, GL at 11 against 15, and the save decelerates. Only Property\'s slack is exceeded, by one '
-      + 'year. PAIRED CONTROL: flag off, same book, Property peaks at 8. FIX: re-derive AGE_SLACK against '
-      + 'the booked-development climb rather than picking a larger round number.',
-  },
+  // ⚠ THREE OF THE FIVE ARE OUT OF THIS MAP, RE-DERIVED RATHER THAN RE-EXCUSED.
+  // Each was measured to fail on a plausible defect after restatement, because a
+  // restatement that passes on both arms has been widened rather than re-pointed:
+  //
+  //   cohort-stock-check       AGE_SLACK (1.6, chosen) DELETED. The delay was
+  //     never a payment lag — processIbner trues paid up to cumulativePaid(age+2)
+  //     of the current ultimate, so unpaid/ultimate tracks the pattern however far
+  //     the estimate climbed. What holds a cohort open is the maturity gate, so
+  //     the floor is where TRIANGLE_OPEN_SHARE reaches zero: 30 / 10 / 15. Bound
+  //     is max(patternCloseAge, floor) + 1 = 38 / 11 / 16 against measured
+  //     36 / 11 / 16, two lines exactly on it. PROVEN: disabling the true-up
+  //     drives WC to 59 and trips the plateau at 14.1%.
+  //   claims-workbook-check    Gross Incurred is the RAW drawn claim and Drawn
+  //     Occurrence is the occurrence AS BOOKED, so they separate by the
+  //     contraction — and not by a constant, since A x^k with k<1 contracts a big
+  //     claim harder (0.712 small, 0.400 large). Asserted as
+  //     drawn === initialEstimate(line, gross): predicted 1482.8 vs measured
+  //     1482.64. PROVEN: scaling the ledger 1.001 fails every developed WC row.
+  //     ⚠ Perturbing the CONSTANT does not fail it, deliberately — see the note
+  //     at the assertion for why that is the right scope.
+  //   reinsurance-tower-check  `net === gross` was a proxy for "no cession" and
+  //     stopped being one: netUltimateLoss is net of reinsurance AND of the
+  //     booking markdown. On a fully declined tower, cost / recovery / aggregate
+  //     are all exactly 0 and net - gross runs -1.94M on the contraction alone.
+  //     Re-pointed at the three current-year items; prior-year development on
+  //     cohorts written UNDER cover is reported, not asserted zero. PROVEN:
+  //     ignoring the decline on layer 0 fails all three decline assertions.
   'actuarial-memo-check': {
     code: 1,
     why: 'THE MEMO\'S DEFINITION OF "MATURED" IS THE COHORT HORIZON. It asserts that an accident year '

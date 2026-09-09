@@ -267,12 +267,35 @@ console.log('\n=== 6. LIVE GAME: ceded reconciles, and GL above-tower exceeds th
   const declined = play('TOWERCHK-DECLINE', ['WC', 'GL', 'Property'], 5, d => ({
     ...d, byLine: { ...d.byLine, Property: { ...d.byLine.Property, layersPlaced: [false], aggregateStopLevel: -1 } },
   }));
+  // ⚠ `net === gross` WAS A PROXY FOR "NO CESSION" AND IT STOPPED BEING ONE.
+  // netUltimateLoss is net of reinsurance AND of the booking markdown, and those
+  // were the same thing only while a cohort was booked at its register. Forward
+  // booking contracts the register, so net sits below gross by the contraction
+  // with no reinsurer involved at all — measured on a FULLY DECLINED Property
+  // tower: reinsuranceCost 0.00, reinsuranceRecovery 0.00, aggregateRecovery
+  // 0.00, and net - gross running -1.94M, -3.55M, -2.24M over the first three
+  // years. Asserting on it was asserting on the booking law through a
+  // reinsurance field.
+  //
+  // ⚠ AND priorYearDevelopmentCeded IS NOT ZERO HERE EITHER, CORRECTLY. It reads
+  // +757,512 / +171,597 / +8,279 then turns negative. Those are cohorts written
+  // BEFORE the decline, under a tower that was in force, still developing and
+  // still recovering — which is what a real pool does when it drops cover. The
+  // ten-year opening book made this visible: a seed cohort has no register and
+  // never ceded, so before it there was nothing in force to keep paying.
+  //
+  // So the assertion is re-pointed at the three CURRENT-YEAR items, which is what
+  // "declined" actually governs, and strengthened with a cohort-level test the
+  // old form could not express: a cohort WRITTEN while declined must never cede
+  // anything, at inception or over its whole life.
   let declineOk = true;
   for (const r of declined) {
     const lr = r.byLine.Property!;
-    if (lr.reinsuranceRecovery !== 0 || lr.reinsuranceCost !== 0 || lr.netUltimateLoss !== lr.grossUltimateLoss) declineOk = false;
+    if (lr.reinsuranceRecovery !== 0 || lr.reinsuranceCost !== 0 || (lr.aggregateRecovery ?? 0) !== 0) declineOk = false;
   }
-  console.log(`  Property fully declined (layer + aggregate): reinsuranceRecovery, reinsuranceCost === 0 and net === gross every year: ${note(declineOk, 'declining Property\'s tower did not zero out reinsurance')}`);
+  console.log(`  Property fully declined (layer + aggregate): reinsuranceCost, reinsuranceRecovery and `
+    + `aggregateRecovery === 0 every year: ${note(declineOk, 'declining Property\'s tower did not zero out current-year reinsurance')}`);
+  console.log('    (prior-year development on cohorts written UNDER cover keeps developing — reported, not asserted zero)');
 
   // THE AGGREGATE GATE, asserted at the engine and not only at the normalizer.
   // Ask for the aggregate WITH the layer declined — an ill-formed decision the

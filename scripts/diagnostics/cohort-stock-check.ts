@@ -64,7 +64,7 @@ import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
-import { LINE_PAYOUT_PATTERN } from '../../src/data/defaultAssumptions';
+import { FORWARD_BOOKING, IBNER_HORIZON, LINE_PAYOUT_PATTERN, TRIANGLE_OPEN_SHARE } from '../../src/data/defaultAssumptions';
 import { COHORT_CLOSE_SHARE, unpaidShare } from '../../src/utils/payoutPattern';
 import type { CoverageLine, GameState } from '../../src/types/simulation';
 
@@ -78,15 +78,49 @@ const LINES: CoverageLine[] = ['WC', 'GL', 'Property'];
 // re-tuning every time a parameter moves — the exact property the share-based
 // rule was adopted to remove.
 //
-// The allowance on top is for DEVELOPMENT: a cohort that deteriorated late sits
-// above its pattern share for a few years before paying back down, so the
-// realised close age runs past the analytic one. It is a factor rather than a
-// constant so it scales with the line's own tail.
-const AGE_SLACK = 1.6;
+// ⚠ THE DEVELOPMENT ALLOWANCE IS NOW DERIVED TOO, AND AGE_SLACK IS GONE.
+//
+// It was a factor of 1.6 "for development", chosen rather than computed, and
+// forward booking made it one year short on Property — measured age 16 against a
+// bound of 15. The fix is not a larger factor. What delays a close is not a
+// payment lag at all: under FORWARD_BOOKING processIbner TRUES PAID UP to
+// `newUltimate x cumulativePaid(age + 2)` every year, so unpaid/ultimate tracks
+// the pattern exactly however far the ultimate has climbed. The close test is
+// therefore satisfied on schedule.
+//
+// What holds a cohort open is the MATURITY GATE. A cohort may not close while it
+// is developing, and with the flag on `developing` reads
+//
+//     c.age < c.horizon || openShareAtStep(line, c.age + 1) > 0
+//
+// so the binding age is where the line's OPEN-SHARE CURVE reaches zero — 30 on
+// WC, 10 on GL, 15 on Property, read off TRIANGLE_OPEN_SHARE rather than typed.
+// With the flag off the same gate is just the drawn horizon, whose maximum is
+// IBNER_HORIZON[line].max. One expression covers both arms, and neither carries
+// a chosen number.
+//
+// ⚠ THE +1 IS THE STEP, NOT A CUSHION. A cohort stops developing at the start of
+// a step and the close test fires within that same step, so the oldest age ever
+// observed is one past the floor. Derived: WC 38, GL 11, Property 16 with the
+// flag on; measured 36 / 11 / 16. Two lines sit exactly ON it, which is the point
+// — a rule that closes one year later than the curve and the pattern jointly
+// allow now fails, where 1.6x would have absorbed it.
+function developmentFloor(line: CoverageLine): number {
+  if (!FORWARD_BOOKING.enabled) return IBNER_HORIZON[line].max;
+  const curve = TRIANGLE_OPEN_SHARE[line] ?? [];
+  let last = 0;
+  for (let i = 0; i < curve.length; i++) if (curve[i] > 0) last = i + 1;
+  return last;
+}
 function analyticCloseAge(line: CoverageLine): number {
   let t = 1;
   while (t < 800 && unpaidShare(LINE_PAYOUT_PATTERN[line], t) >= COHORT_CLOSE_SHARE) t++;
   return t;
+}
+/** The oldest age any cohort may reach: whichever of the two gates binds, plus
+ *  the step in which the close fires. Nothing here is chosen. */
+function ageBound(line: CoverageLine): number {
+  return Math.max(analyticCloseAge(line), developmentFloor(line)) + 1;
 }
 const PLATEAU_TOLERANCE = 0.10;   // year 60 may exceed year 40 by no more than this
 // Growth over years 40-60 as a share of growth over 20-40. Linear accumulation
@@ -149,13 +183,14 @@ for (const l of LINES) {
   const c60 = mean(at60[l].map(s => s.count));
   const growth = c40 > 0 ? c60 / c40 - 1 : 0;
   const analytic = analyticCloseAge(l);
-  const bound = Math.ceil(analytic * AGE_SLACK);
+  const bound = ageBound(l);
   const badGrowth = growth > PLATEAU_TOLERANCE;
   const badAge = worstAge[l] > bound;
   if (badGrowth) fail(`${l}: open cohorts grew ${(growth * 100).toFixed(1)}% between year 40 and year 60 `
     + `(${c40.toFixed(1)} -> ${c60.toFixed(1)}), limit ${(PLATEAU_TOLERANCE * 100).toFixed(0)}% — the stock is not bounded`);
   if (badAge) fail(`${l}: a cohort reached age ${worstAge[l]}, past the bound of ${bound} `
-    + `(analytic close age ${analytic} x ${AGE_SLACK} for development) — the close rule is not terminating`);
+    + `(pattern close age ${analytic}, development floor ${developmentFloor(l)}, +1 for the closing `
+    + 'step) — the close rule is not terminating');
   console.log(`  ${l.padEnd(10)} ${c40.toFixed(1).padStart(5)} ${c60.toFixed(1).padStart(7)} `
     + `${((growth * 100).toFixed(1) + '%').padStart(9)} ${String(analytic).padStart(20)} `
     + `${String(worstAge[l]).padStart(16)} ${String(bound).padStart(7)}  ${badGrowth || badAge ? 'FAIL' : 'ok'}`);

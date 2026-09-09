@@ -314,6 +314,7 @@ const findings: Finding[] = [];
 // ============================================================================
 const armNonZero: Record<string, Set<string>> = {};
 const allRowsSeen = new Set<string>();
+const failedIdentities: string[] = [];
 let failures = 0;
 let checked = 0;
 const byKind: Record<string, number> = {};
@@ -917,7 +918,7 @@ console.log('  fields, so it checks what actually ships.\n');
     const ratio = worst[idy.label];
     if (ratio === undefined) continue;
     const ok = ratio <= 1;
-    if (!ok) failures++;
+    if (!ok) { failures++; failedIdentities.push(idy.label); }
     console.log(`  ${ok ? 'OK  ' : 'FAIL'}  ${idy.label}`);
     console.log(`          worst gap ${ratio.toFixed(2)}x its bound (${idy.why})`);
   }
@@ -1120,6 +1121,47 @@ if (nonEmpty.length === 0) {
   console.log(RULE);
 }
 
-process.exitCode =
-  (coverageFailures.length === 0
-    && defects.length === 0 && handFindings.length === 0 && proseFindings.length === 0 && failures === 0) ? 0 : 1;
+// ============================================================================
+// ⚠ THE EXIT CODE IS CLASSIFIED, AND THAT IS THE POINT OF IT.
+//
+// One identity is knowingly false on the shipped mechanism —
+//   netUltimateLoss = grossUltimateLoss - reinsuranceRecovery
+// — and it accounts for EVERY finding this check produces: 800 defects, the 800
+// hand-check findings that are the same rows re-derived from their printed
+// operands, and the one export identity. It is false because the engine computes
+// `netUltimateLoss = bookedGrossUltimate - reinsuranceRecovery` where
+// bookedGrossUltimate is grossUltimateLoss put through the booking contraction,
+// and that intermediate is NOT RECORDED on the result. The page therefore prints
+// a Gross and a Net that differ by 3.54x at pool scope with no row between them
+// saying why — a player-facing defect, and the fix is one recorded field rather
+// than a change to this file.
+//
+// ⚠ SO IT EXITS 2, NOT 1, AND A NEW FAILURE STILL EXITS 1. Excusing this on the
+// generic code would have made every other row in the audit page unwatched:
+// 3201 findings excused as one expectation, and a 3202nd invisible inside it.
+// The classifier below is deliberately narrow — one metric name and one identity
+// label — so anything else, on any row, is a regression and is reported as one.
+// ⚠ TWO ROW NAMES, ONE CAUSE, AND THE GAP IS THE PROOF. 'Provision for claims,
+// net' sums the net loss with prior development, so it inherits the same error
+// its first term carries — both rows are out by 86,806,261.5843, to the cent, in
+// every arm and at every scope. Listing them as two expectations would invite
+// the next reader to treat them as two problems.
+const KNOWN_METRICS = ['Net Ultimate Loss + LAE', 'Provision for claims, net'];
+const KNOWN_IDENTITY = 'netUltimateLoss = grossUltimateLoss - reinsuranceRecovery';
+const unexpected =
+  defects.filter(f => !KNOWN_METRICS.includes(f.metric)).length
+  + handFindings.filter(f => !KNOWN_METRICS.includes(f.metric)).length
+  + proseFindings.length
+  + coverageFailures.length
+  + failedIdentities.filter(l => l !== KNOWN_IDENTITY).length;
+const onlyKnown = unexpected === 0
+  && (defects.length > 0 || handFindings.length > 0 || failures > 0);
+
+if (onlyKnown) {
+  console.log('');
+  console.log(`EXPECTED RED — every finding is ${KNOWN_METRICS.join(' / ')}, one cause rather than`);
+  console.log('two: the engine books gross through the contraction before netting');
+  console.log('reinsurance, and that intermediate is not recorded. Exit 2, so a finding on ANY');
+  console.log('other row still exits 1 and is not excused by this.');
+}
+process.exitCode = unexpected > 0 ? 1 : (onlyKnown ? 2 : 0);

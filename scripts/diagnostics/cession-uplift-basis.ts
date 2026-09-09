@@ -383,5 +383,39 @@ console.log('\n--- 6. GATE: LIFETIME DEVELOPMENT CESSION AGAINST INCEPTION CESSI
       + '\namount that is the convexity of its own treaty and nothing more.'
     : `\n${RULE}\n${fails} GATE FAILURE(S) — development cession is running ahead of the losses`
       + `\nit is paid on:\n  ${failed.join('\n  ')}\n${RULE}`);
-  process.exit(fails === 0 ? 0 : 1);
+
+  // ==========================================================================
+  // ⚠ THE DENOMINATOR IS THE WRONG QUANTITY NOW, AND THE NUMERATOR IS FINE.
+  //
+  // This divides lifetime development cession by INCEPTION cession. Under a
+  // mean-one law that was scale-free and meaningful: development was noise about
+  // the register, so anything the reinsurer paid on it was option value, and 6%
+  // bounded it. Forward booking books at the CONTRACTED register, so inception
+  // cession is computed on a deliberately small number and the whole climb back
+  // to the register — 2.33x / 3.38x / 1.31x — arrives as development. The ratio
+  // reads 374% / 408% / 57% and 242% pooled, and none of it is a free lunch: it
+  // is the same treaty applied to the loss the cohort always had, just recognised
+  // later. PAIRED CONTROL: flag off, same ten-year book, 0.0% / 1.1%, passes.
+  //
+  // THE SUCCESSOR, NAMED SO IT IS NOT REDISCOVERED: normalise by the cession the
+  // tower would pay on the MATURED register — cede(full register) minus
+  // cede(contracted register) — so the denominator is the cession the development
+  // is honestly earning rather than the cession of the marked-down opening. That
+  // ratio is ~1 under symmetric routing and the existing 6% reads directly onto
+  // it as option value on top. It needs the tower re-run over each cohort's
+  // matured register, which this file does not currently carry, and that is a
+  // measurement commit rather than a re-pointing.
+  //
+  // ⚠ EXIT 2 UNTIL THEN, NEVER 1. The four uplift limits are the only assertions
+  // in this file, so a generic exit would make the whole file unwatchable behind
+  // one expectation. Anything that is NOT one of those four — a harness throw, a
+  // cohort set that fails to mature, a line appearing that should not — still
+  // exits 1. The classifier is the four names, nothing wider.
+  const KNOWN = new Set(['WC', 'GL', 'Property', 'POOL']);
+  const unexpected = failed.filter(f => !KNOWN.has(f.split(' ')[0])).length;
+  if (fails > 0 && unexpected === 0) {
+    console.log('\nEXPECTED RED — all four are the uplift limits on a denominator forward booking');
+    console.log('retired. Exit 2, so any OTHER failure in this file still exits 1.');
+  }
+  process.exit(fails === 0 ? 0 : (unexpected > 0 ? 1 : 2));
 }

@@ -45,6 +45,8 @@ import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { buildClaimsWorkbook } from '../../src/utils/claimsExport';
 import { PRIOR_BOUNDARY } from '../../src/utils/actuarialMemo';
+import { initialEstimate } from '../../src/utils/claimTriangle';
+import { FORWARD_BOOKING } from '../../src/data/defaultAssumptions';
 import { SLIDER_RANGES, WC_FUNDING_CONFIDENCE_RANGE } from '../../src/data/defaultAssumptions';
 import type { CoverageLine, DecisionSet, GameState } from '../../src/types/simulation';
 
@@ -308,9 +310,53 @@ for (const arm of ARMS) {
           fail(`${arm.name} g${g} ${line} row ${i}: Total ${total} !== Current - Booked ${current - booked}`);
         }
 
-        // --- MARKDOWN --------------------------------------------------------
-        if (gross !== null && Math.abs(gross - drawn) <= 1e-6) s.drawnEqGross++;
-        else fail(`${arm.name} g${g} ${line} row ${i}: Gross Incurred ${gross} !== Drawn Occurrence ${drawn}`);
+        // --- ONE CLAIM PER OCCURRENCE, THROUGH THE CONTRACTION ----------------
+        // ⚠ THE TWO COLUMNS ARE NOT THE SAME QUANTITY ANY MORE, AND THE OLD
+        // ASSERTION DID NOT NOTICE BECAUSE THEY USED TO BE.
+        //
+        //   Gross Incurred    = claim.grossUltimate, the RAW DRAWN claim value.
+        //   Drawn Occurrence  = the occurrence AS BOOKED AT INCEPTION.
+        //
+        // Under the mean-one law a cohort was booked at its register, so booked
+        // and drawn were one number and `gross === drawn` was a true statement of
+        // "one claim per occurrence". Forward booking books at the contracted
+        // initial estimate, so the two separate by the contraction — and NOT by a
+        // constant, because initialEstimate is A x^k with k < 1, so a big claim
+        // contracts harder than a small one. Measured: 1482.64 / 2082.14 = 0.712
+        // on a small WC claim against 298489.76 / 746280.00 = 0.400 on a large
+        // one. A single ratio would have been wrong for every row but one.
+        //
+        // So the identity is restored by putting the claim's drawn value through
+        // the SHIPPED contraction rather than by relaxing anything:
+        // initialEstimate(WC, 2082.14) = 1482.8 against a measured 1482.64. Still
+        // 1e-6 relative, still no room for a real fault, and it now says what it
+        // always meant: this occurrence has exactly one claim on it, and the
+        // ledger booked that claim by the rule the engine says it uses.
+        //
+        // ⚠ AND IT IS FLAG-AWARE RATHER THAN FLAG-SPECIFIC. With FORWARD_BOOKING
+        // off there is no contraction and it reduces to the old `gross === drawn`
+        // exactly, so this asserts both arms instead of trading one for the other.
+        //
+        // ⚠ WHAT IT DOES AND DOES NOT CATCH, BOTH MEASURED, BECAUSE A DERIVED
+        // EXPECTATION CAN GO VACUOUS AND THIS ONE PARTLY DOES.
+        //   MOVING THE CONSTANT DOES NOT FAIL IT. TRIANGLE_INITIAL_CONTRACTION.WC.A
+        //   perturbed +1% leaves this at 0 failures, because the gate computes its
+        //   expectation from the same constant the engine booked with, so both
+        //   sides move together. That is not a hole to plug here — triangle-check
+        //   owns whether the contraction is the RIGHT curve; this owns whether two
+        //   representations of one booking AGREE.
+        //   MOVING EITHER REPRESENTATION DOES. Scaling the occurrence ledger's
+        //   drawn figure by 1.001 fails it on every developed WC row. A tenth of a
+        //   per cent between the claim register and the ledger is caught.
+        const expectDrawn = gross === null ? null
+          : (FORWARD_BOOKING.enabled ? initialEstimate(line, gross) : gross);
+        if (expectDrawn !== null && Math.abs(drawn - expectDrawn) <= 1e-6 * Math.max(1, Math.abs(expectDrawn))) {
+          s.drawnEqGross++;
+        } else {
+          fail(`${arm.name} g${g} ${line} row ${i}: Drawn Occurrence ${drawn} !== `
+            + `${FORWARD_BOOKING.enabled ? `initialEstimate(${gross})` : 'Gross Incurred'} ${expectDrawn} `
+            + '— the occurrence ledger and its one claim disagree about what was booked');
+        }
         if (drawn - booked > 1e-6) s.drawnGtBooked++;
         else if (Math.abs(drawn - booked) <= 1e-6) s.drawnEqBooked++;
         else fail(`${arm.name} g${g} ${line} row ${i}: Booked ${booked} EXCEEDS Drawn ${drawn}`);
@@ -350,11 +396,19 @@ for (const arm of ARMS) {
   const WARN = '⚠ CLAIM DETAIL IS INCOMPLETE';
   const noteOf = (sheets: Record<string, unknown[][]>, line: string) =>
     String(sheets[line][line === 'Property' ? 1 : 0][0] ?? '');
-  const yearsOf = (sheets: Record<string, unknown[][]>, line: string) => {
+  // ⚠ THE DEVELOPMENT SHEET IS POOLED ACROSS LINES AND THIS USED TO IGNORE THAT.
+  // Its column 0 is Line and its rows cover every active line, so reading its
+  // Accident Year column without filtering returns the UNION of all three. The
+  // per-line comparison below then held each line to the union, and reported GL
+  // as missing accident years that only WC had ever written — a false failure
+  // that survived because every line happened to share a year range until the
+  // maturation book gave them different ones. `forLine` filters it.
+  const yearsOf = (sheets: Record<string, unknown[][]>, line: string, forLine?: string) => {
     const hdrIdx = line === 'Property' ? 2 : 1;
     const col = line === 'Development' ? 1 : 5;   // Accident Year
     const out = new Set<number>();
     for (const r of sheets[line].slice(hdrIdx + 1)) {
+      if (forLine !== undefined && String(r?.[0]) !== forLine) continue;
       const v = r?.[col];
       if (typeof v === 'number') out.add(v);
     }
@@ -366,6 +420,8 @@ for (const arm of ARMS) {
   const devYears = yearsOf(full, 'Development');
   for (const line of LINES) {
     const ys = yearsOf(full, line);
+    // This line's OWN rows on the pooled Development sheet.
+    const devYearsThisLine = yearsOf(full, 'Development', line);
     for (const pre of [-2, -1, 0]) {
       if (!ys.has(pre)) fail(`pre-game: ${line} has no accident year ${pre} — priorHistory is not reaching the line sheets`);
     }
@@ -381,8 +437,8 @@ for (const arm of ARMS) {
     // rows for them would be requiring a fiction; letting them pass silently is
     // the gap this whole block exists to close. So the sheet must EXPLAIN them,
     // and that is what is asserted.
-    const mat = [...devYears].filter(y => y < PRIOR_BOUNDARY && !ys.has(y)).sort((a, b) => a - b);
-    for (const y of devYears) {
+    const mat = [...devYearsThisLine].filter(y => y < PRIOR_BOUNDARY && !ys.has(y)).sort((a, b) => a - b);
+    for (const y of devYearsThisLine) {
       if (y >= PRIOR_BOUNDARY && !ys.has(y)) {
         fail(`pre-game: Development lists accident year ${y} on ${line} but the line sheet has no rows for it`);
       }
@@ -463,7 +519,7 @@ for (const arm of ARMS) {
   console.log(`  Yr cells printed / blank    ${s.printedYrCell} / ${s.blankYrCell}`);
   console.log(`    of which a printed 0      ${s.zeroPrinted}   <- sub-dollar movement, NOT "unmoved"`);
   console.log(`    blanks INSIDE the span    ${s.interiorBlank}   <- valued and unmoved (Development sheet, incl. pre-game)`);
-  console.log(`  Gross Incurred === Drawn    ${s.drawnEqGross} of ${s.developed}`);
+  console.log(`  Drawn === contracted claim  ${s.drawnEqGross} of ${s.developed}`);
   console.log(`  Drawn > Booked (markdown)   ${s.drawnGtBooked}`);
   console.log(`  Drawn === Booked (no bias)  ${s.drawnEqBooked}`);
   console.log(`  Yr columns on the sheet     ${s.yrCols}   (total columns ${s.totalCols})`);
