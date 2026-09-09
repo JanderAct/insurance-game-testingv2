@@ -371,6 +371,21 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
       csvValue: r => roundDollars(r.grossUltimateLoss),
     },
     {
+      // ⚠ THE MISSING STEP BETWEEN GROSS AND NET, AND ITS ABSENCE WAS THE DEFECT.
+      // Gross above is the DRAWN register — the right figure, and the one the
+      // tower attaches to. Net below is what the pool BOOKS. Between them sits
+      // the optimistic booking markdown, and with FORWARD_BOOKING on that is a
+      // factor of 3.54 at pool scope. The page printed both ends and nothing in
+      // between, so an actuary reading it down the column saw a 3.54x drop with
+      // no cause on the page — on the one exhibit whose entire job is showing the
+      // arithmetic. It reads identical to Gross whenever there is no markdown.
+      key: 'bookedGrossUltimate',
+      category: 'Losses',
+      label: 'Booked Gross Ultimate (after optimistic booking)',
+      value: r => formatCurrency(r.bookedGrossUltimate ?? r.grossUltimateLoss),
+      csvValue: r => roundDollars(r.bookedGrossUltimate ?? r.grossUltimateLoss),
+    },
+    {
       key: 'shockLossIncurred',
       category: 'Losses',
       label: 'Shock Loss Incurred',

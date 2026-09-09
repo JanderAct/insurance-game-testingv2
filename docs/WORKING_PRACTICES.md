@@ -555,6 +555,63 @@ detector keyed on uniformity, a bound derived from observed magnitudes, a
 coverage counter — anything inferred FROM the captured set changes meaning when
 the set changes, and the loss is silent because nothing fails.
 
+**DERIVED-EXPECTATION BLINDNESS — the gate computes its expectation from the
+thing under test.** The field is watched and the configuration reaches it, so
+neither answer above applies. The gate cannot fail because both sides of its
+comparison move together.
+
+This project has around twenty instances of a gate that could not fail because
+its bound was too LOOSE. This is the first where one could not fail because its
+bound was too well DERIVED, and it is worth stating as a rule because the
+instinct that produced it — stop hardcoding numbers, derive them from the
+shipped constants — is otherwise correct and is written down elsewhere in this
+file.
+
+**The rule: a gate whose expectation is derived from the thing under test can
+only prove that two representations AGREE. It cannot prove either is right.**
+
+Measured, at the maturation-book commit. `claims-workbook-check` asserts
+`Drawn Occurrence === initialEstimate(line, Gross Incurred)` — the occurrence
+ledger against the claim register put through the shipped contraction.
+Perturbing `TRIANGLE_INITIAL_CONTRACTION.WC.A` by +1% leaves it at **zero
+failures**, because the gate computes its expectation from the same constant the
+engine booked with. Perturbing either REPRESENTATION does fail it: scaling the
+ledger's drawn figure by 1.001 fails every developed WC row.
+
+Neither form is better than the other and the choice is not the point:
+
+| | can be wrong | can be silent |
+|---|---|---|
+| hardcoded bound | yes — it drifts from the engine | no — it is independent, so it still fires |
+| derived expectation | no — it tracks the engine | yes — it tracks the engine all the way into a shared error |
+
+**So the obligation is to STATE THE SCOPE SPLIT at the assertion, naming which
+gate owns the other half.** For the case above: `triangle-check` owns whether the
+contraction is the right curve; the workbook gate owns whether two views of it
+agree. Written down, that is two gates covering one mechanism. Left unwritten, it
+is one gate that looks like it covers both and covers neither.
+
+**And the test for it is mechanical: perturb the SHARED INPUT, not just the
+output.** A perturbation that only ever moves one side will not reveal this. If
+moving a constant the gate reads leaves the gate green, the gate is not watching
+that constant — say so at the assertion rather than discovering it the next time
+the constant is wrong.
+
+**⚠ AND THE TRAP CATCHES THE PERTURBATION ITSELF, WHICH IS HOW IT WAS MET THE
+SECOND TIME — while writing this section.** `bookedGrossUltimate` was recorded so
+that `netUltimateLoss = bookedGrossUltimate - reinsuranceRecovery` could be
+asserted. The first attempt to prove that assertion could still fail perturbed
+`bookedGrossUltimate` AT ITS DEFINITION — and the gate stayed green, because
+`netUltimateLoss` is computed FROM that definition, so both sides moved together
+exactly as the constant had. Perturbing the RECORDED value instead — the same
+expression, one line later, where it enters the result object — fails it on all
+three finding kinds at 0.01%.
+
+So the rule has a corollary worth as much as the rule: **perturb where the two
+paths SEPARATE, not where they share a source.** Upstream of the fork, every
+perturbation is invisible by construction, and a green run there proves the gate
+is well-derived rather than that it is watching anything.
+
 ## Rulings and stopping
 - **A failed verification check stops the work UNCOMMITTED. Whether it blocks is the user's call, not
   Claude Code's.** Diagnosing the cause is exactly right; deciding it doesn't count is not. This applies

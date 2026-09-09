@@ -848,10 +848,15 @@ const EXPORT_IDENTITIES: {
     // failure, which was the check being wrong, not the data.
     bound: 4 * 0.5, why: '4 columns each rounded to whole dollars in the export',
     check: v => [v.poolPremium + v.adminExpense + v.reinsuranceCost, v.totalMemberCharge] },
-  { label: 'netUltimateLoss = grossUltimateLoss - reinsuranceRecovery',
-    parts: ['netUltimateLoss', 'grossUltimateLoss', 'reinsuranceRecovery'],
+  // ⚠ bookedGrossUltimate, NOT grossUltimateLoss. The engine has always computed
+  // `bookedGrossUltimate - reinsuranceRecovery`; the intermediate simply was not
+  // recorded, so this identity was written against the nearest field that was and
+  // was false by the whole booking markdown — 86,806,261.5843, to the cent, in
+  // every arm and at every scope. It is recorded now and the identity is exact.
+  { label: 'netUltimateLoss = bookedGrossUltimate - reinsuranceRecovery',
+    parts: ['netUltimateLoss', 'bookedGrossUltimate', 'reinsuranceRecovery'],
     bound: 3 * 0.5, why: '3 columns each rounded to whole dollars in the export',
-    check: v => [v.grossUltimateLoss - v.reinsuranceRecovery, v.netUltimateLoss] },
+    check: v => [v.bookedGrossUltimate - v.reinsuranceRecovery, v.netUltimateLoss] },
   { label: 'endingNetReserve = beginningNetReserve + netUltimate - development - netPaid',
     parts: ['endingNetReserve', 'beginningNetReserve', 'netUltimateLoss', 'priorYearDevelopment', 'netPaidLosses'],
     // ⚠ THIS BOUND WAS $10,000 AND IS NOW THE ROUNDING FLOOR, BECAUSE THE
@@ -1121,47 +1126,12 @@ if (nonEmpty.length === 0) {
   console.log(RULE);
 }
 
-// ============================================================================
-// ⚠ THE EXIT CODE IS CLASSIFIED, AND THAT IS THE POINT OF IT.
-//
-// One identity is knowingly false on the shipped mechanism —
-//   netUltimateLoss = grossUltimateLoss - reinsuranceRecovery
-// — and it accounts for EVERY finding this check produces: 800 defects, the 800
-// hand-check findings that are the same rows re-derived from their printed
-// operands, and the one export identity. It is false because the engine computes
-// `netUltimateLoss = bookedGrossUltimate - reinsuranceRecovery` where
-// bookedGrossUltimate is grossUltimateLoss put through the booking contraction,
-// and that intermediate is NOT RECORDED on the result. The page therefore prints
-// a Gross and a Net that differ by 3.54x at pool scope with no row between them
-// saying why — a player-facing defect, and the fix is one recorded field rather
-// than a change to this file.
-//
-// ⚠ SO IT EXITS 2, NOT 1, AND A NEW FAILURE STILL EXITS 1. Excusing this on the
-// generic code would have made every other row in the audit page unwatched:
-// 3201 findings excused as one expectation, and a 3202nd invisible inside it.
-// The classifier below is deliberately narrow — one metric name and one identity
-// label — so anything else, on any row, is a regression and is reported as one.
-// ⚠ TWO ROW NAMES, ONE CAUSE, AND THE GAP IS THE PROOF. 'Provision for claims,
-// net' sums the net loss with prior development, so it inherits the same error
-// its first term carries — both rows are out by 86,806,261.5843, to the cent, in
-// every arm and at every scope. Listing them as two expectations would invite
-// the next reader to treat them as two problems.
-const KNOWN_METRICS = ['Net Ultimate Loss + LAE', 'Provision for claims, net'];
-const KNOWN_IDENTITY = 'netUltimateLoss = grossUltimateLoss - reinsuranceRecovery';
-const unexpected =
-  defects.filter(f => !KNOWN_METRICS.includes(f.metric)).length
-  + handFindings.filter(f => !KNOWN_METRICS.includes(f.metric)).length
-  + proseFindings.length
-  + coverageFailures.length
-  + failedIdentities.filter(l => l !== KNOWN_IDENTITY).length;
-const onlyKnown = unexpected === 0
-  && (defects.length > 0 || handFindings.length > 0 || failures > 0);
-
-if (onlyKnown) {
-  console.log('');
-  console.log(`EXPECTED RED — every finding is ${KNOWN_METRICS.join(' / ')}, one cause rather than`);
-  console.log('two: the engine books gross through the contraction before netting');
-  console.log('reinsurance, and that intermediate is not recorded. Exit 2, so a finding on ANY');
-  console.log('other row still exits 1 and is not excused by this.');
-}
-process.exitCode = unexpected > 0 ? 1 : (onlyKnown ? 2 : 0);
+// ⚠ THE EXIT-2 CLASSIFIER THAT STOOD HERE IS GONE, AND ITS ABSENCE IS THE POINT.
+// It excused one identity — netUltimateLoss = grossUltimateLoss -
+// reinsuranceRecovery — which accounted for all 3201 findings. That identity was
+// not wrong about the engine; the page was missing the step. bookedGrossUltimate
+// is recorded now and the identity is exact on both arms, so there is nothing to
+// classify and this exits 0 or 1 like any other check.
+process.exitCode =
+  (coverageFailures.length === 0
+    && defects.length === 0 && handFindings.length === 0 && proseFindings.length === 0 && failures === 0) ? 0 : 1;

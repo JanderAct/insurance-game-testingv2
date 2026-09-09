@@ -566,22 +566,20 @@ const EXPECTED_RED: Record<string, { code: number; why: string }> = {
       + 'are the ONLY assertions in this file, so a generic code would make the whole file unwatchable. '
       + 'Anything that is not one of those four still exits 1.',
   },
-  'audit-formula-check': {
-    code: 2,
-    why: 'ONE IDENTITY, AND IT ACCOUNTS FOR ALL 3201 FINDINGS. `netUltimateLoss = grossUltimateLoss - '
-      + 'reinsuranceRecovery` is false on the shipped mechanism: the engine computes `bookedGrossUltimate '
-      + '- reinsuranceRecovery`, where bookedGrossUltimate is grossUltimateLoss put through the booking '
-      + 'contraction — and that intermediate is NOT RECORDED on the result. Two row names carry it (Net '
-      + 'Ultimate Loss + LAE, and Provision for claims net, which sums it) and both are out by '
-      + '86,806,261.5843 to the cent in every arm and scope, which is the proof they are one cause. '
-      + '⚠ THIS IS A PLAYER-FACING DEFECT, NOT ONLY A STALE ASSERTION: the audit page prints a Gross and '
-      + 'a Net differing by 3.54x at pool scope with no row between them saying why, so the booking '
-      + 'markdown is invisible to the reader. FIX: record bookedGrossUltimate and give it a row, beside '
-      + 'the "Recovery deferred by optimistic booking" row that already exists for its cession twin. That '
-      + 'is an engine field and a new player-facing row, so it is its own commit. PAIRED CONTROL: flag '
-      + 'off, same ten-year book, all formula rows reconcile in every arm. ⚠ EXIT 2, classified on two '
-      + 'metric names and one identity label — a finding on ANY other row exits 1 and is not excused.',
-  },
+  // ⚠ audit-formula-check IS OUT OF THIS MAP AND IT WAS A PAGE DEFECT, NOT A
+  // STALE ASSERTION. Its entry said `netUltimateLoss = grossUltimateLoss -
+  // reinsuranceRecovery` was false on the shipped mechanism. It was — but the
+  // identity was not the thing that was wrong. The engine computes
+  // `bookedGrossUltimate - reinsuranceRecovery` and simply never RECORDED that
+  // intermediate, so the Calculation Audit page printed a Gross and a Net 3.54x
+  // apart at pool scope with no row between them, on the one exhibit whose whole
+  // job is showing the arithmetic. An actuary reading down that column concludes
+  // the model is broken.
+  //
+  // The field is recorded, the row is on the page, and the identity is exact on
+  // both arms. Gross Ultimate Loss is unchanged and still the drawn register,
+  // which is the right figure and the one the tower attaches to — what was
+  // missing was the step between it and Net, not a correction to either.
   // ⚠ THREE OF THE FIVE ARE OUT OF THIS MAP, RE-DERIVED RATHER THAN RE-EXCUSED.
   // Each was measured to fail on a plausible defect after restatement, because a
   // restatement that passes on both arms has been widened rather than re-pointed:

@@ -1860,6 +1860,15 @@ export function processLineYear(
     commonLossFactor,
     catastropheFactor,
     grossUltimateLoss,
+    // ⚠ THE STEP BETWEEN GROSS AND NET, AND IT WAS COMPUTED AND THROWN AWAY.
+    // netUltimateLoss has always been `bookedGrossUltimate - reinsuranceRecovery`
+    // and this intermediate was a local. With the flag off it equals
+    // grossUltimateLoss exactly (bookedGrossContraction is 1), so nothing moves on
+    // that arm; with it on the two differ by the booking markdown, and the audit
+    // page was printing both ends of that gap with nothing between them — Gross
+    // and Net 3.54x apart at pool scope and no row saying why. See its own row in
+    // resultMetrics.
+    bookedGrossUltimate,
     shockLossIncurred: shockOccurred,
     shockEvents: ctx.shockFirings?.length
       ? ctx.shockFirings.map((f): ShockRecord => ({
@@ -2881,6 +2890,12 @@ export function aggregateLineResults(
     ),
     catastropheFactor: first.catastropheFactor,
     grossUltimateLoss: addDollars('grossUltimateLoss'),
+    // ⚠ SUMMED LIKE ITS GROSS AND NET NEIGHBOURS, because the pool figure is the
+    // sum of the lines and nothing else. Omitting it here left the pool scope
+    // falling back to grossUltimateLoss while the per-line scopes read the booked
+    // figure — the audit page then reconciled on every line and not at pool,
+    // which is a worse state than failing everywhere.
+    bookedGrossUltimate: results.reduce((sum, r) => sum + (r.bookedGrossUltimate ?? r.grossUltimateLoss), 0),
     shockLossIncurred: results.some(r => r.shockLossIncurred),
     // ONE ROW PER EVENT, costs summed across the lines it hit — not one row per
     // line. A cross-line event like #28 is a single cause, and showing it twice

@@ -963,6 +963,14 @@ export interface ResultSet {
   claimCountsByTier?: Record<string, number>;   // WC
   claimCount?: number;                          // GL — total claims generated this line-year, no sub-coverage breakdown anymore
   grossUltimateLoss: number;
+  // The register AFTER the optimistic booking markdown and BEFORE reinsurance —
+  // the step between grossUltimateLoss and netUltimateLoss, which is exactly
+  // `bookedGrossUltimate - reinsuranceRecovery`.
+  //
+  // ⚠ IT EQUALS grossUltimateLoss WHENEVER THERE IS NO MARKDOWN, which is the
+  // whole shipped path with FORWARD_BOOKING off, so recording it adds a field
+  // without moving one. Optional for saves written before it existed.
+  bookedGrossUltimate?: number;
   // ⚠ NOT THE SHOCK EVENT SYSTEM. This flag predates it and already carries
   // THREE different line-specific meanings — a WC catastrophic-tier claim, a GL
   // occurrence over $1M, or Property's aggregate factor exceeding its

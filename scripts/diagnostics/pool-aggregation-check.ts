@@ -59,6 +59,10 @@ const DOLLARS = new Set([
   'poolPremium', 'adminExpense', 'poolPremiumAndAdminExpense', 'totalMemberCharge',
   'grossPremium', 'assessments', 'dividends', 'aggregateMemberLoss',
   'grossUltimateLoss', 'reinsuranceCost', 'retainedAboveTower', 'aggregateRecovery',
+  // Additive for the same reason its gross and net neighbours are: it is the
+  // same register at a different point in the booking, so the pool figure is
+  // the sum of the lines and nothing else.
+  'bookedGrossUltimate',
   'aggregatePremium', 'reinsuranceRecovery', 'netUltimateLoss', 'netIncurredLoss',
   'operatingExpense', 'riskControlInvestment', 'priorYearDevelopment',
   'beginningNetReserve', 'currentYearNetReserve', 'netPaidLosses', 'endingNetReserve',

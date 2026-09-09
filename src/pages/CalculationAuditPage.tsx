@@ -1394,7 +1394,13 @@ export function buildSupportingRows(
   const clfAdjustedExpectedLossDifference =
     result.clfAdjustedExpectedLoss - clfAdjustedExpectedLossCheck;
 
-  const netUltimateLossCheck = result.grossUltimateLoss - result.reinsuranceRecovery;
+  // ⚠ THE BOOKED GROSS, WHICH IS WHAT THE ENGINE NETS FROM. This read
+  // grossUltimateLoss — the DRAWN register — so with FORWARD_BOOKING on the
+  // "recalculated" figure was the raw register less recovery and the difference
+  // row below reported the whole booking markdown as a discrepancy. Falls back to
+  // gross for saves written before the field existed, where they are equal.
+  const bookedGross = result.bookedGrossUltimate ?? result.grossUltimateLoss;
+  const netUltimateLossCheck = bookedGross - result.reinsuranceRecovery;
   const netUltimateLossDifference = result.netUltimateLoss - netUltimateLossCheck;
 
   const indicatedNetReserveCheck =
@@ -1862,10 +1868,22 @@ export function buildSupportingRows(
       },
     },
     {
+      // ⚠ THE STEP THAT WAS MISSING FROM THIS PAGE. Gross above is the drawn
+      // register; Net below is what the pool books. Between them is the
+      // optimistic booking markdown, 3.54x at pool scope with FORWARD_BOOKING on,
+      // and this page printed both ends with nothing in between — so the exhibit
+      // whose job is showing the arithmetic showed a drop with no cause. Reads
+      // identical to Gross whenever there is no markdown.
+      metric: 'Booked Gross Ultimate (after optimistic booking)',
+      value: formatCurrency(bookedGross),
+      numericValue: bookedGross,
+      formula: { kind: 'text', text: 'Gross Ultimate x the optimistic booking contraction; equal to Gross when there is none' },
+    },
+    {
       metric: 'Net Ultimate Loss + LAE',
       value: formatCurrency(result.netUltimateLoss),
       numericValue: result.netUltimateLoss,
-      formula: { kind: 'sum', terms: [curTerm(result.grossUltimateLoss), curTerm(-result.reinsuranceRecovery)] },
+      formula: { kind: 'sum', terms: [curTerm(bookedGross), curTerm(-result.reinsuranceRecovery)] },
     },
     {
       metric: 'Net Ultimate Loss Check Difference',
@@ -2335,6 +2353,10 @@ export function buildRevExpRows(
   const isPoolView = lineView === 'pool';
   const result: LineResultSet = isPoolView ? poolResult : poolResult.byLine[lineView];
   const lineKeys = Object.keys(poolResult.byLine) as CoverageLine[];
+  // The register after the optimistic booking markdown — what the engine nets
+  // reinsurance from. Equal to gross when there is no markdown; see the Losses
+  // block for why printing gross here was the defect.
+  const bookedGrossIS = result.bookedGrossUltimate ?? result.grossUltimateLoss;
   // Mirrors the statement: neither is modelled yet, so both are zero and the
   // rows they gate stay hidden.
   const additionalPaidInCapital = 0;
@@ -2514,9 +2536,13 @@ export function buildRevExpRows(
       numericValue: result.netIncurredLoss,
       formula: {
         kind: 'sum',
+        // ⚠ THE BOOKED GROSS HERE TOO. This row SUMS the net ultimate with prior
+        // development, so it inherited the first term's error exactly: both rows
+        // were out by 86,806,261.5843 to the cent, which is what showed they were
+        // one cause and not two.
         terms: result.reinsuranceRecovery !== 0
-          ? [cur(result.grossUltimateLoss), cur(-result.reinsuranceRecovery), cur(checks.priorYearClaimsValue)]
-          : [cur(result.grossUltimateLoss), cur(checks.priorYearClaimsValue)],
+          ? [cur(bookedGrossIS), cur(-result.reinsuranceRecovery), cur(checks.priorYearClaimsValue)]
+          : [cur(bookedGrossIS), cur(checks.priorYearClaimsValue)],
       },
       indent: 2,
       emphasis: 'subtotal',
