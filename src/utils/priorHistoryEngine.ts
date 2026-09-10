@@ -21,7 +21,8 @@
 //
 // Opening band (PER-LINE reject-and-redraw, NO clamping): each active line
 // must end its pre-game with opening surplus inside that line's own
-// OPENING_SURPLUS_TO_PREMIUM_BAND — [min, max] × its own opening POOL PREMIUM
+// OPENING_SURPLUS_BAND — [min, max] × its own opening POOL PREMIUM on a
+// 'premium' line, or × its own opening NET RESERVE on a 'reserve' line
 // (two-sided: too weak AND too strong both redraw). If a line lands outside,
 // ONLY that line re-simulates on a deterministically derived alternate seed
 // (seed + attempt * 997) until it lands in-band — one line's redraw never
@@ -46,7 +47,7 @@ import type {
 import { generateStartingPoolState } from './instanceGenerator';
 import { getPredefinedMarketMembers } from '../data/memberCatalog';
 import {
-  OPENING_SURPLUS_TO_PREMIUM_BAND,
+  OPENING_SURPLUS_BAND,
   OPERATING_CASH_PCT_OF_PREMIUM,
   STARTING_CAPITAL_TO_PREMIUM,
 } from '../data/defaultAssumptions';
@@ -283,7 +284,7 @@ export function simulateLineCandidate(
 }
 
 // Per-line reject-and-redraw: re-simulate ONLY this line until its opening
-// surplus lands inside OPENING_SURPLUS_TO_PREMIUM_BAND (two-sided).
+// surplus lands inside OPENING_SURPLUS_BAND (two-sided), on that line's basis.
 //
 // ⚠ MEASURED AGAINST PREMIUM, NOT AGAINST THE REQUIRED RESERVE MARGIN. The
 // margin is expectedNetUnpaidLoss x (reserveMarginCLF - 1), and testing against
@@ -295,18 +296,51 @@ export function simulateLineCandidate(
 // PER-LINE: a single shared tolerance was measured and rejected because it moved
 // WC +22% and Property -18%, which is a re-tune, not a decoupling. See the
 // band's own comment for the calibration.
+//
+// ⚠ AND THAT PARAGRAPH IS NOW HALF TRUE, WHICH IS WHY IT IS KEPT. WC and GL are
+// tested against the opening NET RESERVE; Property is still tested against
+// premium. The objection above — that testing against the required reserve
+// margin made the opening move whenever the reserve, the margin CLF or the
+// funding basis moved — is answered by FROZEN_CAPITAL_J: the CLF-derived
+// multiple is a frozen literal, so the margin CLF is not a live consumer of this
+// path and cannot move it. The RESERVE still can, and that is intended: it is
+// the liability the capital is held against. See OPENING_SURPLUS_BAND.
+
+/**
+ * THE ACCEPTANCE RATIO — one definition, called by the engine and by every gate
+ * that reproduces the search.
+ *
+ * ⚠ IT IS EXPORTED BECAUSE FOUR DIAGNOSTICS RE-IMPLEMENT THIS TEST. pin-vs-band,
+ * opening-centring, pregame-acceptance and opening-basis-report all divide a
+ * surplus by something and compare it to the band. Before the reserve basis
+ * existed they could all hardcode `/ poolPremium` and be right; now a copy that
+ * did so would silently grade WC and GL against the wrong denominator and still
+ * look green. There is one expression and all five call it.
+ */
+export function openingBandRatio(
+  line: CoverageLine,
+  endingSurplus: number,
+  poolPremium: number,
+  endingNetReserve: number,
+): number {
+  const basis = OPENING_SURPLUS_BAND[line]?.basis ?? 'premium';
+  return basis === 'reserve'
+    ? endingSurplus / Math.max(endingNetReserve, 1)
+    : endingSurplus / Math.max(poolPremium, 1);
+}
+
 function runLinePreGame(
   instance: GameInstance,
   setup: GameSetupSettings,
   line: CoverageLine
 ): LinePreGame {
-  const band = OPENING_SURPLUS_TO_PREMIUM_BAND[line] ?? { min: 0.83, max: 1.22 };
+  const band = OPENING_SURPLUS_BAND[line] ?? { basis: 'premium' as const, min: 0.83, max: 1.22 };
   let best: { c: ReturnType<typeof simulateLineCandidate>; attempt: number; distance: number } | null = null;
 
   for (let attempt = 0; attempt < MAX_HISTORY_ATTEMPTS; attempt++) {
     const c = simulateLineCandidate(instance, setup, line, attempt);
     const last = c.lineResults[c.lineResults.length - 1];
-    const multiple = last.endingSurplus / Math.max(last.poolPremium, 1);
+    const multiple = openingBandRatio(line, last.endingSurplus, last.poolPremium, last.endingNetReserve);
     if (multiple >= band.min && multiple <= band.max) return finalizeLine(c, line, attempt);
     // Distance to the band (0 inside): the fallback keeps the closest miss.
     const distance = multiple < band.min ? band.min - multiple : multiple - band.max;
@@ -315,7 +349,7 @@ function runLinePreGame(
 
   console.warn(
     `Prior history (${line}): no attempt of ${MAX_HISTORY_ATTEMPTS} landed in the ` +
-    `[${band.min}, ${band.max}]x opening band; using closest attempt ${best!.attempt} ` +
+    `[${band.min}, ${band.max}]x opening ${band.basis} band; using closest attempt ${best!.attempt} ` +
     `(missed by ${best!.distance.toFixed(2)}x).`
   );
   return finalizeLine(best!.c, line, best!.attempt);

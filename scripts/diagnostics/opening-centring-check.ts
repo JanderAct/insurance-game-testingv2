@@ -90,8 +90,8 @@
 // ============================================================================
 
 import { generateGameInstance } from '../../src/utils/instanceGenerator';
-import { PRE_GAME_DEPTH, simulateLineCandidate } from '../../src/utils/priorHistoryEngine';
-import { OPENING_SURPLUS_TO_PREMIUM_BAND, STARTING_CAPITAL_TO_PREMIUM } from '../../src/data/defaultAssumptions';
+import { PRE_GAME_DEPTH, simulateLineCandidate, openingBandRatio } from '../../src/utils/priorHistoryEngine';
+import { OPENING_SURPLUS_BAND, STARTING_CAPITAL_TO_PREMIUM } from '../../src/data/defaultAssumptions';
 import type { CoverageLine, GameInstance, GameSetupSettings } from '../../src/types/simulation';
 
 const LINES: CoverageLine[] = ['WC', 'GL', 'Property'];
@@ -118,7 +118,9 @@ const RULE = '='.repeat(72);
 function unfilteredMultiple(instance: GameInstance, setup: GameSetupSettings, line: CoverageLine): number {
   const c = simulateLineCandidate(instance, setup, line, 0);
   const last = c.lineResults[c.lineResults.length - 1];
-  return last.endingSurplus / Math.max(last.poolPremium, 1);
+  // ⚠ THE SHARED RATIO — see openingBandRatio's own header for why this is not
+  // a local divide any more.
+  return openingBandRatio(line, last.endingSurplus, last.poolPremium, last.endingNetReserve);
 }
 
 const q = (a: number[], p: number) => {
@@ -133,7 +135,7 @@ console.log('  line       K       band            midpoint   unfiltered median  
 console.log('                                                                              band width  offset/SE   above / below');
 
 for (const line of LINES) {
-  const band = OPENING_SURPLUS_TO_PREMIUM_BAND[line];
+  const band = OPENING_SURPLUS_BAND[line];
   const mid = (band.min + band.max) / 2;
   const width = band.max - band.min;
   const tol = TOL_BAND_WIDTHS * width;

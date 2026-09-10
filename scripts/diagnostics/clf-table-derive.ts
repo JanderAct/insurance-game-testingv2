@@ -64,7 +64,7 @@
 // gave 47.2%.
 //
 // ⚠ THE LINK IS NOW CUT: the pre-game tests the opening against PREMIUM
-// (OPENING_SURPLUS_TO_PREMIUM_BAND), so the 90% stop no longer reaches the
+// (OPENING_SURPLUS_BAND), so the 90% stop no longer reaches the
 // opening surplus. Expect ONE pass to converge. Run it twice anyway and check —
 // the cost is one run, and this loop is exactly the kind that comes back.
 //

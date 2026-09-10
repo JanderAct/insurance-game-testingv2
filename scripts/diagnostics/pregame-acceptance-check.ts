@@ -8,7 +8,7 @@
 // This is a BLOCKER, not a calibration. runLinePreGame is a reject-and-redraw
 // search: it simulates a candidate 3-year past on (seed + attempt x 997) and
 // keeps redrawing until the ending surplus/premium lands inside
-// OPENING_SURPLUS_TO_PREMIUM_BAND, giving up after MAX_HISTORY_ATTEMPTS = 500
+// OPENING_SURPLUS_BAND, giving up after MAX_HISTORY_ATTEMPTS = 500
 // and shipping the closest miss. IF THE SEARCH STARTS FAILING, NO GAME
 // GENERATES and everything downstream of the flip is moot — which is why this
 // sits in Stage 1 rather than in the cascade.
@@ -71,8 +71,8 @@
 // ============================================================================
 
 import { generateGameInstance } from '../../src/utils/instanceGenerator';
-import { runPriorHistory, PRE_GAME_DEPTH, simulateLineCandidate } from '../../src/utils/priorHistoryEngine';
-import { OPENING_SURPLUS_TO_PREMIUM_BAND, PER_CLAIM_REVISION } from '../../src/data/defaultAssumptions';
+import { runPriorHistory, PRE_GAME_DEPTH, simulateLineCandidate, openingBandRatio } from '../../src/utils/priorHistoryEngine';
+import { OPENING_SURPLUS_BAND, PER_CLAIM_REVISION } from '../../src/data/defaultAssumptions';
 import type { CoverageLine } from '../../src/types/simulation';
 
 const LINES: CoverageLine[] = ['WC', 'GL', 'Property'];
@@ -125,12 +125,12 @@ function measure(line: CoverageLine, seeds: number = SEEDS): Arm {
       const setup = { poolName: 'A', gameLength: 10, startingYear: 2026, instanceId: id, activeLines: [line] };
       const { poolState, priorHistory } = runPriorHistory(inst, setup as never);
       const r = (priorHistory as never as {
-        byLine: Record<string, { poolPremium: number; pregameAttempt?: number }>
+        byLine: Record<string, { poolPremium: number; endingNetReserve: number; pregameAttempt?: number }>
       }[]).slice(-1)[0]?.byLine?.[line];
       if (!r) continue;
       attempts.push((r.pregameAttempt ?? 0) + 1);
       const surplus = (poolState as never as { lines: Record<string, { surplus: number }> }).lines[line].surplus;
-      openings.push(surplus / Math.max(r.poolPremium, 1));
+      openings.push(openingBandRatio(line, surplus, r.poolPremium, r.endingNetReserve));
     }
   } finally {
     console.warn = realWarn;
@@ -160,7 +160,7 @@ function measureUnfiltered(line: CoverageLine, seeds: number): number[] {
     const setup = { poolName: 'A', gameLength: 10, startingYear: 2026, instanceId: id, activeLines: [line] };
     const c = simulateLineCandidate(inst, setup as never, line, 0);
     const last = c.lineResults[c.lineResults.length - 1];
-    out.push(last.endingSurplus / Math.max(last.poolPremium, 1));
+    out.push(openingBandRatio(line, last.endingSurplus, last.poolPremium, last.endingNetReserve));
   }
   return out;
 }
@@ -250,7 +250,7 @@ console.log(`  ${REPORT_SEEDS} seeds, attempt 0 only. Where its candidates SIT, 
 console.log('  live arm\'s accepted opening is beside it for scale.');
 console.log('  line       unfiltered median   share in band   band              live arm accepted median');
 for (const line of LINES) {
-  const band = OPENING_SURPLUS_TO_PREMIUM_BAND[line];
+  const band = OPENING_SURPLUS_BAND[line];
   const o = reportedOpenings[line];
   const inBand = o.filter(x => x >= band.min && x <= band.max).length / Math.max(1, o.length);
   console.log(`  ${line.padEnd(9)} ${median(o).toFixed(3).padStart(17)}   ${(100 * inBand).toFixed(0).padStart(12)}%   `

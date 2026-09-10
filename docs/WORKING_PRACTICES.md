@@ -507,6 +507,51 @@ Things that were discovered expensively and live only in conversation memory. Re
   for briefs and headers: do not write the intuitive damage claim into a failure message. It reads
   as measured, and the next person budgets against a number nobody took.
 
+## ⚠ A FIGURE IN A COMMENT IS A MEASUREMENT CLAIM. WRITE ONLY WHAT A RUN RETURNED.
+
+**THE RULE: any figure written into a comment, a header, a gate's rationale or a
+commit message must come from a run that COULD HAVE RETURNED A DIFFERENT NUMBER.
+A figure derived from the mechanism is a PREDICTION, and a prediction written in
+the past tense becomes a measurement to the next reader.**
+
+This is a third kind of blindness and it is worse than the two below, because
+those at least fail loudly once someone re-runs them. Nobody re-runs a comment.
+A number to two decimal places reads as measured no matter how it was produced,
+it survives every gate, and it is quoted forward by readers who have no way to
+tell it apart from the real thing.
+
+**BOTH INSTANCES SO FAR CAME FROM ONE COMMIT, AND WERE CAUGHT BY THE AUTHOR
+RATHER THAN BY A GATE — WHICH IS THE POINT. Nothing in the suite could have
+caught either.** Re-deriving `pin-vs-band-check`'s redraw bound onto an
+elasticity ratio needed a falsifier: a demonstration that the restated assertion
+still fails something.
+
+- **The falsifier was written before it was run.** The comment asserted "measured
+  on GL with its band widened 4x: opening elasticity 0.42, attempts ratio 1.06,
+  elasticity ratio 0.20 — a 135x collapse." The mechanism was right — widening
+  the band does make the pin set the opening, and the ratio does collapse — so
+  the prediction felt safe enough to write in the past tense. Measured: opening
+  elasticity 0.438, attempts ratio 1.49x, elasticity ratio **1.3x**, a **15x**
+  collapse. The direction held; the magnitude was out by an order and the
+  headline figure by 6.5x. Had it shipped, the next reader tightening that floor
+  would have had 0.20 as their evidence for how much headroom the assertion had.
+- **And the pass-side figures were hand-derived from a previous run's output**
+  rather than read off the gate: "WC 48x, GL 27x, Property 44x" against an actual
+  46x / 25x / 41x. Smaller, same defect — arithmetic done on remembered numbers
+  and then written as though the gate had printed them.
+
+**THE TELL IS TENSE AND PRECISION TOGETHER.** "Widening the band would collapse
+this ratio" is a prediction and reads as one. "Measured: 0.20" is a claim about
+a run. If the run has not happened, either do it or write the sentence in the
+form it deserves. Two decimal places on an unmeasured quantity is the specific
+thing to catch yourself doing.
+
+**WHY IT IS TEMPTING HERE SPECIFICALLY.** This project rewards writing the
+reasoning down at the constant, and a comment that says "measured X" is stronger
+evidence than one that says "should be about X". That pressure is exactly what
+produces the defect: the more a codebase values recorded measurement, the more a
+fabricated measurement is worth, and the less likely anyone is to doubt it.
+
 ## ⚠ THE TWO KINDS OF GATE BLINDNESS, AND THEY HAVE DIFFERENT ANSWERS
 
 "The gate is blind" has now been said about two different failures with two

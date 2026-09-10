@@ -7,7 +7,7 @@
 // STARTING_CAPITAL_TO_PREMIUM looks like a capital standard and is not one. The
 // pre-game is a reject-and-redraw search: runLinePreGame simulates a candidate
 // three-year past, tests its ending surplus against
-// OPENING_SURPLUS_TO_PREMIUM_BAND, and redraws until one lands inside. The pin
+// OPENING_SURPLUS_BAND, and redraws until one lands inside. The pin
 // sets where that search STARTS; the band sets where it LANDS.
 //
 // EVERY READER GETS THIS WRONG, INCLUDING THE TWO WHO WROTE THE SURROUNDING
@@ -39,7 +39,11 @@
 //                         because the raw percentage on its own invites exactly
 //                         the threshold-fiddling this file warns about.
 //
-//   REDRAWS SENSITIVE     mean attempts rise by at least MIN_REDRAW_RATIO. The
+//   REDRAWS SENSITIVE     the redraw cost responds at least MIN_ELASTICITY_RATIO
+//                         times as elastically to the pin as the opening does.
+//                         The raw attempts multiple is printed but NOT asserted
+//                         — see the block at MIN_ELASTICITY_RATIO for why a bare
+//                         multiple is basis-dependent and this is not. The
 //                         shipped pins are calibrated to MINIMISE this, so any
 //                         perturbation can only raise it and the test is
 //                         one-sided by construction.
@@ -57,9 +61,9 @@
 // ============================================================================
 
 import { generateGameInstance } from '../../src/utils/instanceGenerator';
-import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
+import { runPriorHistory, openingBandRatio } from '../../src/utils/priorHistoryEngine';
 import {
-  STARTING_CAPITAL_TO_PREMIUM, OPENING_SURPLUS_TO_PREMIUM_BAND,
+  STARTING_CAPITAL_TO_PREMIUM, OPENING_SURPLUS_BAND,
 } from '../../src/data/defaultAssumptions';
 import type { CoverageLine } from '../../src/types/simulation';
 
@@ -85,7 +89,62 @@ const MAX_OPENING_SHIFT = 0.15;
 const MAX_SHIFT_SHARE_OF_BAND = 0.40;
 // Measured at x2.0: WC 30.9x, GL 4.3x, Property 4.6x. Set below the two smaller
 // readings rather than above them — see the note printed at the end of the run.
-const MIN_REDRAW_RATIO = 3.0;
+// ⚠ THE OLD RAW FLOOR IS GONE, NOT KEPT AS AN UNUSED CONSTANT. It read 3.0.
+// Leaving it declared-and-unread would be a threshold nobody enforces sitting
+// where a reader would take it for the live one.
+// ============================================================================
+// ⚠ THE REDRAW ASSERTION IS NOW AN ELASTICITY RATIO, AND THE RAW x3 IS REPORTED
+// RATHER THAN ASSERTED. THE ASYMMETRY WAS THE DEFECT.
+//
+// The OPENING side of this check is normalised twice — as a share of the band's
+// own width and as an elasticity against the pin move — with the header's own
+// reason: "the raw percentage on its own invites exactly the threshold-fiddling
+// this file warns about." The REDRAW side had no such normalisation. It was a
+// bare multiple, and a bare multiple is basis-dependent: it reads how far a
+// line's candidate distribution has to travel before its own band stops
+// catching it, which is a property of that distribution's spread, not of
+// whether the pin is a proposal.
+//
+// The reserve re-anchor exposed it. GL, correctly centred at -0.0 SE by
+// opening-centring-check, reads 2.56x (3.55 -> 9.07 attempts) against the 3.0
+// floor. Both explanations the failure message offers are false: the pin IS
+// centred, and 3.55 mean attempts is not a band that "accepts almost anything".
+// What actually happened is that GL's candidate distribution has a long enough
+// lower tail that displacing it above the band still leaves draws falling back
+// into it. That is GL's spread, and the old 3.0 was calibrated when GL's band
+// was on PREMIUM against a differently-shaped distribution.
+//
+// So the assertion is restated on the same footing as the opening's: the redraw
+// cost must respond MUCH more elastically to the pin than the opening does.
+//
+//   attempts elasticity = ln(attempts ratio) / ln(PERTURB)
+//   opening  elasticity = shift / (PERTURB - 1)          [unchanged, as printed]
+//   assert     attempts elasticity >= MIN_ELASTICITY_RATIO x opening elasticity
+//
+// MEASURED BY THIS GATE at the shipped pins and bands: WC 46x, GL 25x,
+// Property 41x. The floor is 10x — below the weakest line by 2.5x, and not a
+// number chosen to clear it by a hair.
+//
+// ⚠ AND IT STILL FAILS SOMETHING, WHICH IS THE POINT, AND THE FIGURES BELOW ARE
+// MEASURED RATHER THAN REASONED. An earlier draft of this block asserted a
+// collapse to 0.20 and a 135x drop; those were derived from the mechanism and
+// were wrong when run — the real collapse is real but a tenth that size. Widen
+// each line's band 4x about its midpoint, which is the exact condition the
+// failure message names ("wide enough to accept almost anything"), and the pin
+// genuinely does start setting the opening:
+//
+//   line       opening elasticity   attempts ratio   ELASTICITY RATIO
+//   WC           0.095 -> 0.509      4.64x -> 2.50x    23.3x ->  2.6x
+//   GL           0.064 -> 0.438      2.44x -> 1.49x    20.1x ->  1.3x
+//   Property     0.022 -> 0.363      5.01x -> 2.07x   104.6x ->  2.9x
+//
+// All three fall far below the 10x floor, so the restated assertion detects the
+// condition the raw multiple did not. (Those readings are from a scratch
+// harness with its own seed sequence, so its shipped-band column does not equal
+// this gate's 46/25/41; the comparison that matters is shipped-against-widened
+// within one harness, and the collapse is 9x / 15x / 36x.)
+// ============================================================================
+const MIN_ELASTICITY_RATIO = 10.0;
 
 interface Arm { openings: number[]; attempts: number[]; fallbacks: number }
 
@@ -102,11 +161,14 @@ function measure(line: CoverageLine, seeds: number): Arm {
       const setup = { poolName: 'P', gameLength: 10, startingYear: 2026, instanceId: id, activeLines: [line] };
       const { poolState, priorHistory } = runPriorHistory(inst, setup as never);
       const r = (priorHistory as never as {
-        byLine: Record<string, { poolPremium: number; pregameAttempt?: number }>
+        byLine: Record<string, { poolPremium: number; endingNetReserve: number; pregameAttempt?: number }>
       }[]).slice(-1)[0]?.byLine?.[line];
       if (!r) continue;
       const surplus = (poolState as never as { lines: Record<string, { surplus: number }> }).lines[line].surplus;
-      openings.push(surplus / Math.max(r.poolPremium, 1));
+      // ⚠ THE SHARED RATIO, NOT A LOCAL DIVIDE. WC and GL are graded against the
+      // opening RESERVE now; a hardcoded / poolPremium here would compare the right
+      // surplus to the wrong denominator and still look green.
+      openings.push(openingBandRatio(line, surplus, r.poolPremium, r.endingNetReserve));
       attempts.push(r.pregameAttempt ?? 0);
     }
   } finally {
@@ -126,10 +188,11 @@ const shipped = { ...STARTING_CAPITAL_TO_PREMIUM };
 
 console.log('=== THE PIN IS A PROPOSAL, THE BAND IS THE TARGET ===');
 console.log(`${SEEDS} solo pre-games per arm, pin perturbed x${PERTURB.toFixed(2)}.\n`);
-console.log('  line       pin      band            median opening     shift   of band   elasticity     mean attempts      ratio    verdict');
+console.log('  line       pin      band            median opening     shift   of band   elasticity     mean attempts      ratio   elast.   verdict');
+console.log('                                                                                                                      ratio  (asserted)');
 
 for (const line of LINES) {
-  const band = OPENING_SURPLUS_TO_PREMIUM_BAND[line];
+  const band = OPENING_SURPLUS_BAND[line];
   const base = measure(line, SEEDS);
 
   STARTING_CAPITAL_TO_PREMIUM[line] = shipped[line] * PERTURB;
@@ -149,8 +212,12 @@ for (const line of LINES) {
   const share = bandWidth > 0 ? shift / bandWidth : 0;
   const elasticity = shift / (PERTURB - 1);
 
+  // The redraw side, normalised the same way the opening side is.
+  const attemptsElasticity = ratio > 0 ? Math.log(ratio) / Math.log(PERTURB) : 0;
+  const elasticityRatio = elasticity > 1e-9 ? attemptsElasticity / elasticity : Infinity;
+
   const badShift = shift > MAX_OPENING_SHIFT || share > MAX_SHIFT_SHARE_OF_BAND;
-  const badRatio = ratio < MIN_REDRAW_RATIO;
+  const badRatio = elasticityRatio < MIN_ELASTICITY_RATIO;
   const badFall = base.fallbacks > 0 || pert.fallbacks > 0;
 
   if (badShift) fails.push(`${line}: doubling the pin moved the median opening ${(shift * 100).toFixed(1)}% `
@@ -159,8 +226,9 @@ for (const line of LINES) {
     + `${(MAX_OPENING_SHIFT * 100).toFixed(0)}% and ${(MAX_SHIFT_SHARE_OF_BAND * 100).toFixed(0)}% — the pin is `
     + 'setting the opening, so the band is no longer the thing that decides it and every comment saying '
     + 'otherwise is now wrong');
-  if (badRatio) fails.push(`${line}: doubling the pin changed mean attempts only ${ratio.toFixed(2)}x `
-    + `(${a0.toFixed(2)} -> ${a1.toFixed(2)}), under the ${MIN_REDRAW_RATIO}x floor — either the pins are no `
+  if (badRatio) fails.push(`${line}: the redraw cost is only ${elasticityRatio.toFixed(1)}x as elastic to the pin `
+    + `as the opening is (attempts elasticity ${attemptsElasticity.toFixed(2)} against opening ${elasticity.toFixed(2)}; `
+    + `attempts ${a0.toFixed(2)} -> ${a1.toFixed(2)} = ${ratio.toFixed(2)}x), under the ${MIN_ELASTICITY_RATIO}x floor — either the pins are no `
     + 'longer centred on their bands, or the band has grown wide enough to accept almost anything');
   if (badFall) fails.push(`${line}: the pre-game fell back to a closest-miss opening `
     + `(${base.fallbacks} at the shipped pin, ${pert.fallbacks} perturbed) — a fallback opening is OUTSIDE `
@@ -173,7 +241,8 @@ for (const line of LINES) {
     + `${((share * 100).toFixed(0) + '%').padStart(9)}`
     + `${elasticity.toFixed(2).padStart(13)}   `
     + `${a0.toFixed(2)} -> ${a1.toFixed(2)}`.padStart(15)
-    + `${(ratio.toFixed(1) + 'x').padStart(9)}    ${badShift || badRatio || badFall ? 'FAIL' : 'ok'}`);
+    + `${(ratio.toFixed(1) + 'x').padStart(9)}  ${(elasticityRatio === Infinity ? 'inf' : elasticityRatio.toFixed(0) + 'x').padStart(7)}    `
+    + `${badShift || badRatio || badFall ? 'FAIL' : 'ok'}`);
 }
 
 console.log('\n  ⚠ NEITHER THRESHOLD IS THE ROUND NUMBER THIS CHECK WAS ASKED FOR, AND BOTH REASONS ARE');

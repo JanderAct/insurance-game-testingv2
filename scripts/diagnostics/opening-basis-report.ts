@@ -21,7 +21,7 @@ import { unpaidShare } from '../../src/utils/payoutPattern';
 import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import {
-  STARTING_CAPITAL_TO_PREMIUM, OPENING_SURPLUS_TO_PREMIUM_BAND, LINE_PAYOUT_PATTERN,
+  STARTING_CAPITAL_TO_PREMIUM, OPENING_SURPLUS_BAND, LINE_PAYOUT_PATTERN,
 } from '../../src/data/defaultAssumptions';
 import type { CoverageLine } from '../../src/types/simulation';
 
@@ -87,7 +87,7 @@ console.log('  kept here so a re-run still shows both sides.');
 
 console.log('\n--- 2. WHAT THE BAND COSTS IN REDRAWS ---');
 console.log(`  bands in force (surplus/premium): ${LINES.map(l =>
-  `${l} [${OPENING_SURPLUS_TO_PREMIUM_BAND[l].min}, ${OPENING_SURPLUS_TO_PREMIUM_BAND[l].max}]`).join('  ')}`);
+  `${l} [${OPENING_SURPLUS_BAND[l].min}, ${OPENING_SURPLUS_BAND[l].max}] on ${OPENING_SURPLUS_BAND[l].basis}`).join('  ')}`);
 console.log('\n  line       attempts (median/p90/max)   mean');
 for (const line of LINES) {
   const a = obs[line].map(x => x.attempt);
@@ -158,7 +158,7 @@ console.log('  re-translation to [1.51, 2.24] fixed. Section 3 above is where to
 console.log('\n  ⚠ AND A RESERVE PIN DOES NOT FOLLOW FROM ANY OF THIS. Because CLF@90 is a static');
 console.log('  per-line table, margin/reserve is an exact constant (WC 0.3294, GL 0.5020, Property');
 console.log('  0.5923), so "hold J x reserve" IS "hold T x margin" and adopting it puts the CLF back');
-console.log('  on the opening path. See the block beside OPENING_SURPLUS_TO_PREMIUM_BAND.');
+console.log('  on the opening path. See the block beside OPENING_SURPLUS_BAND.');
 console.log('\n  The premium base each pin is applied to, for scale:');
 for (const line of LINES) {
   const p = q(obs[line].map(x => x.premium), 0.5);

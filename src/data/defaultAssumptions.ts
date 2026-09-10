@@ -1162,7 +1162,7 @@ export const SIZE_WEIGHTS = [0.55, 0.30, 0.12, 0.03];
 //
 // The pre-game is a reject-and-redraw search: runLinePreGame simulates a
 // candidate three-year past, tests its ending surplus against
-// OPENING_SURPLUS_TO_PREMIUM_BAND, and redraws until one lands inside. This
+// OPENING_SURPLUS_BAND, and redraws until one lands inside. This
 // constant sets where that search STARTS. The BAND sets where it LANDS. They are
 // a proposal distribution and a target, and moving the proposal changes the
 // ACCEPTANCE RATE, not the answer.
@@ -1333,8 +1333,33 @@ export const SIZE_WEIGHTS = [0.55, 0.30, 0.12, 0.03];
 // carries ten accident years of runoff.
 // ============================================================================
 export const STARTING_CAPITAL_TO_PREMIUM: Record<string, number> = {
-  WC: 0.2906,
-  GL: 0.5007,
+  // ⚠ RE-SOLVED AGAINST THE RESERVE-ANCHORED BAND. WC and GL are bisected so the
+  // UNFILTERED median surplus/reserve lands on each line's band midpoint, which
+  // IS that line's FROZEN_CAPITAL_J (the band is J times a symmetric relative
+  // half-width, so midpoint and J coincide by construction). Property is
+  // untouched because its band is still on premium. Solved on the unfiltered
+  // candidate with the band held open — centring on the ACCEPTED sample would
+  // chase the band's own selection. Four passes, tolerance 10% of band width:
+  //
+  //   line   pin  0.2906 -> 0.3250   unfiltered median 0.331  (midpoint 0.3294)
+  //          pin  0.5007 -> 0.2062                     0.501  (midpoint 0.5020)
+  //
+  // ⚠ SOLVE THROUGH simulateLineCandidate AT 400 SEEDS — THE GATE'S OWN
+  // ESTIMATOR — AND NOT THROUGH A PARALLEL HARNESS. The first attempt used a
+  // private 64-instance harness, landed GL at 0.1659, and opening-centring-check
+  // rejected it at -5.4 SE: the gate reads 400 seeds through
+  // simulateLineCandidate and measured 0.408 where the harness had measured
+  // 0.502. WC agreed across both (0.330 / 0.332) and GL did not. A pin solved
+  // against a different estimator than the one that asserts is a pin that fails
+  // its own gate; call the gate's function.
+  //
+  // ⚠ AND A SECANT WAS TRIED FIRST AND THRASHED ON GL — 0.5007 -> 0.2543 ->
+  // 0.0665 -> 0 -> 0.1097, never reaching the target. The objective is a MEDIAN
+  // of N noisy draws so a secant differentiates noise, and near the floor the
+  // curve is non-monotone (pin 0.0665 read 0.271 against pin 0 reading 0.280).
+  // Bracket and bisect; do not fit a slope to it.
+  WC: 0.3250,
+  GL: 0.2062,
   Property: 0.6231,
 };
 
@@ -1464,11 +1489,149 @@ export const STARTING_CAPITAL_TO_PREMIUM: Record<string, number> = {
 // line may carry no capital DECISION for the player. That is a game-design
 // finding for the playtest, to be settled by watching someone play.
 // ============================================================================
-export const OPENING_SURPLUS_TO_PREMIUM_BAND: Record<string, { min: number; max: number }> = {
-  WC: { min: 0.83, max: 1.22 },
-  GL: { min: 1.22, max: 1.80 },
-  Property: { min: 1.13, max: 1.70 },
+// ============================================================================
+// ⚠ RE-ANCHORED TO RESERVES ON WC AND GL. PROPERTY STAYS ON PREMIUM, AND THAT
+// SPLIT IS THE DECISION — NOT AN EXEMPTION.
+//
+// Premium is an annual FLOW; the liability is a multi-year STOCK. Capital
+// adequacy for a long-tail line is judged against reserves, and this band never
+// made that comparison. What it produced instead — measured on ACCEPTED
+// openings with the band in force, which is what the pool actually opens with,
+// 40 games, both flags on:
+//
+//   line       surplus/reserve   reserve/surplus   opening surplus
+//   WC              0.466             2.14            $9.25M
+//   GL              1.108             0.90           $20.02M
+//   Property        1.455             0.69           $18.62M
+//
+// A 2.38x spread between WC and GL in capital held per dollar of liability,
+// from a band that was never asked the question. THAT is the defect this fixes,
+// more than the level is. After: 0.330 / 0.498, a 1.51x spread, which is the
+// intended J ratio of 1.52x and nothing else.
+//
+// ⚠ THE UNFILTERED FIGURES ARE DIFFERENT AND BOTH ARE REAL — 0.293 / 0.988 /
+// 1.872, a 3.37x WC-to-GL spread. Unfiltered is the right basis for CENTRING the
+// pin (see STARTING_CAPITAL_TO_PREMIUM) because the accepted sample is truncated
+// by the band being centred. Accepted is the right basis for saying what the
+// pool HOLDS. Quote whichever answers the question and say which it is.
+//
+// ⚠ THE TARGETS ARE THE MODEL'S OWN, NOT A RULE OF THUMB. A uniform "30% of
+// reserves" was proposed and is wrong here: reserveRiskMarginNeeded/reserve is
+// a STATIC per-line constant in this engine (see FROZEN_CAPITAL_J below) at
+// 0.3294 / 0.5020 / 0.5923, so a flat 30% would leave every line BELOW its own
+// required margin — WC by 8.9%, GL by 40.2%, Property by 49.3%. The band is set
+// AT each line's own margin instead. The residual WC-to-GL spread after the
+// re-anchor is 1.52x, which is exactly 0.5020/0.3294 — the intended difference
+// between the lines' CLFs, not an arbitrary one.
+//
+// ⚠ WHY PROPERTY IS NOT ON THIS STANDARD. Property is short-tail: its reserve is
+// 1.04x annual ultimate against WC's 2.96x, and it settles by age 7. Its
+// surplus/reserve reads high because the DENOMINATOR is small, not because it is
+// over-capitalised. Its risk is a current-year catastrophe, not runoff
+// deterioration, and a short-tail cat-exposed line is capitalised against
+// OCCURRENCE. Measured confirmation that the standard does not fit it: at a pin
+// of ZERO — no starting capital at all — Property's pre-game still accumulates
+// to surplus/reserve 0.846, above both 0.30 and its own 0.5923. No pin reaches
+// the target. That floor is a sign the standard is wrong for the line, not that
+// the line is wrong, and "a standard one of three lines cannot meet is not a
+// standard" is answered by its not being that line's standard.
+//
+// ⚠ THE PRIOR REJECTION AT LINE ~1500 DOES NOT BIND THIS, AND THE NEXT READER
+// SHOULD NOT HAVE TO REDISCOVER WHY. That record rejects anchoring surplus to
+// the year -2 SEED draw — a static dollar band with Pearson r against seed
+// premium of -0.014 / +0.068 / -0.008, and 3.6x / 16.9x / 14.8x smaller than the
+// opening reserve. Its own words: the seed "is not the pool's liability in any
+// case." This anchors to the OPENING reserve, which is that liability. Different
+// proposal, and the measurement that killed the old one does not touch it.
+//
+// ⚠ THE ACCEPTANCE SEARCH IS NOT CIRCULAR, WHICH WAS THE OTHER FEAR. The test
+// reads endingSurplus and endingNetReserve — BOTH OUTPUTS OF THE SAME CANDIDATE
+// DRAW. It is rejection sampling, not a quantity that must be known before the
+// thing producing it, so it needs none of the "agree in advance" treatment the
+// aggregate's attachment needed. The reserve does move a little with the pin
+// (3.6% WC, 5.2% GL across a 0.30-1.00 pin range), which makes the pin solve a
+// fixed point; bisecting on median(surplus/reserve) converged in 6 passes.
+//
+// COST, MEASURED BY pregame-acceptance-check AT THE SHIPPED PIN, 150 seeds:
+//
+//   line       mean attempts        p99   max   fallbacks
+//   WC          2.23 -> 3.53         12    14       0
+//   GL          2.27 -> 4.35         22    27       0
+//   Property    3.27 -> 3.95         13    16       0
+//
+// No fallbacks on any line, against a 500 cap. The search survives.
+//
+// ⚠ READ THOSE NET OF PROPERTY. Property's pin and band are UNTOUCHED and its
+// per-line search is independent of the other two, so its 3.27 -> 3.95 is pure
+// run-to-run and context drift — about +21%. Netting it off, the re-anchor costs
+// roughly +30% on WC and +59% on GL, not the +58% and +92% the raw figures
+// suggest.
+//
+// ⚠ AND ON THE SHIPPED ARM WC GOT CHEAPER, NOT DEARER. Measured with the band in
+// force under both flags on, WC's accepted search went 4.80 -> 2.92 attempts:
+// the parent pin was calibrated against PRICING_TRIANGLE OFF, so under the arm
+// that now ships it was already off-centre. Pool-mean attempts across the three
+// lines are 3.22 -> 3.38, essentially flat. The 2.23 baseline above is the
+// parent's own published figure and is kept because it is what the record said;
+// it is not measured on the arm this commit ships.
+//
+// ⚠ AND PROPERTY WAS THE CONTROL THAT MADE THOSE TWO NUMBERS TRUSTWORTHY —
+// UNPLANNED, AND WORTH DOING ON PURPOSE NEXT TIME. Its pin and band are
+// untouched, so the same attempt model that predicted WC and GL also predicted a
+// line whose answer was already known: it said 3.76 against a measured 3.27, so
+// the model runs about 15% HIGH. That is what turns a modelled 3.56 and 4.92
+// into a reported 3.1 and 4.3 — a correction, not a hedge.
+//
+// Without it the modelled figures would have been quoted raw and been wrong by
+// half an attempt each, in the same direction, with nothing to say so. Anyone
+// changing two of three lines should LEAVE ONE ALONE DELIBERATELY: an untouched
+// line is a free calibration of whatever harness is being used to predict the
+// other two, and it costs nothing because it is already being run.
+// ============================================================================
+export const OPENING_SURPLUS_BAND: Record<string,
+  { basis: 'premium' | 'reserve'; min: number; max: number }> = {
+  // Each band keeps the RELATIVE half-width the premium band had — WC +/-19.02%,
+  // GL +/-19.21% — so only the denominator and the centre change, and the
+  // acceptance cost above is attributable to those two things alone.
+  WC: { basis: 'reserve', min: 0.2667, max: 0.3921 },
+  GL: { basis: 'reserve', min: 0.4056, max: 0.5984 },
+  Property: { basis: 'premium', min: 1.13, max: 1.70 },
 };
+
+// ============================================================================
+// J — CAPITAL HELD PER DOLLAR OF RESERVE, FROZEN AS LITERALS AT CALIBRATION.
+//
+// ⚠ FROZEN DELIBERATELY, AND THE BLOCK BELOW SAYS WHY IN ITS OWN WORDS.
+// J_line = T x (reserveMarginCLF_line - 1) EXACTLY, so a reserve pin carrying a
+// capital rationale puts the 90% CLF back on the opening path — the single
+// coupling a3d7760 removed. Freezing the CLF-derived value as a literal is that
+// block's own prescribed remedy: the CLF sets the number once, here, and never
+// becomes a live consumer. DO NOT replace these with a call to the CLF table.
+//
+// These are reserveRiskMarginNeeded/reserve, measured with ZERO dispersion
+// across seeds and across both payout-pattern arms.
+export const FROZEN_CAPITAL_J: Record<string, number> = {
+  WC: 0.3294,
+  GL: 0.5020,
+  Property: 0.5923,   // recorded for completeness; Property's band is on premium
+};
+
+// ============================================================================
+// ⚠ WHAT THIS DOES NOT DO, RECORDED SO NOBODY READS IT AS HAVING DONE IT.
+//
+// It fixes the capital STRUCTURE. It does not, on its own, make a bad year hurt.
+//
+//   investment income as a share of surplus   = (1 + k) x 5.42%
+//   a one-SD reserve deviation                =       k x 4.13%
+//
+// with k = reserve/surplus. Since 5.42 > 4.13 the income term beats a one-sigma
+// bad year at EVERY capital structure — there is no leverage at which an
+// ordinary bad year is a loss. At the new targets the reserve volatility that
+// would change that is 7.20% on WC and 8.14% on GL, against a measured 4.13%.
+// So difficulty is a question about the SIZE OF THE SHOCK, and the shock is
+// small because the development law is mean-one around a systematic ~30% that
+// premium already funds. Re-anchoring the band is not an answer to it.
+// ============================================================================
 
 // ============================================================================
 // THE ARITHMETIC BEHIND ANY FUTURE CAPITAL RULE — recorded because it is not
@@ -1511,6 +1674,17 @@ export const OPENING_SURPLUS_TO_PREMIUM_BAND: Record<string, { min: number; max:
 // the reserve at the opening, so it is not the pool's liability in any case.
 // Whoever proposes this next should find this measurement rather than repeat the
 // proposal.
+//
+// ⚠ AND THIS DOES NOT REJECT ANCHORING TO THE OPENING RESERVE, WHICH IS WHAT
+// SHIPPED. Read the paragraph above carefully: every objection in it is about
+// the year -2 SEED draw. Uncorrelated with pool size, 2-4x noisier than K x
+// premium, and — in its own words — "not the pool's liability in any case."
+// The OPENING reserve, at the end of the pre-game, is 3.6x / 16.9x / 14.8x
+// larger and IS that liability; it is an output of the same candidate draw the
+// acceptance test already reads, so it is neither noisy in the seed's way nor
+// circular. OPENING_SURPLUS_BAND is now anchored to it on WC and GL. The
+// measurement above stands and still forbids the seed version; it does not
+// reach this one.
 // ============================================================================
 
 // Starting enrollment per line: each active line independently enrolls members

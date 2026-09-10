@@ -1737,10 +1737,17 @@ export function processLineYear(
   // starting surplus. It did, three commits running (f328d65, fab85e4, 962ef60);
   // the worst of it moved GL's median opening from $21.29M to $11.72M and needed
   // a MEDIAN OF 28 REDRAWS to land in band. The pre-game now tests against
-  // PREMIUM (OPENING_SURPLUS_TO_PREMIUM_BAND), so this margin has no consumer on
-  // the opening path at all. KEEP IT THAT WAY: if a future change wants to
-  // condition the opening on reserve risk, that is a decision to argue for
-  // explicitly, not a side effect to reintroduce.
+  // PREMIUM, so this margin had no consumer on the opening path at all.
+  //
+  // ⚠ THAT IS NOW HALF TRUE AND THE CHANGE WAS ARGUED FOR, NOT SLIPPED IN. WC
+  // and GL are graded against the opening NET RESERVE (OPENING_SURPLUS_BAND),
+  // which is exactly the "condition the opening on reserve risk" this paragraph
+  // said to argue for explicitly. What it warned against — the 90% CLF becoming
+  // a LIVE consumer of the opening path — did not happen: the multiple is
+  // FROZEN_CAPITAL_J, a literal frozen at calibration, so moving the CLF table
+  // moves nothing here. The RESERVE moves the opening, the CLF does not.
+  // Property is still on premium. KEEP THE FREEZE: replacing those literals with
+  // a call to the CLF table is the coupling, not the reserve basis.
   //
   // ⚠ THE ONE THING THAT MAY LEGITIMATELY READ THIS RATIO IS A ONE-OFF
   // CALIBRATION. Because reserveMarginCLF is a static per-line table, the line
@@ -1749,7 +1756,7 @@ export function processLineYear(
   // arms. So any "hold J x reserve" capital rule is "hold T x this margin"
   // wearing a different denominator, and adopting one puts the 90% CLF back on
   // the opening path. The consequences are worked through beside
-  // OPENING_SURPLUS_TO_PREMIUM_BAND in defaultAssumptions.ts, together with the
+  // OPENING_SURPLUS_BAND in defaultAssumptions.ts, together with the
   // reserve pin that was measured and rejected. Read that before wiring anything
   // here to the opening.
   const reserveMarginCLF = hasStaticClf(line)
