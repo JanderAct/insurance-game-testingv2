@@ -1,7 +1,7 @@
 // Core simulation engine for Risk Pool Simulation v1
 // Premium formula: Premium = Exposure($M) × Rate_per_$100_payroll × 10,000
 
-import type { Claim, GameState, Occurrence, PoolState, DecisionSet, LinePoolState, LineDecisionSet, ResultSet, LineResultSet, ReserveCohort, ReserveDevelopmentRow, Member, MemberLossResult, MembershipHistory, CoverageLine, GameInstance, AssetAllocation } from '../types/simulation';
+import type { Claim, GameState, Occurrence, PoolState, DecisionSet, LinePoolState, LineDecisionSet, ResultSet, LineResultSet, ReserveCohort, ReserveDevelopmentRow, Member, MemberLossResult, MemberLossHistory, MembershipHistory, CoverageLine, GameInstance, AssetAllocation } from '../types/simulation';
 import type { LineShockEffects, ShockFiring, ShockRecord } from '../types/shocks';
 import { resolveShocks, ownFreqMultipliers, ownComponentFreqMultipliers, ownSevMultipliers } from './shockResolver';
 import { WHOLE_LINE } from './shockEffects';
@@ -32,6 +32,7 @@ import {
 } from './developmentAllocation';
 import { isClaimClosed } from './claimClosure';
 import { allocateMemberPremium } from './memberPremium';
+import { memberExperienceMods } from './memberExperienceMod';
 import { claimRevisionUnit, normalQuantile, reviseDevelopingSet, settleClosingSet } from './claimRevision';
 import { experienceRatePer100, type ExperienceBasis } from './experienceRating';
 import { projectPricingTriangle, windowRows } from './pricingTriangle';
@@ -443,6 +444,16 @@ interface LineYearContext {
   // line's own per-line reads). Recruitment eligibility reads from THIS,
   // never from Member.status (see membershipHistory.ts).
   membershipHistory: MembershipHistory;
+  // The rolling per-member loss ledger AS IT STOOD AT THE START OF THIS YEAR.
+  //
+  // ⚠ IT ENDS AT yearNumber - 1 AND THAT IS THE POINT, NOT AN ACCIDENT OF
+  // ORDERING TO BE TIDIED. processYear records this year's losses into the
+  // ledger AFTER processLineYear returns, so the experience modifier prices
+  // year N off years N-3..N-1 and cannot see the year it is pricing. Move the
+  // recording ahead of processLineYear and the mod starts pricing off the
+  // answer; member-experience-mod-check's lookahead assertion is what catches
+  // that.
+  memberLossHistory: MemberLossHistory;
   // The year's pool-wide loss factor (mean 1), drawn ONCE in processYear and
   // shared by every line — the cross-line aggregate correlation that the
   // per-line commonLossFactor could not express. The WC and GL claim
@@ -936,8 +947,19 @@ export function processLineYear(
   // blend.sum(e_i) by about an ulp and grows with the book. See
   // memberPremium.ts for the measured figures and for why WC is the only line
   // with class rates to un-blend.
+  //
+  // ⚠ AND THE EXPERIENCE MODIFIER RIDES IN THE SAME WEIGHTS, FOR THE SAME
+  // REASON. It is computed here and nowhere else, it is passed as a weight
+  // multiplier, and it therefore cannot move poolPremium above — which is
+  // already fixed on the line before this call. It must not reach the rate,
+  // retention or recruitment; memberExperienceMod.ts says why each of those
+  // would be a defect and member-experience-mod-check holds all three.
+  const experienceMods = memberExperienceMods(
+    memberResult.activeMembers, line, ctx.memberLossHistory, yearNumber,
+  );
   const memberPremiumShares = allocateMemberPremium(
     memberResult.activeMembers, line, yearNumber, poolPremium,
+    new Map(experienceMods.map(m => [m.memberId, m.mod])),
   );
 
   // ⚠ ADMIN STAYS ON THE GROSS EXPECTED LOSS, deliberately. The pool adjusts,
@@ -2329,6 +2351,8 @@ export function processYear(
       calendarYear,
       allMarketMembers: currentAllMarketMembers,
       membershipHistory,
+      // Ends at yearNumber - 1 — see the field's note on LineYearContext.
+      memberLossHistory,
       gPool,
       shock: shocks?.byLine[line],
       shockFirings: shocks?.firings.filter(f => f.linesAffected.includes(line)),

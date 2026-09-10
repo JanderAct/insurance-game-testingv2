@@ -138,12 +138,23 @@ export interface MemberPremiumShare {
   /** Their share of poolPremium. Sums to poolPremium to float tolerance. */
   premium: number;
   /**
-   * Their class rate over the ENROLLED book's exposure-weighted blend. 1.000
-   * on GL and Property, which have no class structure. On WC this is what the
-   * un-blending actually does: measured on the roster, schools 0.353 and
-   * highSafety 1.571 against the blend.
+   * What they are charged per unit of exposure, against the book's mean.
+   *
+   * ⚠ THIS IS CLASS x EXPERIENCE MOD, NOT CLASS ALONE, AND IT WAS CLASS ALONE
+   * BEFORE THE MODIFIER SHIPPED. A member with a favourable mod IS cheaper
+   * per $100 and this column says so. On GL and Property, which have no class
+   * structure, it therefore reads exactly `experienceMod` — that identity is
+   * asserted in member-premium-check and is a direct test of the rebase, so
+   * do not "fix" this back to 1. On WC it is the class relativity (schools
+   * 0.353, highSafety 1.571 against the blend) moved by the mod.
    */
   relativity: number;
+  /**
+   * The member's experience modifier for this line-year, exactly 1 when they
+   * are unrated. Exposure-weighted mean over the book is 1 by construction —
+   * see memberExperienceMod.ts and its gate's rebase assertion.
+   */
+  experienceMod: number;
 }
 
 // ---------------------------------------------------------------------------

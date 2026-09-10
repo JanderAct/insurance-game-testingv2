@@ -91,6 +91,8 @@ const FAST: string[] = [
                                      //         GAMES 16 -> 48 at IBNER_CALENDAR_RHO — see the note at its own GAMES
   'member-experience-basis-check',   //   5s   expectedAtManual is the expectation at NEUTRAL risk quality and
                                      //         out-ranks expectedAtOwnRq in every measured game-year
+  'member-experience-mod-check',     //   8s   the mod is centred on the book it rates, cannot see the year it
+                                     //         is pricing, and reaches neither the total, the rate nor the roster
   'member-loss-history-check',       //   2s
   'member-premium-check',            //  55s   members pay their own WC class rate; the pool total is untouched
                                      //         and the allocation reaches nothing that decides who is enrolled

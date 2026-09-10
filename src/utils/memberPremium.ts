@@ -104,15 +104,36 @@ export function allocateMemberPremium(
   line: CoverageLine,
   yearNumber: number,
   poolPremium: number,
+  /**
+   * Per-member experience modifiers, keyed by member id. A member with no
+   * entry is treated as 1, which is also what an unrated member carries.
+   *
+   * ⚠ IT ENTERS AS A WEIGHT, AND THAT IS THE WHOLE OF WHY THE POOL TOTAL
+   * CANNOT MOVE. Shares are poolPremium x w_i / sum(w), so ANY factor folded
+   * into w_i — the mod included — redistributes between members and cancels
+   * out of the total exactly, in floating point as well as in real
+   * arithmetic. Same allocate-don't-recompute property the class rates rely
+   * on, and the reason a modifier can ship without touching what the pool
+   * collects. See memberExperienceMod.ts for what it must never reach.
+   *
+   * ⚠ AND THE RELATIVITY COLUMN DELIBERATELY INCLUDES IT. `relativity` is
+   * what the member is charged per unit of exposure against the book's mean,
+   * so a member with a favourable mod IS cheaper per $100 and the column
+   * should say so. It stops being a pure class relativity the moment the mod
+   * is non-trivial, which is why member-premium-check's WC class assertion
+   * now runs against an explicitly unmodified allocation.
+   */
+  mods?: ReadonlyMap<string, number>,
 ): MemberPremiumShare[] {
-  const rows: Array<{ member: Member; exposure: number; weight: number }> = [];
+  const rows: Array<{ member: Member; exposure: number; weight: number; mod: number }> = [];
   let totalWeight = 0;
   for (const m of members) {
     const exposure = getMemberExposure(m, line, yearNumber);
     if (!(exposure > 0)) continue;
-    const weight = exposure * memberRateWeight(m, line);
+    const mod = mods?.get(m.id) ?? 1;
+    const weight = exposure * memberRateWeight(m, line) * mod;
     totalWeight += weight;
-    rows.push({ member: m, exposure, weight });
+    rows.push({ member: m, exposure, weight, mod });
   }
   if (!(totalWeight > 0)) return [];
 
@@ -128,5 +149,6 @@ export function allocateMemberPremium(
     exposure: r.exposure,
     premium: poolPremium * (r.weight / totalWeight),
     relativity: (r.weight / r.exposure) / blendWeight,
+    experienceMod: r.mod,
   }));
 }

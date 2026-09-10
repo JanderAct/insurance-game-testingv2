@@ -90,6 +90,7 @@ interface Snap {
   poolPremium: number;
   blendedRatePer100: number;
   shares: MemberPremiumShare[];
+  classOnly: MemberPremiumShare[];
 }
 
 /** One game, snapshotted per line-year. `rateScale` perturbs the class rates
@@ -130,6 +131,13 @@ function runGame(g: number, rateScale: Record<string, number> | null): Map<strin
         poolPremium,
         blendedRatePer100: expo > 0 ? weighted / expo : 0,
         shares,
+        // ⚠ THE SAME BOOK ALLOCATED WITH NO EXPERIENCE MODS, which is what
+        // assertion 2 tests. Since the modifier shipped, the live
+        // `relativity` is class x mod, so asserting "GL and Property are
+        // exactly 1" against it would be asserting the mod does nothing.
+        // The CLASS question is still a real one and this is where it lives;
+        // the mod gets its own gate and its own identity below.
+        classOnly: allocateMemberPremium(members, line, y, poolPremium),
       });
     }
     gs = { ...gs, currentYearNumber: y + 1, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result] };
@@ -160,6 +168,9 @@ function reallocatePerturbed(
     memberId: r.id, exposure: r.e,
     premium: poolPremium * (r.w / tw),
     relativity: (r.w / r.e) / blend,
+    // This arm exists to perturb CLASS RATES only, so it carries no mod. The
+    // mod's own version of assertion 4 lives in member-experience-mod-check.
+    experienceMod: 1,
   }));
 }
 
@@ -193,13 +204,13 @@ console.log(`  worst |sum(shares) - poolPremium| / poolPremium = ${worstSumRel.t
   + `against ${MAX_SUM_REL.toExponential(0)}   ${worstSumRel <= MAX_SUM_REL ? 'PASS' : 'FAIL'}`);
 
 // ------------------------------------ 2. WC differentiated, GL and Property flat
-console.log('\n--- 2. WC IS CLASS-DIFFERENTIATED, GL AND PROPERTY ARE FLAT ---');
+console.log('\n--- 2. WC IS CLASS-DIFFERENTIATED, GL AND PROPERTY ARE FLAT (class only, mods off) ---');
 const relSeen: Record<string, Set<string>> = { WC: new Set(), GL: new Set(), Property: new Set() };
 let worstFlat = 0, worstWc = 0;
 for (const game of base) {
   for (const [key, s] of game) {
     const line = key.split('|')[0];
-    for (const r of s.shares) {
+    for (const r of s.classOnly) {
       relSeen[line].add(r.relativity.toFixed(4));
       if (line !== 'WC') {
         worstFlat = Math.max(worstFlat, Math.abs(r.relativity - 1));
@@ -225,6 +236,40 @@ if (relSeen.WC.size < 2) {
 console.log(`  GL/Property worst |relativity - 1| = ${worstFlat.toExponential(2)}   `
   + `${worstFlat <= MAX_RELATIVITY_ABS ? 'PASS' : 'FAIL'}`);
 console.log(`  WC distinct relativities ${relSeen.WC.size} (needs >= 2)   ${relSeen.WC.size >= 2 ? 'PASS' : 'FAIL'}`);
+
+// ------------------------- 2b. the rebase identity, on the LIVE allocation
+//
+// ⚠ AN EXACT IDENTITY, NOT A TOLERANCE, AND IT TESTS THE REBASE RATHER THAN
+// THE CLASS RATES. On GL and Property every class rate is 1, so the live
+// relativity collapses to mod_i / (exposure-weighted mean mod). The rebase
+// makes that denominator exactly 1, so relativity MUST equal experienceMod
+// member for member. If the rebase drifts, this separates immediately — and
+// it does so on the shipped allocation, not on a re-derivation.
+{
+  let worst = 0, n = 0, moved = 0;
+  for (const game of base) {
+    for (const [key, s] of game) {
+      if (key.startsWith('WC|')) continue;
+      for (const r of s.shares) {
+        worst = Math.max(worst, Math.abs(r.relativity - r.experienceMod));
+        if (r.experienceMod !== 1) moved++;
+        n++;
+      }
+    }
+  }
+  console.log(`  GL/Property worst |relativity - experienceMod| over ${n} rows = ${worst.toExponential(2)}   `
+    + `${worst <= 1e-12 ? 'PASS' : 'FAIL'}`);
+  console.log(`  of those, ${moved} carry a mod other than exactly 1  (must be > 0, or the identity is trivial)`);
+  if (worst > 1e-12) {
+    failures.push(`on a flat-rated line the relativity should equal the experience mod exactly (the rebase `
+      + `makes the blend 1), but they differ by ${worst.toExponential(2)}. Either the rebase is not producing an `
+      + 'exposure-weighted mean of 1, or the mod is being applied somewhere other than the allocation weight.');
+  }
+  if (moved === 0) {
+    failures.push('every GL and Property row carries a mod of exactly 1, so the identity above compares 1 to 1 '
+      + 'and proves nothing. Either no member is rated or the mod is not reaching the allocator.');
+  }
+}
 
 // --------------------------------------------- 3. the two derivations agree
 console.log('\n--- 3. THE TWO CLASS-RATE DERIVATIONS AGREE ---');

@@ -105,12 +105,28 @@ export const SAVE_KEY = 'riskpool_gamestate_v10';
  * produce is the worst kind: a member's BILL, restored from a stale row after
  * the class rates moved.
  *
- * ⚠ SO A CONSUMER THAT WANTS IT FOR A LOCKED YEAR MUST CALL THE ALLOCATOR.
- * Reading `result.memberPremiumShares` on a reloaded game returns undefined
- * for every year processed before the reload, and a page that renders it
- * directly would silently blank — the same degradation the note above keeps
- * memberLossResults out of this list to avoid. Nothing renders it today; the
- * day something does, that page calls the allocator or this entry comes out.
+ * ⚠ THE EXPERIENCE MODIFIER ADDED A FOURTH INPUT AND IT IS NOT FULLY
+ * RECOVERABLE, SO THE PARAGRAPH ABOVE IS NARROWER THAN IT READS. A share row
+ * now carries `experienceMod`, which is a function of memberLossHistory AS IT
+ * STOOD BEFORE THAT YEAR. The save keeps the ledger, but only its CURRENT
+ * state and only LOSS_HISTORY_CAP_YEARS of it — so the window ending at N-1
+ * can be rebuilt for recent years and has been pruned away for old ones.
+ * Reconstruction therefore works near the present and degrades with age
+ * rather than being exact for every year.
+ *
+ * That is not a reason to store the rows. A stale bill is still worse than an
+ * absent one, and a stored row would need the mod's inputs frozen alongside
+ * it to mean anything. It is a reason not to promise an exact rebuild of
+ * year 2's bills in year 12.
+ *
+ * ⚠ SO A CONSUMER THAT WANTS IT FOR A LOCKED YEAR MUST CALL THE ALLOCATOR,
+ * and must pass the mods itself if it wants the real bill rather than the
+ * class-only split. Reading `result.memberPremiumShares` on a reloaded game
+ * returns undefined for every year processed before the reload, and a page
+ * that renders it directly would silently blank — the same degradation the
+ * note above keeps memberLossResults out of this list to avoid. Nothing
+ * renders it today; the day something does, that page calls the allocator, or
+ * this entry comes out and the staleness problem comes back with it.
  */
 export const SAVE_STRIPPED_KEYS: readonly string[] = [
   'claims', 'occurrences', 'marketMemberLossResults', 'pricingTriangle',
