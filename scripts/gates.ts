@@ -90,6 +90,8 @@ const FAST: string[] = [
   'maturity-anchor-check',           //  76s   the cohort must develop back to its own register, both arms
                                      //         GAMES 16 -> 48 at IBNER_CALENDAR_RHO — see the note at its own GAMES
   'member-loss-history-check',       //   2s
+  'member-premium-check',            //  55s   members pay their own WC class rate; the pool total is untouched
+                                     //         and the allocation reaches nothing that decides who is enrolled
   'net-funding-fields-check',        //   6s
   'opening-centring-check',          //  30s
   'paid-headroom-check',             //   7s

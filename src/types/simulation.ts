@@ -94,6 +94,32 @@ export interface MemberLossResult {
   simulatedLoss: number;
 }
 
+// One member's share of a line-year's pool premium, at their own class rate.
+// See src/utils/memberPremium.ts for the allocation and for why WC has four
+// rates while GL and Property have one.
+//
+// ⚠ A SEPARATE TYPE FROM MemberLossResult, NOT A FIELD ON IT, AND DELIBERATELY.
+// MemberLossResult is built by the claim engines, which run BEFORE the premium
+// is known and have no business knowing it — a premium field there could only
+// be back-filled by mutating engine output after the fact. Keeping the two
+// apart also keeps the loss path free of any premium term, which is what makes
+// the "member premium never feeds the draw" property checkable rather than
+// merely intended.
+export interface MemberPremiumShare {
+  memberId: string;
+  /** This line's exposure for the member, at this year's wage factor. */
+  exposure: number;
+  /** Their share of poolPremium. Sums to poolPremium to float tolerance. */
+  premium: number;
+  /**
+   * Their class rate over the ENROLLED book's exposure-weighted blend. 1.000
+   * on GL and Property, which have no class structure. On WC this is what the
+   * un-blending actually does: measured on the roster, schools 0.353 and
+   * highSafety 1.571 against the blend.
+   */
+  relativity: number;
+}
+
 // ---------------------------------------------------------------------------
 // Claim / Occurrence scaffolding for the loss-distribution work.
 //
@@ -895,6 +921,19 @@ export interface ResultSet {
   // ENROLLED MEMBERS ONLY. This is the pool-accounting list: aggregateMemberLoss,
   // grossUltimateLoss, reserves and reinsurance all derive from it.
   memberLossResults: MemberLossResult[];
+  // ENROLLED MEMBERS ONLY, one row each, at their own class rate. Sums to
+  // poolPremium to float tolerance — see memberPremium.ts for why the total is
+  // allocated rather than recomputed.
+  //
+  // ⚠ STRIPPED ON SAVE AND FULLY DERIVABLE. Every input is already persisted
+  // (the roster, the enrolled list, the year, poolPremium), and
+  // `allocateMemberPremium` rebuilds it from them at any time. Storing it would
+  // put a second copy of a derived quantity in the save, which is the
+  // pricingTriangle argument and Ruling 8. Optional for that reason: a
+  // reloaded game reads `undefined` here for past years until something calls
+  // the allocator, and any consumer that needs it for a locked year must call
+  // the allocator rather than assume the field.
+  memberPremiumShares?: MemberPremiumShare[];
   // ALL 200 CANONICAL MEMBERS, enrolled and prospect alike — loss HISTORY only,
   // never pool accounting. Claims are generated marketplace-wide so that a
   // prospect arrives with a readable loss record instead of a blank one, which

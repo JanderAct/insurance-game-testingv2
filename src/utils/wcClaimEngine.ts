@@ -407,6 +407,46 @@ export function computeKLine(members: Member[]): number {
 // group's own payroll on exactly the basis deriveNeutralPurePremiumPer100 uses
 // for the single blended rate.
 //
+// ============================================================================
+// ⚠ THESE NOW REACH THE MEMBER'S BILL, AND THAT IS A CORRECTNESS FIX RATHER
+// THAN A CALIBRATION. Until member-level class pricing they were blended away
+// at wcBlendedRatePer100 and every WC member paid the blend whatever their
+// class. memberPremium.ts un-blends them at the member.
+//
+// THE JUSTIFICATION IS THE GENERATOR, NOT A CONVENTION. A school district's
+// rate is 0.353 of the blend BECAUSE a school district generates 0.353 of the
+// blend's losses per $100 of payroll — these four numbers are DERIVED from the
+// loss model at neutral risk quality, not assigned to it. Measured over the
+// shipped catalog:
+//
+//   group        rate/$100   relativity   members   mean RQ
+//   schools         1.3201       0.353        20      5.63
+//   county          2.9527       0.790        23      4.77
+//   lowSafety       4.0561       1.085       133      4.91
+//   highSafety      5.8757       1.571        24      5.36
+//   BLEND           3.7391       1.000       200        --
+//
+// SPREAD 4.45x, and the CV of the member rate WITHIN each group is EXACTLY
+// 0.0% — the four rates fully describe WC's class structure and nothing is
+// left inside a group for a fifth rate to catch. That 0.0% is also what makes
+// "actual over expected at manual" exactly class-normalising on this line.
+//
+// ⚠ AND THE REDISTRIBUTION IS LARGE. A school district's WC bill falls to 35%
+// of what it paid under the blend; a fire district's rises to 157%. Nothing
+// about the pool's total changes — the blend is exposure-weighted, so the
+// allocation moves between members and not into or out of the pool.
+//
+// ⚠ GL AND PROPERTY STAY FLAT, AND THE NEXT READER SHOULD NOT "FINISH THE JOB".
+// There is no job. Measured on the same basis, expected loss per $100 at
+// neutral RQ by member type: every one of GL's nine types reads 5.6319 and
+// every one of Property's reads 0.0962 — SPREAD 1.00x on both, CV 0.0% within
+// every category. GL is flat by an explicit decision (GL_LOSS_MODEL's note,
+// and GL_RELATIVITIES retired by name) and Property is TIV-proportional. A
+// class rate on either would have to be INVENTED rather than derived, which is
+// a change to the LOSS MODEL and not to pricing. Put the differential in the
+// generator first or leave both alone.
+// ============================================================================
+//
 // ⚠ THIS IS NOT A SECOND WAY TO PRICE, IT IS THE SAME PRICE STOPPED ONE STEP
 // EARLIER. The blended rate IS the payroll-weighted average of these four over
 // the full roster — reproduced to 1.3e-15 — so nothing has been re-fitted or

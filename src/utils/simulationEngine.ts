@@ -31,6 +31,7 @@ import {
   allocateDevelopment, buildTrackedSet, cedeDevelopment, markDownForBooking, reselectDevelopingSet,
 } from './developmentAllocation';
 import { isClaimClosed } from './claimClosure';
+import { allocateMemberPremium } from './memberPremium';
 import { claimRevisionUnit, normalQuantile, reviseDevelopingSet, settleClosingSet } from './claimRevision';
 import { experienceRatePer100, type ExperienceBasis } from './experienceRating';
 import { projectPricingTriangle, windowRows } from './pricingTriangle';
@@ -928,6 +929,16 @@ export function processLineYear(
   // and conclude something is still needed here.
   const poolPremium =
     activeExposure * rateAtConfidenceLevelPer100 * 10_000;
+
+  // MEMBER-LEVEL CLASS PRICING. The line total above is UNTOUCHED and is not on
+  // this call's arithmetic path — the allocator splits it by weight rather than
+  // rebuilding it from members, because summing e_i.r_i differs from
+  // blend.sum(e_i) by about an ulp and grows with the book. See
+  // memberPremium.ts for the measured figures and for why WC is the only line
+  // with class rates to un-blend.
+  const memberPremiumShares = allocateMemberPremium(
+    memberResult.activeMembers, line, yearNumber, poolPremium,
+  );
 
   // ⚠ ADMIN STAYS ON THE GROSS EXPECTED LOSS, deliberately. The pool adjusts,
   // reserves and pays a ceded claim in full and only then recovers from the
@@ -1918,6 +1929,7 @@ export function processLineYear(
     kLineApplied,
     rcEffectivenessApplied: newRCEffectiveness,
     memberLossResults,
+    memberPremiumShares,
     aggregateMemberLoss,
     marketMemberLossResults,
     claims: generatedClaims,

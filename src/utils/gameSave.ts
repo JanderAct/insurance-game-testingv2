@@ -94,9 +94,27 @@ export const SAVE_KEY = 'riskpool_gamestate_v10';
  * it would put a second copy of the ledger in the save, and a second copy is a
  * thing that can disagree with the first. Store the inputs, not the output —
  * Ruling 8, and the same argument claimRegeneration.ts makes for the register.
+ *
+ * ⚠ `memberPremiumShares` IS HERE ON pricingTriangle's GROUNDS, NOT ON SIZE.
+ * It is one row per enrolled member per line-year and would cost roughly a
+ * tenth of what memberLossResults does, so size alone would not exclude it.
+ * It is excluded because it is a pure function of inputs the save already
+ * carries — the roster, the enrolled list, the year and poolPremium — and
+ * `allocateMemberPremium` rebuilds it from them exactly. A stored copy is a
+ * second copy that can disagree with the first, and the disagreement it would
+ * produce is the worst kind: a member's BILL, restored from a stale row after
+ * the class rates moved.
+ *
+ * ⚠ SO A CONSUMER THAT WANTS IT FOR A LOCKED YEAR MUST CALL THE ALLOCATOR.
+ * Reading `result.memberPremiumShares` on a reloaded game returns undefined
+ * for every year processed before the reload, and a page that renders it
+ * directly would silently blank — the same degradation the note above keeps
+ * memberLossResults out of this list to avoid. Nothing renders it today; the
+ * day something does, that page calls the allocator or this entry comes out.
  */
 export const SAVE_STRIPPED_KEYS: readonly string[] = [
   'claims', 'occurrences', 'marketMemberLossResults', 'pricingTriangle',
+  'memberPremiumShares',
 ];
 
 /** Measured against a real Chromium — see the header. Not a spec figure. */
