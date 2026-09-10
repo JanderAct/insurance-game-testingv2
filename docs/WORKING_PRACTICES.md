@@ -446,6 +446,35 @@ Things that were discovered expensively and live only in conversation memory. Re
   threshold is honest however it is set.** The tuned constant disappears with it: a sign test against
   p=0.5 has no bar to pick.
 
+  ⚠ FIFTH APPEARANCE, AND THE CAUSE IS DIFFERENT FROM THE FOUR ABOVE: A LEVEL CAN BE UNUSABLE FROM
+  BIAS RATHER THAN FROM NOISE, AND PAIRING FIXES BOTH. The cases above are heavy tails — the level is
+  unbiased and too noisy to gate. Here the level was tight enough (sd 0.020 across games) and still
+  wrong to gate on, because it does not TRANSFER between harnesses. Member ranking power against true
+  risk quality measured 0.208 / 0.120 (manual / own-RQ basis) in the harness that first measured it
+  and 0.257 / 0.164 in `member-experience-basis-check` — every level about 0.045 high, on every basis
+  and at every window, from population and accumulation choices neither harness is wrong about. The
+  paired GAP reproduced to within 0.005 (0.088 against 0.0925). So an absolute ceiling of 0.17 on the
+  own-RQ basis, which looked like it had a 0.05 margin from the recorded pair, actually sat 0.006
+  from the measurement and went the wrong side of it at a five-year window. Pairing also cut the
+  spread eightfold on the same draws (sd 0.0199 on the level, 0.0025 on the gap), because both bases
+  divide the SAME actuals.
+
+  **So the test is not only "is my sample big enough" — it is "would this number be the same number
+  in someone else's harness". A difference between two bases computed on shared inputs travels; a
+  level does not, and no sample size fixes that.** Cheap tell: when two harnesses that should agree
+  differ by a near-constant offset across every cell of a table, the offset belongs to the level and
+  the differences are still good. ⚠ This one was specified as an absolute bar in the prompt AFTER the
+  four lessons above had been written, which is the part worth noticing — the reflex survives being
+  documented, so the check belongs in the build, not in the reading.
+
+  ⚠ AND THE ABSOLUTE BAR IS STILL WORTH KEEPING ALONGSIDE, FOR WHAT PAIRING CANNOT SEE. A paired gap
+  is blind to anything that moves both arms together: if the whole experience signal vanished,
+  manual minus own-RQ could sit at 0.09 with both arms near zero. `member-experience-basis-check`
+  keeps the 0.17 floor on the manual basis for exactly that, and its header states the two clauses
+  catch different failures rather than being belt-and-braces. Pick the paired test as the
+  DISCRIMINATOR; keep an absolute one as the LIVENESS check, sited where every harness clears it with
+  room rather than where it just separates.
+
   ⚠ AND A PAIRED TEST NEEDS ITS OWN NULL CONTROLS, because it can fall into the family it was brought
   in to fix. Condition 3's first version was a float inequality that passed 73.7% of line-years on the
   arm where nothing develops. Two controls now run every time: the arm paired with ITSELF (difference

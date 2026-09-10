@@ -33,11 +33,73 @@
 // 2,408 entries, so about 118 chars an entry across three numbers and their
 // keys.
 //
-// A FOURTH NUMBER ON EVERY ENTRY — capped actual, the obvious next one —
-// measures at +72,801 chars, 1.8 points of budget, taking the save to roughly
-// 95.6%. That is measured by materialising the field on a real year-10 ledger
-// and re-serialising, not projected from the per-entry rate. It fits; what no
-// longer fits is a second one after it.
+// MEASURED BY MATERIALISING THE FIELDS ON REAL YEAR-10 LEDGERS AND
+// RE-SERIALISING, worst of 3 games — not projected from a per-entry rate:
+//
+//   3 numbers, as shipped        3,751,379   93.8%
+//   4 numbers, + capped actual   3,824,178   95.6%   (+72,799)
+//   5 numbers, + capped expected 3,928,646   98.2%  (+104,468)
+//
+// ⚠ AN EARLIER VERSION OF THIS NOTE SAID A FIFTH NUMBER WOULD NOT FIT. It
+// does, with 71,354 chars to spare — and it costs HALF AGAIN what the fourth
+// costs, because `cappedExpectedAtManual` is a longer key than `cappedActual`
+// and the key is most of the cost at this precision. Both halves of that were
+// wrong by projection and right by measurement, which is the entry in
+// WORKING_PRACTICES about figures in comments, again.
+//
+// FIVE IS THE END OF IT THOUGH. At 98.2% the margin is under two points, and
+// the sixth number is not a question worth asking — compression, or a
+// narrower retained window, comes first.
+//
+// ---------------------------------------------------------------------------
+// WHAT THIS LEDGER ACTUALLY READS AS A MODIFIER. Measured 8 games x 16 years
+// on the shipped basis (actual / expectedAtManual), accumulated uncapped and
+// cross-checked against this ledger over 158,605 windows with 0 mismatches.
+// Recorded here because the next change to this file is the capped-actual
+// field, and these are the numbers that decide its shape.
+//
+//   RANKING POWER against true risk quality (Spearman, sign-flipped):
+//                        1yr    3yr    5yr    8yr
+//     WC, all members    0.171  0.224  0.256  0.290
+//     WC, within group   0.173  0.225  0.258  0.291   <- class is priced now,
+//     GL                 0.130  0.181  0.195  0.212      so this is selection
+//     Property           0.054  0.119  0.144  0.145
+//   WC's edge over its within-group figure is GONE, which is the confirmation
+//   that member-level class pricing did its job: what is left is the member,
+//   not their class.
+//
+//   ⚠ AND THE RATIO IS SAVAGELY SKEWED, WHICH IS THE CREDIBILITY PROBLEM
+//   STATED AS A NUMBER. WC at three years, median-size members: MEAN 1.03,
+//   MEDIAN 0.395, p10 0.064, p90 2.16, p99 11.0. GL: mean 0.995, median
+//   0.215. The expectation is CALIBRATED — aggregate actual/expected is 0.986
+//   on WC and the exposure-weighted mean ratio is 0.993 — so this is the loss
+//   distribution, not a basis error. A raw ratio would hand the typical member
+//   a large credit (-15% at Z=0.25 on WC, -20% on GL) and recover it from a
+//   few members with enormous debits.
+//
+//   ⚠ SO CAPPING ACTUAL ALONE IS WRONG, AND THIS IS THE TRAP FOR THE NEXT
+//   COMMIT. Capping the member-year actual at 2x expected moves ranking power
+//   only 0.224 -> 0.247 on WC and 0.181 -> 0.195 on GL, but it drops the mean
+//   ratio from 1.03 to 0.50. A capped numerator over an uncapped denominator
+//   gives EVERY member a ~50% credit. The capped ratio needs a capped
+//   EXPECTATION under it.
+//
+//   ⚠ AND ONE LINE-LEVEL REBASE FACTOR WILL NOT DO, BECAUSE THE CAPPING RATIO
+//   IS SIZE-GRADED. Capped/uncapped actual by WC exposure decile, small to
+//   large: 0.222 0.353 0.429 0.409 0.430 0.498 0.622 0.569 0.642 0.771 — a
+//   3.5x spread. By rating group it is much flatter (schools 0.643, county
+//   0.674, lowSafety 0.575, highSafety 0.698), so the gradient is SIZE, not
+//   class: a small member holds more of its loss above any multiple of its
+//   own expectation because it has fewer claims. Rebasing on a single factor
+//   would pay small members and charge large ones for being large, which is
+//   the opposite of experience rating.
+//
+//   SO THE CAP IS TWO FIELDS, NOT ONE, and the storage note above is costed
+//   for both: capped actual AND a capped expectation on the same basis, 98.2%
+//   of budget together. Ship them in one commit — a capped numerator over an
+//   uncapped denominator is not a partial feature, it is a 50% across-the-
+//   board credit, and it would look like a working modifier while it did it.
+// ---------------------------------------------------------------------------
 //
 // ACCUMULATED AS IT HAPPENS, NEVER REGENERATED ON DEMAND. Recomputing a past
 // year's expected loss later would evaluate it at the member's CURRENT risk
