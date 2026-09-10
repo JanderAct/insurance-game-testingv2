@@ -67,7 +67,8 @@ const DIAG = path.join(__dirname, 'diagnostics');
 const FAST: string[] = [
   'actuarial-memo-check',            //   5s
   'audit-formula-check',             //  18s
-  'cession-path-independence',       //  77s   GAMES=300 — it cannot resolve its subject below that
+  'cession-path-independence',       // 785s   GAMES=600 — it could not resolve its subject below 300, and the
+                                     //         calendar blend thinned it further; see the note at its own GAMES
   'cession-uplift-basis',            //  22s
   'claims-workbook-check',           //  17s
   'clf-label-backtest-check',        //  20s   GREEN since the maturation book — worst label error -3.2pp against 5pp

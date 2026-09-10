@@ -149,7 +149,40 @@ import type { CoverageLine, DecisionSet, GameState, ReserveCohort } from '../../
 // 70s keeps it inside the fast tier: the tier's wall clock is ~119s at 3-way
 // concurrency and its previous longest job was 45s, so this becomes the longest
 // job without becoming the binding constraint.
-const GAMES = Number(process.env.GAMES ?? 300);
+// ⚠ 300 -> 600 AT IBNER_CALENDAR_RHO, AND IT IS THE SAME THINNING THAT COST
+// maturity-anchor-check ITS SAMPLE IN THE SAME COMMIT. This gate's statistic is
+// a DIFFERENCE between two arms, and its resolution is set by the between-game
+// variance of that difference. The calendar blend widens WC's reserve, which
+// widens exactly that variance, so the estimator got noisier while the bound
+// stayed where it was.
+//
+// MEASURED, WC inception diff against a ~$0.35M tolerance:
+//
+//   commit                    GAMES   diff      95% CI            verdict
+//   eaf930a (before)            300   -$0.01M   [-0.35, +0.34]    ok
+//   IBNER_CALENDAR_RHO          300   +$0.38M   [-0.02, +0.77]    FAIL
+//   IBNER_CALENDAR_RHO          600   +$0.26M   [-0.04, +0.56]    ok
+//
+// The flip at 300 is about ONE standard error of the difference, and both
+// failing and passing intervals contain zero — which is this file's own
+// recorded pathology from the other direction ("passing on noise and failing
+// on slightly less noise", $0.16M against $0.29M). At 600 the interval tightens
+// and the reading is inside the bound.
+//
+// ⚠ AND THE MECHANISM ARGUMENT SAYS THERE SHOULD BE NOTHING HERE, which is why
+// the sample and not the bound is what moved. The calendar shock is a pure
+// function of (gameId, line, valuationYear), so it is IDENTICAL in the defaults
+// and squeezed arms; a common term largely cancels in a difference between
+// them. The only route to the inception component is indirect — wider reserve,
+// noisier triangle, different rate, different membership, different register —
+// and that re-rolls both arms rather than biasing their gap.
+//
+// ⚠ DO NOT PUT THIS BACK TO 300 TO SAVE THE RUNTIME, and do not widen the
+// tolerance instead. The tolerance is derived per line from the arms' own
+// spread; loosening it to fit a sample that cannot see is the failure this
+// directory keeps finding. Measured 785s against 458s, and it is by a wide
+// margin the longest job in the fast tier.
+const GAMES = Number(process.env.GAMES ?? 600);
 const YEARS = Number(process.env.YEARS ?? 12);
 const LINES: CoverageLine[] = ['WC', 'GL', 'Property'];
 
