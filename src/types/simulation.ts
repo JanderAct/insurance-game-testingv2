@@ -89,6 +89,32 @@ export interface MemberLossResult {
   exposure: number; // exposure units for the line this loss was simulated on
   riskQuality: number;
   expectedLoss: number;
+  /**
+   * The same expectation AT NEUTRAL RISK QUALITY — the manual.
+   *
+   * ⚠ IDENTICAL INPUTS TO `expectedLoss` IN EVERY RESPECT BUT ONE. Same k,
+   * same year, same class, same exposure; only risk quality is overridden to
+   * NEUTRAL_RQ. In particular k_line IS INCLUDED, for exactly the reason
+   * memberLossHistory.ts gives for including it in the other leg: the DRAW is
+   * scaled by k, so a leg without it biases every enrolled member's ratio by
+   * (1 - k) — about 2.2% at a typical 0.978, and it flips sign as the roster
+   * mix drifts.
+   *
+   * WHY IT EXISTS: an experience modifier divides actual by expected, and
+   * dividing by an expectation that already contains the member's own risk
+   * quality removes the very thing the modifier is there to discover.
+   *
+   * Measured, ranking power against true risk quality over a three-year
+   * window on WC: 0.208 on this basis against 0.120 on `expectedLoss` in the
+   * harness that first measured it, and 0.257 against 0.164 in
+   * member-experience-basis-check. ⚠ QUOTE THE GAP, NOT THE LEVEL. The two
+   * harnesses disagree on the level by about 0.045 — on every basis and at
+   * every window — and agree on the GAP to within 0.005 (0.088 against
+   * 0.0925). Both bases divide the same actuals, so pairing them cancels the
+   * game-to-game variance that dominates either level on its own. That is
+   * why the gate asserts the gap; see its header.
+   */
+  expectedLossAtManual: number;
   coefficientOfVariation: number;
   standardDeviation: number;
   simulatedLoss: number;
@@ -1346,10 +1372,27 @@ export type MembershipHistory = Record<string, Partial<Record<CoverageLine, Enro
 
 // One member-line-year of loss experience. See src/utils/memberLossHistory.ts
 // for what each leg includes and — importantly — what it deliberately does not.
+//
+// ⚠ THE TWO EXPECTED LEGS ARE NAMED BY BASIS AND NOT BY ADJECTIVE, AND THAT IS
+// THE WHOLE OF WHY THE FIELD WAS RENAMED. It was `expected`, and a modifier
+// that divides actual by "expected" reads correctly and is wrong: that leg
+// carries the member's OWN risk quality and therefore divides out the very
+// quality an experience modifier exists to discover. Measured, the manual leg
+// out-ranks the own-RQ leg against true risk quality by 0.09 on WC over a
+// three-year window, in every one of 112 measured game-years and on all three
+// lines. A reader choosing between `expected` and
+// `expectedNeutral` can pick wrong by accident; a reader choosing between
+// `expectedAtOwnRq` and `expectedAtManual` has to choose a basis to pick at
+// all. member-experience-basis-check holds the distinction.
 export interface MemberLossYear {
   yearNumber: number;   // pre-game years negative, matching every other yearNumber here
   actual: number;       // that year's drawn gross ultimate loss for this member
-  expected: number;     // the analytic expectation AS IT STOOD THAT YEAR (not recomputed later)
+  /** The expectation at the member's OWN risk quality, as it stood that year. */
+  expectedAtOwnRq: number;
+  /** The same expectation at NEUTRAL risk quality — the manual. Identical
+   *  inputs but for the risk-quality override, k_line included. This is the
+   *  leg an experience modifier divides by. */
+  expectedAtManual: number;
 }
 
 // Rolling per-member, per-line loss history, keyed memberId -> line -> years.

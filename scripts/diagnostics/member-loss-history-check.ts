@@ -36,9 +36,14 @@
 //      is the reason those two must stay green across this change.
 //
 // PROPERTY IS ENROLLED-ONLY AND THAT IS EXPECTED, NOT A GAP IN THE STORE.
-// Property still runs the legacy aggregate path, which produces per-member
-// figures for the enrolled book only (marketMemberLossResults is undefined for
-// it). It gains marketplace coverage automatically when its generator cuts over.
+// ⚠ AND NOT FOR THE REASON THIS HEADER USED TO GIVE. It said Property "still
+// runs the legacy aggregate path"; it has not since its claim generator
+// landed — simulationEngine calls generatePropertyClaims like the other two,
+// and the aggregate path is now dead for all three lines (the engine says so
+// at the branch). The real reason is narrower: the Property branch generates
+// no PROSPECTS, so it leaves marketMemberLossResults undefined and the store
+// sees only the enrolled book. Property gains marketplace coverage when that
+// branch grows a prospect call, not when a cutover happens.
 // Reported explicitly below so the asymmetry is visible rather than mistaken for
 // a bug in the accumulation.
 // ============================================================================
@@ -47,8 +52,8 @@ import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
-import { expectedWcGrossLossForPricing } from '../../src/utils/wcClaimEngine';
-import { expectedGlGrossLossForPricing } from '../../src/utils/glClaimEngine';
+import { expectedWcGrossLossForPricing, NEUTRAL_RQ as WC_NEUTRAL_RQ } from '../../src/utils/wcClaimEngine';
+import { expectedGlGrossLossForPricing, NEUTRAL_RQ as GL_NEUTRAL_RQ } from '../../src/utils/glClaimEngine';
 import {
   EXPERIENCE_WINDOW_YEARS,
   LOSS_HISTORY_CAP_YEARS,
@@ -198,40 +203,55 @@ console.log('\n--- 3. THE ASYMMETRY: expected includes k_line, excludes risk con
     const lr = y1.byLine[line]!;
     const k = lr.kLineApplied!;
     const enrolledIds = new Set(lr.memberLossResults.map(m => m.memberId));
-    const expectFor = (m: Member, kUsed: number) => line === 'WC'
-      ? expectedWcGrossLossForPricing([m], { kLine: kUsed, yearNumber: 1 })
-      : expectedGlGrossLossForPricing([m], { yearNumber: 1, kGl: kUsed });
+    // ⚠ BOTH LEGS, AND THE MANUAL ONE IS THE POINT. k_line has to be in
+    // `expectedAtManual` for exactly the reason it has to be in
+    // `expectedAtOwnRq` — the DRAW is scaled by k, so a leg without it biases
+    // every enrolled member's ratio by (1 - k). The manual leg is the one a
+    // reader is tempted to strip k out of, because "manual" sounds like
+    // "before pool adjustments". It is not: it is the same expectation with
+    // RISK QUALITY alone neutralised.
+    const expectFor = (m: Member, kUsed: number, rqOverride?: number) => line === 'WC'
+      ? expectedWcGrossLossForPricing([m], { kLine: kUsed, yearNumber: 1, riskQualityOverride: rqOverride })
+      : expectedGlGrossLossForPricing([m], { yearNumber: 1, kGl: kUsed, riskQualityOverride: rqOverride });
+    const NEUTRAL = line === 'WC' ? WC_NEUTRAL_RQ : GL_NEUTRAL_RQ;
 
-    // ENROLLED: stored expected must equal the expectation AT kLineApplied, and
-    // must NOT equal it at k = 1 — which is what proves k is genuinely included
-    // rather than the two happening to coincide.
-    let enrChecked = 0, enrWorst = 0, distinguishable = 0;
+    // ENROLLED: each stored leg must equal the expectation AT kLineApplied on
+    // ITS OWN basis, and must NOT equal it at k = 1 — which is what proves k is
+    // genuinely included rather than the two happening to coincide.
+    let enrChecked = 0, enrWorst = 0, manWorst = 0, distinguishable = 0, manDistinguishable = 0;
     for (const id of enrolledIds) {
       const m = byId.get(id); if (!m) continue;
       const stored = storedLossYears(history, id, line).find(y => y.yearNumber === 1);
       if (!stored) continue;
       const atK = expectFor(m, k);
       const atOne = expectFor(m, 1);
-      enrWorst = Math.max(enrWorst, Math.abs(stored.expected - atK));
+      const manAtK = expectFor(m, k, NEUTRAL);
+      const manAtOne = expectFor(m, 1, NEUTRAL);
+      enrWorst = Math.max(enrWorst, Math.abs(stored.expectedAtOwnRq - atK));
+      manWorst = Math.max(manWorst, Math.abs(stored.expectedAtManual - manAtK));
       if (Math.abs(atK - atOne) > 1e-9) distinguishable++;
+      if (Math.abs(manAtK - manAtOne) > 1e-9) manDistinguishable++;
       enrChecked++;
     }
     console.log(`  ${line} ENROLLED (k applied = ${k.toFixed(6)}):`);
-    console.log(`    ${enrChecked} members, worst |stored.expected - E[loss | k]| = $${enrWorst.toFixed(6)}  ${note(enrWorst < 0.01, `${line}: enrolled stored expected does not match the expectation at kLineApplied (worst $${enrWorst.toFixed(4)})`)}`);
-    console.log(`    of those, ${distinguishable} would differ at k = 1, so the check can actually tell k apart  ${note(distinguishable > 0, `${line}: k is indistinguishable from 1 here — this assertion cannot fail and proves nothing`)}`);
+    console.log(`    ${enrChecked} members, worst |stored.expectedAtOwnRq - E[loss | k]| = $${enrWorst.toFixed(6)}  ${note(enrWorst < 0.01, `${line}: enrolled stored expectedAtOwnRq does not match the expectation at kLineApplied (worst $${enrWorst.toFixed(4)})`)}`);
+    console.log(`    ${enrChecked} members, worst |stored.expectedAtManual - E[loss | k, rq=${NEUTRAL}]| = $${manWorst.toFixed(6)}  ${note(manWorst < 0.01, `${line}: enrolled stored expectedAtManual does not match the NEUTRAL-RQ expectation at kLineApplied (worst $${manWorst.toFixed(4)}) — either the wrong basis or k has been stripped out of the manual leg`)}`);
+    console.log(`    of those, ${distinguishable} / ${manDistinguishable} (ownRq / manual) would differ at k = 1, so the check can actually tell k apart  ${note(distinguishable > 0 && manDistinguishable > 0, `${line}: k is indistinguishable from 1 on at least one leg — that assertion cannot fail and proves nothing`)}`);
 
     // PROSPECTS: both legs unadjusted, i.e. the expectation at k = 1.
-    let proChecked = 0, proWorst = 0, proWrongIfK = 0;
+    let proChecked = 0, proWorst = 0, proManWorst = 0, proWrongIfK = 0;
     for (const m of market) {
       if (enrolledIds.has(m.id)) continue;
       const stored = storedLossYears(history, m.id, line).find(y => y.yearNumber === 1);
       if (!stored) continue;
-      proWorst = Math.max(proWorst, Math.abs(stored.expected - expectFor(m, 1)));
-      if (Math.abs(stored.expected - expectFor(m, k)) > 0.01) proWrongIfK++;
+      proWorst = Math.max(proWorst, Math.abs(stored.expectedAtOwnRq - expectFor(m, 1)));
+      proManWorst = Math.max(proManWorst, Math.abs(stored.expectedAtManual - expectFor(m, 1, NEUTRAL)));
+      if (Math.abs(stored.expectedAtOwnRq - expectFor(m, k)) > 0.01) proWrongIfK++;
       proChecked++;
     }
     console.log(`  ${line} PROSPECTS:`);
-    console.log(`    ${proChecked} members, worst |stored.expected - E[loss | k=1]| = $${proWorst.toFixed(6)}  ${note(proWorst < 0.01, `${line}: prospect stored expected is not unadjusted — pool terms are leaking into prospect history`)}`);
+    console.log(`    ${proChecked} members, worst |stored.expectedAtOwnRq - E[loss | k=1]| = $${proWorst.toFixed(6)}  ${note(proWorst < 0.01, `${line}: prospect stored expected is not unadjusted — pool terms are leaking into prospect history`)}`);
+    console.log(`    ${proChecked} members, worst |stored.expectedAtManual - E[loss | k=1, rq=${NEUTRAL}]| = $${proManWorst.toFixed(6)}  ${note(proManWorst < 0.01, `${line}: prospect stored expectedAtManual is not the unadjusted neutral-RQ expectation`)}`);
     console.log(`    ${proWrongIfK} of them would MISMATCH at the pool's k, confirming they were not rated on pool terms  ${note(proWrongIfK > 0, `${line}: prospect expectations are indistinguishable from pool-k ones`)}`);
   }
 
@@ -270,11 +290,12 @@ console.log('\n--- 3. THE ASYMMETRY: expected includes k_line, excludes risk con
   for (const [label, run] of [['rc 0%', noRc], ['rc 8%', hiRc]] as [string, typeof noRc][]) {
     const h = run.gs.poolState.memberLossHistory!;
     const byId = new Map(run.gs.poolState.allMarketMembers.map(m => [m.id, m]));
-    let worst = 0, n = 0;
+    let worst = 0, manWorst = 0, n = 0;
     const ks: string[] = [];
     for (const line of CLAIM_LINES) {
       const lr = run.gs.lockedResults[0].byLine[line]!;
       const k = lr.kLineApplied!;
+      const NEUTRAL = line === 'WC' ? WC_NEUTRAL_RQ : GL_NEUTRAL_RQ;
       ks.push(`${line} k=${k.toFixed(5)} n=${lr.memberLossResults.length}`);
       for (const mlr of lr.memberLossResults) {
         const m = byId.get(mlr.memberId); if (!m) continue;
@@ -283,14 +304,21 @@ console.log('\n--- 3. THE ASYMMETRY: expected includes k_line, excludes risk con
         const at = line === 'WC'
           ? expectedWcGrossLossForPricing([m], { kLine: k, yearNumber: 1 })
           : expectedGlGrossLossForPricing([m], { yearNumber: 1, kGl: k });
-        worst = Math.max(worst, Math.abs(stored.expected - at));
+        // The manual leg has to be RC-free too, and it is NOT free by
+        // construction: it neutralises risk quality, not risk control.
+        const manAt = line === 'WC'
+          ? expectedWcGrossLossForPricing([m], { kLine: k, yearNumber: 1, riskQualityOverride: NEUTRAL })
+          : expectedGlGrossLossForPricing([m], { yearNumber: 1, kGl: k, riskQualityOverride: NEUTRAL });
+        worst = Math.max(worst, Math.abs(stored.expectedAtOwnRq - at));
+        manWorst = Math.max(manWorst, Math.abs(stored.expectedAtManual - manAt));
         n++;
       }
     }
     console.log(`    ${label}: ${ks.join(', ')}`);
-    console.log(`      ${n} member-lines, worst |stored.expected - E[loss | k]| = $${worst.toFixed(6)}  ${note(worst < 0.01, `at ${label} the stored expectation stopped matching E[loss | kLineApplied] (worst $${worst.toFixed(4)}) — risk control has leaked into the expectation`)}`);
+    console.log(`      ${n} member-lines, worst |stored.expectedAtOwnRq - E[loss | k]| = $${worst.toFixed(6)}  ${note(worst < 0.01, `at ${label} the stored expectation stopped matching E[loss | kLineApplied] (worst $${worst.toFixed(4)}) — risk control has leaked into the expectation`)}`);
+    console.log(`      ${n} member-lines, worst |stored.expectedAtManual - E[loss | k, neutral rq]| = $${manWorst.toFixed(6)}  ${note(manWorst < 0.01, `at ${label} the stored MANUAL expectation stopped matching its neutral-RQ expectation (worst $${manWorst.toFixed(4)}) — risk control has leaked into the manual leg`)}`);
   }
-  console.log(`    So RC reaches the ACTUAL leg and reaches the expected leg ONLY through k_line's`);
+  console.log(`    So RC reaches the ACTUAL leg and reaches BOTH expected legs ONLY through k_line's`);
   console.log(`    dependence on who is enrolled — never as a frequency multiplier. Held structurally by`);
   console.log(`    invariant 2: no expected<Line>GrossLoss takes a risk-control argument at all.`);
 }
@@ -326,7 +354,18 @@ console.log('\n--- 5. persistence: JSON round-trip, and an old save without the 
   const sampleId = Object.keys(history)[0];
   const before = storedLossYears(history, sampleId, 'WC');
   const after = storedLossYears(rh ?? {}, sampleId, 'WC');
-  console.log(`  entries and values preserved for ${sampleId}: ${before.length} -> ${after.length}  ${note(before.length === after.length && before.every((b, i) => b.yearNumber === after[i].yearNumber && b.actual === after[i].actual && b.expected === after[i].expected), 'round-tripped entries differ in value or count')}`);
+  // ⚠ EVERY FIELD OF THE ENTRY IS IN THE COMPARED SET, INCLUDING THE NEWEST.
+  // A field that is written and never compared proves nothing about itself:
+  // the round-trip would stay green if expectedAtManual serialised as
+  // undefined. If MemberLossYear gains a field, it gets a clause here.
+  console.log(`  entries and values preserved for ${sampleId}: ${before.length} -> ${after.length}  ${note(before.length === after.length && before.every((b, i) => b.yearNumber === after[i].yearNumber && b.actual === after[i].actual && b.expectedAtOwnRq === after[i].expectedAtOwnRq && b.expectedAtManual === after[i].expectedAtManual), 'round-tripped entries differ in value or count')}`);
+  // The comparison above is vacuous if the sample carries no manual leg at
+  // all — undefined === undefined passes. Assert the field is actually there
+  // and finite before believing the round-trip.
+  const manualPresent = before.length > 0 && before.every(b => Number.isFinite(b.expectedAtManual));
+  const manualDistinct = before.some(b => b.expectedAtManual !== b.expectedAtOwnRq);
+  console.log(`  expectedAtManual present and finite on all ${before.length} sampled entries: ${manualPresent}  ${note(manualPresent, 'expectedAtManual is missing or non-finite on the sampled entries — the round-trip clause above is comparing undefined to undefined')}`);
+  console.log(`  at least one sampled entry has the two legs DIFFERING: ${manualDistinct}  ${note(manualDistinct, 'every sampled entry has expectedAtManual identical to expectedAtOwnRq — either the sample is all neutral-RQ members or the manual leg is a copy')}`);
 
   // AN OLD SAVE LACKS THE FIELD. App.tsx defaults it to {} on load rather than
   // bumping the save key; the engine's own `?? {}` is what makes that safe, so

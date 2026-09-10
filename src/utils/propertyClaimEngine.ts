@@ -38,7 +38,8 @@ import { PROPERTY_LOSS_MODEL } from '../data/defaultAssumptions';
 
 const M = PROPERTY_LOSS_MODEL;
 const LINE: CoverageLine = 'Property';
-const NEUTRAL_RQ = 5;
+// Exported for the same reason as WC's — see the note there.
+export const NEUTRAL_RQ = 5;
 // One band now. Kept as a tier label so Claim.tier stays populated and the
 // claims export keeps a stable column, not because a second band is pending.
 const BAND = 'property';
@@ -400,6 +401,10 @@ export function generatePropertyClaims(inputs: PropertyGenerationInputs): Proper
       exposure: tiv,
       riskQuality: member.riskQuality,
       expectedLoss: expectedPropertyGrossLoss([member], { kPr }),
+      // THE MANUAL: same call, same k — risk quality alone overridden.
+      expectedLossAtManual: expectedPropertyGrossLoss(
+        [member], { kPr, riskQualityOverride: NEUTRAL_RQ },
+      ),
       coefficientOfVariation: 0,
       standardDeviation: 0,
       simulatedLoss: memberLoss,

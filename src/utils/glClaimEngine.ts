@@ -41,7 +41,8 @@ import { limitedExpectedValue, memoizeByYear } from './claimMath';
 
 const M = GL_LOSS_MODEL;
 const LINE: CoverageLine = 'GL';
-const NEUTRAL_RQ = 5;
+// Exported for the same reason as WC's — see the note there.
+export const NEUTRAL_RQ = 5;
 
 // --- severity trend ------------------------------------------------------------
 
@@ -659,6 +660,10 @@ export function generateGlClaims(inputs: GlGenerationInputs): GlGenerationResult
       // PRICING basis, matching wcClaimEngine's memberLossResults: this figure is
       // what the member is charged against, not what the draw expects of them.
       expectedLoss: expectedGlGrossLossForPricing([member], { yearNumber, kGl }),
+      // THE MANUAL: same call, same k, same year — risk quality alone overridden.
+      expectedLossAtManual: expectedGlGrossLossForPricing(
+        [member], { yearNumber, kGl, riskQualityOverride: NEUTRAL_RQ },
+      ),
       // Dispersion is emergent (frequency x severity mixture), not a
       // per-member CV — same convention as the WC generator.
       coefficientOfVariation: 0,

@@ -1295,6 +1295,22 @@ export function processLineYear(
         exposure: memberExposureAmount,
         riskQuality: member.riskQuality,
         expectedLoss: memberExpectedLoss,
+        // ⚠ THE ONE PLACE THE TWO LEGS ARE THE SAME EXPRESSION, AND IT IS NOT A
+        // COPY-TO-SATISFY-THE-TYPE. memberExpectedLoss above is exposure x
+        // pricedPurePremiumPer100 — it never reads member.riskQuality, so this
+        // path's expectation is ALREADY at the manual basis and an override
+        // would change nothing. Every reachable path derives the manual leg
+        // from a separate call with riskQualityOverride: NEUTRAL_RQ; see the
+        // three claim engines.
+        //
+        // This is also why member-experience-basis-check cannot cover this
+        // branch: its definitional assertion requires expectedAtOwnRq to MOVE
+        // under an RQ perturbation, and here it provably would not. The branch
+        // is the `!isClaimLine` aggregate path, dead for all three lines (see
+        // the note below), so nothing reaches the gate — but if it is ever
+        // revived, the leg above must gain a real risk-quality term first and
+        // this line must stop being an alias.
+        expectedLossAtManual: memberExpectedLoss,
         coefficientOfVariation,
         standardDeviation,
         simulatedLoss: independentLoss * commonLossFactor * catastropheFactor,
@@ -2372,7 +2388,8 @@ export function processYear(
       recordMemberLossYear(memberLossHistory, mlr.memberId, line, {
         yearNumber,
         actual: mlr.simulatedLoss,
-        expected: mlr.expectedLoss,
+        expectedAtOwnRq: mlr.expectedLoss,
+        expectedAtManual: mlr.expectedLossAtManual,
       });
     }
 

@@ -88,7 +88,12 @@ import { shockFactorFor } from './shockEffects';
 
 const M = WC_LOSS_MODEL;
 const LINE: CoverageLine = 'WC';
-const NEUTRAL_RQ = 5;
+// EXPORTED SO A GATE NEED NOT RE-TYPE THE 5. Each engine keeps its own — the
+// three lines could in principle neutralise at different points — but a
+// harness that hardcoded the literal would silently stop testing the manual
+// basis if one of them moved. member-experience-basis-check imports all three
+// and asserts they still agree.
+export const NEUTRAL_RQ = 5;
 
 // --- small shared helpers ---------------------------------------------------
 
@@ -678,6 +683,10 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
       exposure: payroll,
       riskQuality: rq,
       expectedLoss: expectedWcGrossLossForPricing([member], { kLine, yearNumber }),
+      // THE MANUAL: same call, same k, same year — risk quality alone overridden.
+      expectedLossAtManual: expectedWcGrossLossForPricing(
+        [member], { kLine, yearNumber, riskQualityOverride: NEUTRAL_RQ },
+      ),
       // Not modelled per member: dispersion is an emergent property of frequency
       // x mixture, not a single per-member CV.
       coefficientOfVariation: 0,

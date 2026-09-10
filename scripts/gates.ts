@@ -89,6 +89,8 @@ const FAST: string[] = [
   'marketplace-generation-check',    //  28s   200 seeds — the sample size IS the claim, see its header
   'maturity-anchor-check',           //  76s   the cohort must develop back to its own register, both arms
                                      //         GAMES 16 -> 48 at IBNER_CALENDAR_RHO — see the note at its own GAMES
+  'member-experience-basis-check',   //   5s   expectedAtManual is the expectation at NEUTRAL risk quality and
+                                     //         out-ranks expectedAtOwnRq in every measured game-year
   'member-loss-history-check',       //   2s
   'member-premium-check',            //  55s   members pay their own WC class rate; the pool total is untouched
                                      //         and the allocation reaches nothing that decides who is enrolled
