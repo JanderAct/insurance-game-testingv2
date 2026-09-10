@@ -2481,6 +2481,242 @@ export const IBNER_BOOKING_BIAS_COEFF = 0.80;
 export const IBNER_UNWIND_DECAY: number = 0.5;
 
 // ===========================================================================
+// THE CALENDAR-YEAR CORRELATION OF THE COHORT LOGNORMAL.
+//
+// Every open cohort of a line shares one shock per valuation:
+//
+//     z_c = sqrt(rho) . Z_{line,year}  +  sqrt(1 - rho) . z_c^idio
+//
+// The mechanism, and the reason this form and no other, is at
+// calendarBlendedZ in simulationEngine.ts. The short version: the blend leaves
+// EVERY COHORT'S MARGINAL LAW UNCHANGED at any rho, so E[factor] = 1 exactly,
+// the reserve martingale is untouched, per-cohort dispersion is untouched, and
+// cohort-ledger-check's three identities still hold by construction. Only the
+// joint law moves. Nothing below is a free choice about a marginal.
+//
+// ⚠ WHAT THIS IS FOR. The reserve-driven residual — netIncurredLoss minus
+// netUltimateLoss, the engine's own identity — was adverse in 100% of
+// pool-years at a mean of ~30% of the opening reserve, and that mean is NOT
+// risk: it is forward booking working as designed and the premium funds it.
+// Only the DEVIATION is risk, and it was far too small for a bad year to cost
+// the pool more than a year's investment income. The thresholds at which it
+// does, computed at the post-re-anchor capital structure, are WC 7.21%,
+// GL 8.12%, pool 9.06% of the opening reserve.
+//
+// ===========================================================================
+// ⚠ WC WAS THE WHOLE PROBLEM AND GL WAS NEVER ONE. Measured at 150 games x 10
+// played years on THREE INDEPENDENT SEED SETS, residual SD, null arm:
+//
+//   line       three seed sets        mean    threshold
+//   WC         3.14 / 2.95 / 2.86     2.98      7.21     a factor of 2.4 short
+//   GL         7.85 / 9.04 / 8.06     8.32      8.12     ALREADY THERE
+//   Property   8.61 / 8.58 / 8.40     8.53        -
+//   POOL       3.96 / 4.23 / 4.11     4.10      9.06     see the shock-event note
+//
+// GL's own estimate swings +/-0.6pp between seed sets, and on one fixed seed
+// scheme it reads 7.20pp at 30 games against 7.73pp at 150 — climbing with
+// sample size, which is the heavy-tail signature reserveStepSigma's header
+// warns about from the other direction: the sample variance of this thing
+// approaches the truth from BELOW, so a small run understates it and a bar set
+// on a small run is set too low. So GL's scale stays at 1.00 and that is a FINDING, not an
+// omission: any GL multiplier solved against an 8.12 target would be fitting a
+// number whose measurement error is larger than the adjustment.
+//
+// ===========================================================================
+// ⚠ THE THREE MECHANISMS THAT WERE REJECTED, AND THE FIRST WILL BE REACHED FOR
+// AGAIN. Anyone wanting more reserve dispersion will reach for phi first. Do
+// not. All figures 30 games x 10 years, pool residual mean and SD:
+//
+//   arm          mean      SD          verdict
+//   base        29.90%    3.91pp
+//   IBNER x0    29.78%    3.30pp       the cohort lognormal off entirely
+//   IBNER x2    29.92%    4.47pp       mean holds
+//   IBNER x4    30.25%    6.03pp       mean holds
+//   phi   x2    27.86%    4.45pp       MEAN MOVES -2.04pp
+//   phi   x4    28.15%   62.28pp       not a measurement of anything
+//
+// 1. NOT phi — AND THE REASON IS THE MEAN, NOT THE REACH. The per-claim law
+//    DOES reach the cohort reserve and in fact dominates it: with the cohort
+//    lognormal off entirely the pool SD only falls 3.91 -> 3.30pp, so the
+//    per-claim law owns 3.30 of the 3.91 and the lognormal owns 2.10 in
+//    quadrature. On the shipped path a cohort's whole stochastic movement IS
+//    the sum of per-claim revisions — `newUnpaid += res.retained` in
+//    processIbner. What looks like a cohort-level law from a distance is the
+//    DETERMINISTIC forward-booking drift, which is applied per claim inside
+//    the same call and is not the dispersion path at all.
+//
+//    phi is rejected because widening it moves the level, through TWO
+//    DIFFERENT MECHANISMS on two different lines. Gross against net, same
+//    sample:
+//
+//      WC        base net 24.52 / gross 28.48  ->  phi x2 net 22.98 / gross 28.70
+//      Property  base net 17.88 / gross 22.03  ->  phi x2 net 14.92 / gross 19.86
+//
+//    WC's gross mean is FLAT and its whole loss is CESSION CONVEXITY: the
+//    retained function is concave in occurrence size, so a wider mean-one draw
+//    on the gross claim is not mean-one on the pool's retained share.
+//    Property's gross mean falls on its own, before any cession — the claim
+//    floor in cedeDevelopment and the settlement and close clips. Both widen
+//    with the draw, so NO phi widens without moving the level.
+//
+// 2. NOT A WIDER INDEPENDENT DRAW ON ITS OWN. IBNER x4 is mean-preserving and
+//    still only reaches 6.03pp at the pool, because the draw is independent
+//    per cohort and diversifies away. Measured on the contribution basis
+//    (c = dev / R_pool, so the pool rate is exactly sum(c)):
+//
+//      actual 3.91pp    independent sqrt(sum Var) 4.46pp    comonotone 18.92pp
+//      diversification actually taken 4.84x
+//      cross-cohort intraclass rho 0.0000
+//      n_eff per pool-year: pool 16.35, WC 11.65, GL 4.53, Property 3.36
+//
+//    n_eff is why rho reaches WC hardest: WC's long tail diversifies itself
+//    across nearly twelve effective accident years, and GL has four and a half
+//    to begin with. That IS the diagnosis of the original figure — not that
+//    each accident year moved too little, but that WC held enough of them for
+//    the moves to cancel.
+//
+//    ⚠ IT STILL REACHES GL, AND ONLY THE PAIRING SHOWS IT. Unpaired, GL's
+//    null and shipped SDs overlap and it looks like nothing happened. Paired
+//    by seed set, every one rises: 7.85 -> 9.73, 9.04 -> 9.31, 8.06 -> 9.08,
+//    a mean 8.32 -> 9.37. GL's estimate is too noisy across seed sets to see a
+//    1pp effect any other way, which is the same reason its threshold cannot
+//    be used to solve a multiplier.
+//
+// 3. NOT A CALENDAR-YEAR FACTOR ON THE NET RESERVE, and this option was
+//    costed and refused rather than overlooked. Applied outside the claim
+//    register it would be exactly mean-preserving and would add tau in
+//    quadrature at the pool by arithmetic. It is rejected on two grounds.
+//    It duplicates SHOCK EVENTS, which are pool-wide by construction and are
+//    the design's own answer to a bad year that moves every line at once —
+//    34 of 40 unbuilt. And it costs the PATHWISE reserve identity: netUltimate
+//    would leave registerSum permanently, true only in expectation, while
+//    maturity-anchor-check — which asserts the GROSS leg — stayed green
+//    throughout. A standing identity weakening silently behind a green gate is
+//    the exact failure this repo keeps finding, and it is not worth tau.
+//
+// ⚠ AND THE POOL THRESHOLD CANNOT BE REACHED FROM THIS MECHANISM AT ALL. rho
+// is scoped PER LINE-YEAR, so the three lines stay independent of each other.
+// Their contributions to the pool rate are WC 2.06 / GL 3.45 / Property 2.11pp,
+// which is 4.53pp added independently and 7.61pp perfectly correlated —
+// against a 9.06% pool threshold. So no rho and no multiplier reaches it, and
+// the answer is shock events rather than a wider reserve draw. That is the
+// finding, not the shortfall.
+//
+// ===========================================================================
+// THE SOLVE. Grid at 80 games to locate, confirmed at 150 games on three
+// independent seed sets, run through the SHIPPED constants rather than a
+// patched engine — the mechanism was built defaulting to the null first, so
+// the solve measured the code that ships. Every SE is jackknifed ACROSS GAMES:
+// the ten years of one game share an opening and a reserve stock, and pooling
+// them as independent understates the SE about threefold.
+//
+// WC residual SD at rho 0.90, by scale, on the three seed sets:
+//
+//   scale 2.10    7.18 / 6.72 / 6.93    mean 6.94
+//   scale 2.40    7.45 / 6.74 / 7.15    mean 7.11
+//   scale 2.80    7.65 / 6.83 / 7.41    mean 7.30     <- shipped
+//
+// ⚠ 2.80 BECAUSE IT IS THE MEASURED CELL THAT CLEARS, AND FOR NO STRONGER
+// REASON THAN THAT. 2.40 lands at 7.11 against a 7.21 threshold and 2.80 at
+// 7.30; the seed-to-seed spread at a fixed scale is 0.45-0.8pp, so THE TWO
+// ARE NOT DISTINGUISHABLE FROM EACH OTHER and neither is distinguishable from
+// the threshold. The tie is broken by direction: the mechanism exists so that
+// a one-sigma bad year costs more than a year's investment income, and of the
+// two cells actually run, one has a point estimate above that line and one
+// below. Interpolating to ~2.6 would put the estimate on the line and would be
+// a number no run returned.
+//
+// ⚠ AND DO NOT KEEP CLIMBING. The lever has saturated: 2.10 -> 2.40 -> 2.80
+// buys 0.17pp then 0.19pp, because reserveStepSigma solves sigma to hit a
+// target and that map compresses hard at large targets. Past here the
+// multiplier grows much faster than the dispersion it buys, and the multiplier
+// is the term that widens marginals. If WC needs materially more than this,
+// the answer is another mechanism, not a bigger number here.
+//
+// ⚠ rho 0.90 AND NOT 1.00, AND IT IS A CLOSE CALL STATED HONESTLY. Every rho
+// from 0.75 to 1.00 hits the WC target with the right scale, and the scale it
+// needs falls as rho rises — roughly 2.6 at rho 0.75 down to roughly 1.9 at
+// rho 1.00. Those two ends are single-seed-set reads and the seed-to-seed
+// spread is ~0.45pp, so take the ORDERING as measured and not the endpoints;
+// only rho 0.90 was solved on three seed sets. The rate-noise cost does not
+// separate them either — GL's robust spread reads 4.67 / 4.70 / 4.72% at rho
+// 0.75 / 0.90 / 1.00 against 4.76% on the null, i.e. flat at every rho.
+// Higher rho is cheaper in multiplier, and the multiplier is the knob
+// that widens marginals, so the pull is toward 1.00. What holds it below:
+// at rho = 1 the calendar term is comonotone, every cohort's factor a
+// monotone function of one number, and the effective sample of any statistic
+// that averages over cohorts within a line-year goes to exactly ONE rather
+// than merely small. That is not hypothetical — maturity-anchor-check needed
+// its sample tripled at this commit for precisely that reason, and 0.90 keeps
+// a real idiosyncratic component (weight sqrt(0.10) = 0.32) so no two accident
+// years ever take an identical calendar factor. The cost of the choice is
+// measured and it is the scale: 2.80 instead of roughly 1.9.
+//
+// ⚠ AND rho = 0.90 DOES NOT MAKE THE RESERVE COMONOTONE — it makes ONE TERM
+// INSIDE IT correlated. The realised cross-cohort correlation of actual cohort
+// development within a line-year, which is what an observer of the reserve
+// sees, measures 0.268 / 0.283 / 0.264 on WC at the shipped cell across the
+// three seed sets, against 0.015 / 0.014 / 0.014 on the null. About 0.27, not
+// 0.90: the per-claim law stays fully idiosyncratic and it owns most of the
+// variance, so what rho correlates is a minority term.
+//
+// ===========================================================================
+// WHAT IT COSTS THE PLAYER — the year-over-year log change in
+// purePremiumPer100, which is the rate jitter a pool actually sees. SEED-
+// MATCHED pairs, null against shipped, 150 games, two independent seed sets:
+//
+//   line       statistic     seed set A         seed set B
+//   WC         SD           3.88 -> 4.58 %     3.92 -> 4.44 %
+//              MAD          3.68 -> 4.45 %     3.47 -> 4.26 %
+//              p10-p90      9.38 -> 11.41%     9.67 -> 11.05%
+//   GL         SD           4.91 -> 5.24 %     5.11 -> 5.08 %
+//              MAD          4.48 -> 4.76 %     4.65 -> 4.54 %
+//   Property   SD           5.10 -> 5.15 %     5.16 -> 5.22 %
+//
+// THE COST IS ON WC AND ONLY WC: about +0.6pp of SD, +0.8pp of MAD, +1.7pp of
+// p10-p90 — call it a fifth more rate jitter on the line whose reserve now
+// actually surprises the pool. GL and Property are flat on every statistic and
+// both directions of change appear between seed sets, which is what flat looks
+// like. That is the price of the mechanism and it is a fair one: WC is the
+// line that changed.
+//
+// ⚠ AND THE FIRST READING OF THIS COST WAS WRONG IN BOTH THE LINE AND THE
+// SIZE. It was quoted as GL going 4.68% -> 5.38%, a 15% rise. Two defects
+// produced that. The pairs were NOT SEED-MATCHED, so a difference between two
+// seed sets was read as a difference between two arms. And the SD of a rate
+// change is outlier-driven: at one point GL read 5.22% at one scale and 6.39%
+// at a SMALLER one, which no mechanism produces. Carrying the MAD and the
+// p10-p90 alongside is what settled it. Anyone quoting a cost from this
+// mechanism should quote all three and should match the seeds.
+export const IBNER_CALENDAR_RHO = { rho: 0.90 };
+
+// ⚠ A SEPARATE CONSTANT RATHER THAN NEW VALUES IN IBNER_TOTAL_SD, DELIBERATELY.
+// Those three values retired as a TARGET at the per-claim flip but explicitly
+// did not retire as a RECORD — their header asks the reader to keep them as the
+// recorded predecessors, with the provenance of each. Overwriting them to carry
+// this commit's calibration would destroy that to save one multiplication. It
+// also keeps ibner-null-check honest: it zeroes IBNER_TOTAL_SD at runtime, and
+// zero times any scale is still zero, so the null works whatever this reads.
+//
+// ⚠ THE PRODUCT IS NOT A PREDICTION ABOUT ANY OBSERVABLE. WC's effective target
+// reads 0.25 x 2.80 = 0.70, and that is not a claim that a WC accident year's
+// ultimate has a 60% standard deviation. IBNER_TOTAL_SD is a dial on
+// reserveStepSigma's solve — the total SD of the ultimate is EMERGENT under the
+// per-claim law and there is no constant that sets it. Read the multiplier as
+// "how hard the cohort lognormal is driven", not as a re-stated target.
+//
+// GL AND PROPERTY STAY AT 1.00. GL because it already meets its threshold and
+// the measurement error exceeds any adjustment worth making; Property because
+// it has no threshold and unscaled it is the control. Its residual SD reads
+// 8.61 / 8.58 on the null against 8.75 / 8.48 at the shipped cell on the same
+// two seed sets — unmoved, in both directions — which is what tells you rho
+// reached WC through WC's own diversification rather than through some
+// pool-wide side effect of the change.
+export const IBNER_COHORT_SD_SCALE: Record<string, number> = {
+  WC: 2.80, GL: 1.00, Property: 1.00,
+};
+
+// ===========================================================================
 // THE PER-CLAIM REVISION LAW — STAGE 1, FLAG-GATED AND OFF.
 //
 // ⚠ NOTHING BELOW IS LIVE. PER_CLAIM_REVISION.enabled is false and the cohort

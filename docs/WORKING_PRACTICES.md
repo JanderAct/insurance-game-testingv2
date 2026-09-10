@@ -552,6 +552,42 @@ evidence than one that says "should be about X". That pressure is exactly what
 produces the defect: the more a codebase values recorded measurement, the more a
 fabricated measurement is worth, and the less likely anyone is to doubt it.
 
+## ⚠ A HARNESS THAT MUTATES A CONSTANT AND THEN `import()`s THE CODE UNDER TEST MAY BE MEASURING A SECOND COPY
+
+A scratch runner set `IBNER_COHORT_SD_SCALE` on the imported constants object,
+printed it back to confirm, and then reached the gate through a dynamic
+`await import(...)`. The print was right and the measurement was wrong: under
+`tsx` the file compiles to CJS, and the dynamic import resolved a **different
+instance** of the constants module — so the gate ran against the untouched
+defaults while the runner's own log showed the mutated value.
+
+**WHAT IT PRODUCED.** `maturity-anchor-check` returned output identical to the
+last digit at scale 0 and at scale 12. The conclusion that follows from that —
+"the gate is structurally blind to the cohort lognormal" — is false, wrong in a
+way that would have been written into this file as a finding, and would have
+removed the one gate that actually constrains the change being made. Run
+through a static import instead, the same gate moves Property's climb from
++2.4% to +4.4% and needed its sample tripled.
+
+**THE TELL, AND IT IS THE ONLY ONE.** A knob set to an absurd value produced
+*exactly* the same answer as the null. Bit-identical output across a 12x
+parameter change is never "the mechanism does not matter here"; it is always
+the mechanism not being in the path. Anything else — a small change, a change
+in the wrong direction, no change to two decimals — is ambiguous and this is
+not. **Every mutate-then-measure harness owes a probe at an absurd value**, and
+the probe must move something before any null reading from that harness is
+believed.
+
+**THE FIX IS NOT A BETTER IMPORT.** It is to stop mutating across a module
+boundary you do not control: set the value in the source file, run the gate as
+a gate, and put the file back. That is what the (rho, scale) solve ended up
+doing, and it is also what makes the numbers comparable to what a reader gets
+by running the gate themselves.
+
+This is the same family as "a diagnostic that re-derives the mechanism is
+measuring its own copy" — one copies the arithmetic, the other copies the
+state — and both fail by agreeing with themselves.
+
 ## ⚠ THE TWO KINDS OF GATE BLINDNESS, AND THEY HAVE DIFFERENT ANSWERS
 
 "The gate is blind" has now been said about two different failures with two

@@ -66,7 +66,30 @@ import type { CoverageLine, GameState } from '../../src/types/simulation';
 
 const RULE = '='.repeat(76);
 const LINES: CoverageLine[] = ['WC', 'GL', 'Property'];
-const GAMES = Number(process.env.GAMES ?? 16);
+// ⚠ 16 -> 48, AND THE REASON IS IBNER_CALENDAR_RHO RATHER THAN ANYTHING WRONG
+// WITH THIS GATE. Its statistic is an aggregate over COHORTS, and its power
+// came from those cohorts being independent draws. The calendar blend makes
+// every cohort of a line share one shock per valuation, so the independent unit
+// becomes the (game, line-year) and the effective sample collapses by roughly
+// the number of open accident years — most of an order of magnitude on
+// Property, which carries only three or four.
+//
+// MEASURED at the shipped cell, Property's gross gap against 1/c:
+//   16 games  +9.9%      32 games  +5.9%      48 games  +4.4%      64 games  +4.3%
+// against a MAX_GAP of 10%. The +9.9% is not a real overshoot — it converges to
+// +4.3% — but at the old default this gate sat one seed set away from red for a
+// reason unconnected to the quantity it asserts. The null arm reads +2.4% at 48,
+// so the blend roughly doubles this estimator's spread and does not bias it.
+//
+// ⚠ DO NOT PUT THIS BACK TO 16 TO SAVE THE RUNTIME. 48 games is ~76s against
+// ~27s. A gate whose sample is too small for the mechanism in the engine is
+// worse than a slow one: it fails on the seed, and then it gets widened or
+// ignored rather than believed.
+//
+// ⚠ AND THE GENERAL FORM, BECAUSE THIS WILL RECUR. Any instrument here whose
+// statistic averages over cohorts within a line-year lost power at this commit,
+// not just this one. The blend does not bias those estimators; it thins them.
+const GAMES = Number(process.env.GAMES ?? 48);
 const YEARS = Number(process.env.YEARS ?? 20);
 
 // ⚠ A GROSS-ERROR BAR, NOT A PRECISION ONE, AND IT IS THE SAME KIND OF NUMBER

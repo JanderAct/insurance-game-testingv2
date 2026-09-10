@@ -183,7 +183,34 @@ const median = (xs: number[]) => {
 };
 const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / Math.max(1, xs.length);
 
+// ⚠ TWO FAILURE KINDS, TWO EXIT CODES, AND THE SPLIT IS LOAD-BEARING RATHER
+// THAN TIDINESS. `fails` holds ASSERTIONS ABOUT THE PIN — the opening moved, or
+// the redraw cost is not elastic enough — and those are defects in the thing
+// this gate exists to watch. `fallOnly` holds a CONTAMINATION OF THIS GATE'S
+// OWN PROBE: a perturbed pre-game that exhausted the attempt cap returns an
+// opening from OUTSIDE the band, so the opening-shift reading above is
+// measuring the fallback. That is a statement about whether the x2 probe is
+// still safe, not about whether the pin is still a proposal.
+//
+// They were one exit code and IBNER_CALENDAR_RHO forced them apart. The
+// calendar blend widens the pre-game candidate distribution, so WC's in-band
+// share falls and a DOUBLED pin now exhausts the cap on about 3% of seeds —
+// measured at SEEDS=120: 0 of 120 at the shipped pin against 4 of 120
+// perturbed. Every elasticity assertion still passes in that same run (WC 42x,
+// GL 12x, Property 41x against the 10x floor; at the 40-seed default the same
+// three read 36x / 16x / 60x). With one code, excusing that would also excuse an elasticity
+// regression, which is exactly the hazard EXPECTED_RED's header names about
+// cohort-ledger-check's 1-versus-2.
+//
+// ⚠ AND THE ANSWER IS NOT TO LOWER PERTURB. This file's own note already
+// records that x2.5 put WC into fallback on 4 of 10 seeds BEFORE the blend
+// existed; the blend has moved that boundary down to x2, which is information,
+// not a nuisance. Tuning the perturbation until the headline numbers come true
+// is named in this same file as the failure this directory keeps finding. The
+// fix is a probe that measures elasticity without a fallback-prone arm, and
+// until it exists this exits 3 and EXPECTED_RED names it.
 const fails: string[] = [];
+const fallOnly: string[] = [];
 const shipped = { ...STARTING_CAPITAL_TO_PREMIUM };
 
 console.log('=== THE PIN IS A PROPOSAL, THE BAND IS THE TARGET ===');
@@ -230,7 +257,7 @@ for (const line of LINES) {
     + `as the opening is (attempts elasticity ${attemptsElasticity.toFixed(2)} against opening ${elasticity.toFixed(2)}; `
     + `attempts ${a0.toFixed(2)} -> ${a1.toFixed(2)} = ${ratio.toFixed(2)}x), under the ${MIN_ELASTICITY_RATIO}x floor — either the pins are no `
     + 'longer centred on their bands, or the band has grown wide enough to accept almost anything');
-  if (badFall) fails.push(`${line}: the pre-game fell back to a closest-miss opening `
+  if (badFall) fallOnly.push(`${line}: the pre-game fell back to a closest-miss opening `
     + `(${base.fallbacks} at the shipped pin, ${pert.fallbacks} perturbed) — a fallback opening is OUTSIDE `
     + 'the band, so the opening-shift reading above is measuring the fallback rather than the band');
 
@@ -260,9 +287,20 @@ console.log('  are printed above rather than summarised into one. Tuning the per
 console.log('  headline numbers came true was the available alternative and is the failure this');
 console.log('  directory keeps finding.');
 
-console.log(fails.length === 0
-  ? '\nTHE PIN IS A PROPOSAL DISTRIBUTION. Doubling it barely moves where the opening lands and'
+if (fails.length > 0) {
+  console.log(`\n${fails.length} FAILURE(S) — THE PIN ASSERTIONS:\n` + fails.map(f => '  ' + f).join('\n'));
+}
+if (fallOnly.length > 0) {
+  console.log(`\n${fallOnly.length} PROBE CONTAMINATION(S) — exit 3, see the note at \`fallOnly\`:\n`
+    + fallOnly.map(f => '  ' + f).join('\n'));
+}
+if (fails.length === 0 && fallOnly.length === 0) {
+  console.log('\nTHE PIN IS A PROPOSAL DISTRIBUTION. Doubling it barely moves where the opening lands and'
     + '\nmultiplies what the pre-game pays to get there — so it sets the ACCEPTANCE RATE, not the'
-    + '\nanswer. Any change that wants to move the opening has to move the band.'
-  : `\n${fails.length} FAILURE(S):\n` + fails.map(f => '  ' + f).join('\n'));
-process.exit(fails.length === 0 ? 0 : 1);
+    + '\nanswer. Any change that wants to move the opening has to move the band.');
+} else if (fails.length === 0) {
+  console.log('\nEVERY PIN ASSERTION HOLDS. The only failure is the probe arm exhausting the attempt'
+    + '\ncap, which contaminates the opening-shift reading and nothing else.');
+}
+// ⚠ 1 BEATS 3. A real pin defect must never be hidden behind the excused code.
+process.exit(fails.length > 0 ? 1 : fallOnly.length > 0 ? 3 : 0);

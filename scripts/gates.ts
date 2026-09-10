@@ -86,7 +86,8 @@ const FAST: string[] = [
   'gl-supplied-clf-check',           //  44s
   'ibner-null-check',                //  40s
   'marketplace-generation-check',    //  28s   200 seeds — the sample size IS the claim, see its header
-  'maturity-anchor-check',           //  40s   the cohort must develop back to its own register, both arms
+  'maturity-anchor-check',           //  76s   the cohort must develop back to its own register, both arms
+                                     //         GAMES 16 -> 48 at IBNER_CALENDAR_RHO — see the note at its own GAMES
   'member-loss-history-check',       //   2s
   'net-funding-fields-check',        //   6s
   'opening-centring-check',          //  30s
@@ -99,6 +100,7 @@ const FAST: string[] = [
   'property-claim-check',            //   3s
   'ratemaking-loop-check',           //  80s   THE ACCEPTANCE TEST — 4/4; condition 3 is paired with two null controls
   'ratio-basis-check',               //   7s
+  'reserve-centring-check',          //  55s   IBNER_CALENDAR_RHO adds dispersion and NOT drift; carries its own positive control
   'report-lag-derive',               //  33s   derives LINE_REPORTING_PATTERN and asserts it against the three recorded figures
   'cohort-ledger-check',             //  35s   three ledger identities, BOTH arms — green since the headroom fix
   'reinsurance-tower-check',         //   2s   PROMOTED at this commit
@@ -565,6 +567,25 @@ const EXPECTED_RED: Record<string, { code: number; why: string }> = {
       + 'file does not carry — a measurement commit, not a re-pointing. ⚠ EXIT 2: the four uplift limits '
       + 'are the ONLY assertions in this file, so a generic code would make the whole file unwatchable. '
       + 'Anything that is not one of those four still exits 1.',
+  },
+  'pin-vs-band-check': {
+    code: 3,
+    why: 'THE PROBE, NOT THE PIN. Every assertion this gate makes about the pin still passes at the '
+      + 'shipped values — at SEEDS=120, WC 42x, GL 12x, Property 41x elasticity ratio against the 10x floor, and no '
+      + 'line moves its opening beyond the permitted share of its band. What fails is the gate\'s x2 '
+      + 'PERTURBED arm exhausting MAX_HISTORY_ATTEMPTS: IBNER_CALENDAR_RHO widens the pre-game candidate '
+      + 'distribution, WC\'s in-band share falls, and a doubled pin now falls back on about 3% of seeds. '
+      + 'Measured at 120 seeds: 0 of 120 at the SHIPPED pin, 4 of 120 perturbed. The shipped pre-game is '
+      + 'healthy on its own gate — pregame-acceptance-check passes with room, and mean attempts at the '
+      + 'shipped pin are 4.72 at SEEDS=120 (3.35 at the 40-seed default) against a 500 cap. '
+      + '⚠ THE TWO AVAILABLE SHORTCUTS ARE BOTH REFUSED: lowering '
+      + 'PERTURB is the exact "tune the perturbation until the headline numbers come true" this file warns '
+      + 'against in its own header, and raising MAX_HISTORY_ATTEMPTS would change the shipped engine to '
+      + 'suit a diagnostic. SUCCESSOR: a probe that measures redraw elasticity without a fallback-prone '
+      + 'arm — perturb the BAND rather than the pin, or read the elasticity off the in-band share, which '
+      + 'is continuous and never falls back. That is a measurement commit and not a re-pointing. ⚠ EXIT 3 '
+      + 'IS ONLY THE FALLBACK CONTAMINATION: any real pin defect — opening shift or elasticity — still '
+      + 'exits 1 and is never excused. See the note at `fallOnly` in the gate.',
   },
   // ⚠ audit-formula-check IS OUT OF THIS MAP AND IT WAS A PAGE DEFECT, NOT A
   // STALE ASSERTION. Its entry said `netUltimateLoss = grossUltimateLoss -

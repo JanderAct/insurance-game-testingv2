@@ -24,14 +24,14 @@ function mergeShockRecords(lineResults: LineResultSet[]): ShockRecord[] | undefi
   return merged.size > 0 ? [...merged.values()] : undefined;
 }
 import { SeededRandom, deriveSubRng } from './random';
-import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, IBNER_BOOKING_BIAS_COEFF, IBNER_HORIZON, IBNER_STEP_MIXTURE, IBNER_TOTAL_SD, IBNER_UNWIND_DECAY, LINE_PAYOUT_PATTERN, FORWARD_BOOKING, PER_CLAIM_REVISION, PRICING_TRIANGLE, MEMBER_LOSS_VOLATILITY, OPERATING_CASH_PCT_OF_PREMIUM, PROPERTY_HELD_PURE_PREMIUM_PER_100, RISK_CONTROL_PARAMS, resolveClosureCurve, openShareAtStep } from '../data/defaultAssumptions';
+import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, IBNER_BOOKING_BIAS_COEFF, IBNER_CALENDAR_RHO, IBNER_COHORT_SD_SCALE, IBNER_HORIZON, IBNER_STEP_MIXTURE, IBNER_TOTAL_SD, IBNER_UNWIND_DECAY, LINE_PAYOUT_PATTERN, FORWARD_BOOKING, PER_CLAIM_REVISION, PRICING_TRIANGLE, MEMBER_LOSS_VOLATILITY, OPERATING_CASH_PCT_OF_PREMIUM, PROPERTY_HELD_PURE_PREMIUM_PER_100, RISK_CONTROL_PARAMS, resolveClosureCurve, openShareAtStep } from '../data/defaultAssumptions';
 import type { TowerLine } from '../data/reinsuranceTower';
 import {
   DEVELOPMENT_ALLOCATION, DEVELOPMENT_CESSION_ENABLED, STOCHASTIC_ALLOCATION_MODE,
   allocateDevelopment, buildTrackedSet, cedeDevelopment, markDownForBooking, reselectDevelopingSet,
 } from './developmentAllocation';
 import { isClaimClosed } from './claimClosure';
-import { reviseDevelopingSet, settleClosingSet } from './claimRevision';
+import { claimRevisionUnit, normalQuantile, reviseDevelopingSet, settleClosingSet } from './claimRevision';
 import { experienceRatePer100, type ExperienceBasis } from './experienceRating';
 import { projectPricingTriangle, windowRows } from './pricingTriangle';
 import { developmentDrift, initialEstimate } from './claimTriangle';
@@ -3445,7 +3445,7 @@ function processIbner(
         // 21% of WC's and 28% of Property's. The floor would have come straight
         // back, more often than before. Measured, not assumed.
         const sigma = c.stepMultiplier * reserveStepSigma(line);
-        const factor = Math.exp(sigma * rng.normal(0, 1) - (sigma * sigma) / 2);
+        const factor = Math.exp(sigma * calendarBlendedZ(rng, gameId, line, valuationYear) - (sigma * sigma) / 2);
 
         // The deterministic unwind of the optimistic booking, front-loaded.
         // Zero unless the line was funded below break-even in this cohort's
@@ -4039,7 +4039,17 @@ function processIbner(
 // test. Keying on the value makes the mutation work by construction.
 const RESERVE_STEP_SIGMA_CACHE = new Map<string, number>();
 function reserveStepSigma(line: CoverageLine): number {
-  const target = IBNER_TOTAL_SD[line];
+  // ⚠ THE SCALE IS A SEPARATE CONSTANT AND IT MULTIPLIES HERE, NOT AT
+  // IBNER_TOTAL_SD. The three values there carry a provenance their own header
+  // asks the reader to keep — they are the RECORDED PREDECESSORS of a target
+  // that has retired — and overwriting them to carry this commit's calibration
+  // would destroy that record to save one multiplication. Keeping them apart
+  // also keeps ibner-null-check honest: it zeroes IBNER_TOTAL_SD, and zero
+  // times any scale is still zero, so the null works whatever the scale reads.
+  const target = IBNER_TOTAL_SD[line] * (IBNER_COHORT_SD_SCALE[line] ?? 1);
+  // The cache key is the TARGET, which now folds in the scale — so a runtime
+  // change to either constant reaches the solver, exactly as the note below
+  // requires for IBNER_TOTAL_SD alone.
   const key = `${line}|${target}`;
   const hit = RESERVE_STEP_SIGMA_CACHE.get(key);
   if (hit !== undefined) return hit;
@@ -4102,6 +4112,69 @@ function reserveStepSigma(line: CoverageLine): number {
   const sigma = (lo + hi) / 2;
   RESERVE_STEP_SIGMA_CACHE.set(key, sigma);
   return sigma;
+}
+
+// ============================================================================
+// THE CALENDAR-YEAR BLEND — ONE SHARED SHOCK BEHIND EVERY COHORT OF A LINE.
+//
+//     z_c = sqrt(rho) . Z_{line,year}  +  sqrt(1 - rho) . z_c^idio
+//
+// ⚠ EVERY COHORT'S MARGINAL LAW IS UNCHANGED AT ANY rho, AND THAT IS THE WHOLE
+// REASON THIS FORM WAS CHOSEN OVER A WIDER DRAW. Z and z^idio are independent
+// standard normals and the coefficients square to 1, so z_c is standard normal
+// for any rho in [0, 1]. Therefore, at every rho:
+//
+//   E[factor] = E[exp(s z - s^2/2)] = 1 EXACTLY, per cohort, per step — the
+//   martingale is untouched and so is the level the pricing is derived from;
+//   the per-cohort dispersion is untouched, so terminal severity and
+//   maturity-anchor-check's climb are untouched;
+//   factor > 0 strictly, so cohort-ledger-check's three identities still hold
+//   BY CONSTRUCTION rather than by measurement.
+//
+// Only the JOINT law moves. That is a strictly weaker change than widening any
+// marginal, and it is why widening `IBNER_TOTAL_SD` alone — or `phi` — was
+// rejected. See IBNER_CALENDAR_RHO for the measurements behind that ruling.
+//
+// ⚠ rng.normal IS CONSUMED UNCONDITIONALLY, AND THAT IS THE NULL TEST'S
+// REQUIREMENT, NOT A STYLE CHOICE. Skipping the draw at rho = 0 would leave the
+// seeded stream in a different place and re-roll every downstream game, so a
+// "null" arm would differ from the shipped path for a reason having nothing to
+// do with this mechanism. Same discipline as PER_CLAIM_REVISION's own note at
+// the allocation branch.
+//
+// ⚠ AND AT rho = 0 THIS RETURNS THE SHIPPED DRAW ITSELF, NOT AN ARITHMETICALLY
+// EQUAL REARRANGEMENT OF IT. The early return hands back `rng.normal(0, 1)`
+// with no operation applied, so `Math.exp(sigma * z - (sigma * sigma) / 2)` at
+// the call site is character for character what it was. cc9d8ac is why that
+// matters: routing both arms through a shared rearrangement of the same
+// arithmetic moved 325 values at ~1e-12 with nothing behaviourally different,
+// and a null test cannot tell a reassociation from a mechanism. Do not
+// "simplify" this into a single blended expression.
+//
+// ⚠ THE COMMON DRAW IS HASHED, NOT TAKEN FROM `rng`, for claimClosureUnit's
+// reason. Every cohort of a line needs the SAME Z at a given valuation, and the
+// cohorts are walked one at a time inside a `.map` — a stream draw would give
+// each of them a different number, and hoisting it out of the map would consume
+// one extra value from `rng` and shift everything after it. A pure function of
+// (gameId, line, valuationYear) gives every cohort the identical value with no
+// stream cost at all.
+//
+// ⚠ SCOPED PER LINE-YEAR, SO THE THREE LINES STAY INDEPENDENT OF EACH OTHER,
+// AND THAT IS DELIBERATE. A pool-wide bad year is what SHOCK EVENTS are for;
+// see the ruling recorded at IBNER_CALENDAR_RHO.
+function calendarBlendedZ(
+  rng: SeededRandom,
+  gameId: string,
+  line: CoverageLine,
+  valuationYear: number,
+): number {
+  const z = rng.normal(0, 1);
+  const rho = IBNER_CALENDAR_RHO.rho;
+  if (!(rho > 0)) return z;
+  const common = normalQuantile(
+    claimRevisionUnit(gameId, `CALYR|${line}`, valuationYear, 'ibner_calendar'),
+  );
+  return Math.sqrt(rho) * common + Math.sqrt(1 - rho) * z;
 }
 
 // One draw from IBNER_STEP_MIXTURE. Drawn ONCE PER COHORT — see the constant.
