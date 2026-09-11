@@ -1557,12 +1557,6 @@ export function processLineYear(
         line as TowerLine,
         (generatedOccurrences ?? []).map(o => o.id),
         (generatedOccurrences ?? []).map(o => o.claimIds[0] ?? o.id),
-        // ⚠ FROM THE OCCURRENCE, NOT FROM A REGISTER LOOKUP. The occurrence
-        // already knows whose it is, so the member travels with the tracked set
-        // from the moment it is built and never needs the claim register — which
-        // is what makes it available for the maturation years, whose registers
-        // are never retained. See DevelopingClaim.memberId.
-        (generatedOccurrences ?? []).map(o => o.memberIds),
         // Same contraction the tower saw — the tracked set IS the register the
         // development law moves, so it must open where the books opened.
         (() => {

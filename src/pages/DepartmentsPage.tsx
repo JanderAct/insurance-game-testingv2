@@ -27,11 +27,16 @@ export default function DepartmentsPage({ gameState }: DepartmentsPageProps) {
     [gameState, selectedYear],
   );
 
-  // ⚠ NOT KEYED TO selectedYear, AND THAT IS THE EXHIBIT'S OWN PROPERTY RATHER
-  // THAN AN OVERSIGHT. Every row compares an occurrence's CURRENT value with its
-  // booked one, so there is no valuation date to select; the memo says so in its
-  // first paragraph. Memoised on gameState alone for the same reason.
-  const claimsMemo = useMemo(() => buildClaimsMemo({ gameState }), [gameState]);
+  // ⚠ KEYED TO selectedYear NOW, WHERE THE EXHIBIT IT REPLACED WAS NOT. The
+  // listing is struck AT a valuation: the Evaluation date column says which, and
+  // both Claim status and Paid resolve against it — a claim open at year 6 may
+  // be closed at year 9. It rebuilds the whole book to split paid per accident
+  // year, which is 41 ms on a reloaded game, so it is memoised rather than
+  // recomputed on an unrelated re-render.
+  const claimsMemo = useMemo(
+    () => buildClaimsMemo({ gameState, asAtYear: selectedYear }),
+    [gameState, selectedYear],
+  );
 
   const documents: DocumentEntry[] = [
     {
@@ -43,7 +48,7 @@ export default function DepartmentsPage({ gameState }: DepartmentsPageProps) {
     {
       id: 'claims',
       title: 'Claims',
-      summary: 'Which claims developed, by line and member',
+      summary: 'Large loss listing by member and status',
       content: claimsMemo,
     },
     {

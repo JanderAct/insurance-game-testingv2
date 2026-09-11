@@ -747,13 +747,14 @@ const WC_FORMATS = (years: number[]): (NumFmt | undefined)[] => [
   DOLLARS,   // Gross Paid
   YEAR,      // Reported Year
   TEXT,      // Enrolled
+  TEXT,      // Claim Description
   ...devFormats(years),
 ];
 
 function buildWcSheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelopment>, years: number[], view: PaidLedgerView, coverage: string): Row[] {
   const header = [
     ...SHARED_HEADER, 'Rating Group', 'Component', 'Status', 'Gross Incurred',
-    'Gross Paid', 'Reported Year', 'Enrolled', ...devHeader(years),
+    'Gross Paid', 'Reported Year', 'Enrolled', 'Claim Description', ...devHeader(years),
   ];
   const body = sortClaimRows(rows).map(row => {
     const ps = paidAndStatus(row.claim, view, 'WC');
@@ -761,7 +762,7 @@ function buildWcSheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelopment>
       ...sharedCells(row),
       safeStr(row.claim.ratingClass), row.claim.tier,
       ps.status, numOrBlank(row.claim.grossUltimate),
-      ps.paid, row.claim.reportedYear, row.enrolled ? 'Yes' : 'No',
+      ps.paid, row.claim.reportedYear, row.enrolled ? 'Yes' : 'No', safeStr(row.claim.description),
       ...devCells(dev.get(row.claim.occurrenceId), years),
     ];
   });
@@ -795,13 +796,14 @@ const GL_FORMATS = (years: number[]): (NumFmt | undefined)[] => [
   DOLLARS,   // Gross Paid
   YEAR,      // Reported Year
   TEXT,      // Enrolled
+  TEXT,      // Claim Description
   ...devFormats(years),
 ];
 
 function buildGlSheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelopment>, years: number[], view: PaidLedgerView, coverage: string): Row[] {
   const header = [
     ...SHARED_HEADER, 'Component', 'Status', 'Gross Incurred',
-    'Gross Paid', 'Reported Year', 'Enrolled', ...devHeader(years),
+    'Gross Paid', 'Reported Year', 'Enrolled', 'Claim Description', ...devHeader(years),
   ];
   const body = sortClaimRows(rows).map(row => {
     const ps = paidAndStatus(row.claim, view, 'GL');
@@ -809,7 +811,7 @@ function buildGlSheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelopment>
       ...sharedCells(row),
       row.claim.tier,
       ps.status, numOrBlank(row.claim.grossUltimate),
-      ps.paid, row.claim.reportedYear, row.enrolled ? 'Yes' : 'No',
+      ps.paid, row.claim.reportedYear, row.enrolled ? 'Yes' : 'No', safeStr(row.claim.description),
       ...devCells(dev.get(row.claim.occurrenceId), years),
     ];
   });
@@ -824,6 +826,7 @@ const PROPERTY_FORMATS = (years: number[]): (NumFmt | undefined)[] => [
   DOLLARS,   // Gross Paid
   YEAR,      // Reported Year
   TEXT,      // Enrolled
+  TEXT,      // Claim Description
   ...devFormats(years),
 ];
 
@@ -835,7 +838,7 @@ function buildPropertySheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelo
     // populated on no other line; the fitted mixture draws an amount directly,
     // so there is nothing for either column to hold.
     'Status', 'Gross Incurred', 'Gross Paid',
-    'Reported Year', 'Enrolled', ...devHeader(years),
+    'Reported Year', 'Enrolled', 'Claim Description', ...devHeader(years),
   ];
   const body = sortClaimRows(rows).map(({ claim, member, enrolled }) => {
     const ps = paidAndStatus(claim, view, 'Property');
@@ -844,7 +847,7 @@ function buildPropertySheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelo
       claim.accidentYear, claim.calendarYear,
       claim.tier,
       ps.status, numOrBlank(claim.grossUltimate), ps.paid,
-      claim.reportedYear, enrolled ? 'Yes' : 'No',
+      claim.reportedYear, enrolled ? 'Yes' : 'No', safeStr(claim.description),
       ...devCells(dev.get(claim.occurrenceId), years),
     ];
   });

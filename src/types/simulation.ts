@@ -271,6 +271,21 @@ export interface Claim {
   // per tier; the mixture model books one amount with no payout schedule, so
   // WC claims leave this absent. GL and Property are unaffected.
   paymentPattern?: number[];
+  /**
+   * Free text about the claim. ALWAYS ABSENT TODAY — nothing populates it.
+   *
+   * ⚠ THE FIELD EXISTS AHEAD OF ITS CONTENT DELIBERATELY, so the day something
+   * writes one there is no schema change, no save migration and no export
+   * rework — only a writer. The claims memo already reads it and renders its
+   * column ONLY when a displayed row has one, so an unpopulated field shows as
+   * nothing rather than as a blank column, which reads as a defect.
+   *
+   * ⚠ AND IT IS NOT A GENERATED LABEL. The memo's Description column, which is
+   * assembled from the member's own attributes, is a different thing and has a
+   * different name for that reason. This is for text ABOUT THE CLAIM, and there
+   * is nothing in the model that produces any.
+   */
+  description?: string;
 }
 
 // Seeded, read-only operating history shown before Year 1 begins.
@@ -511,43 +526,6 @@ export interface DecisionSet {
 export interface DevelopingClaim {
   claimId: string;
   occurrenceId: string;
-  /**
-   * WHOSE CLAIM IT IS. Carried so a reader can be told, without re-deriving it.
-   *
-   * ⚠ STORED RATHER THAN LOOKED UP, AND THE REASON IS THE MATURATION YEARS.
-   * The obvious alternative is to find the claim in its accident year's
-   * register — `LineResultSet.claims` when it is in memory, claimRegeneration
-   * when the save has stripped it. That works for every year the game kept a
-   * ResultSet for, and the maturation years are exactly the years it did not:
-   * the seven years simulated to build the opening book are deliberately never
-   * carried into priorHistory, so there is no result to redraw from and no
-   * register to look in, permanently. Measured at year 10 x 3 lines: 211 of 839
-   * developed occurrences sit in those years, and on Workers' Compensation they
-   * were FIVE OF THE TOP TEN in both games sampled. A member column that is
-   * half empty on one line is not a member column.
-   *
-   * ⚠ AND PARSING THE ID WOULD NOT HAVE WORKED EITHER, which is worth recording
-   * because it is the tempting shortcut. `gl-{year}-{memberId}-{i}` and
-   * `PR-{year}-{memberId}-{i}` do embed it — but WC's shock claims are
-   * `wc-inject-{year}-{seq}` and carry no member at all. One id format out of
-   * four is enough to make string-parsing a silent wrong answer rather than a
-   * missing one.
-   *
-   * ⚠ memberIdS, PLURAL, MIRRORING Occurrence RATHER THAN FLATTENING IT.
-   * Occurrence.memberId is deliberately optional and its comment says why: a
-   * weather or catastrophe event hits several members at once, and a single
-   * required field would silently attribute a pool-wide event to one of them.
-   * That warning applies here verbatim, so the authoritative list is what is
-   * carried and the exhibit renders "N members" rather than picking one.
-   *
-   * Measured end to end at the reachable worst case (10 years x 3 lines): the
-   * raw save goes 4,052,741 -> 4,083,062 characters (+30,321, +0.75%) and the
-   * STORED save 1,097,556 -> 1,101,676 (+4,120, +0.38%), which does not move
-   * the budget reading off 73%. The compressed cost is a seventh of the raw one
-   * because a member id repeated across a member's occurrences is exactly what
-   * DEFLATE is good at.
-   */
-  memberIds: string[];
   /** As the generator drew it, GROSS of reinsurance. Never moves. */
   drawn: number;
   /** As first BOOKED — `drawn` less this cohort's optimistic markdown. Equal to
@@ -628,10 +606,6 @@ export interface DevelopingClaim {
 export interface BenchClaim {
   claimId: string;
   occurrenceId: string;
-  /** Whose claim it is — carried for the same reason DevelopingClaim carries
-   *  it, and carried HERE because a promoted bench claim becomes a tracked one
-   *  and would otherwise arrive on the exhibit with no member. */
-  memberIds: string[];
   /** As the generator drew it, GROSS. Never moves. Also the size the closure
    *  curve is resolved on, exactly as for a tracked occurrence. */
   drawn: number;
