@@ -41,49 +41,62 @@
 // measured instead.
 //
 // ============================================================================
-// ONE TABLE, NOT THREE, AND THE MEASUREMENT REVERSED THE EXPECTATION.
+// THREE SECTIONS AGAIN, AND BOTH PREMISES BEHIND THE ONE-TABLE DECISION MOVED.
 //
-// The development exhibit had to be split by line because GL's severity
-// dominated a single ranking — measured, its top 25 ran GL 17 / WC 5 /
-// Property 3. Ranking by INCURRED does not have that problem, because the
-// dominance belonged to the sort key rather than to the book. Measured over two
-// games at year 10, a single ranking by gross incurred:
+// The single table was right for the exhibit as it then was, and it rested on
+// two things that the open filter changed underneath it:
 //
-//              top 20                 top 30
-//   game 0     WC 4  GL 8  PR 8       WC 7  GL 12  PR 11
-//   game 1     WC 4  GL 6  PR 10      WC 6  GL 10  PR 14
+//   the dominance was gone       a single ranking by INCURRED ran WC 4 / GL 8 /
+//                                PR 8 in one game and WC 4 / GL 6 / PR 10 in
+//                                another, so no line crowded the others out.
+//   Program earned its column    with one table, the line had to be on the row.
 //
-// Every line is represented in both. Property is the SMALLEST register — about
-// 550 claims against WC's 7,000 — and appears most often, because its severity
-// tail is the heaviest. So a Program column on one table costs nothing and
-// three tables would carry a redundant column to solve a problem the new sort
-// key had already removed.
+// Filtering to open files changes the first — open inventories differ sharply by
+// line, so one ranking would be a WC ranking — and sections carrying the line
+// name make the second redundant by construction. So: three sections, ten rows
+// each, ranked by current incurred within each.
 //
-// ⚠ RANKED BY CURRENT INCURRED, ALL STATUSES. That is what a large-loss listing
-// is: the pool's biggest exposures, whether or not the file is still open.
-// Ranking open files only would make it a workload report — useful, and a
-// different document. 25 rows, which at year 10 puts the floor around $3-5M.
+// ============================================================================
+// OPEN FILES ONLY, AND THE TENTH ROW IS SMALL ON TWO OF THE THREE LINES.
 //
-// ⚠ DEVELOPING THE INCURRED MADE THE LISTING MORE CLOSED, NOT LESS, AND THAT
-// WAS NOT THE EXPECTATION. Measured at year 10, the displayed open/closed mix:
+// Settled files cannot move again, so an inventory of them is a history. The
+// filter is severe: measured at year 10, open files are a small minority of each
+// register, and what the tenth row reaches down to is worth stating plainly.
 //
-//            ranked by DRAWN        ranked by CURRENT      carried over
-//   game 0   21 closed / 4 open     22 closed / 3 open      23 of 25
-//   game 1   21 closed / 4 open     24 closed / 1 open      22 of 25
+//   as at year 10       register   open        #1        #5       #10
+//     WC   game 0          5,720    766 (13%)  $6.54M   $1.84M   $1.15M
+//     WC   game 1          6,270    901 (14%)  $3.44M   $1.48M   $1.05M
+//     GL   game 0          4,268    661 (15%)  $1.75M   $0.67M   $0.37M
+//     GL   game 1          4,596    572 (12%)  $5.93M   $2.03M   $1.49M
+//     PR   game 0            608     36  (6%)  $6.23M   $0.57M   $0.24M
+//     PR   game 1            507     44  (9%)  $3.32M   $1.64M   $0.61M
 //
-// The reasoning that predicted the opposite was that a cohort climbs, so its
-// development lands on the open files and lifts them. The gross ledger this
-// column reads does not climb: measured, a cohort's current gross ultimate over
-// its drawn register runs 0.30 to 1.37 and is BELOW 1 for most years, because
-// the optimistic markdown unwinds over the horizon and recent years have barely
-// started. So developing the incurred marks most claims DOWN, and closed
-// claims — pinned at their drawn value — rise relative to open ones that take a
-// scaled share of what is left.
+// ⚠ SO THERE IS NO MATERIALITY FLOOR, AND THAT IS A DECISION RATHER THAN AN
+// OMISSION. GL's and Property's tenth rows are small — $0.37M and $0.24M in one
+// game — and a listing padded to ten with immaterial rows is worse than a short
+// one. Every floor considered was either invented or borrowed:
 //
-// The listing is dominated by settled files because the book is: roughly four
-// claims in five are closed by year 10. Surfacing open files is a real want and
-// it is a FILTER, not a sort key — a different exhibit, and it should be asked
-// for rather than arrived at by leaving a column stale.
+//   a fixed dollar threshold   arbitrary, and wrong across lines whose top open
+//                              file ranges from $1.75M to $6.54M in one game.
+//   a share of the section's   cuts Property to four rows and leaves GL's ten
+//   largest                    untouched, because GL's open book is flat.
+//   the first-layer retention  $1M / $1M / $5M. DERIVED, and it gives sections
+//                              of 10 / 2 / 1 — because it is calibrated for what
+//                              a reinsurer attaches on, not for what a claims
+//                              reader watches. Borrowing it here is the
+//                              well-derived-but-wrong-question trap.
+//
+// What a small tenth row actually says is that the line's open inventory IS
+// small, which is true and worth seeing. So each section prints its own count
+// and range — "10 of 661 open GL files, $1.75M down to $0.37M" — and a reader
+// judges materiality with the numbers in front of them.
+//
+// ⚠ AND A SHORT OR EMPTY SECTION SAYS SO. Every line had at least 36 open files
+// in every game and valuation measured, so neither case arises at defaults — but
+// both are reachable on an early valuation or a line the pool has barely
+// written, and a three-row Property section that does not explain itself reads
+// as a bug. A short section names the count; an empty one says the register has
+// wholly settled and points at the workbook.
 //
 // ============================================================================
 // ⚠ INCURRED HERE IS NOT THE WORKBOOK'S Gross Incurred, AND THE DIFFERENCE IS
@@ -129,13 +142,8 @@ import type {
   Claim, CoverageLine, GameState, LinePoolState, Member, ResultSet,
 } from '../types/simulation';
 
-/** The listing's length. See the header for the floor this puts on it. */
-export const CLAIMS_LISTING_ROWS = 25;
-
-/** The column header's short form, as a claims department writes it. */
-export const PROGRAM_LABEL: Record<CoverageLine, string> = {
-  WC: 'WC', GL: 'GL', Property: 'PR',
-};
+/** Rows per line section. See OPEN FILES ONLY for what this reaches down to. */
+export const CLAIMS_ROWS_PER_LINE = 10;
 
 export interface ClaimListingRow {
   line: CoverageLine;
@@ -161,12 +169,39 @@ export interface ClaimListingRow {
   closed: boolean;
 }
 
-const money = (v: number): string =>
-  v >= 1_000_000 ? `${(v / 1_000_000).toFixed(2)}M` : `${Math.round(v).toLocaleString()}`;
+/**
+ * Always millions, two decimals.
+ *
+ * ⚠ ONE UNIT PER COLUMN, AND THE MIXED VERSION WAS UNREADABLE. This used to
+ * render millions as "6.23M" and anything smaller as a plain "635,675", so a
+ * Property section spanning $6.23M down to $236,797 put both forms in one
+ * column and a reader had to parse each cell before comparing it to the one
+ * above. Open inventories span exactly that range, so the mixed form failed
+ * precisely where this exhibit lives.
+ */
+const money = (v: number): string => `${(v / 1_000_000).toFixed(2)}M`;
 
 /** 12/31 of the calendar year the valuation year maps to. */
 export function evaluationDate(gameState: GameState, yearNumber: number): string {
   return `12/31/${gameState.setup.startingYear + yearNumber - 1}`;
+}
+
+/**
+ * The accident year as a CALENDAR year, matching the evaluation date's form.
+ *
+ * ⚠ THE COLUMN THE RESTRUCTURE DROPPED AND THIS PUTS BACK. Without it an
+ * eight-year-old file and a current-year one are indistinguishable, which is the
+ * first thing a claims reader wants and the only thing on the row that varies
+ * with age. Measured, it is not cosmetic: a single line's top ten open files
+ * span accident years -2 to 10 in one game — a thirteen-year spread reading as
+ * one undated block.
+ *
+ * Pre-game years render as calendar years like any other (year 0 at a 2026 start
+ * is 2025), because a reader does not need the game's internal numbering to read
+ * a date.
+ */
+export function programYear(gameState: GameState, accidentYear: number): string {
+  return String(gameState.setup.startingYear + accidentYear - 1);
 }
 
 function memberIndex(gameState: GameState): Map<string, Member> {
@@ -313,51 +348,88 @@ export function buildClaimsMemo(input: ClaimsMemoInput): string {
   const out: string[] = [];
 
   out.push('# Claims Department');
-  out.push(`**Large loss listing, evaluated ${evaluationDate(gameState, asAtYear)}.** `
-    + `The ${CLAIMS_LISTING_ROWS} largest claims on the book by CURRENT incurred, across all `
-    + 'programs. Amounts are GROSS of reinsurance. Both money columns are shares of the same '
-    + 'accident-year figures, so they are on one basis and subtractable.');
+  out.push(`**Open claim inventory, evaluated ${evaluationDate(gameState, asAtYear)}.** `
+    + `The ${CLAIMS_ROWS_PER_LINE} largest OPEN files on each program by current incurred. `
+    + 'Settled files are excluded: they cannot move again, so they belong to a history rather '
+    + 'than to an inventory. Amounts are GROSS of reinsurance, and both money columns are shares '
+    + 'of the same accident-year figures, so they are on one basis and subtractable.');
 
   if (rows.length === 0) {
     out.push('_No claim detail is available at this valuation._');
     return out.join('\n\n');
   }
 
-  const shown = rows.slice(0, CLAIMS_LISTING_ROWS);
-  // ⚠ THE COLUMN APPEARS ONLY IF A DISPLAYED ROW HAS ONE — see the header.
-  const anyDescription = shown.some(r => (r.claim.description ?? '').trim().length > 0);
+  // ⚠ NO Claim status COLUMN, AND THAT IS THE OPEN FILTER'S DOING. Every row is
+  // open by construction, so the column would be uniform and carry nothing —
+  // the same objection this file applies to the description column. Status is a
+  // property of the FILTER now, stated once above, not of the row. The
+  // evaluation date stays despite also being constant, because it is a fact
+  // ABOUT each row that happens to repeat rather than the criterion that
+  // selected it, and a listing row copied out of context needs to carry it.
+  let anyShown = false;
+  for (const line of gameState.setup.activeLines) {
+    const open = rows.filter(r => r.line === line && !r.closed);
+    out.push(`## ${line}`);
 
-  const head = ['Evaluation date', 'Program', 'Member', 'Claim status', 'Paid total', 'Incurred total'];
-  const align = ['---', '---', '---', '---', '---:', '---:'];
-  if (anyDescription) { head.push('Claim description'); align.push('---'); }
+    if (open.length === 0) {
+      // ⚠ AN EMPTY SECTION SAYS WHY RATHER THAN LOOKING BROKEN. Reachable: a
+      // line whose whole register has settled, or an early valuation on a line
+      // the pool has barely written.
+      out.push(`_No open ${line} file at this valuation — every claim on the `
+        + `${rows.filter(r => r.line === line).length.toLocaleString()} in this program's register `
+        + 'has settled. Settled claims are listed in the claims workbook._');
+      continue;
+    }
 
-  out.push([
-    `| ${head.join(' | ')} |`,
-    `|${align.join('|')}|`,
-    ...shown.map(r => {
-      const cells = [
-        evaluationDate(gameState, asAtYear),
-        PROGRAM_LABEL[r.line],
-        r.member?.name ?? r.claim.memberId,
-        r.closed ? 'Closed' : 'Open',
-        r.paid === undefined ? '' : money(r.paid),
-        money(r.incurred),
-      ];
-      if (anyDescription) cells.push((r.claim.description ?? '').trim());
-      return `| ${cells.join(' | ')} |`;
-    }),
-  ].join('\n'));
+    anyShown = true;
+    const shown = open.slice(0, CLAIMS_ROWS_PER_LINE);
+    const anyDescription = shown.some(r => (r.claim.description ?? '').trim().length > 0);
 
-  out.push(`_${(rows.length - shown.length).toLocaleString()} further claims are on the book at this `
-    + 'valuation; the claims workbook carries every one._');
+    const head = ['Evaluation date', 'Program year', 'Member', 'Paid total', 'Incurred total'];
+    const align = ['---', '---:', '---', '---:', '---:'];
+    if (anyDescription) { head.push('Claim description'); align.push('---'); }
+
+    out.push([
+      `| ${head.join(' | ')} |`,
+      `|${align.join('|')}|`,
+      ...shown.map(r => {
+        const cells = [
+          evaluationDate(gameState, asAtYear),
+          programYear(gameState, r.claim.accidentYear),
+          r.member?.name ?? r.claim.memberId,
+          r.paid === undefined ? '' : money(r.paid),
+          money(r.incurred),
+        ];
+        if (anyDescription) cells.push((r.claim.description ?? '').trim());
+        return `| ${cells.join(' | ')} |`;
+      }),
+    ].join('\n'));
+
+    // ⚠ THE SECTION STATES ITS OWN SCALE RATHER THAN BEING CUT TO A THRESHOLD.
+    // See OPEN FILES ONLY for why there is no materiality floor: every candidate
+    // was either invented or borrowed from a constant calibrated for something
+    // else. Printing the count and the range lets a reader judge for themselves,
+    // which is the honest version of the same service.
+    const lo = shown[shown.length - 1].incurred, hi = shown[0].incurred;
+    out.push(`_${shown.length} of ${open.length.toLocaleString()} open ${line} files, `
+      + `$${money(hi)} down to $${money(lo)}._`
+      + (shown.length < CLAIMS_ROWS_PER_LINE
+        ? ` _This program has fewer than ${CLAIMS_ROWS_PER_LINE} open files; the section is short `
+          + 'because the inventory is, not because rows are missing._'
+        : ''));
+  }
+
+  if (!anyShown) {
+    out.push('_Every claim in the register has settled at this valuation, on every program._');
+  }
 
   out.push(paidNote());
 
   out.push(
-    '_The listing covers the accident years the pool holds a claim register for. The years carried '
-    + 'in before the declared history were built as an opening position rather than from individual '
-    + 'claims, so they have no files to list — their development still appears in the actuarial '
-    + 'memorandum._',
+    '_The inventory covers the accident years the pool holds a claim register for. The years '
+    + 'carried in before the declared history were built as an opening position rather than from '
+    + 'individual claims, so they have no files to list — their development still appears in the '
+    + 'actuarial memorandum._',
   );
 
   if (unpricedYears > 0) {

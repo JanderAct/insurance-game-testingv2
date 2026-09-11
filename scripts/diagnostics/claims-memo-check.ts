@@ -12,7 +12,7 @@
 //   a dash where a member name belongs            (the member did not resolve)
 //   a Paid figure that is not the workbook's      (a second allocation)
 //   a Status that is not the workbook's           (a second closure draw)
-//   every row Open, or every row Closed           (a column with no content)
+//   a CLOSED file in an inventory of open ones     (the filter did not fire)
 //   a year's Paid not summing to the cohort's paydown  (dollars invented or lost)
 //   a year's Incurred not summing to the cohort's ultimate  (a stale vintage)
 //   a Paid above the Incurred beside it            (the two columns disagree)
@@ -44,7 +44,7 @@ import { isClaimClosed, claimPaidSplit } from '../../src/utils/claimClosure';
 import { resolveClosureCurve } from '../../src/data/defaultAssumptions';
 import { regenerateLineYearClaims } from '../../src/utils/claimRegeneration';
 import {
-  buildClaimsMemo, claimListing, evaluationDate, CLAIMS_LISTING_ROWS, PROGRAM_LABEL,
+  buildClaimsMemo, claimListing, evaluationDate, programYear, CLAIMS_ROWS_PER_LINE,
 } from '../../src/utils/claimsMemo';
 import type { Claim, CoverageLine, GameState } from '../../src/types/simulation';
 
@@ -114,7 +114,8 @@ function workbookAnswer(g: GameState, asAt: number) {
 console.log(RULE);
 console.log('THE CLAIMS LISTING: a register, agreeing with the workbook');
 console.log(RULE);
-console.log(`${GAMES} games x ${YEARS} years x ${LINES.length} lines, ${CLAIMS_LISTING_ROWS} rows.\n`);
+console.log(`${GAMES} games x ${YEARS} years x ${LINES.length} lines, `
+  + `${CLAIMS_ROWS_PER_LINE} rows per line section.\n`);
 
 let totalRows = 0, totalShown = 0;
 
@@ -132,12 +133,19 @@ for (let g = 0; g < GAMES; g++) {
   ok(liveList.rows.length === postList.rows.length,
     `the listing survives a save/restore (${liveList.rows.length.toLocaleString()} claims)`,
     `${liveList.rows.length} live against ${postList.rows.length} after reload`);
-  const liveTop = liveList.rows.slice(0, CLAIMS_LISTING_ROWS).map(r => r.claim.id).join(',');
-  const postTop = postList.rows.slice(0, CLAIMS_LISTING_ROWS).map(r => r.claim.id).join(',');
+  // ⚠ THE DISPLAYED SET IS PER-LINE, OPEN ONLY, CAPPED — the same selection the
+  // memo makes, rebuilt here so the gate checks what a reader sees rather than
+  // the whole register behind it.
+  const displayed = (g2: ReturnType<typeof claimListing>) => LINES.flatMap(line =>
+    g2.rows.filter(r => r.line === line && !r.closed)
+      .sort((a, b) => b.incurred - a.incurred)
+      .slice(0, CLAIMS_ROWS_PER_LINE));
+  const liveTop = displayed(liveList).map(r => r.claim.id).join(',');
+  const postTop = displayed(postList).map(r => r.claim.id).join(',');
   ok(liveTop === postTop, 'and the displayed rows are the same claims in the same order',
     'the reloaded book ranks differently, so the register was not reproduced exactly');
 
-  const shown = postList.rows.slice(0, CLAIMS_LISTING_ROWS);
+  const shown = displayed(postList);
   totalRows += postList.rows.length;
   totalShown += shown.length;
 
@@ -146,11 +154,18 @@ for (let g = 0; g < GAMES; g++) {
   ok(nameless.length === 0, `all ${shown.length} displayed rows resolve their member`,
     `${nameless.length} row(s) do not — member ids ${nameless.map(r => r.claim.memberId).join(', ')}`);
 
-  // 3. SORTED BY CURRENT INCURRED, DESCENDING — the developed figure, not the
-  //    drawn one. Checking grossUltimate here is what the assertion did before
-  //    the vintage fix, and it fails now precisely because the ranking moved.
-  const sorted = shown.every((r, i) => i === 0 || shown[i - 1].incurred >= r.incurred);
-  ok(sorted, 'the listing is ranked by CURRENT incurred, descending', 'it is not in order');
+  // 3. SORTED BY CURRENT INCURRED, DESCENDING — WITHIN EACH SECTION.
+  //
+  // ⚠ PER SECTION, NOT ACROSS. `shown` is three sections concatenated, so a
+  // global check fails the moment GL's largest exceeds WC's tenth — which is
+  // ordinary and not a defect. Checking the concatenation is what the assertion
+  // did before the split, and it failed on exactly that.
+  for (const line of LINES) {
+    const sec = shown.filter(r => r.line === line);
+    const sorted = sec.every((r, i) => i === 0 || sec[i - 1].incurred >= r.incurred);
+    ok(sorted, `${line}: ranked by current incurred, descending within its section`,
+      'the section is not in order');
+  }
 
   // 4. AGREEMENT WITH THE WORKBOOK — the assertion the design exists for.
   const wb = workbookAnswer(reloaded, asAt);
@@ -240,27 +255,44 @@ for (let g = 0; g < GAMES; g++) {
     `${crossed.length} row(s) cross — e.g. ${crossed[0]?.line} ay${crossed[0]?.claim.accidentYear} `
     + `paid ${crossed[0]?.paid?.toFixed(0)} against incurred ${crossed[0]?.incurred.toFixed(0)}`);
 
+  // 5d. EVERY DISPLAYED ROW IS OPEN. The inventory's whole premise.
+  ok(shown.every(r => !r.closed), `all ${shown.length} displayed rows are open files`,
+    `${shown.filter(r => r.closed).length} settled file(s) reached the inventory`);
+
   // 6. THE RENDERED DOCUMENT.
   const memo = buildClaimsMemo({ gameState: reloaded, asAtYear: asAt });
   const bodyRows = memo.split('\n').filter(l => /^\| 12\/31\//.test(l));
   ok(bodyRows.length === shown.length, `the rendered memo has ${shown.length} body rows`,
     `it rendered ${bodyRows.length}`);
+  for (const line of LINES) {
+    ok(memo.includes(`## ${line}`), `${line} has its own section`,
+      'the section heading is absent, so the line is not split out');
+  }
   ok(memo.includes(evaluationDate(reloaded, asAt)), 'the evaluation date is rendered and formatted',
     'the 12/31 evaluation date is absent');
   ok(!/\|\s*—\s*\|/.test(memo), 'no row renders an em-dash where a value belongs',
     'at least one cell rendered as "—"');
-  // No mixture-component label may reach a reader — the vocabulary is internal.
   const leaked = bodyRows.filter(l => /component[123]|schoolsMedium|\binjected\b/.test(l));
   ok(leaked.length === 0, 'no row leaks a raw mixture-component label',
     `${leaked.length} row(s) render a tier string: ${leaked[0]?.slice(0, 90)}`);
-  // Programs are the short forms, and more than one appears.
-  const programs = new Set(bodyRows.map(l => l.split('|')[2]?.trim()));
-  ok([...programs].every(p => Object.values(PROGRAM_LABEL).includes(p)),
-    `the Program column uses the short forms (${[...programs].join(', ')})`,
-    `it renders something else: ${[...programs].join(', ')}`);
-  ok(programs.size > 1, 'more than one program appears in the listing',
-    'one program fills the whole listing, which is the dominance the single table was checked against');
-  // The description column is absent while nothing populates it.
+
+  // ⚠ THE PROGRAM YEAR IS RENDERED AND IT VARIES. The column exists because a
+  // listing where an eight-year-old file and a current-year one look identical
+  // is missing the first thing a reader wants; a column that rendered one value
+  // would reintroduce exactly that.
+  const years = new Set(bodyRows.map(l => l.split('|')[2]?.trim()));
+  const wanted = new Set(shown.map(r => programYear(reloaded, r.claim.accidentYear)));
+  ok([...years].every(y => wanted.has(y)),
+    `the Program year column renders calendar years (${[...years].sort().join(', ')})`,
+    `it renders something the rows do not carry: ${[...years].sort().join(', ')}`);
+  ok(years.size > 1, `more than one program year appears (${years.size} distinct)`,
+    'every displayed file is from one accident year, so the column carries nothing');
+
+  // The status column is GONE — uniform under the open filter, so it would
+  // carry nothing. Its absence is asserted so it is not reinstated by habit.
+  ok(!memo.includes('Claim status'), 'no Claim status column, since every row is open',
+    'a uniform status column has come back');
+
   ok(!memo.includes('Claim description'),
     'the Claim description column is not rendered while no claim has one',
     'an always-empty column is being rendered');
@@ -275,15 +307,17 @@ console.log('\n  POSITIVE CONTROLS (each MUST be caught):');
   const { live } = build(0);
   const asAt = YEARS;
   const base = claimListing({ gameState: live, asAtYear: asAt });
-  const shown = base.rows.slice(0, CLAIMS_LISTING_ROWS);
+  const pick = (l: ReturnType<typeof claimListing>) => LINES.flatMap(line =>
+    l.rows.filter(r => r.line === line && !r.closed)
+      .sort((a, b) => b.incurred - a.incurred).slice(0, CLAIMS_ROWS_PER_LINE));
+  const shown = pick(base);
 
   // A: a member id that resolves to nobody.
   const broken: GameState = JSON.parse(JSON.stringify(live));
   for (const r of [...broken.priorHistory, ...broken.lockedResults])
     for (const line of LINES)
       for (const c of r.byLine[line]?.claims ?? []) c.memberId = 'member-does-not-exist';
-  const brokenShown = claimListing({ gameState: broken, asAtYear: asAt })
-    .rows.slice(0, CLAIMS_LISTING_ROWS);
+  const brokenShown = pick(claimListing({ gameState: broken, asAtYear: asAt }));
   ok(brokenShown.some(r => r.member === undefined),
     'control A — an unresolvable member id is caught by the member assertion',
     'the assertion passed on ids no member holds');
@@ -303,12 +337,24 @@ console.log('\n  POSITIVE CONTROLS (each MUST be caught):');
     'control C — a flipped Status is caught by the workbook-agreement assertion',
     'a disagreeing Status was accepted');
 
-  // D: the STATUS COLUMN VARIES. A column that is uniform carries nothing, and
-  // this is the one the brief asked for explicitly.
-  const closedN = shown.filter(r => r.closed).length;
-  ok(closedN > 0 && closedN < shown.length,
-    `control D — the Status column varies within the displayed rows (${closedN} closed of ${shown.length})`,
-    `every displayed row reads ${closedN === 0 ? 'Open' : 'Closed'}, so the column carries no information`);
+  // D: THE OPEN FILTER MUST ACTUALLY REMOVE SOMETHING. It replaces the old
+  //    status-varies control, which the filter made meaningless: every row is
+  //    open now, so a column that varied would be the defect. What matters
+  //    instead is that the filter is doing work — if the book were all open, or
+  //    the filter were a no-op, "all displayed rows are open" would pass
+  //    vacuously and the inventory would be the history it replaced.
+  {
+    const closedInBook = base.rows.filter(r => r.closed).length;
+    const droppedFromTop = LINES.flatMap(line => {
+      const all = base.rows.filter(r => r.line === line)
+        .sort((a, b) => b.incurred - a.incurred).slice(0, CLAIMS_ROWS_PER_LINE);
+      return all.filter(r => r.closed);
+    }).length;
+    ok(closedInBook > 0 && droppedFromTop > 0,
+      `control D — the open filter removes real rows (${closedInBook.toLocaleString()} settled in the `
+      + `book, ${droppedFromTop} of them would have been displayed unfiltered)`,
+      'no settled claim would have been displayed anyway, so the filter is untested on this book');
+  }
 
   // F: THE INCURRED IDENTITY MUST CATCH A STALE VINTAGE. The defect this commit
   //    fixed was Incurred being claim.grossUltimate — the DRAWN value. So the
@@ -355,8 +401,12 @@ console.log('\n  POSITIVE CONTROLS (each MUST be caught):');
   // E: the description column APPEARS when a claim has one — the other half of
   // the conditional. Without this, "the column is absent" would also pass on a
   // renderer that had no column at all.
+  // ⚠ A DISPLAYED claim, WHICH IS AN OPEN ONE. Targeting the register's largest
+  // no longer works: the biggest claims on the book are settled, so the column
+  // stayed absent and the control read as a failure of the field rather than of
+  // its own aim.
   const withDesc: GameState = JSON.parse(JSON.stringify(live));
-  const target = claimListing({ gameState: withDesc, asAtYear: asAt }).rows[0];
+  const target = pick(claimListing({ gameState: withDesc, asAtYear: asAt }))[0];
   for (const r of [...withDesc.priorHistory, ...withDesc.lockedResults])
     for (const line of LINES)
       for (const c of r.byLine[line]?.claims ?? []) {
@@ -380,8 +430,9 @@ if (failures.length > 0) {
   console.log(RULE);
   process.exitCode = 1;
 } else {
-  console.log('THE LISTING IS A REGISTER ON ONE VINTAGE: PAID AND INCURRED ARE BOTH SHARES OF THE');
-  console.log('SAME COHORT, EACH SUMS TO ITS OWN COHORT TOTAL, AND NO ROW SHOWS PAID ABOVE');
+  console.log('AN OPEN INVENTORY, SPLIT BY PROGRAM: EVERY DISPLAYED ROW IS AN OPEN FILE, RANKED');
+  console.log('WITHIN ITS OWN SECTION AND DATED BY PROGRAM YEAR. PAID AND INCURRED ARE SHARES OF');
+  console.log('THE SAME COHORT, EACH SUMS TO ITS COHORT TOTAL, AND NO ROW SHOWS PAID ABOVE');
   console.log('INCURRED. PAID AND STATUS AGREE WITH THE WORKBOOK CLAIM FOR CLAIM.');
   console.log(RULE);
 }
