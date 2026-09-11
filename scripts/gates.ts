@@ -115,6 +115,7 @@ const FAST: string[] = [
   'roster-catalog-check',            //   3s
   'renewal-stability-check',         //  95s   declining the worst members does not ratchet; four controls
   'save-debounce-check',             //   1s   a drag is one write and never loses the last value; 3 controls
+  'save-flush-wiring-check',         //   1s   static: the two lifecycle events reach flush(); 6 controls
   'save-round-trip-check',           //   3s
   'save-size-check',                 //   4s
   'seed-cohort-shape-check',         //   1s

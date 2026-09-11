@@ -63,8 +63,19 @@
 // of a facilitator running a room. The pair above is the Page Lifecycle
 // recommendation and neither one alone is sufficient.
 //
-// Both handlers call flush(), which is synchronous. A ~210 ms write inside a
+// Both handlers call flush(), which is synchronous. A ~214 ms write inside a
 // visibilitychange handler is exactly what that event is for.
+//
+// ⚠ AND THE WIRING IS GATED, BECAUSE IT LIVES SOMEWHERE NO GATE CAN RUN.
+// save-flush-wiring-check asserts it statically against App.tsx's source: both
+// events registered, both handlers reaching flush(), both removed in cleanup,
+// and the visibilitychange handler guarded on 'hidden' rather than firing on
+// every transition. Static because a React effect is not callable from node,
+// and the realistic failure is a refactor dropping or renaming a listener —
+// which a text assertion does catch. What it cannot cover is whether the
+// events fire as expected in a real browser; that is assumed, and the gate's
+// header says so and records jsdom/happy-dom as the route if it ever needs
+// more.
 // ============================================================================
 
 /**

@@ -19,11 +19,16 @@
 // is exact and the whole file runs in milliseconds.
 //
 // WHAT THIS DOES NOT CHECK, STATED SO IT IS NOT ASSUMED AWAY:
-//   - THE BROWSER EVENTS. That visibilitychange and pagehide are wired to
-//     flush() lives in App.tsx's effect and is not callable from node — the
-//     same blind spot save-round-trip-check names for the load-side migrations.
-//     This gate proves flush() does the right thing when called; that it IS
-//     called on those two events is read, not tested.
+//   - THE BROWSER EVENTS. This gate proves flush() does the right thing when
+//     called. That visibilitychange and pagehide CALL it lives in App.tsx's
+//     effect and is not callable from node.
+//     ⚠ save-flush-wiring-check NOW COVERS THE WIRING STATICALLY — both
+//     listeners registered, both handlers reaching flush(), both removed in
+//     cleanup, and the visibilitychange handler guarded on 'hidden'. So the gap
+//     is no longer "the wiring might not exist"; it is "the wiring exists and
+//     the browser's behaviour is assumed". Smaller, and still a gap: whether
+//     those events fire when expected, and whether a 214 ms synchronous write
+//     completes inside one on a backgrounding mobile tab, is not testable here.
 //   - WHAT A WRITE COSTS. save-size-check owns the wall-clock figure and the
 //     before/after drag arithmetic.
 // ============================================================================
