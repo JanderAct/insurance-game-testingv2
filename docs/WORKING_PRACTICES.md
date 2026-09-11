@@ -481,6 +481,31 @@ Things that were discovered expensively and live only in conversation memory. Re
   identically zero, so the test cannot fire) and two runs of the null arm on DISJOINT seeds (real
   noise, no mechanism — measured 57.8% / 50.0% / 41.3% positive at p 0.09 / 0.54 / 0.91, correctly
   silent). A control that passes fails the gate.
+- **A SELECTION MECHANISM CANNOT BE MEASURED ON THE POPULATION IT HAS ALREADY SELECTED.** First
+  occurrence, and the tell was an impossible number. Decomposing the departure sort key
+  `satisfaction + 0.3 x riskQuality` over the standing enrolled book gave variance shares of 114.8%
+  and 93.8% — summing to 209% — because the covariance between the two terms was −0.294. That
+  covariance is not a property of members; it is a property of SURVIVORS. The sort had been removing
+  the lowest sum for years, so anyone still on the book with low satisfaction had to have high risk
+  quality to have survived, and the two terms were negatively correlated BY the mechanism under
+  measurement.
+
+  The decomposition was not merely noisy, it was measuring the wrong thing entirely, and it would have
+  read as a clean finding if the shares had happened to land under 100%. **Variance shares that sum to
+  more than 100% are the visible symptom; the invisible version is the same bias at 70/30.**
+
+  ⚠ THE REMEDY IS NOT A BIGGER SAMPLE — more years of the same book is more selection, not less. Use a
+  population the mechanism has not acted on (members at the moment they JOIN, or the full marketplace
+  including those never enrolled), or measure the OUTCOME instead of the input decomposition. Here the
+  outcome was unambiguous where the decomposition was not: mean risk quality of leavers 4.607 against
+  5.630 for stayers, a full point, on every line.
+
+  ⚠ AND THE RANK CORRELATIONS SURVIVED WHERE THE VARIANCE SHARES DID NOT, which is why the finding was
+  recoverable at all: rho(key, riskQuality) 0.340 and rho(key, satisfaction) 0.524 are computed against
+  the terms themselves rather than against a decomposition of their sum, so the induced covariance
+  distorts them without inverting them. When a decomposition and a correlation disagree on a selected
+  population, the correlation is the one to trust.
+
 - **Say out loud which checks are gross-error detectors and which are precision instruments.** A
   CI gate wide enough to be honest about a heavy tail is, by construction, too wide to catch a subtle
   error — invariant 1 on GL abuse would not notice a 5% mis-specification. Precision for those

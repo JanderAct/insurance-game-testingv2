@@ -1,10 +1,11 @@
 // Membership engine for Risk Pool Simulation v1
 // Uses count-based attraction to keep growth realistic
 
-import type { Member, LineDecisionSet, CoverageLine, MembershipHistory } from '../types/simulation';
+import type { Member, LineDecisionSet, CoverageLine, MembershipHistory, MemberLossHistory } from '../types/simulation';
 import { SeededRandom } from './random';
 import { canReenroll } from './membershipHistory';
 import { getMemberExposure } from './lineHelpers';
+import { departureRisks } from './memberDeparture';
 import {
   MEMBER_MOVEMENT_WEIGHTS,
   BASE_RETENTION,
@@ -26,6 +27,9 @@ export interface MemberMovementInputs {
   // Authoritative per-line enrollment ledger — the ONLY legitimate source for
   // recruitment eligibility (see the candidate-pool filter below).
   membershipHistory: MembershipHistory;
+  // The rolling loss ledger, as it stood entering this year. Departure reads
+  // it for each member's experience modifier and its year-over-year change.
+  memberLossHistory: MemberLossHistory;
   decisions: LineDecisionSet;
   line: CoverageLine;
   currentMemberSatisfaction: number;
@@ -299,37 +303,29 @@ export function simulateMemberMovement(inputs: MemberMovementInputs): MemberMove
   const cappedWithdrawalCount = Math.min(rawWithdrawalCount, MAX_WITHDRAWN_PER_YEAR);
 
   // ============================================================================
-  // ⚠ THIS STILL READS riskQuality, AND THAT IS DELIBERATE NOW THAT THE
-  // ATTRIBUTE IS HIDDEN. The pool does not need to SEE an attribute for
-  // members to act on it: a badly-run entity knows it is badly run, and its
-  // decision to stay or go is its own. Risk quality has no per-member UI
-  // anywhere (surface-privacy-check enforces that), so a reader finding this
-  // sort would otherwise reasonably conclude the field is dead and delete it.
-  // It is not dead. It is unobservable to the PLAYER and fully available to
-  // the SIMULATION, which is the whole point of hiding it.
+  // WHO LEAVES. The COUNT is above (calcRetentionProbability, which reads the
+  // pool-wide rate increase, dividends, assessments and surplus); this is the
+  // SELECTION, and it is the member's own decision rather than the pool's.
   //
-  // ⚠ AND THE DIRECTION IS BACKWARDS FOR ADVERSE SELECTION. RECORDED HERE,
-  // NOT FIXED HERE.
+  // Sorted DESCENDING — highest departure risk leaves — which is the opposite
+  // of the key this replaced. See memberDeparture.ts for the model, for the
+  // measurements that condemned the old one, and for why marketability's
+  // scale is derived from the clamp rather than chosen.
   //
-  // The sort is ascending and the lowest leave, so `+ riskQuality * 0.3`
-  // means LOW risk quality leaves FIRST: the book self-cleans. Real adverse
-  // selection runs the other way — when the rate rises it is the GOOD risks
-  // who can get a better price elsewhere and leave, and the pool is left with
-  // the ones nobody else wants. As written, the engine hands the player a
-  // free improvement in the book's quality every time members depart, which
-  // works directly against the pressure Renewal Underwriting and New Business
-  // Appetite exist to manage: there is nothing to manage if departures always
-  // help.
-  //
-  // Flipping the sign is a one-character change and NOT the whole fix — the
-  // coefficient was fitted (or at least settled) against the current
-  // direction, retention is calibrated on top of it, and reversing it without
-  // re-measuring would move every membership figure in the model. It is a
-  // separate decision with its own measurement, not a tidy-up to fold into a
-  // UI commit.
+  // ⚠ THE OLD KEY READ riskQuality DIRECTLY AND THIS ONE DOES NOT. Departure
+  // now runs on the experience modifier, which is something the member can
+  // actually see in their own claims and their own bill. Risk quality reaches
+  // this decision only through the losses it generates, which is the whole
+  // difference between an economic mechanism and a psychic one.
   // ============================================================================
-  const membersSortedByLeaveRisk = [...currentMembers].sort((a, b) =>
-    (a.satisfaction + a.riskQuality * 0.3) - (b.satisfaction + b.riskQuality * 0.3)
+  const risks = new Map(
+    departureRisks(
+      currentMembers, line, inputs.memberLossHistory,
+      priceSignalFor(inputs).changeDeviationPct, rng,
+    ).map(r => [r.memberId, r.risk]),
+  );
+  const membersSortedByLeaveRisk = [...currentMembers].sort(
+    (a, b) => (risks.get(b.id) ?? 0) - (risks.get(a.id) ?? 0)
   );
 
   const withdrawnMembers: Member[] = membersSortedByLeaveRisk

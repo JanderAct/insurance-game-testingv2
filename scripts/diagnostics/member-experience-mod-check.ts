@@ -21,24 +21,44 @@
 // reject an off-centre input is not a centring assertion. A deliberate 5%
 // off-balance is injected and must be rejected.
 //
-// 2. IT DOES NOT REACH THE POOL TOTAL, RETENTION, OR THE RATE.
+// 2. IT REACHES THE RATE ONLY THROUGH WHO IS ENROLLED, NEVER DIRECTLY.
 //
-// Perturbed by scaling CREDIBILITY_Z tenfold — the real constant, mutated in
-// this process before the engine runs, so the engine's own path is exercised
-// rather than a re-derivation of it. poolPremium, activeExposure, the
-// enrolled roster, the retention rate and the rate per $100 must all be
-// bit-identical; only the allocation may move.
+// ⚠ THIS ASSERTION WAS REWRITTEN, AND THE OLD ONE WAS RIGHT WHEN IT WAS
+// WRITTEN. It used to demand that scaling CREDIBILITY_Z left the enrolled
+// roster, activeExposure, poolPremium and the rate ALL bit-identical — "the
+// modifier reaches nothing but the split". That held while the modifier fed
+// only the premium allocation.
 //
-//   THE POOL TOTAL because this is an allocation. It holds by construction —
-//     the mod enters as a weight and weights are normalised — and is asserted
-//     anyway, because "by construction" is an argument and this is a
-//     measurement. Same standard the class rates were held to.
-//   RETENTION because member premium -> who stays -> the enrolled mix -> the
-//     blended rate -> the pool rate is a feedback loop the pool must not
-//     acquire by accident.
-//   THE RATE because the pool prices at NEUTRAL risk quality deliberately. A
-//     modifier feeding back into it is finding 17 arriving through
-//     underwriting.
+// It is now false BY DESIGN. memberDeparture.ts reads the modifier: a member
+// with better-than-average experience is more marketable and leaves sooner
+// when the price rises. So changing Z changes who leaves, which changes the
+// enrolled book, which changes activeExposure and therefore poolPremium.
+// That is adverse selection, it is the pressure Renewal Underwriting exists
+// to manage, and a gate forbidding it would forbid the feature.
+//
+// WHAT MUST STILL HOLD IS NARROWER AND IS THE PART THAT WAS EVER LOAD-BEARING:
+// the modifier must not reach the RATE. The pool prices at NEUTRAL risk
+// quality deliberately, and a modifier feeding into the rate would be
+// finding 17 arriving through underwriting — a realized outcome repricing
+// the line rather than moving money between members.
+//
+// ⚠ THE OBVIOUS TEST IS VACUOUS AND WAS TRIED FIRST. Comparing only the
+// line-years where the two arms HAPPEN to enrol the same book self-selects:
+// the books match exactly in the early years, when no member has three years
+// of history, so no member is rated, so the modifier is 1 everywhere and
+// there is nothing for the rate to leak. 60 of 180 line-years matched and the
+// modifier moved in none of them.
+//
+// So the departure channel is CLOSED instead, by setting DEPARTURE.priceWeight
+// to 0 in BOTH arms. Departure then reads no modifier at all and the roster
+// is invariant to Z by construction, which restores the original strict
+// comparison — the roster, exposure, pool premium and rate must all be
+// bit-identical while the ALLOCATION moves. That isolates the pricing path
+// from the selection path rather than hoping they separate on their own.
+//
+// A second clause then re-opens the channel and requires the roster to MOVE,
+// because a closed-channel test alone would also pass if departure had
+// silently stopped reading the modifier.
 //
 // ⚠ AND IT FAILS IF THE PERTURBATION MOVES NO ALLOCATION, the same
 // inert-probe guard member-premium-check carries. A probe that cannot move
@@ -68,6 +88,7 @@ import { processYear } from '../../src/utils/simulationEngine';
 import {
   CREDIBILITY_Z, EXPERIENCE_MOD, memberExperienceMods, modBounds, primaryShare,
 } from '../../src/utils/memberExperienceMod';
+import { DEPARTURE } from '../../src/utils/memberDeparture';
 import { ratingGroupOf } from '../../src/utils/wcClaimEngine';
 import { EXPERIENCE_SPLIT_POINT } from '../../src/utils/memberLossHistory';
 import type {
@@ -202,50 +223,78 @@ console.log('\n--- 1. THE REBASE: exposure-weighted mean mod is 1 ---');
 }
 
 // -------------------------------------- 2. it reaches nothing but the split
-console.log('\n--- 2. IT REACHES NOTHING BUT THE SPLIT (Z scaled x10 in-process) ---');
+console.log('\n--- 2. IT REACHES THE RATE ONLY THROUGH THE ROSTER (Z scaled x10 in-process) ---');
 {
   const originals = { ...CREDIBILITY_Z };
-  for (const l of LINES) CREDIBILITY_Z[l] = originals[l] * 10;
+  const originalWeight = DEPARTURE.priceWeight;
+
+  // --- channel CLOSED: departure cannot read the modifier -------------------
+  const closedBase: Array<Map<string, Snap>> = [];
+  const closedPert: Array<Map<string, Snap>> = [];
+  // --- channel OPEN: the shipped configuration ------------------------------
   const pert: Array<Map<string, Snap>> = [];
   try {
+    DEPARTURE.priceWeight = 0;
+    for (let g = 0; g < GAMES; g++) closedBase.push(runGame(g));
+    for (const l of LINES) CREDIBILITY_Z[l] = originals[l] * 10;
+    for (let g = 0; g < GAMES; g++) closedPert.push(runGame(g));
+    DEPARTURE.priceWeight = originalWeight;
     for (let g = 0; g < GAMES; g++) pert.push(runGame(g));
   } finally {
     for (const l of LINES) CREDIBILITY_Z[l] = originals[l];
+    DEPARTURE.priceWeight = originalWeight;
   }
 
   let compared = 0, leaked = 0, allocationMoved = 0, modMoved = 0;
   for (let g = 0; g < GAMES; g++) {
-    for (const [key, b] of base[g]) {
-      const p = pert[g].get(key);
+    for (const [key, b] of closedBase[g]) {
+      const p = closedPert[g].get(key);
       if (!p) { leaked++; continue; }
       compared++;
-      const same = b.enrolledIds === p.enrolledIds
-        && b.activeExposure === p.activeExposure
-        && b.retention === p.retention
-        && b.poolPremium === p.poolPremium
-        && b.ratePer100 === p.ratePer100;
-      if (!same) {
+      if (b.enrolledIds !== p.enrolledIds || b.activeExposure !== p.activeExposure
+        || b.poolPremium !== p.poolPremium || b.ratePer100 !== p.ratePer100
+        || b.retention !== p.retention) {
         leaked++;
         if (leaked <= 3) {
-          failures.push(`${key}: scaling credibility moved something outside the allocation — `
-            + `enrolled ${b.enrolledIds === p.enrolledIds ? 'same' : 'DIFFERENT'}, `
+          failures.push(`${key}: with the departure channel CLOSED, scaling credibility still moved `
+            + `something outside the allocation — enrolled ${b.enrolledIds === p.enrolledIds ? 'same' : 'DIFFERENT'}, `
             + `exposure ${b.activeExposure === p.activeExposure ? 'same' : `${b.activeExposure} vs ${p.activeExposure}`}, `
-            + `retention ${b.retention === p.retention ? 'same' : `${b.retention} vs ${p.retention}`}, `
             + `poolPremium ${b.poolPremium === p.poolPremium ? 'same' : `${b.poolPremium} vs ${p.poolPremium}`}, `
             + `rate ${b.ratePer100 === p.ratePer100 ? 'same' : `${b.ratePer100} vs ${p.ratePer100}`}. `
-            + 'The experience modifier is an ALLOCATION: it may change who pays and must change nothing about '
-            + 'what the pool charges, what it collects, or who is in the book.');
+            + 'With DEPARTURE.priceWeight at 0 the only route from the modifier to anything is the premium '
+            + 'allocation, so a move here is the modifier reaching the RATE directly — finding 17 arriving '
+            + 'through underwriting.');
         }
       }
       if (b.shares.some((s, i) => s.premium !== p.shares[i]?.premium)) allocationMoved++;
       if (b.shares.some((s, i) => s.experienceMod !== p.shares[i]?.experienceMod)) modMoved++;
     }
   }
-  console.log(`  ${compared} line-years compared`);
-  console.log(`  line-years whose MOD moved: ${modMoved}  (must be > 0, or the probe is inert)`);
-  console.log(`  line-years whose ALLOCATION moved: ${allocationMoved}  (must be > 0)`);
-  console.log(`  line-years that LEAKED outside the allocation: ${leaked}  (must be 0)   `
+  console.log(`  CHANNEL CLOSED (DEPARTURE.priceWeight = 0), ${compared} line-years compared`);
+  console.log(`    line-years whose MOD moved: ${modMoved}  (must be > 0, or the probe is inert)`);
+  console.log(`    line-years whose ALLOCATION moved: ${allocationMoved}  (must be > 0)`);
+  console.log(`    line-years that LEAKED past the allocation: ${leaked}  (must be 0)   `
     + `${leaked === 0 && modMoved > 0 && allocationMoved > 0 ? 'PASS' : 'FAIL'}`);
+
+  // --- and the channel must actually be open in the shipped configuration ---
+  let rosterMoved = 0, openCompared = 0;
+  for (let g = 0; g < GAMES; g++) {
+    for (const [key, b] of base[g]) {
+      const p = pert[g].get(key);
+      if (!p) continue;
+      openCompared++;
+      if (b.enrolledIds !== p.enrolledIds) rosterMoved++;
+    }
+  }
+  console.log(`  CHANNEL OPEN (shipped), ${openCompared} line-years: roster moved in ${rosterMoved}  `
+    + `(must be > 0 — this is adverse selection working)   ${rosterMoved > 0 ? 'PASS' : 'FAIL'}`);
+  if (rosterMoved === 0) {
+    failures.push('scaling credibility tenfold changed nobody\'s departure decision in the SHIPPED '
+      + 'configuration. The closed-channel assertion above would pass just as well if departure had '
+      + 'stopped reading the modifier altogether, so this clause is what distinguishes "the channel is '
+      + 'correctly closed when closed" from "there is no channel". Check that memberDeparture reads the '
+      + 'modifier and that DEPARTURE.priceWeight is not 0.');
+  }
   if (modMoved === 0 || allocationMoved === 0) {
     failures.push('scaling credibility tenfold changed no mod or no allocation, so assertion 2 proved nothing. '
       + 'A probe that cannot move the thing it perturbs is not a control — see WORKING_PRACTICES on the '

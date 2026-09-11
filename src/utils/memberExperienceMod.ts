@@ -155,7 +155,7 @@ import {
 import { getMemberExposure } from './lineHelpers';
 import { expectedWcGrossLossForPricing, NEUTRAL_RQ as WC_NEUTRAL_RQ, ratingGroupOf } from './wcClaimEngine';
 import { expectedGlGrossLossForPricing, NEUTRAL_RQ as GL_NEUTRAL_RQ } from './glClaimEngine';
-import type { CoverageLine, Member, MemberLossHistory } from '../types/simulation';
+import type { CoverageLine, Member, MemberLossHistory, MemberLossYear } from '../types/simulation';
 
 export const EXPERIENCE_MOD = {
   /** Years of history read. Reliability peaks here — 5 is no better. */
@@ -241,13 +241,47 @@ export function primaryShare(member: Member, line: CoverageLine, yearNumber: num
  * as well: the rated part averages 1 by construction and the unrated part is
  * 1 identically.
  */
+/**
+ * One member's clamped experience ratio over a window ENDING AT `endYear`.
+ *
+ * ⚠ ONE IMPLEMENTATION, TWO CALLERS, DELIBERATELY, AND IT TAKES THE WINDOW
+ * RATHER THAN READING IT. memberExperienceMods below passes the current
+ * window; memberDeparture.ts passes the current one and the prior one, to get
+ * a member's own price change without storing a prior modifier. A second copy
+ * of this arithmetic is exactly the kind of duplicate that drifts — the clamp
+ * and the expected-primary basis have to be identical on both sides, or the
+ * ratio mod_t/mod_(t-1) would measure the difference between two
+ * implementations rather than between two years.
+ */
+export function clampedRatioFor(
+  member: Member,
+  line: CoverageLine,
+  w: readonly MemberLossYear[],
+): { rated: boolean; clamped: number; ap: number; ep: number; ax: number; years: number } {
+  const { ratioFloor, ratioCeiling, minYears } = EXPERIENCE_MOD;
+  let ap = 0, ax = 0, ep = 0;
+  for (const e of w) {
+    ap += e.primaryActual;
+    ax += e.actual - e.primaryActual;
+    ep += e.expectedAtManual * primaryShare(member, line, e.yearNumber);
+  }
+  if ((CREDIBILITY_Z[line] ?? 0) <= 0 || w.length < minYears || !(ep > 0)) {
+    return { rated: false, clamped: 1, ap, ep, ax, years: w.length };
+  }
+  return {
+    rated: true,
+    clamped: Math.min(ratioCeiling, Math.max(ratioFloor, ap / ep)),
+    ap, ep, ax, years: w.length,
+  };
+}
+
 export function memberExperienceMods(
   members: readonly Member[],
   line: CoverageLine,
   history: MemberLossHistory,
   yearNumber: number,
 ): MemberExperienceMod[] {
-  const { windowYears, ratioFloor, ratioCeiling, minYears } = EXPERIENCE_MOD;
+  const { windowYears } = EXPERIENCE_MOD;
   const Z = CREDIBILITY_Z[line] ?? 0;
 
   const rows: Array<{
@@ -261,26 +295,17 @@ export function memberExperienceMods(
     if (!(exposure > 0)) continue;
 
     const w = experienceWindow(history, m.id, line, windowYears);
-    let ap = 0, ax = 0, ep = 0;
-    for (const e of w) {
-      ap += e.primaryActual;
-      ax += e.actual - e.primaryActual;
-      // The share is taken at the entry's OWN year, not this year's — the
-      // severity trend moves it, and a window spans three of them.
-      ep += e.expectedAtManual * primaryShare(m, line, e.yearNumber);
-    }
+    const r = clampedRatioFor(m, line, w);
 
     // Unrated: too little history, an expectation of zero to divide by, or a
     // line the measurement says carries no signal (Z = 0).
-    if (Z <= 0 || w.length < minYears || !(ep > 0)) {
-      rows.push({ memberId: m.id, exposure, years: w.length, ap, ep, ax, raw: null, clamped: 1 });
+    if (!r.rated) {
+      rows.push({ memberId: m.id, exposure, years: r.years, ap: r.ap, ep: r.ep, ax: r.ax, raw: null, clamped: 1 });
       continue;
     }
 
-    const raw = ap / ep;
-    const clamped = Math.min(ratioCeiling, Math.max(ratioFloor, raw));
-    rows.push({ memberId: m.id, exposure, years: w.length, ap, ep, ax, raw, clamped });
-    weighted += exposure * clamped;
+    rows.push({ memberId: m.id, exposure, years: r.years, ap: r.ap, ep: r.ep, ax: r.ax, raw: r.ap / r.ep, clamped: r.clamped });
+    weighted += exposure * r.clamped;
     totalExposure += exposure;
   }
 

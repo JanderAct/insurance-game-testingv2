@@ -287,3 +287,39 @@ export function experienceWindow(
   const years = storedLossYears(history, memberId, line);
   return years.slice(Math.max(0, years.length - windowYears));
 }
+
+/**
+ * The window as it stood ONE YEAR AGO — the same read as experienceWindow,
+ * shifted back by one stored entry.
+ *
+ * ⚠ THIS IS WHAT MAKES LAST YEAR'S MODIFIER RECOVERABLE WITHOUT STORING IT.
+ * The departure model needs mod_t / mod_(t-1) — a member's own price change
+ * relative to the book — and storing a prior modifier would be a fifth number
+ * the save budget does not have. It does not need to be stored: the ledger
+ * retains LOSS_HISTORY_CAP_YEARS (5) against a window of
+ * EXPERIENCE_WINDOW_YEARS (3), so both windows are still present. The two
+ * extra retained years were described at LOSS_HISTORY_CAP_YEARS as buying
+ * flexibility against a change of window; this is the first thing that
+ * spends them, and for a different purpose than the one anticipated.
+ *
+ * ⚠ SHIFTED BY ONE ENTRY, NOT BY ONE YEAR, AND THAT IS DELIBERATE. It has to
+ * match experienceWindow's own semantics exactly: that function takes the
+ * last N STORED entries, not the last N calendar years, so for a member with
+ * an enrolment gap the two differ. Defining this one by year while the live
+ * window is defined by entry would make mod_t / mod_(t-1) measure the
+ * difference between two window DEFINITIONS for exactly those members —
+ * a ratio that moves for a reason that has nothing to do with their
+ * experience. Whether the live window should be year-based is a real
+ * question and a separate one; it would move the shipped modifier.
+ */
+export function priorExperienceWindow(
+  history: MemberLossHistory,
+  memberId: string,
+  line: CoverageLine,
+  windowYears: number = EXPERIENCE_WINDOW_YEARS,
+): MemberLossYear[] {
+  const years = storedLossYears(history, memberId, line);
+  if (years.length < 2) return [];
+  const end = years.length - 1;                       // drop the most recent
+  return years.slice(Math.max(0, end - windowYears), end);
+}

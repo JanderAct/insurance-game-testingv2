@@ -32,6 +32,7 @@ import {
 } from './developmentAllocation';
 import { isClaimClosed } from './claimClosure';
 import { allocateMemberPremium } from './memberPremium';
+import { applyRenewalDeclines, renewalDeclines } from './renewalUnderwriting';
 import { memberExperienceMods } from './memberExperienceMod';
 import { claimRevisionUnit, normalQuantile, reviseDevelopingSet, settleClosingSet } from './claimRevision';
 import { experienceRatePer100, type ExperienceBasis } from './experienceRating';
@@ -818,6 +819,9 @@ export function processLineYear(
     currentMembers: currentActiveMembers,
     allMarketMembers: ctx.allMarketMembers,
     membershipHistory: ctx.membershipHistory,
+    // Ends at yearNumber - 1, like everything else that reads it this year —
+    // see the field's note on LineYearContext.
+    memberLossHistory: ctx.memberLossHistory,
     decisions: lineDecisions,
     line,
     currentMemberSatisfaction: lineState.memberSatisfaction,
@@ -834,7 +838,36 @@ export function processLineYear(
     rng: memberRng,
   });
 
-  const activeExposure = memberResult.activeExposure;
+  // ============================================================================
+  // RENEWAL UNDERWRITING — BESIDE MOVEMENT, NOT THROUGH IT.
+  //
+  // Movement has already decided who LEFT (their own decision) and who JOINED.
+  // This is the pool declining to renew, which is a different decision by a
+  // different party, and it must not consume movement's withdrawal budget —
+  // run through it, a decline would SAVE a member who would otherwise have
+  // gone, and a strict policy would read as improved retention.
+  //
+  // ⚠ THE DECISION READS THE PRE-DECLINE BOOK, WHICH IS THE ONLY BOOK THAT
+  // EXISTS WHEN IT IS MADE, and pricing below reads the mod again on the
+  // POST-decline book. Two evaluations, deliberately — see
+  // renewalUnderwriting.ts for why collapsing them is invisible until a
+  // player declines enough members to move the rebase divisor.
+  //
+  // Each decline writes closeInterval, so the two-year cooldown applies and
+  // the member cannot simply be recruited back next year.
+  // ============================================================================
+  const renewalDecisions = renewalDeclines(
+    memberResult.activeMembers, line, ctx.memberLossHistory, yearNumber,
+    lineDecisions.renewalThreshold ?? null,
+  );
+  const renewal = applyRenewalDeclines(
+    memberResult.activeMembers, line, yearNumber, renewalDecisions, ctx.membershipHistory,
+  );
+  const enrolledMembers = renewal.retained;
+  const declinedMembers = renewal.declined;
+  const activeExposure = declinedMembers.length === 0
+    ? memberResult.activeExposure
+    : enrolledMembers.reduce((s, m) => s + getMemberExposure(m, line, yearNumber), 0);
 
   // ⚠ THE RATE IS RECOMPUTED ON THE POST-MOVEMENT BOOK, and with class rates it
   // genuinely differs from the quoted one. `newPurePremiumPer100` above is the
@@ -866,18 +899,24 @@ export function processLineYear(
     aggregateTermsRetainedPer100: termsRetainedPer100,
   };
   const pricedPurePremiumPer100 = currentPurePremiumPer100(
-    line, yearNumber, memberResult.activeMembers, experienceBasis, pricedCession,
+    line, yearNumber, enrolledMembers, experienceBasis, pricedCession,
   );
 
   const totalMarketExposure = memberResult.totalMarketExposure;
   const marketShare = activeExposure / Math.max(totalMarketExposure, 0.01);
 
   const updatedAllMembers: Member[] = ctx.allMarketMembers.map(m => {
-    const active = memberResult.activeMembers.find(a => a.id === m.id);
+    const active = enrolledMembers.find(a => a.id === m.id);
     if (active) return active;
 
     const withdrawn = memberResult.withdrawnMembers.find(w => w.id === m.id);
     if (withdrawn) return withdrawn;
+
+    // A declined member is off the book too, and must carry the withdrawn
+    // status into the marketplace roster or they would read as still enrolled
+    // everywhere that checks Member.status.
+    const declined = declinedMembers.find(d => d.id === m.id);
+    if (declined) return declined;
 
     return m;
   });
@@ -955,10 +994,10 @@ export function processLineYear(
   // retention or recruitment; memberExperienceMod.ts says why each of those
   // would be a defect and member-experience-mod-check holds all three.
   const experienceMods = memberExperienceMods(
-    memberResult.activeMembers, line, ctx.memberLossHistory, yearNumber,
+    enrolledMembers, line, ctx.memberLossHistory, yearNumber,
   );
   const memberPremiumShares = allocateMemberPremium(
-    memberResult.activeMembers, line, yearNumber, poolPremium,
+    enrolledMembers, line, yearNumber, poolPremium,
     new Map(experienceMods.map(m => [m.memberId, m.mod])),
   );
 
@@ -1082,7 +1121,7 @@ export function processLineYear(
   // are identical whether generated alone, with the pool, or with the whole
   // marketplace. Enrolment independence is what makes the split free —
   // asserted in scripts/diagnostics/enrolment-independence-check.ts.
-  const enrolledMemberIds = new Set(memberResult.activeMembers.map(m => m.id));
+  const enrolledMemberIds = new Set(enrolledMembers.map(m => m.id));
   const marketplaceProspects = ctx.allMarketMembers.filter(m => !enrolledMemberIds.has(m.id));
 
   // Shock cost, accumulated per shockId by the effect application below and
@@ -1106,7 +1145,7 @@ export function processLineYear(
     // ⚠ ENROLLED BOOK, NOT THE FULL ROSTER. Marketplace-wide generation makes it
     // tempting to hand the 200-member roster to everything below; doing it here
     // would drive k_line to ~1 permanently and silently disable the correction.
-    const kLine = computeKLine(memberResult.activeMembers);
+    const kLine = computeKLine(enrolledMembers);
 
     // ⚠ THE ARGUMENTS COME FROM claimGeneration.ts's SHARED MAPPING, the same
     // one claimRegeneration uses to redraw this year later. Two inline literals
@@ -1118,7 +1157,7 @@ export function processLineYear(
     //   - risk control acts on the DRAW ONLY (finding 17), so it moves the loss
     //     ratio instead of cancelling out of it.
     const generated = generateWcClaims(wcGenerationInputs({
-      members: memberResult.activeMembers, yearNumber, calendarYear, instanceSeed: instance.seed,
+      members: enrolledMembers, yearNumber, calendarYear, instanceSeed: instance.seed,
       k: kLine, riskControlEffectiveness: newRCEffectiveness, gPool: ctx.gPool, shock: ctx.shock,
     }));
     // PROSPECTS: the rest of the 200-member marketplace, generated at kLine = 1
@@ -1174,11 +1213,11 @@ export function processLineYear(
     // measuring it on a basis that includes the risk-quality severity tilt would
     // fold the book's RQ mix into a figure attributed to the shock.
     if (ctx.shock?.componentFreqMultipliers && ctx.shockFirings?.length) {
-      const baseline = expectedWcGrossLossForPricing(memberResult.activeMembers, { kLine, yearNumber });
+      const baseline = expectedWcGrossLossForPricing(enrolledMembers, { kLine, yearNumber });
       for (const firing of ctx.shockFirings) {
         const multipliers = ownComponentFreqMultipliers(firing.shockId, 'WC');
         if (!multipliers) continue;
-        shockExpectedAdded[firing.shockId] = expectedWcGrossLossForPricing(memberResult.activeMembers, {
+        shockExpectedAdded[firing.shockId] = expectedWcGrossLossForPricing(enrolledMembers, {
           kLine, yearNumber, componentFreqMultipliers: multipliers,
         }) - baseline;
       }
@@ -1188,12 +1227,12 @@ export function processLineYear(
     // correction against the currently enrolled book; the pure premium itself
     // is held (step 6b) rather than chasing enrollment.
     // ⚠ ENROLLED BOOK, NOT THE FULL ROSTER — same trap as WC's k_line above.
-    const kGl = computeKGl(memberResult.activeMembers, yearNumber);
+    const kGl = computeKGl(enrolledMembers, yearNumber);
     // Shared mapping — see the WC call above and claimGeneration.ts. Risk
     // control and the shock multipliers are DRAW ONLY (finding 17): a shock is
     // a realized event, not a repricing.
     const generated = generateGlClaims(glGenerationInputs({
-      members: memberResult.activeMembers, yearNumber, calendarYear, instanceSeed: instance.seed,
+      members: enrolledMembers, yearNumber, calendarYear, instanceSeed: instance.seed,
       k: kGl, riskControlEffectiveness: newRCEffectiveness, gPool: ctx.gPool, shock: ctx.shock,
     }));
     // PROSPECTS at kGl = 1, rc = 0 — see the marketplaceProspects note above.
@@ -1236,7 +1275,7 @@ export function processLineYear(
     // which is correct — each answers "what did this event add", not "how do
     // we split the interaction".
     if ((ctx.shock?.freqMultipliers || ctx.shock?.sevMultipliers) && ctx.shockFirings?.length) {
-      const baseline = expectedGlGrossLossForPricing(memberResult.activeMembers, { yearNumber, kGl });
+      const baseline = expectedGlGrossLossForPricing(enrolledMembers, { yearNumber, kGl });
       for (const firing of ctx.shockFirings) {
         const ownFreq = ownFreqMultipliers(firing.shockId, 'GL');
         const ownSev = ownSevMultipliers(firing.shockId, 'GL');
@@ -1247,7 +1286,7 @@ export function processLineYear(
         // a shock inside the PRICING function, which is exactly what must not
         // happen. This stays a measurement of the event's cost.
         const sevFactor = ownSev?.[WHOLE_LINE] ?? 1;
-        const shocked = expectedGlGrossLossForPricing(memberResult.activeMembers, {
+        const shocked = expectedGlGrossLossForPricing(enrolledMembers, {
           yearNumber, kGl, ...(ownFreq ? { freqMultipliers: ownFreq } : {}),
         }) * sevFactor;
         shockExpectedAdded[firing.shockId] = shocked - baseline;
@@ -1258,12 +1297,12 @@ export function processLineYear(
     // HELD and k_Pr is the per-year roster/risk-quality-mix correction against
     // the ENROLLED book — not the full roster, which is the trap both other
     // lines carry a warning about.
-    const kPr = computeKPr(memberResult.activeMembers);
+    const kPr = computeKPr(enrolledMembers);
     // Shared mapping — see claimGeneration.ts. Property reads no shock channel
     // and no gPool; the mapper drops both, exactly as this literal always did.
     // Risk control acts on the DRAW ONLY (finding 17), as in WC and GL.
     const generated = generatePropertyClaims(propertyGenerationInputs({
-      members: memberResult.activeMembers, yearNumber, calendarYear, instanceSeed: instance.seed,
+      members: enrolledMembers, yearNumber, calendarYear, instanceSeed: instance.seed,
       k: kPr, riskControlEffectiveness: newRCEffectiveness, gPool: ctx.gPool, shock: ctx.shock,
     }));
     generatedClaims = generated.claims;
@@ -1299,7 +1338,7 @@ export function processLineYear(
     shockOccurred = false;
   } else {
     shockOccurred = commonLossFactor > catastropheThreshold;
-    memberLossResults = memberResult.activeMembers.map(member => {
+    memberLossResults = enrolledMembers.map(member => {
       const memberExposureAmount = getMemberExposure(member, line, yearNumber);
       const memberExpectedLoss = memberExposureAmount * pricedPurePremiumPer100 * 10_000;
       const riskQuality = Math.max(1, Math.min(10, member.riskQuality));
@@ -1937,22 +1976,30 @@ export function processLineYear(
     decisions: lineDecisions,
     assetAllocation: ctx.assetAllocation,
 
-    activeMembers: memberResult.activeMembers.length,
+    activeMembers: enrolledMembers.length,
     newMembers: memberResult.newMembers.length,
     withdrawnMembers: memberResult.withdrawnMembers.length,
     // At line scope one member is one enrolment, so these two agree with the
     // counts above by construction. Both exist so the POOLED row can tell
     // members from enrolments — see the block on ResultSet.
-    enrolmentCount: memberResult.activeMembers.length,
+    enrolmentCount: enrolledMembers.length,
     newMemberIds: memberResult.newMembers.map(m => m.id),
     withdrawnMemberIds: memberResult.withdrawnMembers.map(m => m.id),
+    // ⚠ SEPARATE FROM withdrawnMembers, AND memberRetentionRate DELIBERATELY
+    // DOES NOT COUNT THEM. Retention is what the MEMBERS chose; a decline is
+    // what the POOL chose. Folding declines into the retention rate would
+    // make a strict renewal policy look like a satisfaction problem.
+    //
+    // The COUNT only, not the ids: nothing renders a declined roster yet and
+    // the save sits at 96% of budget, so ids go in when something needs them.
+    declinedMembers: declinedMembers.length,
     activeExposure: parseFloat(activeExposure.toFixed(2)),
     totalMarketExposure: parseFloat(totalMarketExposure.toFixed(2)),
     marketShare: parseFloat(marketShare.toFixed(4)),
     memberRetentionRate: parseFloat(memberResult.retentionRate.toFixed(3)),
     memberSatisfaction: memberResult.memberSatisfaction,
     averageRiskQuality: memberResult.averageRiskQuality,
-    memberList: memberResult.activeMembers,
+    memberList: enrolledMembers,
 
     rateLevel: parseFloat(newRateLevel.toFixed(2)),
     ratePer100: parseFloat(totalMemberRatePer100.toFixed(4)),
@@ -2118,7 +2165,7 @@ export function processLineYear(
       currentYearCohort,
       yearNumber,
     ),
-    members: memberResult.activeMembers,
+    members: enrolledMembers,
 
     netUnpaidReserve: endingNetReserve,
     surplus: endingSurplus,

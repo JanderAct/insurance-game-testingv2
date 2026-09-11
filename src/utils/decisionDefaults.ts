@@ -18,6 +18,9 @@ export function defaultLineDecisionSet(line: CoverageLine): LineDecisionSet {
     // did nothing; its derived table crosses at 54.0%, not 60%, so it now
     // carries the same meaning here as on WC and GL.
     fundingAtExpected: true,
+    // Renew everyone. A pool that declines by default would be making an
+    // underwriting decision nobody took.
+    renewalThreshold: null,
     dividendPct: SLIDER_RANGES.dividendPct.default,
     assessmentPct: SLIDER_RANGES.assessmentPct.default,
     riskControlPct: SLIDER_RANGES.riskControlPct.default,

@@ -113,6 +113,7 @@ const FAST: string[] = [
   'reinsurance-tower-check',         //   2s   PROMOTED at this commit
   'revision-direction-check',        //  10s   STAGE 1 — the OBSERVABLE direction rate; asserts no sign chain
   'roster-catalog-check',            //   3s
+  'renewal-stability-check',         //  95s   declining the worst members does not ratchet; four controls
   'save-round-trip-check',           //   3s
   'save-size-check',                 //   4s
   'seed-cohort-shape-check',         //   1s

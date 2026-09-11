@@ -346,7 +346,18 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // here runs at the default of 5, which always took the else branch, so the
 // RNG stream is untouched — and value-identity agreeing is the measurement
 // that says so rather than the reasoning.
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v36.json');
+// v37: ALL 24 MOVED, ON VALUES THIS TIME RATHER THAN ON SHAPE. The departure
+// rebuild changes WHICH members leave, so a different book is enrolled from
+// year 1 and every export figure follows. No column was added or removed —
+// the shape is identical to v36 and the row count is unchanged.
+//
+// ⚠ AND THAT IS THE OPPOSITE OF v36, WHICH IS WHY THE PAIR MATTERS. At v36
+// all 24 moved and NO value changed (a retired decision row came out); here
+// all 24 moved and 22,174 values changed with the shape held. A hash guard
+// reports the same thing in both cases. value-identity v37 is what separates
+// them, and its note records the confinement check: every changed field is
+// downstream of the roster, nothing roster-independent moved, no NaN.
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v37.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

@@ -409,6 +409,14 @@ export interface LineDecisionSet {
   fundingAtExpected: boolean;
   dividendPct: number;            // 0.00 to 0.15 of premium
   assessmentPct: number;          // 0.00 to 0.25 of premium
+  /**
+   * Renewal Underwriting: decline members whose DISPLAYED experience modifier
+   * exceeds this. null renews everyone, which is the default.
+   *
+   * ⚠ ON THE DISPLAYED (median-centred) SCALE, so 1.15 means "more than 15%
+   * above the typical member" in any book. See renewalUnderwriting.ts.
+   */
+  renewalThreshold?: number | null;
   // ⚠ underwritingStrictness IS DELETED, NOT DEPRECATED. Above 6 it sorted
   // candidates by riskQuality descending and kept the top 60% — exact
   // selection on an attribute the player can no longer see. See
@@ -897,6 +905,12 @@ export interface ResultSet {
   // record of who actually entered or left in a given year.
   newMemberIds: string[];
   withdrawnMemberIds: string[];
+  /**
+   * Members the pool DECLINED to renew this year (Renewal Underwriting).
+   * Distinct from withdrawnMembers, which is what members chose themselves —
+   * and deliberately absent from memberRetentionRate for the same reason.
+   */
+  declinedMembers?: number;
   activeExposure: number;
   totalMarketExposure: number;
   marketShare: number;          // exposure-based

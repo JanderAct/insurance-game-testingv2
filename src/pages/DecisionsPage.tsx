@@ -1,6 +1,6 @@
 import React from 'react';
 import { DollarSign, TrendingUp, BarChart2, Shield, RotateCcw, Lock, Info } from 'lucide-react';
-import type { DecisionSet, LineDecisionSet, CoverageLine, LineView, LineResultSet, Member } from '../types/simulation';
+import type { DecisionSet, LineDecisionSet, CoverageLine, LineView, LineResultSet, Member, MemberLossHistory } from '../types/simulation';
 import SliderInput from '../components/SliderInput';
 import AllocationBar from '../components/AllocationBar';
 import { SLIDER_RANGES, ASSET_ALLOCATION_DEFAULT } from '../data/defaultAssumptions';
@@ -14,6 +14,7 @@ import { lineDisplayName } from '../utils/lineDisplay';
 import { lookupCLF } from '../utils/simulationEngine';
 import { hasStaticClf, staticClf } from '../data/clfTables';
 import type { FundingConsequence } from '../utils/fundingConsequence';
+import { RENEWAL_THRESHOLDS, renewalDeclines } from '../utils/renewalUnderwriting';
 
 export interface LineLoanInfo {
   balance: number;
@@ -41,6 +42,9 @@ interface DecisionsPageProps {
   // SELECTED funding confidence level and reinsurance level. Null only
   // before a game exists.
   fundingConsequence: FundingConsequence | null;
+  /** The rolling loss ledger, for Renewal Underwriting's live decline counts.
+   *  Same source MembershipPage reads — see its note on why not the shares. */
+  memberLossHistory: MemberLossHistory;
   // The line's ACTIVE enrolled members. The reinsurance tower prices off the
   // book itself now, not off a frozen per-$100 rate card times exposure — both
   // E[ceded] and SD[ceded] depend on who is actually enrolled and on the year.
@@ -83,7 +87,7 @@ function resetLineToDefaults(decisions: DecisionSet, line: CoverageLine): Decisi
   };
 }
 
-export default function DecisionsPage({ decisions, onChange, yearNumber, estimatedExpectedLoss, estimatedAggregateTermsRetained, disabled = false, lineView, lineLoanInfo, lastLineResult, fundingConsequence, activeMembers }: DecisionsPageProps) {
+export default function DecisionsPage({ decisions, onChange, yearNumber, estimatedExpectedLoss, estimatedAggregateTermsRetained, disabled = false, lineView, lineLoanInfo, lastLineResult, fundingConsequence, activeMembers, memberLossHistory }: DecisionsPageProps) {
   // Pool tab: the two pool-wide decisions. One allocation policy and one
   // risk-control intensity for the whole pool — each line applies them to its
   // OWN base (own segregated portfolio / own premium).
@@ -97,7 +101,9 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
   const d = decisions.byLine[selectedLine];
   const selectedLoanInfo = lineLoanInfo[selectedLine];
 
-  const set = (key: keyof LineDecisionSet, val: number | boolean | boolean[] | LineDecisionSet['assetAllocation']) =>
+  // `null` is in the union for renewalThreshold, whose "Renew All" position
+  // is an explicit null rather than an absent key.
+  const set = (key: keyof LineDecisionSet, val: number | boolean | boolean[] | null | LineDecisionSet['assetAllocation']) =>
     onChange({ ...decisions, byLine: { ...decisions.byLine, [selectedLine]: { ...d, [key]: val } } });
 
   // ⚠ FOR CHANGING TWO FIELDS AT ONCE. `set` closes over `d` as it stood at
@@ -198,7 +204,15 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
               <span className="text-gray-400">Neither is active yet.</span>
             </span>
           </p>
-          <RenewalUnderwritingPreview line={selectedLine} />
+          <RenewalUnderwriting
+            line={selectedLine}
+            members={lastLineResult?.memberList ?? []}
+            history={memberLossHistory}
+            yearNumber={yearNumber}
+            value={d.renewalThreshold ?? null}
+            onChange={v => set('renewalThreshold', v)}
+            disabled={disabled}
+          />
           <NewBusinessAppetitePreview line={selectedLine} />
         </SectionCard>
 
@@ -517,13 +531,13 @@ function InactivePreview({ title, children }: { title: React.ReactNode; children
 // distinction from a live Reinsurance box is carried entirely by the
 // InactivePreview wrapper around these (dashed border, grayscale filter,
 // opacity, pointer-events-none, INACTIVE badge) — not by a different color.
-function PreviewBox({ title, description, selected }: { title: string; description: string; selected: boolean }) {
+function PreviewBox({ title, description, selected, active = false }: { title: string; description: string; selected: boolean; active?: boolean }) {
   return (
     <button
       type="button"
-      disabled
-      tabIndex={-1}
-      className={`w-full h-full flex flex-col items-center p-2 rounded-lg border text-center transition-all text-xs cursor-not-allowed ${selected ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white text-gray-600 border-gray-200'}`}
+      disabled={!active}
+      tabIndex={active ? 0 : -1}
+      className={`w-full h-full flex flex-col items-center p-2 rounded-lg border text-center transition-all text-xs ${active ? 'cursor-pointer hover:border-blue-400' : 'cursor-not-allowed'} ${selected ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white text-gray-600 border-gray-200'}`}
     >
       <span className="font-bold">{title}</span>
       <span className="text-xs opacity-75 mt-0.5 leading-tight">{description}</span>
@@ -531,27 +545,6 @@ function PreviewBox({ title, description, selected }: { title: string; descripti
   );
 }
 
-// RENEWAL UNDERWRITING (Part 3, top control) — inactive preview. Would screen
-// on the EXPERIENCE MODIFIER, never a loss ratio: a prospect has no premium
-// with the pool, so a loss ratio is undefined for it, while actual-over-
-// expected is defined identically for members and prospects. Local,
-// unpersisted state only — this control is not wired to LineDecisionSet or to
-// anything else.
-//
-// ⚠ THE BASIS DESCRIPTION HERE WAS WRONG AND IS CORRECTED. It said the
-// modifier divides by "expected loss at the member's own class, exposure and
-// risk quality". It does not, and the "risk quality" half was the whole
-// problem: dividing by an expectation that already contains the member's own
-// risk quality removes the very thing the modifier exists to discover.
-// The shipped basis is the PRIMARY layer over an expectation at NEUTRAL risk
-// quality — see memberExperienceMod.ts. Measured, the two bases rank true
-// risk quality at 0.332 and 0.176 respectively.
-//
-// Deliberately no threshold default: the sensible non-renew level depends on
-// the modifier's distribution, which is now measured — the displayed mod is
-// centred on the median, so 1.00 is the typical member and the shipped WC
-// spread runs roughly 0.93 to 1.39. A default still is not set here, because
-// picking one is a game-design call rather than a measurement.
 // ⚠ PROPERTY HAS NOTHING TO RATE ON, AND THE CONTROLS SAY SO RATHER THAN
 // DISAPPEARING. Hiding the line would leave a player wondering whether
 // Property has admission controls at all; showing them greyed with no reason
@@ -574,35 +567,74 @@ function PropertyNoSignalNote() {
   );
 }
 
-function RenewalUnderwritingPreview({ line }: { line: CoverageLine }) {
-  // Starts unselected — an inactive control has no active choice to show.
-  const [mode, setMode] = React.useState<'renewAll' | 'nonRenewThreshold' | null>(null);
+// ============================================================================
+// RENEWAL UNDERWRITING — ACTIVE. The pool declines to renew members whose
+// displayed experience modifier is above the level chosen here.
+//
+// ⚠ THE COUNTS ARE LIVE AND THE LABELS CARRY NO PERCENTAGE, DELIBERATELY.
+// The share of a book above a given modifier moves as the roster changes, so
+// a static "declines about 5%" would be wrong the first time membership
+// shifted and would keep being wrong silently. The count is recomputed from
+// the current book every render, by the SAME function the engine applies —
+// so the number shown is the number that happens, not an estimate of it.
+//
+// ⚠ AND THE COUNT IS ONE YEAR'S, WHILE THE EFFECT COMPOUNDS. A declined
+// member enters the two-year cooldown and cannot be recruited back, so a
+// level held for several years shrinks the book by much more than its annual
+// count suggests. Measured over 12 years at the 1.10 level, WC settles around
+// 35 enrolled against 57 with renewal off. The note below says so, because
+// the control cannot show it.
+// ============================================================================
+function RenewalUnderwriting({
+  line, members, history, yearNumber, value, onChange, disabled,
+}: {
+  line: CoverageLine;
+  members: Member[];
+  history: MemberLossHistory;
+  yearNumber: number;
+  value: number | null;
+  onChange: (v: number | null) => void;
+  disabled?: boolean;
+}) {
+  const counts = React.useMemo(
+    () => RENEWAL_THRESHOLDS.map(t => renewalDeclines(members, line, history, yearNumber, t).length),
+    [members, line, history, yearNumber],
+  );
+  const rated = line !== 'Property';
+
   return (
-    <InactivePreview title="Renewal Underwriting">
-      {/* min-h matches New Business Appetite's row below (measured 66px) —
-          Renewal's two boxes are wider so their descriptions wrap less and
-          would otherwise sit shorter than that row on their own content. */}
-      <div className="grid grid-cols-2 gap-1 min-h-[66px]">
-        <div onClick={() => setMode('renewAll')}>
-          <PreviewBox title="Renew All" description="Renew all existing members" selected={mode === 'renewAll'} />
-        </div>
-        <div onClick={() => setMode('nonRenewThreshold')}>
-          <PreviewBox title="Non-renew above" description="Decline members above a threshold experience modifier" selected={mode === 'nonRenewThreshold'} />
-        </div>
-      </div>
-      {mode === 'nonRenewThreshold' && (
-        <div className="flex items-center gap-2 pt-1">
-          <span className="text-[11px] text-gray-500">Threshold (experience modifier):</span>
-          <input
-            type="text"
-            disabled
-            placeholder="not yet calibrated"
-            className="flex-1 text-[11px] px-2 py-1 rounded border border-gray-200 bg-white text-gray-400 placeholder:text-gray-400 cursor-not-allowed"
-          />
-        </div>
+    <div className="rounded-lg border border-gray-200 bg-white p-3 space-y-2">
+      <span className="text-sm font-semibold text-gray-700">Renewal Underwriting</span>
+      {rated ? (
+        <>
+          <div className="grid grid-cols-4 gap-1">
+            <div onClick={() => !disabled && onChange(null)}>
+              <PreviewBox title="Renew All" description="Renew every member" selected={value === null} active={!disabled} />
+            </div>
+            {RENEWAL_THRESHOLDS.map((t, i) => (
+              <div key={t} onClick={() => !disabled && onChange(t)}>
+                <PreviewBox
+                  title={`Above ${t.toFixed(2)}`}
+                  description={`${counts[i]} member${counts[i] === 1 ? '' : 's'} this year`}
+                  selected={value === t}
+                  active={!disabled}
+                />
+              </div>
+            ))}
+          </div>
+          <p className="flex items-start gap-1 text-[11px] text-gray-500 leading-relaxed">
+            <Info size={12} className="mt-0.5 flex-shrink-0" />
+            <span>
+              Declines members charged more than this against the typical member (1.00). A declined member
+              cannot rejoin for two years, so holding a level shrinks the book by more than its yearly
+              count.
+            </span>
+          </p>
+        </>
+      ) : (
+        <PropertyNoSignalNote />
       )}
-      {line === 'Property' && <PropertyNoSignalNote />}
-    </InactivePreview>
+    </div>
   );
 }
 

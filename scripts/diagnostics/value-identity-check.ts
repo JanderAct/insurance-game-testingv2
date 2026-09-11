@@ -443,7 +443,32 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // basis. The mechanism's own correctness is held by cohort-ledger-check (three
 // identities, both arms), martingale-equivalence-check (term by term) and
 // terminal-severity-check (phi on its anchor), all green at this commit.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v36.json');
+// v37: THE DEPARTURE REBUILD. Who LEAVES the pool changed basis entirely —
+// from `satisfaction + 0.3 x riskQuality` ascending to a price-shock x
+// marketability model with fresh annual noise, sorted descending. Different
+// members leave, so a different book is enrolled every year from year 1, and
+// everything downstream of the roster moves with it: 22,174 values across 79
+// fields, 0 added, 0 removed.
+//
+// ⚠ THERE IS NO NULL ARM THAT REPRODUCES v36, AND THAT IS A PROPERTY OF THE
+// CHANGE RATHER THAN A GAP IN THE TESTING. Setting DEPARTURE.priceWeight to 0
+// removes the economic term but leaves the fresh annual noise, which is
+// itself a stream change against a draw frozen at enrolment. The old key
+// cannot be recovered by any constant because the model it belonged to is
+// gone. So this capture is justified by CONFINEMENT rather than by a null.
+//
+// CONFINEMENT, CHECKED: every one of the 79 changed fields is downstream of
+// the enrolled roster — exposure, premium, losses, reserves, capital, the
+// ratios, and the membership counts themselves. Nothing that should be
+// roster-INDEPENDENT moved: no held pure premium, no class rate, no CLF
+// table, no reinsurance term. And 0 values are NaN or Infinity, which is the
+// check that catches a roster change that quietly divided by an empty book.
+//
+// ⚠ READ WITH solo-export-guard v37, WHICH MOVED FOR THE SAME REASON. Neither
+// capture is sufficient alone here: the hash guard cannot tell "different
+// members enrolled" from "the arithmetic broke", and this one says the
+// changed set is exactly the set a roster change explains.
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v37.json');
 
 function seedOf(id: string) {
   let h = 5381;
