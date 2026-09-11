@@ -66,8 +66,10 @@ import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { processYear } from '../../src/utils/simulationEngine';
 import {
-  CREDIBILITY_Z, EXPERIENCE_MOD, memberExperienceMods, modBounds,
+  CREDIBILITY_Z, EXPERIENCE_MOD, memberExperienceMods, modBounds, primaryShare,
 } from '../../src/utils/memberExperienceMod';
+import { ratingGroupOf } from '../../src/utils/wcClaimEngine';
+import { EXPERIENCE_SPLIT_POINT } from '../../src/utils/memberLossHistory';
 import type {
   CoverageLine, GameState, Member, MemberLossHistory, MemberPremiumShare,
 } from '../../src/types/simulation';
@@ -140,6 +142,7 @@ console.log(RULE);
 console.log('THE MEMBER EXPERIENCE MODIFIER');
 console.log(RULE);
 console.log(`${GAMES} games x ${YEARS} years. window ${EXPERIENCE_MOD.windowYears}yr, `
+  + `primary split $${(EXPERIENCE_SPLIT_POINT / 1000).toFixed(0)}k, `
   + `ratio clamped to [${EXPERIENCE_MOD.ratioFloor}, ${EXPERIENCE_MOD.ratioCeiling}], `
   + `Z ` + LINES.map(l => `${l} ${CREDIBILITY_Z[l]}`).join(' / '));
 
@@ -342,6 +345,148 @@ console.log('\n--- 4/5. BOUNDS, AND UNRATED MEMBERS SIT AT EXACTLY 1 ---');
   if (unratedOff1 > 0) {
     failures.push(`${unratedOff1} members with too little history carry a mod other than exactly 1. An unrated `
       + 'member is one the design declines to have an opinion about, and a mod of 0.9997 is an opinion.');
+  }
+}
+
+// ------------------------------- 6. the split is exhaustive and matched
+//
+// ⚠ TWO DIFFERENT CLAIMS, AND THE SECOND IS THE LOAD-BEARING ONE.
+//
+// EXHAUSTIVE: primaryActual <= actual, always, and the excess is the
+// remainder. Nothing is discarded by the split — that is the whole answer to
+// "capping throws away the large claim", and it is asserted rather than
+// asserted-in-prose.
+//
+// MATCHED: the DRAWN primary share and the ANALYTIC primary share must agree
+// per rating group. The generators limit each drawn claim at
+// EXPERIENCE_SPLIT_POINT; the modifier divides by an expectation limited at
+// the same point through `severityLimit`. That is invariant 1 — one basis for
+// losses and pricing — applied to a new quantity, and if the two ever read
+// different split points the modifier would divide a limited numerator by an
+// unlimited denominator and hand every member a large credit. Nothing else in
+// the codebase would notice.
+//
+// ⚠ NEAR-NEUTRAL MEMBERS ONLY, AND THAT IS WHAT MAKES IT A BASIS CHECK. The
+// analytic share is at NEUTRAL risk quality; the DRAW carries the
+// risk-quality severity tilt, which is draw-only by invariant 2. So a member
+// away from neutral has a drawn primary share that legitimately differs —
+// measured over the whole book the gap reaches 3.3pp on highSafety, whose
+// tilt is the largest in the model, and that gap IS the signal the modifier
+// exists to read. Comparing the full book would therefore gate the tilt
+// rather than the split point. Restricted to |RQ - 5| <= 0.5 the tilt is
+// close to the identity and what is left is the basis.
+//
+// ⚠ PROPERTY IS EXCLUDED, NOT MERELY UNINTERESTING. primaryShare returns 0
+// for Property by design (it is never rated), so an analytic share of 0.00%
+// against a drawn 4.10% would sit inside any bound wide enough for the other
+// lines and assert nothing. A meaningless comparison inside a passing bound
+// is worse than no comparison.
+console.log('\n--- 6. THE SPLIT IS EXHAUSTIVE, AND THE DRAW MATCHES THE ANALYTIC ---');
+{
+  let rows = 0, overActual = 0, negative = 0;
+  const drawn: Record<string, [number, number]> = {};   // line|group -> [primary, total]
+  const analytic: Record<string, [number, number]> = {};
+  const nEntries: Record<string, number> = {};
+  for (const game of base) {
+    for (const [key, s] of game) {
+      const line = key.split('|')[0] as CoverageLine;
+      const byId = new Map(s.members.map(m => [m.id, m]));
+      for (const [mid, byLine] of Object.entries(s.historyAfter)) {
+        const years = byLine[line]; if (!years) continue;
+        const m = byId.get(mid); if (!m) continue;
+        for (const e of years) {
+          rows++;
+          if (e.primaryActual > e.actual + 1e-6) overActual++;
+          if (e.primaryActual < -1e-9) negative++;
+        }
+        // the matched pair: rated lines only, near-neutral members only
+        if (line === 'Property') continue;
+        if (Math.abs(m.riskQuality - 5) > 0.5) continue;
+        const grp = `${line}|${line === 'WC' ? ratingGroupOf(m) : '-'}`;
+        for (const e of years) {
+          const d = (drawn[grp] ??= [0, 0]);
+          d[0] += e.primaryActual; d[1] += e.actual;
+          const a = (analytic[grp] ??= [0, 0]);
+          a[0] += e.expectedAtManual * primaryShare(m, line, e.yearNumber);
+          a[1] += e.expectedAtManual;
+          nEntries[grp] = (nEntries[grp] ?? 0) + 1;
+        }
+      }
+    }
+  }
+  console.log(`  ${rows} ledger entries, ${overActual} with primaryActual > actual, ${negative} negative   `
+    + `${overActual === 0 && negative === 0 ? 'PASS' : 'FAIL'}`);
+  if (overActual > 0 || negative > 0) {
+    failures.push(`${overActual} ledger entries have primaryActual above actual and ${negative} are negative. `
+      + 'The primary layer is a per-claim minimum, so it is bounded by the loss it came from — and the excess '
+      + 'is computed as the difference, so a violation makes the unrated layer negative.');
+  }
+
+  console.log('  primary share, DRAWN vs ANALYTIC, rated lines, |RQ - 5| <= 0.5:');
+  let worstGap = 0;
+  for (const grp of Object.keys(drawn).sort()) {
+    const d = drawn[grp], a = analytic[grp];
+    if (!a || !(d[1] > 0) || !(a[1] > 0)) continue;
+    const ds = d[0] / d[1], as = a[0] / a[1];
+    const gap = Math.abs(ds - as);
+    worstGap = Math.max(worstGap, gap);
+    console.log(`    ${grp.padEnd(20)} n ${String(nEntries[grp] ?? 0).padStart(5)}   drawn ${(ds * 100).toFixed(2)}%   analytic ${(as * 100).toFixed(2)}%   gap ${(gap * 100).toFixed(2)}pp   (reported, not gated)`);
+  }
+  // GATED ON THE POOLED GAP ONLY — see the note below the table for why.
+  const POOLED_BOUND = 0.01;
+  let pd = 0, pt = 0, pa = 0, pe = 0;
+  for (const grp of Object.keys(drawn)) {
+    pd += drawn[grp][0]; pt += drawn[grp][1];
+    pa += analytic[grp][0]; pe += analytic[grp][1];
+  }
+  const pooledGap = Math.abs(pd / pt - pa / pe);
+  console.log(`  POOLED over rated lines: drawn ${(pd / pt * 100).toFixed(2)}%   analytic ${(pa / pe * 100).toFixed(2)}%   `
+    + `gap ${(pooledGap * 100).toFixed(2)}pp against ${(POOLED_BOUND * 100).toFixed(0)}pp   ${pooledGap <= POOLED_BOUND ? 'PASS' : 'FAIL'}`);
+  if (pooledGap > POOLED_BOUND) {
+    failures.push(`the pooled drawn and analytic primary shares differ by ${(pooledGap * 100).toFixed(2)}pp, over `
+      + `the ${(POOLED_BOUND * 100).toFixed(0)}pp bound. The generators limit each claim at `
+      + 'EXPERIENCE_SPLIT_POINT and the modifier divides by an expectation limited through severityLimit at the '
+      + 'same point — invariant 1 for a new quantity. A mismatch means a limited numerator over an unlimited '
+      + 'denominator, which credits every member and looks like a working modifier.');
+  }
+  // ⚠ PER-GROUP IS REPORTED AND NOT GATED, AND THE REASON IS THE DENOMINATOR.
+  // The primary NUMERATOR is bounded by the split point and behaves; the
+  // denominator is the member's whole loss, which is heavy-tailed. So the
+  // SHARE inherits the tail, and the smallest classes cannot resolve it —
+  // highSafety has 24 members in the entire roster and carries the model's
+  // heaviest component weight, so its share swings several points on whether
+  // one large claim happened to land. Measured above at 5.9pp against GL's
+  // 0.02pp over 4,615 entries.
+  //
+  // Gating the worst group would therefore gate the smallest one, which is
+  // WORKING_PRACTICES' heavy-tail rule exactly: a realized mean of a
+  // heavy-tailed quantity is not a gateable statistic. The POOLED share has
+  // the sample and is gated at 1pp; the per-group rows are a diagnostic for a
+  // reader, not an assertion. A real split-point mismatch does not hide here
+  // — it would move the pooled figure by tens of points, not fractions.
+  //
+  // ⚠ AND DO NOT "FIX" THIS BY WIDENING A PER-GROUP BOUND UNTIL highSafety
+  // PASSES. That is tuning the threshold to the sample, which this project
+  // has a named rule against. If a per-group assertion is wanted, it needs a
+  // statistic whose denominator is not the raw loss — claim COUNTS below the
+  // split would do it — and that is a measurement commit, not a bound change.
+  void worstGap;
+
+  // Property is unrated BY MEASUREMENT (primary-layer reliability 0.000), so
+  // its mod must be identically 1 — not approximately, and not merely small.
+  let prRows = 0, prOff = 0;
+  for (const game of base) {
+    for (const [key, s] of game) {
+      if (!key.startsWith('Property|')) continue;
+      for (const r of s.shares) { prRows++; if (r.experienceMod !== 1) prOff++; }
+    }
+  }
+  console.log(`  Property rows ${prRows}, with a mod other than exactly 1: ${prOff}  (must be 0)   `
+    + `${prOff === 0 ? 'PASS' : 'FAIL'}`);
+  if (prOff > 0) {
+    failures.push(`${prOff} Property members carry a mod other than 1. Property's measured primary-layer `
+      + 'reliability is 0.000 at every split point tried — 1.9 claims per three-year window is not a sample — '
+      + 'so CREDIBILITY_Z.Property is 0 and every Property mod must be exactly 1.');
   }
 }
 

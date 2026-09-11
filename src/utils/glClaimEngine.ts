@@ -38,6 +38,7 @@ import { deriveSubRng } from './random';
 import { WHOLE_LINE } from './shockEffects';
 import { GL_HEAVY_COMPONENT_INDEX, GL_LOSS_MODEL, GL_SEVERITY_CAP, GL_SEVERITY_COMPONENTS, type GlSeverityComponent } from '../data/defaultAssumptions';
 import { limitedExpectedValue, memoizeByYear } from './claimMath';
+import { EXPERIENCE_SPLIT_POINT } from './memberLossHistory';
 
 const M = GL_LOSS_MODEL;
 const LINE: CoverageLine = 'GL';
@@ -652,6 +653,10 @@ export function generateGlClaims(inputs: GlGenerationInputs): GlGenerationResult
     }
 
     const simulatedLoss = claims.slice(before).reduce((s, c) => s + c.grossUltimate, 0);
+    // PER CLAIM — see the note on MemberLossResult.primaryActual for why the
+    // limit goes on each claim and not on the year's total.
+    const primaryLoss = claims.slice(before)
+      .reduce((s, c) => s + Math.min(c.grossUltimate, EXPERIENCE_SPLIT_POINT), 0);
     memberLossResults.push({
       memberId: member.id,
       memberName: member.name,
@@ -664,6 +669,7 @@ export function generateGlClaims(inputs: GlGenerationInputs): GlGenerationResult
       expectedLossAtManual: expectedGlGrossLossForPricing(
         [member], { yearNumber, kGl, riskQualityOverride: NEUTRAL_RQ },
       ),
+      primaryLoss,
       // Dispersion is emergent (frequency x severity mixture), not a
       // per-member CV — same convention as the WC generator.
       coefficientOfVariation: 0,

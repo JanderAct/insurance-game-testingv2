@@ -12,9 +12,9 @@
 // A RUNNING SUM, NOT A CLAIM ARCHIVE. Claims themselves are still not
 // persisted — ~800 claims/yr across 200 members would blow the localStorage
 // quota, which is why LineResultSet.claims is in-memory only. What is stored
-// here is THREE numbers per member per line per year: actual, expectedAtOwnRq,
-// expectedAtManual. The ceiling is 200 members x 3 lines x 5 retained years =
-// 3,000 entries, 9,000 numbers; measured at year 10 it is 2,408 entries,
+// here is FOUR numbers per member per line per year: actual, expectedAtOwnRq,
+// expectedAtManual, primaryActual. The ceiling is 200 members x 3 lines x 5
+// retained years = 3,000 entries; measured at year 10 it is 2,408 entries,
 // because Property is enrolled-only and so carries ~57 members rather than
 // 200 (see member-loss-history-check's header for why that is expected).
 //
@@ -36,27 +36,39 @@
 // MEASURED BY MATERIALISING THE FIELDS ON REAL YEAR-10 LEDGERS AND
 // RE-SERIALISING, worst of 3 games — not projected from a per-entry rate:
 //
-//   3 numbers, as shipped        3,751,379   93.8%
-//   4 numbers, + capped actual   3,824,178   95.6%   (+72,799)
-//   5 numbers, + capped expected 3,928,646   98.2%  (+104,468)
+//   3 numbers                    3,751,379   93.8%
+//   4 numbers, + primaryActual    3,828,928   95.7%   (+77,549, SHIPPED)
+//   5 numbers, a hypothetical     3,928,646   98.2%  (+104,468)
 //
 // ⚠ AN EARLIER VERSION OF THIS NOTE SAID A FIFTH NUMBER WOULD NOT FIT. It
 // does, with 71,354 chars to spare — and it costs HALF AGAIN what the fourth
-// costs, because `cappedExpectedAtManual` is a longer key than `cappedActual`
-// and the key is most of the cost at this precision. Both halves of that were
-// wrong by projection and right by measurement, which is the entry in
-// WORKING_PRACTICES about figures in comments, again.
+// costs, because a longer key name is most of the cost at this precision.
+// Both halves of that were wrong by projection and right by measurement.
+//
+// ⚠ AND THE FOURTH NUMBER NEARLY COST TWICE ITS PRICE, WHICH IS THE TRAP
+// WORTH REMEMBERING. `primaryActual` was first added to BOTH MemberLossResult
+// and MemberLossYear, and the result-row copy is saved too — the pair
+// measured 213,555 chars, 5.3 points, taking the save to 99% rather than 96%.
+// The result-row copy is a pure duplicate: processYear reads it once into the
+// ledger and nothing reads it again. It is named `primaryLoss` there and
+// stripped (gameSave.ts explains why one key name could not do both jobs).
+// A new per-member field costs its ledger price AND its result-row price
+// unless one of them is stripped, and only the second is avoidable.
 //
 // FIVE IS THE END OF IT THOUGH. At 98.2% the margin is under two points, and
 // the sixth number is not a question worth asking — compression, or a
-// narrower retained window, comes first.
+// narrower retained window, comes first. THE EXPECTED PRIMARY WOULD HAVE BEEN
+// THAT FIFTH NUMBER and is not stored: E[min(X,D)]/E[X] cancels k, exposure
+// and lambda, so it is recomputed per rating group per year in
+// memberExperienceMod.ts instead.
 //
 // ---------------------------------------------------------------------------
 // WHAT THIS LEDGER ACTUALLY READS AS A MODIFIER. Measured 8 games x 16 years
-// on the shipped basis (actual / expectedAtManual), accumulated uncapped and
-// cross-checked against this ledger over 158,605 windows with 0 mismatches.
-// Recorded here because the next change to this file is the capped-actual
-// field, and these are the numbers that decide its shape.
+// on the WHOLE-LOSS basis (actual / expectedAtManual), accumulated uncapped
+// and cross-checked against this ledger over 158,605 windows with 0
+// mismatches. This is the basis the modifier NO LONGER USES — it is kept
+// because it is what motivated the primary/excess split, and because the
+// ranking-power table is still the reference for what the ledger can see.
 //
 //   RANKING POWER against true risk quality (Spearman, sign-flipped):
 //                        1yr    3yr    5yr    8yr
@@ -77,28 +89,26 @@
 //   a large credit (-15% at Z=0.25 on WC, -20% on GL) and recover it from a
 //   few members with enormous debits.
 //
-//   ⚠ SO CAPPING ACTUAL ALONE IS WRONG, AND THIS IS THE TRAP FOR THE NEXT
-//   COMMIT. Capping the member-year actual at 2x expected moves ranking power
-//   only 0.224 -> 0.247 on WC and 0.181 -> 0.195 on GL, but it drops the mean
-//   ratio from 1.03 to 0.50. A capped numerator over an uncapped denominator
-//   gives EVERY member a ~50% credit. The capped ratio needs a capped
-//   EXPECTATION under it.
+//   ⚠ THIS MOTIVATED AN AGGREGATE CAP, WHICH WAS MEASURED AND THEN NOT BUILT.
+//   Capping the member-YEAR actual at 2x expected moves ranking power only
+//   0.224 -> 0.247 on WC and 0.181 -> 0.195 on GL, drops the mean ratio from
+//   1.03 to 0.50 (so it needs a capped expectation under it, a fifth number),
+//   and grades hard by SIZE: capped/uncapped by WC exposure decile runs 0.222
+//   to 0.771, a 3.5x spread, because a small member holds more of its loss
+//   above any multiple of its own expectation.
 //
-//   ⚠ AND ONE LINE-LEVEL REBASE FACTOR WILL NOT DO, BECAUSE THE CAPPING RATIO
-//   IS SIZE-GRADED. Capped/uncapped actual by WC exposure decile, small to
-//   large: 0.222 0.353 0.429 0.409 0.430 0.498 0.622 0.569 0.642 0.771 — a
-//   3.5x spread. By rating group it is much flatter (schools 0.643, county
-//   0.674, lowSafety 0.575, highSafety 0.698), so the gradient is SIZE, not
-//   class: a small member holds more of its loss above any multiple of its
-//   own expectation because it has fewer claims. Rebasing on a single factor
-//   would pay small members and charge large ones for being large, which is
-//   the opposite of experience rating.
+//   ⚠ WHAT SHIPPED INSTEAD IS A PER-CLAIM SPLIT, AND THE SIZE GRADING ABOVE
+//   IS THE REASON. min(claim, D) summed is size-NEUTRAL: E[min(X,D)]/E[X] is
+//   a property of the severity distribution, not of how many claims a member
+//   brings, so the decile gradient disappears. It also needs only ONE new
+//   stored number rather than two, because the expected primary cancels k,
+//   exposure and lambda and is recomputed rather than stored.
 //
-//   SO THE CAP IS TWO FIELDS, NOT ONE, and the storage note above is costed
-//   for both: capped actual AND a capped expectation on the same basis, 98.2%
-//   of budget together. Ship them in one commit — a capped numerator over an
-//   uncapped denominator is not a partial feature, it is a 50% across-the-
-//   board credit, and it would look like a working modifier while it did it.
+//   Do not read the aggregate-cap figures above as an argument against the
+//   shipped split — they are an argument against the design that was NOT
+//   taken, and the difference between capping a year's total and limiting
+//   each claim is the whole of it. memberExperienceMod.ts carries the
+//   split-point sweep and the credibility that came out of it.
 // ---------------------------------------------------------------------------
 //
 // ACCUMULATED AS IT HAPPENS, NEVER REGENERATED ON DEMAND. Recomputing a past
@@ -139,6 +149,35 @@ export const LOSS_HISTORY_CAP_YEARS = 5;
 // How many years the experience modifier actually reads. Stage 4 consumes this;
 // nothing here enforces it beyond providing the windowed read below.
 export const EXPERIENCE_WINDOW_YEARS = 3;
+
+// ---------------------------------------------------------------------------
+// THE PRIMARY/EXCESS SPLIT POINT, PER CLAIM. Lives here beside the window
+// because it is the other half of the same rating basis, and because the
+// claim engines record `primaryActual` against it — a change to this number
+// changes what every future ledger row MEANS, exactly like a change to the
+// window would.
+//
+// ⚠ IT IS NOT COMPARABLE TO A CLAIM CAP AND DOES NOT DISCARD ANYTHING. The
+// excess layer is still recorded (actual - primaryActual) and is still the
+// member's loss; it is simply not rated, because it measured as carrying no
+// repeatable signal. See memberExperienceMod.ts.
+//
+// MEASURED, not chosen. Split-half reliability of the three-year primary
+// ratio on WC against the split point, with the class bias removed:
+//
+//   split      $10k    $25k    $50k   $100k   $1M    none
+//   WC  Zp    0.193   0.155   0.131   0.091  0.036  0.052
+//   WC  rank  0.339   0.332   0.311     --     --   0.176
+//   GL  Zp    0.045   0.076   0.102     --     --  -0.028
+//
+// There is NO KNEE — WC's credibility rises monotonically as the split falls,
+// all the way to $5k, because a lower split is closer to rating on claim
+// COUNTS. $25k is picked for three reasons and none of them is optimality:
+// it is within 2% of WC's best ranking power, it is better than $10k for GL
+// (whose Zp moves the other way), and at 15.6% of WC dollars it still rates a
+// layer a member can recognise as losses rather than as a claim count.
+// ---------------------------------------------------------------------------
+export const EXPERIENCE_SPLIT_POINT = 25_000;
 
 // Deep-clone so a processing pass can mutate its working copy without aliasing
 // the prior year's persisted state — same contract as cloneMembershipHistory.

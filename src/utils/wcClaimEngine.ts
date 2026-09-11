@@ -76,6 +76,7 @@ import type {
 } from '../types/simulation';
 import { deriveSubRng } from './random';
 import { limitedExpectedValue, memoizeByYear } from './claimMath';
+import { EXPERIENCE_SPLIT_POINT } from './memberLossHistory';
 import {
   WC_LOSS_MODEL,
   WC_RATING_GROUPS,
@@ -324,6 +325,20 @@ export interface ExpectedWcLossOptions {
   // cost — never for pricing. The difference between this expectation with and
   // without them IS the analytic expected addition.
   componentFreqMultipliers?: Record<string, number>;
+  // Limit each CLAIM to this amount before taking the expectation, i.e.
+  // E[min(X, limit)] per claim instead of E[min(X, cap)]. Composes with the
+  // year's severity cap by min(), exactly as glClaimEngine's option of the
+  // same name does — a caller passing $25k gets $25k in every year, a caller
+  // passing nothing gets that year's ceiling.
+  //
+  // ⚠ THIS IS WHAT MAKES AN EXPECTED PRIMARY LOSS AVAILABLE, and it has to
+  // live here rather than as a post-hoc fraction because the primary SHARE
+  // differs sharply by rating group: measured at a $25k split, schools run
+  // 33.3% of their losses in the primary layer against county 17.4%,
+  // lowSafety 16.4% and highSafety 16.2%. A pooled share applied to every
+  // member charges schools for their class mix and calls it experience — see
+  // memberExperienceMod.ts, where that was measured and rejected.
+  severityLimit?: number;
 }
 
 // WHICH RISK-QUALITY CHANNELS THE EXPECTATION SEES.
@@ -366,7 +381,9 @@ function expectedWcGrossLossCore(
         componentLambda *= shockFactorFor(options.componentFreqMultipliers, g.mix[i].component);
       }
       const yr = options.yearNumber ?? 1;
-      total += componentLambda * componentMean(g.mix[i].component, yr, wcSeverityCap(yr));
+      // The two ceilings COMPOSE by min(): min(min(X, cap_t), limit).
+      const limit = Math.min(options.severityLimit ?? Number.POSITIVE_INFINITY, wcSeverityCap(yr));
+      total += componentLambda * componentMean(g.mix[i].component, yr, limit);
     }
   }
   return total;
@@ -677,6 +694,11 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
     }
 
     const reportedThisYear = claims.slice(before).reduce((s, c) => s + c.grossUltimate, 0);
+    // PER CLAIM, over the claims this member just generated. Reading them off
+    // `claims.slice(before)` rather than re-deriving is the same
+    // record-what-happened discipline the expected legs follow.
+    const primaryLoss = claims.slice(before)
+      .reduce((s, c) => s + Math.min(c.grossUltimate, EXPERIENCE_SPLIT_POINT), 0);
     memberLossResults.push({
       memberId: member.id,
       memberName: member.name,
@@ -687,6 +709,7 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
       expectedLossAtManual: expectedWcGrossLossForPricing(
         [member], { kLine, yearNumber, riskQualityOverride: NEUTRAL_RQ },
       ),
+      primaryLoss,
       // Not modelled per member: dispersion is an emergent property of frequency
       // x mixture, not a single per-member CV.
       coefficientOfVariation: 0,

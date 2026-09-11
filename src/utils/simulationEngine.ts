@@ -1333,6 +1333,14 @@ export function processLineYear(
         // revived, the leg above must gain a real risk-quality term first and
         // this line must stop being an alias.
         expectedLossAtManual: memberExpectedLoss,
+        // ⚠ NOT A SPLIT, BECAUSE THIS PATH HAS NO CLAIMS TO SPLIT. The
+        // aggregate path draws one Gamma per member and never emits a claim,
+        // so there is nothing to limit per claim and no honest primary layer
+        // to report. 0 rather than the whole loss: a member here is UNRATED
+        // on experience, and reporting the full loss as primary would let a
+        // reader treat this path's members as rated when they cannot be. The
+        // branch is dead for all three lines (see the note below).
+        primaryLoss: 0,
         coefficientOfVariation,
         standardDeviation,
         simulatedLoss: independentLoss * commonLossFactor * catastropheFactor,
@@ -2414,6 +2422,7 @@ export function processYear(
         actual: mlr.simulatedLoss,
         expectedAtOwnRq: mlr.expectedLoss,
         expectedAtManual: mlr.expectedLossAtManual,
+        primaryActual: mlr.primaryLoss,
       });
     }
 

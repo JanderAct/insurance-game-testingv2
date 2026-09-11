@@ -105,6 +105,17 @@ export const SAVE_KEY = 'riskpool_gamestate_v10';
  * produce is the worst kind: a member's BILL, restored from a stale row after
  * the class rates moved.
  *
+ * ⚠ `primaryLoss` IS HERE ON SIZE, WHICH MAKES IT THE ODD ONE OUT. It is the
+ * per-claim primary layer on each MemberLossResult, and it is a pure
+ * duplicate: processYear copies it straight into memberLossHistory, which IS
+ * saved, and nothing reads the result-row copy afterwards. Keeping both cost
+ * a measured 213,555 chars across the two — 5.3 points of budget, taking the
+ * save from 94% to 99% — against 72,799 for the ledger copy alone. At 99%
+ * there is no headroom left for anything, so the duplicate goes and the
+ * durable copy stays. THIS IS WHY THE TWO FIELDS HAVE DIFFERENT NAMES: the
+ * stripper matches by key name at any depth, so one name could not have kept
+ * the ledger entry and dropped the result row.
+ *
  * ⚠ THE EXPERIENCE MODIFIER ADDED A FOURTH INPUT AND IT IS NOT FULLY
  * RECOVERABLE, SO THE PARAGRAPH ABOVE IS NARROWER THAN IT READS. A share row
  * now carries `experienceMod`, which is a function of memberLossHistory AS IT
@@ -130,7 +141,7 @@ export const SAVE_KEY = 'riskpool_gamestate_v10';
  */
 export const SAVE_STRIPPED_KEYS: readonly string[] = [
   'claims', 'occurrences', 'marketMemberLossResults', 'pricingTriangle',
-  'memberPremiumShares',
+  'memberPremiumShares', 'primaryLoss',
 ];
 
 /** Measured against a real Chromium — see the header. Not a spec figure. */

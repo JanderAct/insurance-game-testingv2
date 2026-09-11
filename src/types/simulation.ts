@@ -115,6 +115,34 @@ export interface MemberLossResult {
    * why the gate asserts the gap; see its header.
    */
   expectedLossAtManual: number;
+  /**
+   * The member's loss with every CLAIM limited to EXPERIENCE_SPLIT_POINT —
+   * sum of min(claim, D). The excess is `simulatedLoss - primaryLoss`.
+   *
+   * ⚠ NAMED `primaryLoss` HERE AND `primaryActual` ON MemberLossYear, FOR THE
+   * SAME REASON `expectedLoss` BECOMES `expectedAtOwnRq` ACROSS THAT BOUNDARY:
+   * a result row and a ledger entry are different grains and the convention in
+   * this file already distinguishes them. The practical consequence is that
+   * `primaryLoss` can be — and is — stripped from saves while the ledger's copy
+   * survives. One key name could not have done both, and the result row is the
+   * transient half: it is the generator's report of the split, recorded into
+   * the ledger by processYear and not needed again.
+   *
+   * ⚠ PER CLAIM, NOT ON THE YEAR'S TOTAL, and the difference is the whole
+   * point. Limiting the aggregate would grade hard by member size — measured,
+   * capped/uncapped runs 0.222 to 0.771 across WC exposure deciles — because
+   * a small member holds more of its loss above any multiple of its own
+   * expectation. Limiting each claim is size-neutral: E[min(X,D)]/E[X] is a
+   * property of the severity distribution, not of how many claims a member
+   * brings.
+   *
+   * WHY IT EXISTS: the primary layer is where the credibility is. Measured
+   * split-half reliability of the three-year ratio on WC — 0.052 on the whole
+   * loss against 0.155 on the primary layer at a $25k split. That is Mahler
+   * (1996) reproduced on this engine: dollars are less credible than counts,
+   * and limiting the dollars brings the credibility back.
+   */
+  primaryLoss: number;
   coefficientOfVariation: number;
   standardDeviation: number;
   simulatedLoss: number;
@@ -1404,6 +1432,20 @@ export interface MemberLossYear {
    *  inputs but for the risk-quality override, k_line included. This is the
    *  leg an experience modifier divides by. */
   expectedAtManual: number;
+  /**
+   * That year's actual with every CLAIM limited to EXPERIENCE_SPLIT_POINT.
+   * The excess is `actual - primaryActual` and is recorded by difference
+   * rather than stored — nothing is discarded, it is simply not rated.
+   *
+   * ⚠ THE FOURTH NUMBER, AND THE EXPECTED PRIMARY IS DELIBERATELY NOT A
+   * FIFTH. E[min(X,D)] / E[X] is a pure function of the member's rating
+   * group, the line and the year — it cancels k, exposure and lambda — so it
+   * is recomputed at read time from the same engine that priced the year
+   * rather than stored per member-year. That keeps the save at 95.6% of
+   * budget instead of 98.2%, and memberExperienceMod.ts's own gate asserts
+   * the recomputation against the engine.
+   */
+  primaryActual: number;
 }
 
 // Rolling per-member, per-line loss history, keyed memberId -> line -> years.

@@ -35,6 +35,7 @@
 import type { Claim, CoverageLine, Member, MemberLossResult, Occurrence } from '../types/simulation';
 import { deriveSubRng } from './random';
 import { PROPERTY_LOSS_MODEL } from '../data/defaultAssumptions';
+import { EXPERIENCE_SPLIT_POINT } from './memberLossHistory';
 
 const M = PROPERTY_LOSS_MODEL;
 const LINE: CoverageLine = 'Property';
@@ -323,6 +324,9 @@ export function generatePropertyClaims(inputs: PropertyGenerationInputs): Proper
 
     const tiv = member.exposureByLine.Property ?? 0;
     let memberLoss = 0;
+    // Where this member's claims start, so primaryActual below can read the
+    // claims actually drawn for them rather than re-deriving from memberLoss.
+    const beforeClaims = claims.length;
 
     if (tiv > 0) {
       // One eps per member-year, shared across that member's claims — the same
@@ -395,6 +399,12 @@ export function generatePropertyClaims(inputs: PropertyGenerationInputs): Proper
       }
     }
 
+    // PER CLAIM, over the claims this member just generated. Property is not
+    // RATED on experience (its measured primary-layer credibility is 0.000 —
+    // see memberExperienceMod.ts), but the figure is recorded anyway so the
+    // decision rests on a measurement that stays live rather than on a gap.
+    const primaryLoss = claims.slice(beforeClaims)
+      .reduce((s, c) => s + Math.min(c.grossUltimate, EXPERIENCE_SPLIT_POINT), 0);
     memberLossResults.push({
       memberId: member.id,
       memberName: member.name,
@@ -405,6 +415,7 @@ export function generatePropertyClaims(inputs: PropertyGenerationInputs): Proper
       expectedLossAtManual: expectedPropertyGrossLoss(
         [member], { kPr, riskQualityOverride: NEUTRAL_RQ },
       ),
+      primaryLoss,
       coefficientOfVariation: 0,
       standardDeviation: 0,
       simulatedLoss: memberLoss,
