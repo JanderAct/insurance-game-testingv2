@@ -81,8 +81,13 @@ const PAID_NOTE =
   'of the accident year\'s paid to date, and that year\'s register HAS developed. On a year that ' +
   'deteriorated enough to have paid more than its register sums to, the ratio can exceed 100%, which ' +
   'is not an error — it is a claim\'s share of payments on a register larger than the one it was ' +
-  'drawn into. For a real paid-to-incurred ratio use the Actuarial exhibit, where both terms come ' +
-  'from the same ledger at the same valuation.';
+  'drawn into. For a real paid-to-incurred ratio use the Claims Department listing, where Incurred ' +
+  'is allocated from the SAME cohort figure Paid is and the two are subtractable per claim, or the ' +
+  'Actuarial exhibit, where both terms come from the same ledger at the same valuation. ' +
+  'THIS WORKBOOK DELIBERATELY KEEPS Gross Incurred AS DRAWN. It is a data export, so it can carry ' +
+  'both vintages: the developed figures are in the Drawn / Booked / Current Occurrence block and a ' +
+  'reader who wants either can have it. The Claims listing shows one figure per row and shows the ' +
+  'developed one. The two documents are on different bases ON PURPOSE and each says so.';
 
 const PROPERTY_NOTE =
   'Property claims are drawn from a mixture fitted to the pool\'s own nine years of claims. Band is ' +

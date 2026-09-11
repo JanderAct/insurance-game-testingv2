@@ -14,6 +14,8 @@
 //   a Status that is not the workbook's           (a second closure draw)
 //   every row Open, or every row Closed           (a column with no content)
 //   a year's Paid not summing to the cohort's paydown  (dollars invented or lost)
+//   a year's Incurred not summing to the cohort's ultimate  (a stale vintage)
+//   a Paid above the Incurred beside it            (the two columns disagree)
 //
 // ============================================================================
 // ⚠ THE CENTRAL ASSERTION IS AGREEMENT WITH THE CLAIMS WORKBOOK, because that
@@ -144,9 +146,11 @@ for (let g = 0; g < GAMES; g++) {
   ok(nameless.length === 0, `all ${shown.length} displayed rows resolve their member`,
     `${nameless.length} row(s) do not — member ids ${nameless.map(r => r.claim.memberId).join(', ')}`);
 
-  // 3. SORTED BY INCURRED, DESCENDING.
-  const sorted = shown.every((r, i) => i === 0 || shown[i - 1].claim.grossUltimate >= r.claim.grossUltimate);
-  ok(sorted, 'the listing is ranked by gross incurred, descending', 'it is not in order');
+  // 3. SORTED BY CURRENT INCURRED, DESCENDING — the developed figure, not the
+  //    drawn one. Checking grossUltimate here is what the assertion did before
+  //    the vintage fix, and it fails now precisely because the ranking moved.
+  const sorted = shown.every((r, i) => i === 0 || shown[i - 1].incurred >= r.incurred);
+  ok(sorted, 'the listing is ranked by CURRENT incurred, descending', 'it is not in order');
 
   // 4. AGREEMENT WITH THE WORKBOOK — the assertion the design exists for.
   const wb = workbookAnswer(reloaded, asAt);
@@ -196,6 +200,45 @@ for (let g = 0; g < GAMES; g++) {
   ok(sumMismatch === 0, 'each accident year\'s allocated Paid sums to the cohort\'s gross paid',
     `${sumMismatch} cohort(s) do not, worst relative error ${(worstRel * 100).toFixed(4)}% — the `
     + 'split is dropping or manufacturing dollars');
+
+  // 5b. AND THE SAME IDENTITY ON INCURRED, against the cohort's CURRENT gross
+  //     ultimate. This is what makes the column a developed figure rather than
+  //     the drawn one it used to be: if it still summed to the drawn register,
+  //     the vintage fix never landed.
+  const incByAy = new Map<string, number>();
+  for (const r of postList.rows) {
+    if (!r.developed) continue;
+    const k = `${r.line}|${r.claim.accidentYear}`;
+    incByAy.set(k, (incByAy.get(k) ?? 0) + r.incurred);
+  }
+  let incMismatch = 0, incWorst = 0;
+  for (const line of LINES) {
+    for (const c of reloaded.poolState.lines[line]?.reserveCohorts ?? []) {
+      if (c.grossPaid === undefined || c.grossUnpaid === undefined) continue;
+      const want = c.grossPaid + c.grossUnpaid;
+      const got = incByAy.get(`${line}|${c.yearNumber}`);
+      if (got === undefined) continue;
+      const rel = want > 0 ? Math.abs(got - want) / want : 0;
+      if (rel > 1e-9) { incMismatch++; incWorst = Math.max(incWorst, rel); }
+    }
+  }
+  ok(incMismatch === 0,
+    'each accident year\'s Incurred sums to the cohort\'s CURRENT gross ultimate',
+    `${incMismatch} cohort(s) do not, worst relative error ${(incWorst * 100).toFixed(4)}% — the `
+    + 'Incurred column is not a share of the developed cohort');
+
+  // 5c. PAID <= INCURRED, ON EVERY ROW OF THE WHOLE BOOK.
+  //
+  // ⚠ THE WHOLE BOOK, NOT THE DISPLAYED 25. This holds by construction —
+  // claimPaidSplit is monotone in its total and a cohort's paid never exceeds
+  // its ultimate (see claimIncurredSplit) — so a single crossing anywhere means
+  // the construction has been broken, and it would most likely first break
+  // somewhere nobody is looking.
+  const crossed = postList.rows.filter(r =>
+    r.paid !== undefined && r.paid > r.incurred * (1 + 1e-9));
+  ok(crossed.length === 0, `no row shows Paid above Incurred (${postList.rows.length.toLocaleString()} checked)`,
+    `${crossed.length} row(s) cross — e.g. ${crossed[0]?.line} ay${crossed[0]?.claim.accidentYear} `
+    + `paid ${crossed[0]?.paid?.toFixed(0)} against incurred ${crossed[0]?.incurred.toFixed(0)}`);
 
   // 6. THE RENDERED DOCUMENT.
   const memo = buildClaimsMemo({ gameState: reloaded, asAtYear: asAt });
@@ -267,6 +310,48 @@ console.log('\n  POSITIVE CONTROLS (each MUST be caught):');
     `control D — the Status column varies within the displayed rows (${closedN} closed of ${shown.length})`,
     `every displayed row reads ${closedN === 0 ? 'Open' : 'Closed'}, so the column carries no information`);
 
+  // F: THE INCURRED IDENTITY MUST CATCH A STALE VINTAGE. The defect this commit
+  //    fixed was Incurred being claim.grossUltimate — the DRAWN value. So the
+  //    control is that exact regression: sum the drawn values per accident year
+  //    and require them NOT to equal the cohort's current ultimate. If they did,
+  //    the identity above would pass on the stale column and prove nothing.
+  {
+    const drawnByAy = new Map<string, number>();
+    const rows = claimListing({ gameState: live, asAtYear: asAt }).rows;
+    for (const r of rows) {
+      if (!r.developed) continue;
+      const k = `${r.line}|${r.claim.accidentYear}`;
+      drawnByAy.set(k, (drawnByAy.get(k) ?? 0) + r.claim.grossUltimate);
+    }
+    let wouldFail = 0, checked = 0;
+    for (const line of LINES) {
+      for (const c of live.poolState.lines[line]?.reserveCohorts ?? []) {
+        if (c.grossPaid === undefined || c.grossUnpaid === undefined) continue;
+        const want = c.grossPaid + c.grossUnpaid;
+        const got = drawnByAy.get(`${line}|${c.yearNumber}`);
+        if (got === undefined || want <= 0) continue;
+        checked++;
+        if (Math.abs(got - want) / want > 1e-9) wouldFail++;
+      }
+    }
+    ok(wouldFail > 0 && checked > 0,
+      `control F — the stale DRAWN column would fail the Incurred identity (${wouldFail} of ${checked} cohorts)`,
+      'the drawn values already sum to the current ultimate, so the identity cannot tell the two '
+      + 'vintages apart and the fix is unverified');
+  }
+
+  // G: AND Paid <= Incurred MUST BE ABLE TO FAIL. Against the OLD column — the
+  //    drawn value — the crossing is exactly what was observed before the fix.
+  {
+    const rows = claimListing({ gameState: live, asAtYear: asAt }).rows;
+    const crossedOld = rows.filter(r =>
+      r.paid !== undefined && r.paid > r.claim.grossUltimate * (1 + 1e-9));
+    ok(crossedOld.length > 0,
+      `control G — against the stale DRAWN column, ${crossedOld.length} row(s) do cross`,
+      'no row crosses even on the drawn column, so the Paid <= Incurred assertion is vacuous here '
+      + 'and this book does not exercise the defect the fix was for');
+  }
+
   // E: the description column APPEARS when a claim has one — the other half of
   // the conditional. Without this, "the column is absent" would also pass on a
   // renderer that had no column at all.
@@ -295,8 +380,8 @@ if (failures.length > 0) {
   console.log(RULE);
   process.exitCode = 1;
 } else {
-  console.log('THE LISTING IS A REGISTER: EVERY ROW NAMES ITS MEMBER, PAID AND STATUS AGREE WITH');
-  console.log('THE CLAIMS WORKBOOK CLAIM FOR CLAIM, THE STATUS COLUMN VARIES, NO MIXTURE LABEL');
-  console.log('LEAKS, AND THE DESCRIPTION COLUMN APPEARS ONLY WHEN A CLAIM CARRIES ONE.');
+  console.log('THE LISTING IS A REGISTER ON ONE VINTAGE: PAID AND INCURRED ARE BOTH SHARES OF THE');
+  console.log('SAME COHORT, EACH SUMS TO ITS OWN COHORT TOTAL, AND NO ROW SHOWS PAID ABOVE');
+  console.log('INCURRED. PAID AND STATUS AGREE WITH THE WORKBOOK CLAIM FOR CLAIM.');
   console.log(RULE);
 }

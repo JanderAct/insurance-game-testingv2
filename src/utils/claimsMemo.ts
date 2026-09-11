@@ -59,10 +59,55 @@
 // three tables would carry a redundant column to solve a problem the new sort
 // key had already removed.
 //
-// ⚠ RANKED BY GROSS INCURRED, ALL STATUSES. That is what a large-loss listing
+// ⚠ RANKED BY CURRENT INCURRED, ALL STATUSES. That is what a large-loss listing
 // is: the pool's biggest exposures, whether or not the file is still open.
 // Ranking open files only would make it a workload report — useful, and a
-// different document. 25 rows, which at year 10 puts the floor around $4-5M.
+// different document. 25 rows, which at year 10 puts the floor around $3-5M.
+//
+// ⚠ DEVELOPING THE INCURRED MADE THE LISTING MORE CLOSED, NOT LESS, AND THAT
+// WAS NOT THE EXPECTATION. Measured at year 10, the displayed open/closed mix:
+//
+//            ranked by DRAWN        ranked by CURRENT      carried over
+//   game 0   21 closed / 4 open     22 closed / 3 open      23 of 25
+//   game 1   21 closed / 4 open     24 closed / 1 open      22 of 25
+//
+// The reasoning that predicted the opposite was that a cohort climbs, so its
+// development lands on the open files and lifts them. The gross ledger this
+// column reads does not climb: measured, a cohort's current gross ultimate over
+// its drawn register runs 0.30 to 1.37 and is BELOW 1 for most years, because
+// the optimistic markdown unwinds over the horizon and recent years have barely
+// started. So developing the incurred marks most claims DOWN, and closed
+// claims — pinned at their drawn value — rise relative to open ones that take a
+// scaled share of what is left.
+//
+// The listing is dominated by settled files because the book is: roughly four
+// claims in five are closed by year 10. Surfacing open files is a real want and
+// it is a FILTER, not a sort key — a different exhibit, and it should be asked
+// for rather than arrived at by leaving a column stale.
+//
+// ============================================================================
+// ⚠ INCURRED HERE IS NOT THE WORKBOOK'S Gross Incurred, AND THE DIFFERENCE IS
+// DELIBERATE. Both documents say so.
+//
+//   this listing        the claim's share of its cohort's CURRENT gross
+//                       ultimate — one figure per claim, on the same vintage as
+//                       the Paid beside it.
+//   claims workbook     Gross Incurred is the claim AS DRAWN and never
+//                       develops, and the workbook carries the developed
+//                       figures separately in its Drawn / Booked / Current
+//                       Occurrence block.
+//
+// A workbook is a data export and can carry both vintages in adjacent columns;
+// a one-line-per-claim listing can carry one, and for a large-loss listing it
+// has to be the one the Paid column is on. The workbook's own note already
+// warned that its two columns are not the same vintage and that their ratio is
+// not a paid-to-incurred; that warning is now narrower, because the document it
+// pointed a reader towards is this one.
+//
+// ⚠ SO Paid / Incurred IS A REAL RATIO HERE AND IS NOT ONE IN THE WORKBOOK.
+// That is the whole reason for the difference and it is worth stating plainly,
+// because two documents disagreeing about one claim is exactly what this file
+// went out of its way to avoid on the Paid column.
 //
 // ============================================================================
 // ⚠ THE DESCRIPTION COLUMN RENDERS ONLY WHEN SOMETHING POPULATES IT.
@@ -77,7 +122,7 @@
 // someone who needs to know looks; a player only sees a blank column.
 // ============================================================================
 
-import { isClaimClosed, claimPaidSplit } from './claimClosure';
+import { isClaimClosed, claimPaidSplit, claimIncurredSplit } from './claimClosure';
 import { resolveClosureCurve } from '../data/defaultAssumptions';
 import { regenerateLineYearClaims, ClaimRegenerationError } from './claimRegeneration';
 import type {
@@ -99,6 +144,20 @@ export interface ClaimListingRow {
   /** ALLOCATED, not a payment record — see paidNote(). Undefined when the
    *  cohort's paid total is not available and a figure would be invented. */
   paid: number | undefined;
+  /**
+   * The claim's CURRENT incurred — its share of the cohort's developed gross
+   * ultimate, with a closed file holding its drawn value and the development
+   * landing on the open ones.
+   *
+   * ⚠ NOT claim.grossUltimate, WHICH IS THE VALUE DRAWN AT INCEPTION. Showing
+   * that beside an allocated Paid put two vintages in adjacent columns — see
+   * claimIncurredSplit. Falls back to the drawn value only when the cohort's
+   * current ultimate is unavailable, which is the same corner Paid goes blank
+   * in and is marked the same way.
+   */
+  incurred: number;
+  /** False when `incurred` is the drawn value because the cohort is gone. */
+  developed: boolean;
   closed: boolean;
 }
 
@@ -166,12 +225,21 @@ export function claimListing(
   let unpricedYears = 0, missingRegisters = 0;
 
   for (const line of gameState.setup.activeLines) {
-    // The cohort's cumulative GROSS paid, by accident year. Gross, to match the
-    // register — the net ledger is the actuarial memo's basis, and mixing them
-    // would put net dollars in a column headed Paid.
+    // The cohort's cumulative GROSS paid and its CURRENT gross ultimate, by
+    // accident year. Gross throughout, to match the register — the net ledger is
+    // the actuarial memo's basis, and mixing them would put net dollars in a
+    // column headed Paid.
+    //
+    // ⚠ ULTIMATE IS grossPaid + grossUnpaid, WHICH IS THE COHORT AS CARRIED
+    // TODAY. Both halves are needed, so a cohort missing either contributes
+    // neither figure and its claims fall back to their drawn values.
     const grossPaidByAy = new Map<number, number>();
+    const grossUltByAy = new Map<number, number>();
     for (const c of gameState.poolState.lines[line]?.reserveCohorts ?? []) {
       if (c.grossPaid !== undefined) grossPaidByAy.set(c.yearNumber, c.grossPaid);
+      if (c.grossPaid !== undefined && c.grossUnpaid !== undefined) {
+        grossUltByAy.set(c.yearNumber, c.grossPaid + c.grossUnpaid);
+      }
     }
 
     for (const r of results) {
@@ -202,13 +270,27 @@ export function claimListing(
         paid = split;
       }
 
+      // ⚠ THE SAME TWO-TIER SPLIT AS THE PAID COLUMN, over the cohort's current
+      // ultimate instead of its paydown. Closed files keep their drawn value;
+      // the cohort's development lands on the open ones. That is what makes
+      // Paid <= Incurred hold by construction rather than by clamping.
+      const cohortUlt = grossUltByAy.get(ay);
+      const developed = cohortUlt !== undefined;
+      const incurred = developed
+        ? claimIncurredSplit(
+            claims.map((c, i) => ({ grossUltimate: c.grossUltimate, closed: closed[i] })),
+            cohortUlt,
+          )
+        : claims.map(c => c.grossUltimate);
+
       claims.forEach((c, i) => rows.push({
-        line, claim: c, member: members.get(c.memberId), paid: paid[i], closed: closed[i],
+        line, claim: c, member: members.get(c.memberId), paid: paid[i],
+        incurred: incurred[i], developed, closed: closed[i],
       }));
     }
   }
 
-  rows.sort((a, b) => b.claim.grossUltimate - a.claim.grossUltimate);
+  rows.sort((a, b) => b.incurred - a.incurred);
   return { rows, unpricedYears, missingRegisters };
 }
 
@@ -220,10 +302,9 @@ function paidNote(): string {
     + 'file takes its own incurred, because it has paid everything it ever will, and the open files '
     + 'share what is left in proportion. It is the same split the claims workbook shows, computed '
     + 'by the same function, so the two documents agree. Treat it as this claim\'s share of the '
-    + 'year\'s payments rather than as a cheque that was written. A row can therefore show Paid '
-    + 'ABOVE its Incurred, which is not an error: the accident year has developed since these '
-    + 'claims were written, so the year has paid out more than its original register sums to, and '
-    + 'the excess is shared over the files that are settled.';
+    + 'year\'s payments rather than as a cheque that was written. Incurred is allocated the same '
+    + 'way from the same register, so the two columns are on one basis and Paid never exceeds '
+    + 'Incurred.';
 }
 
 export function buildClaimsMemo(input: ClaimsMemoInput): string {
@@ -233,8 +314,9 @@ export function buildClaimsMemo(input: ClaimsMemoInput): string {
 
   out.push('# Claims Department');
   out.push(`**Large loss listing, evaluated ${evaluationDate(gameState, asAtYear)}.** `
-    + `The ${CLAIMS_LISTING_ROWS} largest claims on the book by gross incurred, across all `
-    + 'programs. Amounts are GROSS of reinsurance.');
+    + `The ${CLAIMS_LISTING_ROWS} largest claims on the book by CURRENT incurred, across all `
+    + 'programs. Amounts are GROSS of reinsurance. Both money columns are shares of the same '
+    + 'accident-year figures, so they are on one basis and subtractable.');
 
   if (rows.length === 0) {
     out.push('_No claim detail is available at this valuation._');
@@ -259,7 +341,7 @@ export function buildClaimsMemo(input: ClaimsMemoInput): string {
         r.member?.name ?? r.claim.memberId,
         r.closed ? 'Closed' : 'Open',
         r.paid === undefined ? '' : money(r.paid),
-        money(r.claim.grossUltimate),
+        money(r.incurred),
       ];
       if (anyDescription) cells.push((r.claim.description ?? '').trim());
       return `| ${cells.join(' | ')} |`;
