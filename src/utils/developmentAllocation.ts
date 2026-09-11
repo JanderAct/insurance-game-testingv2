@@ -342,6 +342,11 @@ export function buildTrackedSet(
   line: TowerLine,
   occurrenceIds: string[],
   claimIds: string[],
+  /** Parallel to the arrays above: whose occurrence each one is. DISPLAY ONLY —
+   *  no selection, cession or development arithmetic reads it, and it sits
+   *  before `totals` rather than being appended so a caller cannot silently
+   *  pass it as one of the optional trailing arguments. */
+  memberIdsPer: string[][],
   totals: number[],
   rule: DevelopmentAllocationRule = DEVELOPMENT_ALLOCATION,
   rng?: SeededRandom,
@@ -385,6 +390,7 @@ export function buildTrackedSet(
       tracked.push({
         claimId: claimIds[i] ?? occurrenceIds[i],
         occurrenceId: occurrenceIds[i],
+        memberIds: memberIdsPer[i] ?? [],
         drawn: totals[i],
         original: totals[i],
         current: totals[i],
@@ -429,6 +435,7 @@ export function buildTrackedSet(
       bench.push({
         claimId: claimIds[i] ?? occurrenceIds[i],
         occurrenceId: occurrenceIds[i],
+        memberIds: memberIdsPer[i] ?? [],
         drawn: totals[i],
         original: totals[i],
         current: totals[i],
@@ -678,6 +685,7 @@ export function reselectDevelopingSet(
       next.push({
         claimId: b.claimId,
         occurrenceId: b.occurrenceId,
+        memberIds: b.memberIds,
         drawn: b.drawn,
         original: b.original,
         current: b.current,

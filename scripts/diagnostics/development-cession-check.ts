@@ -127,7 +127,8 @@ console.log('=== CLAIM-LEVEL DEVELOPMENT CESSION CHECK ===\n');
 console.log('--- ALLOCATOR CONTRACT (direct) ---');
 {
   const mk = (vals: number[]) => vals.map((v, i) => ({
-    claimId: `c${i}`, occurrenceId: `o${i}`, drawn: v, original: v, current: v, developing: i < 3,
+    claimId: `c${i}`, occurrenceId: `o${i}`, memberIds: [`m${i}`],
+    drawn: v, original: v, current: v, developing: i < 3,
   }));
   const cases: { name: string; claims: number[]; untracked: number; amount: number; mode: 'developing' | 'proportional' }[] = [
     { name: 'adverse -> developing claims', claims: [3e6, 2e6, 1e6], untracked: 5e6, amount: 6e6, mode: 'developing' },
@@ -201,6 +202,7 @@ console.log('--- ALLOCATOR CONTRACT (direct) ---');
   // at or above the retention is tracked whether or not it was drawn as a developing claim.
   const totals = [5e6, 1e5, 3e6, 2e6, 1.5e6, 4e5, 2.5e6];
   const built = buildTrackedSet('WC', totals.map((_, i) => `o${i}`), totals.map((_, i) => `c${i}`),
+    totals.map((_, i) => [`m${i}`]),
     totals, DEVELOPMENT_ALLOCATION, new SeededRandom(20260827), new SeededRandom(20260828));
   const developingCount = built.tracked.filter(t => t.developing).length;
   const retention = REINSURANCE_TOWER.WC[0].attachment;
@@ -227,7 +229,8 @@ console.log('\n--- RESELECTION CONTRACT (direct) ---');
   const say = (ok: boolean, msg: string) => { if (!ok) { console.log(`  FAIL ${msg}`); f++; } };
 
   const mk = (vals: number[], nDeveloping: number, closed: number[] = []) => vals.map((v, i) => ({
-    claimId: `c${i}`, occurrenceId: `o${i}`, drawn: v, original: v, current: v,
+    claimId: `c${i}`, occurrenceId: `o${i}`, memberIds: [`m${i}`],
+    drawn: v, original: v, current: v,
     developing: i < nDeveloping && !closed.includes(i), closed: closed.includes(i),
   }));
 
@@ -256,7 +259,7 @@ console.log('\n--- RESELECTION CONTRACT (direct) ---');
   // MEMBERSHIP CHANGES ONLY BY CLOSURE, and a replacement comes off the bench.
   {
     const claims = mk([5e6, 4e6, 3e6], 3);
-    const bench = [4, 5, 6].map(i => ({ claimId: `c${i}`, occurrenceId: `o${i}`, drawn: 1e6, original: 1e6, current: 1e6 }));
+    const bench = [4, 5, 6].map(i => ({ claimId: `c${i}`, occurrenceId: `o${i}`, memberIds: [`m${i}`], drawn: 1e6, original: 1e6, current: 1e6 }));
     const rs = reselectDevelopingSet(claims, bench, 9e6, id => id === 'c0', 3, 0, new SeededRandom(20260830));
     say(rs.retired === 1, `retired ${rs.retired}, expected 1`);
     say(rs.promoted === 1, `promoted ${rs.promoted}, expected 1`);
@@ -275,7 +278,7 @@ console.log('\n--- RESELECTION CONTRACT (direct) ---');
   // that consumes no draw.
   {
     const claims = mk([5e6, 4e6, 3e6], 3);
-    const bench = [{ claimId: 'c9', occurrenceId: 'o9', drawn: 1e6, original: 1e6, current: 1e6 }];
+    const bench = [{ claimId: 'c9', occurrenceId: 'o9', memberIds: ['m9'], drawn: 1e6, original: 1e6, current: 1e6 }];
     const rng = new SeededRandom(20260830);
     const rs = reselectDevelopingSet(claims, bench, 9e6, () => false, 3, 0, rng);
     say(rs.retired === 0 && rs.promoted === 0, 'a valuation with no closures changed the set');
@@ -291,7 +294,7 @@ console.log('\n--- RESELECTION CONTRACT (direct) ---');
   // bound the game never exercises is a bound nothing tests. It is tested here.
   {
     const claims = mk([5e6, 4e6, 3e6], 3);           // floor 3, holds $12M
-    const bench = [4, 5, 6, 7].map(i => ({ claimId: `c${i}`, occurrenceId: `o${i}`, drawn: 2e6, original: 2e6, current: 2e6 }));
+    const bench = [4, 5, 6, 7].map(i => ({ claimId: `c${i}`, occurrenceId: `o${i}`, memberIds: [`m${i}`], drawn: 2e6, original: 2e6, current: 2e6 }));
     const atFloor = reselectDevelopingSet(claims, bench, 9e6, () => false, 3, 0, new SeededRandom(7));
     say(atFloor.promoted === 0, `holding enough already, promoted ${atFloor.promoted}`);
     say(!atFloor.underheld, 'reported underheld while holding enough');

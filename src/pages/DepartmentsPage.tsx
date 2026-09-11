@@ -3,6 +3,7 @@ import type { GameState } from '../types/simulation';
 import DocumentReader, { type DocumentEntry } from '../components/DocumentReader';
 import investmentMemoRaw from '../data/documents/investmentMemo.md?raw';
 import { buildActuarialMemo } from '../utils/actuarialMemo';
+import { buildClaimsMemo } from '../utils/claimsMemo';
 
 interface DepartmentsPageProps {
   gameState: GameState;
@@ -26,6 +27,12 @@ export default function DepartmentsPage({ gameState }: DepartmentsPageProps) {
     [gameState, selectedYear],
   );
 
+  // ⚠ NOT KEYED TO selectedYear, AND THAT IS THE EXHIBIT'S OWN PROPERTY RATHER
+  // THAN AN OVERSIGHT. Every row compares an occurrence's CURRENT value with its
+  // booked one, so there is no valuation date to select; the memo says so in its
+  // first paragraph. Memoised on gameState alone for the same reason.
+  const claimsMemo = useMemo(() => buildClaimsMemo({ gameState }), [gameState]);
+
   const documents: DocumentEntry[] = [
     {
       id: 'actuarial',
@@ -36,8 +43,8 @@ export default function DepartmentsPage({ gameState }: DepartmentsPageProps) {
     {
       id: 'claims',
       title: 'Claims',
-      summary: 'Recent losses and reserve development',
-      notBuiltNote: 'The Claims Department has not filed a memorandum yet.',
+      summary: 'Which claims developed, by line and member',
+      content: claimsMemo,
     },
     {
       id: 'underwriting',

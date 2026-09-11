@@ -70,6 +70,7 @@ const FAST: string[] = [
   'cession-path-independence',       // 785s   GAMES=600 — it could not resolve its subject below 300, and the
                                      //         calendar blend thinned it further; see the note at its own GAMES
   'cession-uplift-basis',            //  22s
+  'claims-memo-check',                //   8s   every displayed row names its member; 3 controls
   'claims-workbook-check',           //  17s
   'clf-label-backtest-check',        //  20s   GREEN since the maturation book — worst label error -3.2pp against 5pp
   'closure-draw-check',              //   3s

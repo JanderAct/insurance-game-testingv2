@@ -452,44 +452,30 @@ export function buildActuarialMemo({ gameState, asAtYear }: ActuarialMemoInput):
     out.push(sectionProse(pool, poolRaw.length - pool.length + (pool.some(r => r.isPrior) ? 1 : 0)));
   }
 
-  // WHICH CLAIMS MOVED — the schedule that gives a reserve deterioration a story.
+  // ⚠ THE "WHICH CLAIMS DEVELOPED" SCHEDULE LIVES IN THE CLAIMS DEPARTMENT NOW,
+  // and only the COUNT and the pointer stay here.
   //
-  // ⚠ AS AT NOW, NOT AS AT THE SELECTED YEAR — and the reason has narrowed.
-  // These rows show each occurrence's CURRENT value against its booked one, so
-  // they do not follow the year selector, and they are labelled rather than
-  // quietly presented as if they did.
+  // It answers a different question from the one this memo asks. This memo's
+  // subject is the reserve — how much, on what basis, moving which way. Which
+  // named occurrences moved, and whose they are, is a claims question, and it is
+  // split by line there because one ranked list across three lines is a GL list
+  // (measured: 17 of the old top 25). See claimsMemo.ts.
   //
-  // The old reason — "the claim subset has no per-valuation history" — is no
-  // longer true: DevelopingClaim.movementByStep carries one entry per valuation,
-  // and the claims workbook renders it as a triangle. So this schedule COULD be
-  // cut as at the selected year. It is not, because that is a change to the
-  // memo's content rather than a correction, and nobody has asked for it.
-  const developed = lines.flatMap(line =>
-    (gameState.poolState.lines[line]?.reserveCohorts ?? []).flatMap(c =>
-      (c.developingClaims ?? [])
-        .filter(d => Math.abs(d.current - d.original) >= 1000)
-        .map(d => ({ line, accidentYear: c.yearNumber, ...d })),
-    ),
-  ).sort((a, b) => (b.current - b.original) - (a.current - a.original));
+  // ⚠ THE POINTER IS NOT OPTIONAL POLITENESS. The development figures above are
+  // EXPLAINED by these claims, and a reserve movement left standing on its own
+  // is the thing this sentence exists to prevent. Moving the exhibit without
+  // leaving the pointer would have made this page harder to read, not tidier.
+  const developed = lines.reduce((n, line) =>
+    n + (gameState.poolState.lines[line]?.reserveCohorts ?? []).reduce((k, c) =>
+      k + (c.developingClaims ?? []).filter(d => Math.abs(d.current - d.original) >= 1000).length,
+    0), 0);
 
-  if (developed.length > 0) {
-    out.push('### Which claims developed');
+  if (developed > 0) {
     out.push(
-      'A reserve movement is not a number on its own — it is claims deteriorating. These are the ' +
-      'occurrences this pool has seen development land on, largest movement first, **as at today ' +
-      'rather than as at the year selected above**. Amounts are occurrence totals, gross of ' +
-      'reinsurance. Every accident year listed here appears individually in the exhibit above: ' +
-      'the years inside Prior have no claim register, so they can never contribute a row.',
+      `**A reserve movement is not a number on its own — it is claims deteriorating.** ` +
+      `${developed.toLocaleString()} occurrences across these lines have had development land on ` +
+      'them. The **Claims Department** files them by name and by member, ranked within each line.',
     );
-    out.push([
-      '| Line | Accident year | Claim | As first written $M | Now $M | Development $M |',
-      '|---|---:|---|---:|---:|---:|',
-      ...developed.slice(0, 25).map(d =>
-        `| ${d.line} | ${d.accidentYear} | ${d.claimId} | ${m(d.original)} | ${m(d.current)} | ${m(d.current - d.original)} |`),
-    ].join('\n'));
-    if (developed.length > 25) {
-      out.push(`_${developed.length - 25} further developed claim(s) not shown; the claims workbook carries all of them._`);
-    }
   }
 
   out.push('### Reading this exhibit');
