@@ -244,7 +244,6 @@ export default function ResultsPage({ lockedResults, lineView }: ResultsPageProp
               <Row label="Funding Confidence Level" value={formatPct(result.decisions.fundingConfidenceLevel, 0)} />
               <Row label="Dividend / Return of Pool Premium" value={formatPct(result.decisions.dividendPct, 1)} />
               <Row label="Assessment" value={formatPct(result.decisions.assessmentPct, 1)} />
-              <Row label="Underwriting Strictness" value={`${result.decisions.underwritingStrictness} / 10`} />
               <Row label="Risk Control Investment" value={formatPct(result.decisions.riskControlPct, 1)} />
               {/* TWO PRODUCTS ARE LIVE. WC/GL run the per-occurrence tower and have
                   no "level"; Property still runs the aggregate quota share. At POOL

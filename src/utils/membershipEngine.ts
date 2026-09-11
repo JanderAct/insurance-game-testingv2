@@ -158,8 +158,9 @@ export function baseNewMembers(rosterSize: number, enrolledCount: number): numbe
 // Everything that is NOT the base, split out so it can be measured on its own.
 //
 // ⚠ THESE DO NOT SUM TO ZERO AT DEFAULT DECISIONS, and the calibration of k
-// depends on knowing by how much. underwritingStrictness 5, assessmentPct 0 and
-// riskControlPct 0 all sit on inert branches, but two channels are live and
+// depends on knowing by how much. assessmentPct 0 and riskControlPct 0 both
+// sit on inert branches (underwritingStrictness did too, and is now gone
+// entirely), but two channels are live and
 // both are positive at defaults: competitivePressure is drawn in [0.3, 0.8], so
 // its term contributes +0.10 to +0.35 (mean +0.225); and satisfaction starts in
 // [6.5, 8.5], so the >= 7.5 branch fires about half the time. The surplusRatio
@@ -167,7 +168,6 @@ export function baseNewMembers(rosterSize: number, enrolledCount: number): numbe
 // builds. See MEMBERSHIP_EQUILIBRIUM_ENROLLMENT for how the measured total is
 // folded into k.
 export function newMemberAdjustment(a: {
-  underwritingStrictness: number;
   assessmentPct: number;
   riskControlPct: number;
   memberSatisfaction: number;
@@ -192,10 +192,10 @@ export function newMemberAdjustment(a: {
     * RATE_LEVEL_SENSITIVITY
     * (a.levelDeviationPct ?? 0);
 
-  if (a.underwritingStrictness <= 2) adj += 0.8;
-  else if (a.underwritingStrictness <= 4) adj += 0.3;
-  else if (a.underwritingStrictness >= 8) adj -= 0.4;
-
+  // ⚠ THE UNDERWRITING-STRICTNESS LADDER IS DELETED (<=2 +0.8, <=4 +0.3,
+  // >=8 -0.4). It was inert at the shipped default of 5 — the header note
+  // above already said so — so its removal moves no baseline. It goes with
+  // the slider rather than being left as a branch on a field nobody sets.
   if (a.memberSatisfaction >= 8.5) adj += 0.5;
   else if (a.memberSatisfaction >= 7.5) adj += 0.2;
   else if (a.memberSatisfaction < 5.0) adj -= 0.5;
@@ -225,7 +225,6 @@ function calcExpectedNewMembers(inputs: MemberMovementInputs): number {
   // unchanged and still applies ON TOP of this — only the base moved.
   const expected = baseNewMembers(allMarketMembers.length, currentMembers.length)
     + newMemberAdjustment({
-      underwritingStrictness: decisions.underwritingStrictness,
       assessmentPct: decisions.assessmentPct,
       riskControlPct: decisions.riskControlPct,
       memberSatisfaction: currentMemberSatisfaction,
@@ -268,18 +267,23 @@ function updateSatisfaction(
   return Math.max(1.0, Math.min(10.0, parseFloat((current + delta).toFixed(1))));
 }
 
+// ⚠ THE STRICTNESS TERM IS DELETED, AND AT THE SHIPPED DEFAULT IT WAS ZERO.
+// This carried `(underwritingStrictness - 5) * 0.04`, a direct nudge to the
+// pool's average risk quality from a slider position. The slider defaulted to
+// 5, so the term was exactly 0 in every default game — which is why removing
+// it moves no baseline. It goes with the slider.
+//
+// What remains is the honest part: the average moves because WHO IS ENROLLED
+// changed, blended at half the new members' share of the book.
 function updateRiskQuality(
   current: number,
-  underwritingStrictness: number,
   newMembers: Member[],
   allActiveMembers: Member[],
 ): number {
-  const strictnessAdjustment = (underwritingStrictness - 5) * 0.04;
   const newMemberAvgQuality = newMembers.length > 0
     ? newMembers.reduce((s, m) => s + m.riskQuality, 0) / newMembers.length
     : current;
   const blendedQuality = current
-    + strictnessAdjustment
     + (newMemberAvgQuality - current) * (newMembers.length / Math.max(allActiveMembers.length, 1)) * 0.5;
   return Math.max(1.0, Math.min(10.0, parseFloat(blendedQuality.toFixed(1))));
 }
@@ -294,6 +298,36 @@ export function simulateMemberMovement(inputs: MemberMovementInputs): MemberMove
   const rawWithdrawalCount = Math.round(expectedWithdrawals * rng.range(0.4, 1.6));
   const cappedWithdrawalCount = Math.min(rawWithdrawalCount, MAX_WITHDRAWN_PER_YEAR);
 
+  // ============================================================================
+  // ⚠ THIS STILL READS riskQuality, AND THAT IS DELIBERATE NOW THAT THE
+  // ATTRIBUTE IS HIDDEN. The pool does not need to SEE an attribute for
+  // members to act on it: a badly-run entity knows it is badly run, and its
+  // decision to stay or go is its own. Risk quality has no per-member UI
+  // anywhere (surface-privacy-check enforces that), so a reader finding this
+  // sort would otherwise reasonably conclude the field is dead and delete it.
+  // It is not dead. It is unobservable to the PLAYER and fully available to
+  // the SIMULATION, which is the whole point of hiding it.
+  //
+  // ⚠ AND THE DIRECTION IS BACKWARDS FOR ADVERSE SELECTION. RECORDED HERE,
+  // NOT FIXED HERE.
+  //
+  // The sort is ascending and the lowest leave, so `+ riskQuality * 0.3`
+  // means LOW risk quality leaves FIRST: the book self-cleans. Real adverse
+  // selection runs the other way — when the rate rises it is the GOOD risks
+  // who can get a better price elsewhere and leave, and the pool is left with
+  // the ones nobody else wants. As written, the engine hands the player a
+  // free improvement in the book's quality every time members depart, which
+  // works directly against the pressure Renewal Underwriting and New Business
+  // Appetite exist to manage: there is nothing to manage if departures always
+  // help.
+  //
+  // Flipping the sign is a one-character change and NOT the whole fix — the
+  // coefficient was fitted (or at least settled) against the current
+  // direction, retention is calibrated on top of it, and reversing it without
+  // re-measuring would move every membership figure in the model. It is a
+  // separate decision with its own measurement, not a tidy-up to fold into a
+  // UI commit.
+  // ============================================================================
   const membersSortedByLeaveRisk = [...currentMembers].sort((a, b) =>
     (a.satisfaction + a.riskQuality * 0.3) - (b.satisfaction + b.riskQuality * 0.3)
   );
@@ -325,13 +359,25 @@ export function simulateMemberMovement(inputs: MemberMovementInputs): MemberMove
     m => !activeIds.has(m.id) && canReenroll(inputs.membershipHistory, m.id, line, yearNumber)
   );
 
-  let candidatePool = [...availableMembers];
-  if (inputs.decisions.underwritingStrictness > 6) {
-    candidatePool.sort((a, b) => b.riskQuality - a.riskQuality);
-    candidatePool = candidatePool.slice(0, Math.ceil(candidatePool.length * 0.6));
-  } else {
-    rng.shuffle(candidatePool);
-  }
+  // ⚠ THE UNDERWRITING-STRICTNESS SCREEN WAS HERE AND IS DELETED. Above
+  // strictness 6 this sorted the candidate pool by riskQuality DESCENDING and
+  // kept the top 60% — exact selection on the hidden truth, at zero
+  // information cost. Risk quality is no longer shown to the player anywhere
+  // per-member, and a lever that selects perfectly on an attribute the UI
+  // does not admit exists is worse than no lever: it is strictly better than
+  // the experience modifier meant to replace it, which ranks true risk
+  // quality at 0.332 rather than at 1.0. Hiding the attribute without
+  // retiring this branch would have made the modifier pointless.
+  //
+  // ⚠ AND THE SHUFFLE IS NOW UNCONDITIONAL, WHICH IS A KEEP-THE-DRAW
+  // STATEMENT. The old code shuffled ONLY on the else branch, so a game at
+  // strictness > 6 consumed no shuffle at all. Every default game already
+  // took the else branch (the slider defaulted to 5), so the stream is
+  // unchanged for them — which is why both baselines still hold across this
+  // deletion. A game saved at strictness > 6 would draw differently, and
+  // there is no such game: the field is gone from the decision set.
+  const candidatePool = [...availableMembers];
+  rng.shuffle(candidatePool);
 
   const newMembers: Member[] = candidatePool.slice(0, Math.min(actualNewCount, candidatePool.length)).map(m => ({
     ...m,
@@ -351,7 +397,7 @@ export function simulateMemberMovement(inputs: MemberMovementInputs): MemberMove
   const newSatisfaction = updateSatisfaction(
     inputs.currentMemberSatisfaction, inputs.decisions, priceSignalFor(inputs).changeDeviationPct,
   );
-  const newRiskQuality = updateRiskQuality(inputs.currentRiskQuality, inputs.decisions.underwritingStrictness, newMembers, activeMembers);
+  const newRiskQuality = updateRiskQuality(inputs.currentRiskQuality, newMembers, activeMembers);
 
   return {
     activeMembers,

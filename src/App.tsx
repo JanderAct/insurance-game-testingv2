@@ -656,6 +656,7 @@ export default function App() {
             startingFinancials={startingFinancials}
             initialMembers={initialMembers}
             startingYear={gameState.setup.startingYear}
+            memberLossHistory={gameState.poolState.memberLossHistory ?? {}}
           />
         )}
       </main>

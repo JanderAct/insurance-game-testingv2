@@ -321,7 +321,32 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // "two columns appended" from "every number changed"; the value capture can,
 // and it says the second did not happen. Neither capture is sufficient alone
 // here — that pairing is the argument.
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v35.json');
+// v36: ALL 24 MOVED, AND THE SHAPE CHANGED — one ROW removed. Underwriting
+// Strictness is retired (above strictness 6 it sorted applicants on the
+// member's true risk quality and kept the best 60%, which is exact selection
+// on an attribute the player can no longer see), so its resultMetrics entry
+// goes and every sheet loses that row.
+//
+// ⚠ THE DIFF WAS TAKEN RATHER THAN INFERRED, and it is two lines. One export
+// (MAMC6EA4, WC-solo, default arm) rendered at the parent commit and at this
+// one differs by exactly:
+//
+//   8d7   < Decisions,Underwriting Strictness,5.00,5.00,5.00,5.00,5.00
+//   98d96 < Decisions,Underwriting Strictness,5.00,5.00,5.00,5.00,5.00
+//
+// — one row per sheet, nothing else, on a 180-line export. Read together with
+// value-identity, which is GREEN across this change: no simulated value moved,
+// which is what makes a 24-of-24 hash move safe to recapture. The pairing is
+// the argument, exactly as at v35.
+//
+// ⚠ AND THE ENGINE PATH WAS CHECKED SEPARATELY, because retiring the slider
+// deleted a branch inside simulateMemberMovement. The old code shuffled the
+// candidate pool ONLY on the else branch, so a game above strictness 6
+// consumed no shuffle; the shuffle is unconditional now. Every configuration
+// here runs at the default of 5, which always took the else branch, so the
+// RNG stream is untouched — and value-identity agreeing is the measurement
+// that says so rather than the reasoning.
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v36.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

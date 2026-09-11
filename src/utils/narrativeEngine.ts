@@ -5,7 +5,7 @@ import type { ResultSet } from '../types/simulation';
 export function generateNarrative(result: ResultSet, _priorResult?: ResultSet): string {
   const parts: string[] = [];
 
-  const { decisions, assetAllocation, actualCombinedRatio, netIncome,
+  const { assetAllocation, actualCombinedRatio, netIncome,
     actualLossRatioPricingBasis, expectedLossRatio,
     reinsuranceRecovery, investmentIncome,
     newMembers, withdrawnMembers, shockLossIncurred,
@@ -15,12 +15,12 @@ export function generateNarrative(result: ResultSet, _priorResult?: ResultSet): 
   // (CLF-only pricing); a narrative describing the funding-confidence-level
   // decision instead is a pending replacement, not invented here.
 
-  // --- Underwriting ---
-  if (decisions.underwritingStrictness <= 2) {
-    parts.push(`With very flexible underwriting, the pool was highly accessible, supporting member growth. However, this creates adverse selection risk.`);
-  } else if (decisions.underwritingStrictness >= 8) {
-    parts.push(`Strict underwriting standards improved average risk quality, reducing expected losses and tail risk.`);
-  }
+  // --- Underwriting --- REMOVED WITH THE SLIDER IT NARRATED. Both branches
+  // described the pool in RISK-QUALITY terms ("improved average risk
+  // quality"), which is an attribute the player can no longer see per member
+  // and which the retired strictness screen selected on directly. A narrative
+  // for the experience modifier is a pending replacement, not invented here —
+  // the same treatment the Rate Change narrative got above.
 
   // --- Shock Loss ---
   if (shockLossIncurred) {

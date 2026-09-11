@@ -20,7 +20,6 @@ export function defaultLineDecisionSet(line: CoverageLine): LineDecisionSet {
     fundingAtExpected: true,
     dividendPct: SLIDER_RANGES.dividendPct.default,
     assessmentPct: SLIDER_RANGES.assessmentPct.default,
-    underwritingStrictness: SLIDER_RANGES.underwritingStrictness.default,
     riskControlPct: SLIDER_RANGES.riskControlPct.default,
     // Default: every purchasable occurrence layer placed, no aggregate. Matches
     // the default-on-load rule for saves that predate the tower. KEYED BY

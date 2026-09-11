@@ -16,7 +16,6 @@ const COVERAGE_LINES: { value: CoverageLine; label: string; hint: string }[] = [
 
 const MANAGED_ITEMS: { label: string; definition: string }[] = [
   { label: 'Rate changes and premium adequacy', definition: 'How much you raise or lower pool rates each year, balancing competitiveness against how well premium covers expected losses.' },
-  { label: 'Underwriting strictness', definition: 'How selective the pool is when accepting new members. Stricter underwriting favors better risks but slows growth.' },
   { label: 'Reinsurance protection levels', definition: 'How much of your losses are transferred to a reinsurer in exchange for a cost, reducing volatility and protecting surplus.' },
   { label: 'Investment risk strategy', definition: 'How aggressively the pool invests its assets. Higher risk offers higher expected returns but more volatility and downside risk.' },
   { label: 'Funding confidence level', definition: 'The percentile of the loss distribution your funding is designed to cover. Higher confidence means more conservative, and costlier, funding.' },

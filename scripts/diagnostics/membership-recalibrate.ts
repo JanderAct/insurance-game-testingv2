@@ -88,7 +88,6 @@ for (let g = 0; g < GAMES; g++) {
       const ldev = RATE_NEUTRAL_LOAD[line] > 0 ? (load / RATE_NEUTRAL_LOAD[line] - 1) * 100 : 0;
       levelDev[line].push(ldev);
       adjBy[line].push(newMemberAdjustment({
-        underwritingStrictness: d.byLine[line].underwritingStrictness,
         assessmentPct: d.byLine[line].assessmentPct,
         riskControlPct: d.byLine[line].riskControlPct,
         memberSatisfaction: pre[line].sat,

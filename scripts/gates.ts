@@ -118,6 +118,7 @@ const FAST: string[] = [
   'seed-cohort-shape-check',         //   1s
   'shock-check',                     //   6s
   'solo-export-guard',               //   4s
+  'surface-privacy-check',           //   1s   risk quality reaches no player-facing render or export path
   'terminal-severity-check',         //  30s   STAGE 1 — derives phi against the pool's settled log-SD
   'tower-runtime-check',             //  13s
   'trend-memoization-check',

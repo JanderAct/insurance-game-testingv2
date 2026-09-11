@@ -1260,7 +1260,6 @@ function buildAssumptionRows(): AuditRow[] {
         `Dividend / Assessment (combined, collapsed input): ${formatSliderPct(SLIDER_RANGES.dividendAssessment)}\n` +
         `  Dividend % (engine field): ${formatSliderPct(SLIDER_RANGES.dividendPct)}\n` +
         `  Assessment % (engine field): ${formatSliderPct(SLIDER_RANGES.assessmentPct)}\n` +
-        `Underwriting Strictness: ${formatSliderNumber(SLIDER_RANGES.underwritingStrictness)}\n` +
         `Risk Control %: ${formatSliderPct(SLIDER_RANGES.riskControlPct)}\n` +
         `Asset Allocation Default: Cash ${ASSET_ALLOCATION_DEFAULT.cashPct}% / Bonds ${ASSET_ALLOCATION_DEFAULT.bondsPct}% / Equities ${ASSET_ALLOCATION_DEFAULT.equitiesPct}%`,
       formula: 'Player decision slider configuration.',
@@ -1306,9 +1305,11 @@ function formatSliderPct(range: { min: number; max: number; step: number; defaul
   return `Min ${formatPct(range.min)}, Max ${formatPct(range.max)}, Step ${formatPct(range.step)}, Default ${formatPct(range.default)}`;
 }
 
-function formatSliderNumber(range: { min: number; max: number; step: number; default: number }): string {
-  return `Min ${range.min}, Max ${range.max}, Step ${range.step}, Default ${range.default}`;
-}
+// formatSliderNumber DELETED WITH ITS ONLY CALLER. It formatted a raw-number
+// slider range, and underwritingStrictness was the only raw-number slider —
+// every other range on this page is a percentage and uses formatSliderPct
+// above. Kept as a note rather than as a dead function: if a raw-number
+// slider returns, this is three lines.
 
 // ============================================================================
 // Supporting-card row builders (Exposure and Membership, Funding Rate

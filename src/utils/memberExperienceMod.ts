@@ -302,6 +302,70 @@ export function memberExperienceMods(
   }));
 }
 
+// ============================================================================
+// THE DISPLAYED MOD IS CENTRED ON THE MEDIAN. THE CHARGED MOD IS NOT.
+//
+// Two numbers, one calculation. `mod` above is rebased to exposure-weighted
+// MEAN 1.0 and that is what multiplies the premium weight — it has to be the
+// mean, because the mean is what makes the allocation sum back to the pool
+// total. The DISPLAYED number divides that same mod by the median of the
+// rated book:
+//
+//   displayed_i = mod_i / median{ mod_j : j rated }
+//
+// A positive constant divisor, so it is a strictly monotone transform: the
+// ordering, and therefore "above 1.0 costs more than typical", survives
+// exactly. What changes is what 1.0 MEANS. The charged mod's 1.0 is the
+// exposure-weighted average member, which on a right-skewed distribution is
+// worse than most of the book — measured, WC's mod has mean 1.000 and median
+// 0.987, so more than half of all members would see a number below 1 and read
+// it as "I am unusually good" when they are simply typical. Dividing by the
+// median puts the typical member at exactly 1.000.
+//
+// ⚠ THE MEDIAN MOVES WITH THE BOOK, AND THAT IS THE CHOICE. A member's
+// displayed mod therefore changes when OTHER members join or leave, even
+// though their own claims did not. The alternative — a fixed constant baked
+// in once — would keep each member's number stable but would drift away from
+// "typical" as the book changed, and would eventually be centred on a pool
+// that no longer exists.
+//
+// Moving wins because the CHARGED mod already moves for exactly the same
+// reason: the rebase divisor M is computed over the current enrolled book, so
+// a member's BILL already responds to who else is in the pool. A display
+// centred on a frozen constant would drift away from the bill it is supposed
+// to explain, and the first time a member asked why their number said 1.05
+// while their premium was below average there would be no answer. The
+// displayed number and the charged number move together or they are two
+// different mechanics wearing one name.
+//
+// ⚠ AND THE MEDIAN IS OVER RATED MEMBERS ONLY. Unrated members sit at exactly
+// 1 by convention rather than by measurement, and there are a lot of them —
+// 3,993 of 10,540 member-line-years in the gate's sample, mostly Property.
+// Letting that block set the median would peg the centre to the convention
+// instead of to the book's experience. Unrated members have no displayed mod
+// at all: they render as "no experience yet", not as 1.000, because a number
+// would imply an opinion the design does not have.
+// ============================================================================
+
+/** The median mod over the RATED members of a book, or null when none are
+ *  rated (Property, or a book too new to have a full window). */
+export function medianRatedMod(mods: readonly MemberExperienceMod[]): number | null {
+  const rated = mods.filter(m => m.rated).map(m => m.mod).sort((a, b) => a - b);
+  if (rated.length === 0) return null;
+  const mid = rated.length >> 1;
+  return rated.length % 2 === 1 ? rated[mid] : (rated[mid - 1] + rated[mid]) / 2;
+}
+
+/** What a member sees. null when they are unrated, or when nothing on the
+ *  book is rated — in both cases there is no "typical" to compare against. */
+export function displayedMod(
+  mod: MemberExperienceMod,
+  median: number | null,
+): number | null {
+  if (!mod.rated || median === null || !(median > 0)) return null;
+  return mod.mod / median;
+}
+
 /** The mod band this configuration can produce on a line, given a rebase
  *  divisor M. Reported by the gate rather than asserted as a constant,
  *  because M moves with the book. */

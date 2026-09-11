@@ -70,7 +70,6 @@ function getFundingLabel(v: number, labels: Record<number, string> = FUNDING_LEV
   return labels[rounded] ?? v.toFixed(2);
 }
 
-const UW_LABELS = ['Very Flexible', 'Flexible', 'Somewhat Flexible', 'Moderate-Flexible', 'Moderate', 'Moderate-Strict', 'Somewhat Strict', 'Strict', 'Very Strict', 'Extremely Strict', 'Maximum Strict'];
 
 // Reset only the given line to defaults (Model A strict per-line: resetting on
 // one line's tab must not clobber the other lines' choices).
@@ -180,13 +179,27 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
         </SectionCard>
 
         <SectionCard title="Growth & Underwriting" icon={<TrendingUp size={16} />}>
-          <SliderInput label="Underwriting Strictness" value={d.underwritingStrictness} min={SLIDER_RANGES.underwritingStrictness.min} max={SLIDER_RANGES.underwritingStrictness.max} step={SLIDER_RANGES.underwritingStrictness.step} onChange={v => set('underwritingStrictness', v)} formatValue={v => `${v}/10 — ${UW_LABELS[Math.round(v)]}`} leftLabel="Flexible" rightLabel="Strict" disabled={disabled} helpText="Strict underwriting improves risk quality." />
-          <p className="flex items-start gap-1 text-[11px] text-gray-500 leading-relaxed -mt-3">
+          {/* ⚠ THE UNDERWRITING STRICTNESS SLIDER IS DELETED. It said "Strict
+              underwriting improves risk quality" and it did exactly that, by
+              sorting applicants on the member's true risk quality and keeping
+              the best 60% — perfect selection on a number the player can no
+              longer see anywhere per member. See membershipEngine.ts at the
+              deleted screen. The note that stood here said the slider "will be
+              replaced by Renewal Underwriting and New Business Appetite once
+              member loss history exists"; that history exists now and the
+              modifier reads it, so the note has come true and the slider goes
+              with it. The two controls below are still INACTIVE. */}
+          <p className="flex items-start gap-1 text-[11px] text-gray-500 leading-relaxed">
             <Info size={12} className="mt-0.5 flex-shrink-0" />
-            This is the current, active mechanism. It will be replaced by Renewal Underwriting and New Business Appetite (below) once member loss history exists.
+            <span>
+              The pool no longer sets a general underwriting standard. Admission will be decided by the
+              two controls below, which read each member&rsquo;s own claims record rather than an
+              assessment of them.{' '}
+              <span className="text-gray-400">Neither is active yet.</span>
+            </span>
           </p>
-          <RenewalUnderwritingPreview />
-          <NewBusinessAppetitePreview />
+          <RenewalUnderwritingPreview line={selectedLine} />
+          <NewBusinessAppetitePreview line={selectedLine} />
         </SectionCard>
 
         {outstandingLoanSlider(d, set, selectedLoanInfo, disabled)}
@@ -519,16 +532,49 @@ function PreviewBox({ title, description, selected }: { title: string; descripti
 }
 
 // RENEWAL UNDERWRITING (Part 3, top control) — inactive preview. Would screen
-// on the EXPERIENCE MODIFIER (actual ÷ expected loss at the member's own class,
-// exposure and risk quality), never a loss ratio: a prospect has no premium
+// on the EXPERIENCE MODIFIER, never a loss ratio: a prospect has no premium
 // with the pool, so a loss ratio is undefined for it, while actual-over-
 // expected is defined identically for members and prospects. Local,
 // unpersisted state only — this control is not wired to LineDecisionSet or to
-// anything else. Deliberately no threshold default: the sensible non-renew
-// level depends on the modifier's distribution, which Stage 4 will report —
-// the threshold input below reveals with no value and no placeholder number
-// for the same reason, only when the second box is picked.
-function RenewalUnderwritingPreview() {
+// anything else.
+//
+// ⚠ THE BASIS DESCRIPTION HERE WAS WRONG AND IS CORRECTED. It said the
+// modifier divides by "expected loss at the member's own class, exposure and
+// risk quality". It does not, and the "risk quality" half was the whole
+// problem: dividing by an expectation that already contains the member's own
+// risk quality removes the very thing the modifier exists to discover.
+// The shipped basis is the PRIMARY layer over an expectation at NEUTRAL risk
+// quality — see memberExperienceMod.ts. Measured, the two bases rank true
+// risk quality at 0.332 and 0.176 respectively.
+//
+// Deliberately no threshold default: the sensible non-renew level depends on
+// the modifier's distribution, which is now measured — the displayed mod is
+// centred on the median, so 1.00 is the typical member and the shipped WC
+// spread runs roughly 0.93 to 1.39. A default still is not set here, because
+// picking one is a game-design call rather than a measurement.
+// ⚠ PROPERTY HAS NOTHING TO RATE ON, AND THE CONTROLS SAY SO RATHER THAN
+// DISAPPEARING. Hiding the line would leave a player wondering whether
+// Property has admission controls at all; showing them greyed with no reason
+// would read as "not built yet", which is wrong — it IS built and it measured
+// at nothing. Property's primary-layer credibility is 0.000 at every split
+// point tried, so every Property member's modifier is exactly 1.000.
+//
+// The reason is written in the MEMBER'S terms, not ours. "Reliability 0.000
+// over disjoint three-year windows" is the measurement; "a typical member has
+// about one property claim every other year" is the same fact in a form a
+// pool administrator can check against their own experience.
+function PropertyNoSignalNote() {
+  return (
+    <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 leading-relaxed mt-1">
+      Not available on Property. A typical member has about one property claim every other year — fewer
+      than two in a three-year record — so a quiet stretch cannot be told apart from a safe one. Every
+      Property member is charged the same relativity for their size and location, whatever their recent
+      claims. Workers&rsquo; Compensation and General Liability have enough claims to rate on.
+    </p>
+  );
+}
+
+function RenewalUnderwritingPreview({ line }: { line: CoverageLine }) {
   // Starts unselected — an inactive control has no active choice to show.
   const [mode, setMode] = React.useState<'renewAll' | 'nonRenewThreshold' | null>(null);
   return (
@@ -555,6 +601,7 @@ function RenewalUnderwritingPreview() {
           />
         </div>
       )}
+      {line === 'Property' && <PropertyNoSignalNote />}
     </InactivePreview>
   );
 }
@@ -575,7 +622,7 @@ const APPETITE_OPTIONS = [
   { title: 'Strict', description: 'Accept excellent experience only' },
 ] as const;
 
-function NewBusinessAppetitePreview() {
+function NewBusinessAppetitePreview({ line }: { line: CoverageLine }) {
   // Starts unselected, matching Renewal Underwriting above it — an inactive
   // control has no active choice to show, and the sensible default depends
   // on the modifier distribution Stage 4 will report.
@@ -589,6 +636,7 @@ function NewBusinessAppetitePreview() {
           </div>
         ))}
       </div>
+      {line === 'Property' && <PropertyNoSignalNote />}
     </InactivePreview>
   );
 }

@@ -38,7 +38,7 @@ export default function DecisionHistoryPage({ lockedResults, lineView }: Decisio
     ? ['Yr', 'Calendar', 'Cash %', 'Bonds %', 'Equities %', 'Risk Control %']
     : [
         'Yr', 'Calendar', 'Funding Confidence', 'Dividend %', 'Assessment %',
-        'Underwriting Strictness', 'Reinsurance Program',
+        'Reinsurance Program',
         ...(showLoanColumn ? ['Loan Repayment Aggressiveness'] : []),
       ];
 
@@ -100,7 +100,6 @@ export default function DecisionHistoryPage({ lockedResults, lineView }: Decisio
                           {r.dividendBlocked && <span className="text-red-600 text-xs ml-1">(blocked)</span>}
                         </td>
                         <td className="px-4 py-3">{pctDisplay(r.decisions.assessmentPct)}</td>
-                        <td className="px-4 py-3">{r.decisions.underwritingStrictness} / 10</td>
                         <td className="px-4 py-3">
                           {isPool ? 'Varies by line' : placementSummary(lineView, r.decisions)}
                         </td>

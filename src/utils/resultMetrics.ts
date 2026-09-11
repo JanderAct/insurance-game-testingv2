@@ -94,12 +94,6 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
       csvValue: r => r.decisions.assessmentPct,
     },
     {
-      key: 'underwritingStrictness',
-      category: 'Decisions',
-      label: 'Underwriting Strictness',
-      value: r => r.decisions.underwritingStrictness,
-    },
-    {
       key: 'riskControlPct',
       category: 'Decisions',
       label: 'Risk Control %',

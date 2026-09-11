@@ -1809,7 +1809,6 @@ export const SLIDER_RANGES = {
   // negative (to -assessmentPct.max). dividendPct/assessmentPct above remain
   // the fields the engine reads; this exists only for the collapsed input.
   dividendAssessment: { min: -0.25, max: 0.15, step: 0.005, default: 0 },
-  underwritingStrictness: { min: 0, max: 10, step: 1, default: 5 },
   riskControlPct: { min: 0, max: 0.08, step: 0.01, default: 0 },
 };
 

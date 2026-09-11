@@ -53,7 +53,6 @@ export default function ResultSpreadsheetPage({ lockedResults, priorHistory, ins
         // NOMINAL, in the dollars of the year being viewed — matching that
         // year's premium. Roster payroll is frozen in year-1 dollars.
         exposure: safeNumber(getMemberExposure(member, 'WC', selectedResult.yearNumber)),
-        riskQuality: safeNumber(record.riskQuality),
         satisfaction: safeNumber(record.satisfaction),
         expectedLoss: loss ? formatCurrency(loss.expectedLoss) : '',
         coefficientOfVariation: loss ? formatPct(loss.coefficientOfVariation) : '',
@@ -158,13 +157,19 @@ export default function ResultSpreadsheetPage({ lockedResults, priorHistory, ins
       <SpreadsheetTable
         title={`Active Member Roster — Year ${selectedYear}`}
         icon={<Users size={16} />}
+        /* ⚠ NO RISK QUALITY COLUMN, HERE OR IN THE CSV BELOW, AND ITS ABSENCE
+           IS DELIBERATE. This export gave the player every member's exact
+           risk quality to two decimals — the single largest leak of the
+           attribute anywhere in the app, and the one hardest to argue is
+           incidental. It is unobservable in a real pool: an administrator
+           sees claims, not a quality score. surface-privacy-check asserts it
+           stays out of every page and export. */
         columns={[
           'Member ID',
           'Name',
           'Status',
           'Size',
           'Payroll Exposure ($M)',
-          'Risk Quality',
           'Satisfaction',
           'Expected Loss',
           'Loss CV',
@@ -177,7 +182,6 @@ export default function ResultSpreadsheetPage({ lockedResults, priorHistory, ins
           member.status,
           member.size,
           member.exposure,
-          member.riskQuality,
           member.satisfaction,
           member.expectedLoss,
           member.coefficientOfVariation,
@@ -349,7 +353,7 @@ function SpreadsheetTable({
 
 function buildMemberCsv(result: ResultSet | undefined): string {
   if (!result?.memberList || result.memberList.length === 0) {
-    return 'Member ID,Name,Status,Size,Payroll Exposure ($M),Risk Quality,Satisfaction,Expected Loss,Loss CV,Loss Standard Deviation,Simulated Actual Loss';
+    return 'Member ID,Name,Status,Size,Payroll Exposure ($M),Satisfaction,Expected Loss,Loss CV,Loss Standard Deviation,Simulated Actual Loss';
   }
 
   const lossByMember = new Map(
@@ -362,7 +366,6 @@ function buildMemberCsv(result: ResultSet | undefined): string {
     'Status',
     'Size',
     'Payroll Exposure ($M)',
-    'Risk Quality',
     'Satisfaction',
     'Expected Loss',
     'Loss CV',
@@ -380,7 +383,6 @@ function buildMemberCsv(result: ResultSet | undefined): string {
       safeCell(record.status),
       safeCell(record.sizeCategory),
       safeNumber(getMemberExposure(member, 'WC', result.yearNumber)),
-      safeNumber(record.riskQuality),
       safeNumber(record.satisfaction),
       loss ? Math.round(loss.expectedLoss) : '',
       loss ? loss.coefficientOfVariation : '',

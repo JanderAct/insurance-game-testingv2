@@ -409,7 +409,11 @@ export interface LineDecisionSet {
   fundingAtExpected: boolean;
   dividendPct: number;            // 0.00 to 0.15 of premium
   assessmentPct: number;          // 0.00 to 0.25 of premium
-  underwritingStrictness: number; // 0-10
+  // ⚠ underwritingStrictness IS DELETED, NOT DEPRECATED. Above 6 it sorted
+  // candidates by riskQuality descending and kept the top 60% — exact
+  // selection on an attribute the player can no longer see. See
+  // membershipEngine.ts's note at the deleted screen. An older save may still
+  // carry the key; nothing reads it, so it is simply ignored on load.
   riskControlPct: number;         // 0.00 to 0.08 of premium (projected from DecisionSet.riskControlPct)
   // Per-occurrence tower placement, index-aligned to REINSURANCE_TOWER[line].
   // false = that band is RETAINED. ANY COMBINATION IS PERMITTED, including a
