@@ -2320,3 +2320,30 @@ This one is a pure addition, and a capture showing **zero** changed values is a 
 showing a plausible-looking subset moved.
 
 v33 retired from the working tree; v34 kept as the immediate predecessor.
+
+---
+
+## v34 retired from the working tree (at the claims-listing commit)
+
+The line above — "v34 kept as the immediate predecessor" — was written when **v35**
+was the live baseline, and it stopped being true without anyone noticing. By the
+time this was looked at, the live baseline was **v37**: v34 was three generations
+back, and v35 and v36 had each been retired without a successor predecessor being
+kept in their place. So the working tree held the live capture and one stale one
+from an older convention, rather than the adjacent pair the convention describes.
+
+Nothing read it. Both guards resolve their baseline through a hardcoded constant
+(`value-identity-check.ts` and `solo-export-guard.ts`, `_v37` in each), and no
+script, source file or document referenced `_v34` other than this lineage.
+
+`VALUE_IDENTITY_v34.json` (1.69 MiB) and its paired `SOLO_EXPORT_GUARD_v34.json`
+were removed together — half a retired capture pair is worse than either keeping
+both or removing both. **The history is untouched**: every version from v4 to v37
+remains reachable, and the 44 MiB of accumulated baseline churn across 36 captures
+is a separate question from what the working tree carries.
+
+⚠ THE CONVENTION IS THE THING THAT DRIFTED, NOT THIS FILE. "Keep the immediate
+predecessor" needs the predecessor to be retired and replaced at every recapture,
+which is three actions that did not happen. Either do it at each recapture, or say
+plainly that the working tree carries the live capture only and the predecessor is
+reached through git — which is what is actually the case now.
