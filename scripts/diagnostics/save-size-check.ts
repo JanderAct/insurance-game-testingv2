@@ -44,18 +44,23 @@
 // and be useless.
 //
 // ============================================================================
-// ⚠ AND SIZE IS NO LONGER THE BINDING CONSTRAINT ON THIS PATH — FREQUENCY IS.
+// ⚠ AND SIZE IS NO LONGER THE BINDING CONSTRAINT ON THIS PATH — FREQUENCY WAS,
+// AND IT IS NOW FIXED. The timing below is what ONE write costs; it used to be
+// multiplied by 80.
 //
-// App.tsx calls persistState from handleDecisionsChange, which is wired to
+// App.tsx called persistState from handleDecisionsChange, which is wired to
 // SliderInput's onChange, which is a bare <input type="range"> onChange and
 // therefore fires on EVERY INTERMEDIATE VALUE OF A DRAG. The Dividend /
 // Assessment slider spans -0.25..0.15 at step 0.005 — 81 positions, 80 steps
-// end to end — so one drag across it writes the whole save up to 80 times.
+// end to end — so one drag across it wrote the whole save 80 times. A
+// pre-existing defect rather than one compression introduced, and compression
+// made it five times more expensive, which is how it was found.
 //
-// The timing printed below is per write. Multiply it by 80 before deciding
-// whether it is comfortable. This is a pre-existing defect, not one compression
-// introduced, but compression multiplies its cost and that is worth knowing at
-// the same place the cost is measured.
+// saveScheduler.ts now coalesces a drag into ONE write, 400 ms after the last
+// movement, with visibilitychange and pagehide covering the window in between.
+// save-debounce-check owns that claim — 80 writes at delay 0 against 1 at the
+// shipped delay, 2,000 randomised interleavings, three controls. This gate owns
+// only what a single write costs, and prints the drag arithmetic from it.
 // ============================================================================
 
 import { generateGameInstance } from '../../src/utils/instanceGenerator';
@@ -199,10 +204,15 @@ if (bad >= 0) {
     + `${worstPacked.toLocaleString()} stored):`);
   console.log(`  serialise only ${serMs.toFixed(0)} ms   serialise+compress ${encMs.toFixed(0)} ms`
     + `   decompress+parse ${decMs.toFixed(0)} ms`);
-  console.log(`⚠ ONE WRITE. The save is written on EVERY decision change, not once a year: the`);
-  console.log(`  Dividend / Assessment slider takes 80 steps end to end and writes on each, so a`);
-  console.log(`  full-width drag costs about ${(encMs * 80 / 1000).toFixed(1)} s of blocked main thread `
-    + `(${(serMs * 80 / 1000).toFixed(1)} s before compression).`);
+  // ⚠ THE DRAG ARITHMETIC, WHICH IS WHY THIS FIGURE IS PRINTED AT ALL. The
+  // decision path used to write once per slider STEP; saveScheduler now
+  // coalesces a drag into one write. save-debounce-check owns the 80 -> 1
+  // claim on a fake clock; this owns what each write actually costs.
+  console.log(`\nA FULL-WIDTH DRAG of the Dividend / Assessment slider (80 steps):`);
+  console.log(`  before the debounce   80 writes   ${(encMs * 80 / 1000).toFixed(1)} s blocked`
+    + `   (${(serMs * 80 / 1000).toFixed(1)} s of it before the save was compressed)`);
+  console.log(`  after  the debounce    1 write    ${(encMs / 1000).toFixed(2)} s blocked`
+    + `, once the player stops moving`);
 }
 
 console.log('');

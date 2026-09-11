@@ -786,6 +786,43 @@ figure the gate prints a half-truth *while the gate went greener* — the failur
 mode that reads as success, which is how the original quota defect survived for
 the life of the project.
 
+## ⚠ A PER-UNIT COST IS NOT A COST. ASK HOW MANY UNITS BEFORE DECIDING IT IS FINE
+
+Met at the save-compression commit, and it is the companion to the section above:
+that one is about measuring the wrong *representation*, this one is about
+measuring the right quantity and then judging it against the wrong *multiplier*.
+
+Compressing the save took one write from 42 ms to 210 ms. 210 ms is a fine
+number. The question nobody had asked was how many writes an interaction
+produces — and the answer was **80**, because `persistState` hung off a bare
+`<input type="range">` `onChange`, which fires per step rather than per drag.
+16.8 seconds of blocked main thread, from a per-unit figure that looked
+comfortable.
+
+**The rule: whenever a measurement is per-operation, the next measurement is
+operations-per-interaction, and neither one is a verdict on its own.** The
+per-unit cost and the frequency were both cheap to measure and only the product
+meant anything.
+
+### And the harder half: do not pre-judge the answer to a question you are asking
+
+The prompt that commissioned the frequency measurement also said, of the timing,
+*"I expect well under a tenth of a second each and it does not matter if it
+is."* Both halves of that turned out to be wrong, and the prompt contained
+everything needed to see it — it was asking about the frequency in the same
+breath.
+
+The failure is not the estimate being off. Estimating is fine and anchoring a
+reader is useful. **The failure is attaching a verdict — "it does not matter" —
+to a quantity whose meaning depends on an answer you have not received yet.** A
+stated expectation is an invitation to confirm it, and the confirmation is
+cheaper to produce than the contradiction.
+
+So: when commissioning a measurement, state the expectation **or** the
+threshold, not both — and if the threshold depends on another measurement in the
+same request, say so instead of pricing it in advance. The recorded form of this,
+from the user who wrote it: *"210 ms is fine and 210 ms eighty times is not."*
+
 ## Rulings and stopping
 - **A failed verification check stops the work UNCOMMITTED. Whether it blocks is the user's call, not
   Claude Code's.** Diagnosing the cause is exactly right; deciding it doesn't count is not. This applies

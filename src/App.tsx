@@ -27,7 +27,8 @@ import { generateGameInstance } from './utils/instanceGenerator';
 import { processYear, applyLoanAuthorizations, aggregateTermsRetainedPer100, type ProcessYearResult } from './utils/simulationEngine';
 import { runPriorHistory, toHistoricalYear } from './utils/priorHistoryEngine';
 import { defaultDecisionSet } from './utils/decisionDefaults';
-import { SAVE_KEY, unpackSave, writeSave, type SaveOutcome } from './utils/gameSave';
+import { SAVE_KEY, unpackSave, writeSave, type SaveEnvelope, type SaveOutcome } from './utils/gameSave';
+import { createSaveScheduler, type SaveScheduler } from './utils/saveScheduler';
 import { getMemberExposure, selectResultView } from './utils/lineHelpers';
 import { computeFundingConsequence } from './utils/fundingConsequence';
 import { endingPosition } from './utils/endingPosition';
@@ -247,12 +248,67 @@ export default function App() {
   // localStorage quota. gameSave strips the per-claim flow that made up 65-70%
   // of it and reports what happened; this turns a failure into a banner the
   // player cannot miss. See gameSave.ts for the measurement and the budget.
-  function persistState(gs: GameState, sf: StartingFinancials, im: Member[], cd: DecisionSet) {
-    const outcome = writeSave(
-      { gameState: gs, startingFinancials: sf, initialMembers: im, currentDecisions: cd },
-      window.localStorage,
+  //
+  // ⚠ AND *WHEN* IT IS WRITTEN LIVES IN saveScheduler.ts, FOR THE SAME REASON.
+  // The decision path fires per slider STEP, not per interaction; the scheduler
+  // coalesces a drag into one write and is a pure module so a gate can prove it
+  // never drops a value. See its header.
+  const scheduler = React.useRef<SaveScheduler<SaveEnvelope> | null>(null);
+  if (scheduler.current === null) {
+    scheduler.current = createSaveScheduler<SaveEnvelope>(
+      // ⚠ THE WRITE IS OUTSIDE setSaveFailure, not inside an updater. A state
+      // updater must be pure — React invokes it twice under StrictMode — and a
+      // write in there would run twice per save in development.
+      env => {
+        const outcome = writeSave(env, window.localStorage);
+        setSaveFailure(outcome.ok ? null : outcome);
+      },
+      { setTimer: (fn, ms) => window.setTimeout(fn, ms), clearTimer: id => window.clearTimeout(id) },
     );
-    setSaveFailure(outcome.ok ? null : outcome);
+  }
+
+  // ⚠ THE LIFECYCLE FLUSH IS WHAT MAKES THE DEBOUNCE SAFE, not an extra. A
+  // trailing debounce leaves the last value in memory for up to
+  // SAVE_DEBOUNCE_MS; these two events are where a tab that is about to stop
+  // existing says so. visibilitychange covers mobile backgrounding (where the
+  // tab can be killed with no further event); pagehide covers navigation and
+  // close. Neither alone is sufficient — see saveScheduler.ts. The unmount
+  // cleanup flushes too, so no path out of this component leaves a write owed.
+  React.useEffect(() => {
+    const s = scheduler.current!;
+    const onFlush = () => s.flush();
+    const onVisibility = () => { if (document.visibilityState === 'hidden') s.flush(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', onFlush);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', onFlush);
+      s.flush();
+    };
+  }, []);
+
+  /** Write now. For the once-a-turn events: starting a game, committing a year. */
+  function persistState(gs: GameState, sf: StartingFinancials, im: Member[], cd: DecisionSet) {
+    scheduler.current!.now(
+      { gameState: gs, startingFinancials: sf, initialMembers: im, currentDecisions: cd },
+    );
+  }
+
+  /**
+   * Write once the player stops moving. For the per-step decision path ONLY.
+   *
+   * ⚠ THIS IS THE ONLY CALLER THAT MAY DEBOUNCE, and the reason is a frequency
+   * measurement rather than a category: handleDecisionsChange is the only
+   * persistState caller on a path that fires more than once per turn, because
+   * SliderInput is the only continuous input in the decision tree and
+   * DecisionsPage's onChange is its only sink. A second high-frequency caller
+   * appearing later belongs here too; a once-a-turn one does not, because
+   * delaying it buys nothing and widens the window above for no reason.
+   */
+  function persistStateSoon(gs: GameState, sf: StartingFinancials, im: Member[], cd: DecisionSet) {
+    scheduler.current!.soon(
+      { gameState: gs, startingFinancials: sf, initialMembers: im, currentDecisions: cd },
+    );
   }
 
   const handleStartGame = useCallback((settings: GameSetupSettings) => {
@@ -340,14 +396,23 @@ export default function App() {
     setInitialMembers([]);
     setCurrentDecisions(defaultDecisionSet(1));
     setLineView('pool');
+    // ⚠ DISCARD BEFORE REMOVING, OR THE OLD GAME COMES BACK. A decision write
+    // pending from the last few hundred milliseconds would fire after this
+    // removeItem and write the abandoned game straight back into the key the
+    // player just cleared. See SaveScheduler.discard.
+    scheduler.current!.discard();
     localStorage.removeItem(SAVE_KEY);
     setActiveTab('setup');
   }, []);
 
+  // ⚠ DEBOUNCED, AND THIS IS THE ONLY CALLER THAT IS. SliderInput's onChange is
+  // a bare <input type="range">, which emits one event per STEP: the Dividend /
+  // Assessment slider's 80 steps wrote the whole save 80 times for one drag.
+  // See persistStateSoon and saveScheduler.ts.
   const handleDecisionsChange = useCallback((d: DecisionSet) => {
     setCurrentDecisions(d);
     if (gameState && startingFinancials) {
-      persistState(gameState, startingFinancials, initialMembers, d);
+      persistStateSoon(gameState, startingFinancials, initialMembers, d);
     }
   }, [gameState, startingFinancials, initialMembers]);
 
