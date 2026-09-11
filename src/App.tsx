@@ -27,7 +27,7 @@ import { generateGameInstance } from './utils/instanceGenerator';
 import { processYear, applyLoanAuthorizations, aggregateTermsRetainedPer100, type ProcessYearResult } from './utils/simulationEngine';
 import { runPriorHistory, toHistoricalYear } from './utils/priorHistoryEngine';
 import { defaultDecisionSet } from './utils/decisionDefaults';
-import { SAVE_KEY, writeSave, type SaveOutcome } from './utils/gameSave';
+import { SAVE_KEY, unpackSave, writeSave, type SaveOutcome } from './utils/gameSave';
 import { getMemberExposure, selectResultView } from './utils/lineHelpers';
 import { computeFundingConsequence } from './utils/fundingConsequence';
 import { endingPosition } from './utils/endingPosition';
@@ -124,7 +124,16 @@ export default function App() {
     try {
       const saved = localStorage.getItem(SAVE_KEY);
       if (saved) {
-        const { gameState: gs, startingFinancials: sf, initialMembers: im, currentDecisions: cd } = JSON.parse(saved);
+        // ⚠ unpackSave THROWS ON A SAVE WRITTEN BEFORE COMPRESSION, AND THE
+        // catch BELOW CLEARING THE KEY IS THE DESIGNED OUTCOME RATHER THAN
+        // DAMAGE CONTROL. There is deliberately no format detection and no
+        // dual-path loader — see gameSave.ts. An old raw-JSON save is not
+        // base64, atob rejects it, and the player starts a new game.
+        const { gameState: gs, startingFinancials: sf, initialMembers: im, currentDecisions: cd } =
+          unpackSave(saved) as {
+            gameState: GameState; startingFinancials: StartingFinancials;
+            initialMembers: Member[]; currentDecisions: DecisionSet;
+          };
 
         // Validate critical fields exist before restoring
         if (gs && sf && Array.isArray(gs.priorHistory) && sf.totalMarketExposure !== undefined && sf.surplus !== undefined) {

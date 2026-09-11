@@ -13,9 +13,16 @@
 //
 // WHAT IT DOES
 //   Arm A plays N years straight through.
-//   Arm B plays SAVE_AT years, serialises through gameSave, JSON.parses it back,
-//          and continues from the restored object to year N.
+//   Arm B plays SAVE_AT years, goes out through packSave (strip, serialise,
+//          DEFLATE, base64) and back through unpackSave, and continues from the
+//          restored object to year N.
 //   The two end states must agree.
+//
+// ⚠ THE CODEC IS LIVE IN BOTH ARMS' ROUND TRIP, NOT STUBBED. Arm B compresses
+// and decompresses for real, so if compression moved a single simulation value
+// the year-by-year comparison below fails and THAT is the finding. Testing the
+// serialiser and skipping the codec would prove nothing about the thing that
+// changed.
 //
 // ⚠ THE POINT IS THE YEARS AFTER THE RELOAD, NOT THE RESTORED SNAPSHOT. Checking
 // that the parsed object equals the one written is a JSON tautology. What
@@ -52,7 +59,9 @@ import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
-import { serialiseSave, SAVE_STRIPPED_KEYS } from '../../src/utils/gameSave';
+import {
+  serialiseSave, packSave, unpackSave, decodeSave, SAVE_STRIPPED_KEYS,
+} from '../../src/utils/gameSave';
 import { regenerateLineYearClaims } from '../../src/utils/claimRegeneration';
 import type { CoverageLine, GameState } from '../../src/types/simulation';
 
@@ -150,10 +159,14 @@ for (let g = 0; g < GAMES; g++) {
   let b = start(id, seed);
   for (let y = 1; y <= SAVE_AT; y++) b = advance(b, y);
 
-  const payload = serialiseSave({
+  // ⚠ packSave / unpackSave, NOT serialiseSave / JSON.parse. The codec is the
+  // thing that changed, and a gate that tests the serialiser and skips the
+  // compression step proves nothing about it — the reportedYear standard: a
+  // value written and not compared says nothing about itself.
+  const payload = packSave({
     gameState: b, startingFinancials: {}, initialMembers: [], currentDecisions: b.currentDecisions,
   });
-  const restored = JSON.parse(payload).gameState as GameState;
+  const restored = (unpackSave(payload) as { gameState: GameState }).gameState;
 
   // ⚠ THE RESTORED OBJECT IS USED AS-IS. No repair, no re-hydration, no
   // reaching back into `b`. If the engine needs something JSON cannot carry —
@@ -203,9 +216,9 @@ for (let g = 0; g < GAMES; g++) {
   for (let y = 1; y <= YEARS; y++) a = advance(a, y);
   let b = start(id, seed);
   for (let y = 1; y <= SAVE_AT; y++) b = advance(b, y);
-  const restored = JSON.parse(serialiseSave({
+  const restored = (unpackSave(packSave({
     gameState: b, startingFinancials: {}, initialMembers: [], currentDecisions: b.currentDecisions,
-  })).gameState as GameState;
+  })) as { gameState: GameState }).gameState;
   let c = restored;
   for (let y = SAVE_AT + 1; y <= YEARS; y++) c = advance(c, y);
 
@@ -270,6 +283,72 @@ console.log('');
 console.log('REGENERATION, FIELD BY FIELD:');
 console.log(`  line-years redrawn ${regenYears}, claims compared ${regenClaims}, occurrences compared ${regenOccs}`);
 console.log(`  ${regenFail.length === 0 ? 'every regenerated claim and occurrence is identical to the one originally drawn' : `${regenFail.length} difference(s) — see FAILED`}`);
+
+// ============================================================================
+// THE CODEC, ON ITS OWN TERMS.
+//
+// The comparison above already runs through it, and that is the real test. This
+// section covers the two things that comparison structurally cannot see: that
+// the codec is byte-exact rather than merely good enough for the fields the
+// engine happens to read, and that a save it did not write is REJECTED rather
+// than half-understood.
+// ============================================================================
+{
+  let a = start('CODEC', 7_711_003);
+  for (let y = 1; y <= SAVE_AT; y++) a = advance(a, y);
+  const env = {
+    gameState: a, startingFinancials: {}, initialMembers: [], currentDecisions: a.currentDecisions,
+  };
+  const raw = serialiseSave(env);
+  const packed = packSave(env);
+
+  // ⚠ BYTE-EXACT, NOT FIELD-EQUAL. decodeSave(packSave(x)) must reproduce
+  // serialiseSave(x) CHARACTER FOR CHARACTER. Comparing parsed objects would
+  // hide a codec that mangled a field nothing in the engine reads today, and
+  // "nothing reads it today" is how the claims register ended up in the save.
+  const back = decodeSave(packed);
+  if (back !== raw) {
+    const at = (() => { for (let i = 0; i < Math.max(raw.length, back.length); i++) if (raw[i] !== back[i]) return i; return -1; })();
+    fail(`THE CODEC IS LOSSY: decodeSave(packSave(x)) !== serialiseSave(x), first difference at `
+      + `character ${at} (${JSON.stringify(raw.slice(at, at + 40))} vs ${JSON.stringify(back.slice(at, at + 40))}). `
+      + `Every simulation value on the far side of a reload is suspect.`);
+  }
+
+  // ⚠ THE POSITIVE CONTROL FOR THE COMPARISON ABOVE. Change one character of
+  // the payload and the decode must NOT come back equal to the original —
+  // either it throws, or it returns something different. If a corrupted payload
+  // decoded cleanly to the right answer, `back !== raw` could never fire and
+  // the check above would be decorative.
+  const i = Math.floor(packed.length / 2);
+  const corrupt = packed.slice(0, i) + (packed[i] === 'A' ? 'B' : 'A') + packed.slice(i + 1);
+  let corruptDetected = false;
+  try { corruptDetected = decodeSave(corrupt) !== raw; } catch { corruptDetected = true; }
+  if (!corruptDetected) {
+    fail('POSITIVE CONTROL FAILED: a payload with a flipped character decoded back to the '
+      + 'original save, so the byte-exact comparison above cannot detect a codec fault');
+  }
+
+  // ⚠ AN UNCOMPRESSED SAVE MUST BE REJECTED, AND THAT IS THE DESIGNED
+  // BEHAVIOUR RATHER THAN A GAP. There is no format detection and no migration
+  // — see gameSave.ts. A save written before this commit is raw JSON, which is
+  // not base64, and the loader's catch clears the key. The failure this guards
+  // against is the opposite one: a decode that SUCCEEDS on raw JSON and hands
+  // the engine a half-parsed object.
+  let legacyRejected = false;
+  try { decodeSave(raw); } catch { legacyRejected = true; }
+  if (!legacyRejected) {
+    fail('an uncompressed (pre-compression) save was accepted by decodeSave instead of throwing — '
+      + 'the loader would hand the engine whatever that produced rather than starting a new game');
+  }
+
+  console.log('');
+  console.log('THE CODEC:');
+  console.log(`  ${raw.length.toLocaleString()} raw -> ${packed.length.toLocaleString()} stored `
+    + `(${(raw.length / packed.length).toFixed(2)}x), byte-exact on the way back: `
+    + `${back === raw ? 'yes' : 'NO'}`);
+  console.log(`  corrupted payload detected: ${corruptDetected ? 'yes' : 'NO'}   `
+    + `uncompressed save rejected: ${legacyRejected ? 'yes' : 'NO'}`);
+}
 
 // ============================================================================
 console.log('');

@@ -39,13 +39,105 @@
 // that is exactly why the failure below is loud rather than assumed impossible.
 //
 // ⚠ THE BUDGET IS A GATE THRESHOLD, NOT THE BROWSER'S LIMIT. It exists to fail
-// in CI before it fails in a facilitated session. 4,000,000 characters is 76% of
-// the measured limit; the reachable worst case (10 years x 3 lines, the longest
-// the setup slider offers) serialises to about 3.28M, which is 82% of the budget
-// and 63% of the browser's. The remaining 18% is roughly one more game-year at
-// ~208k characters per year — so the gate goes red about a year before a player
-// would, which is the point.
+// in CI before it fails in a facilitated session. See THE BUDGET, RE-DERIVED
+// below for what it is now and why — the old figure was a share of the quota
+// chosen when the payload went to storage as raw JSON, and it does not survive
+// the change.
+//
 // ============================================================================
+// THE SAVE IS COMPRESSED, AND THE REASON IS THAT EVERY OTHER OPTION COST
+// SOMETHING VISIBLE.
+//
+// The experience modifier's ledger took the raw payload to 4,052,741 characters
+// at the reachable worst case — 101% of the old 4,000,000 budget, 77% of the
+// measured quota. Every alternative removes something a page renders or a
+// mechanic reads. Compression removes nothing.
+//
+// ⚠ MEASURE THE STORED SIZE, NOT THE STRING LENGTH, BECAUSE THEY ARE NOT THE
+// SAME NUMBER AND THE DIFFERENCE IS A FACTOR OF TWO. Chromium encodes a
+// localStorage value as one byte per character IF the whole string is ASCII,
+// and as UTF-16 — two bytes per character — the moment it is not. A codec whose
+// output is dense but non-ASCII therefore charges double for every character it
+// saved, and `payload.length` reports a ratio that storage does not honour.
+//
+// Measured on the worst reachable save (4,052,741 raw characters, all ASCII),
+// every row on that same save. ⚠ lz-string IS NOT A DEPENDENCY — it was
+// installed to produce these rows and removed again, so this table is the
+// record rather than something a reader can re-run without reinstalling it.
+//
+//   codec                         chars      STORED     ratio   enc ms  dec ms
+//   lz-string compress()        385,405     770,810      5.26     1668     265
+//   lz-string compressToUTF16   411,099     822,198      4.93     1715     349
+//   lz-string compressToBase64  1,027,748  1,027,748     3.94     1696     273
+//   deflate(6) + base64         1,097,556  1,097,556     3.69      168      45
+//
+// The first row is the trap in one line. It looks like a 10.5x win on string
+// length (4,052,741 -> 385,405) and is a 5.3x win on bytes, because every one
+// of those characters is charged twice. Reporting the apparent figure would
+// have overstated the result by exactly 2x — and it would have been a
+// measurement, run and recorded, not a guess.
+//
+// ⚠ AND THE ONE THAT WINS ON SIZE IS NOT THE ONE THAT SHIPS. Every lz-string
+// variant beats deflate on stored bytes, including the ASCII one — this is not
+// a case of base64 forcing the choice. deflate+base64 is 42% larger than
+// lz-string's densest output and TEN TIMES faster to produce, and speed is the
+// binding constraint here while size is not:
+//
+//   - The compressed worst case is 21% of the measured quota either way. There
+//     is 4.8x of headroom at 3.69x, so 5.26x buys nothing that is needed.
+//   - The write is on a path that fires far more often than once a year (see
+//     save-size-check's frequency note). Spending 1.5 extra seconds of blocked
+//     main thread per write to reclaim 327KB of a quota that is already 79%
+//     empty is a bad trade, and it is a worse one 80 times during a drag.
+//   - lz-string's densest variant emits code units across the whole 16-bit
+//     range, lone surrogates included — measured, not assumed. localStorage
+//     tolerates that in practice; it is still an invalid-UTF-16 string sitting
+//     in a player's browser for no benefit this project needs.
+//
+// ⚠ AND THE OUTPUT IS ASCII BY CONSTRUCTION, WHICH IS WORTH MORE THAN THE
+// RATIO IT COSTS. Because base64's alphabet is ASCII, the stored byte count
+// EQUALS the string length for every possible save, so the size gate cannot be
+// wrong about storage the way it would be if it measured a UTF-16 payload.
+// That holds even if a member's name is non-ASCII: the raw JSON would be, the
+// stored payload still is not.
+//
+// ============================================================================
+// THE BUDGET, RE-DERIVED — 1,500,000 CHARACTERS.
+//
+// The old 4,000,000 was 76% of the measured quota, and carrying it forward
+// would leave a gate that reads 27% and never fires again. A threshold that
+// cannot go red is worse than the red it replaced. So:
+//
+//   reachable worst case    1,097,556 chars   (10 years x 3 lines, defaults)
+//   budget                  1,500,000 chars   1.37x the worst case
+//   measured quota          5,242,613 chars   the budget is 29% of it
+//
+// Two margins, and they answer different questions.
+//
+//   AGAINST GROWTH: 1.37x, which is a FEATURE that adds a third to the save.
+//   That is now the right frame and "one more game-year" is not. The old budget
+//   was set a game-year ahead of the player because the save grew with play and
+//   the player could out-run it; at 68k compressed characters per game-year the
+//   budget is 5.9 further years past 10, and 10 is the most the setup slider
+//   offers, so a player can no longer reach it by playing. What can reach it is
+//   another ledger — the experience modifier's added 5.9% to the raw payload
+//   and is what took this gate red in the first place, so the margin is roughly
+//   six more features of that shape.
+//
+//   ⚠ WHICH MEANS THE GATE'S JOB CHANGED, AND PRETENDING OTHERWISE WOULD BE
+//   THE MISTAKE. It used to be a quota alarm. It is now a growth tripwire, and
+//   it is set tight enough to be one — 73% of budget at the worst reachable
+//   save, against 96% before this commit and 101% after the modifier landed.
+//
+//   AGAINST THE ACCOUNTING THIS PROJECT COULD NOT MEASURE: the header above
+//   says other engines were not reachable and may charge differently. The worst
+//   plausible difference is two bytes per character for ASCII as well. At that
+//   accounting 1,500,000 characters is 3,000,000 bytes, which is 57% of the
+//   measured 5 MiB — still safe, where the old budget under the same pessimism
+//   would have been 8,000,000 bytes and over the line.
+// ============================================================================
+
+import { deflateSync, inflateSync, strFromU8, strToU8 } from 'fflate';
 
 /**
  * The storage key. A persisted identifier, not a display string.
@@ -147,8 +239,15 @@ export const SAVE_STRIPPED_KEYS: readonly string[] = [
 /** Measured against a real Chromium — see the header. Not a spec figure. */
 export const MEASURED_QUOTA_CHARS = 5_242_613;
 
-/** The CI threshold. Deliberately below the measured quota — see the header. */
-export const SAVE_BUDGET_CHARS = 4_000_000;
+/**
+ * The CI threshold, ON THE COMPRESSED PAYLOAD — see THE BUDGET, RE-DERIVED.
+ *
+ * ⚠ THIS IS NOT THE OLD 4,000,000 SCALED DOWN. It is 1.37x the reachable worst
+ * case, chosen so the gate keeps firing on growth rather than reading 27% and
+ * going quiet, and it survives the two-bytes-per-character accounting the quota
+ * measurement could not rule out.
+ */
+export const SAVE_BUDGET_CHARS = 1_500_000;
 
 export interface SaveEnvelope {
   gameState: unknown;
@@ -168,6 +267,78 @@ export interface SaveEnvelope {
 export function serialiseSave(env: SaveEnvelope): string {
   return JSON.stringify(env, (key, value) =>
     (SAVE_STRIPPED_KEYS.includes(key) ? undefined : value));
+}
+
+/**
+ * String.fromCharCode.apply's argument count. 8,192 rather than the ~65,000 V8
+ * tolerates: the spread is the only part of this codec that can blow a stack,
+ * and the chunk loop costs nothing measurable at either size.
+ */
+const B64_CHUNK = 8192;
+
+/**
+ * JSON in, storable ASCII out. DEFLATE, then base64.
+ *
+ * ⚠ btoa AND atob RATHER THAN A HAND-ROLLED BASE64, AND IT IS NOT A STYLE
+ * PREFERENCE. Both are globals in every browser and in Node 16+, so the gates
+ * and the app run the same code — and the engine's implementation measured 8x
+ * faster than the obvious loop (10.4 ms against 79.2 ms on the worst save),
+ * which on a write path this hot is the difference between noticeable and not.
+ */
+export function encodeSave(json: string): string {
+  const deflated = deflateSync(strToU8(json), { level: 6 });
+  let binary = '';
+  for (let i = 0; i < deflated.length; i += B64_CHUNK) {
+    binary += String.fromCharCode.apply(
+      null, deflated.subarray(i, i + B64_CHUNK) as unknown as number[],
+    );
+  }
+  return btoa(binary);
+}
+
+/**
+ * The inverse. THROWS on anything that is not a payload this codec produced.
+ *
+ * ⚠ THERE IS NO FORMAT DETECTION, NO DUAL PATH AND NO MIGRATION, AND THE
+ * THROW IS THE DESIGNED BEHAVIOUR RATHER THAN AN UNHANDLED CASE. A save
+ * written before this commit is raw JSON: it opens with `{`, which is not in
+ * base64's alphabet, so atob rejects it here and App.tsx's loader clears the
+ * key and starts a new game. That is the intended outcome — nobody is mid-game
+ * on an uncompressed save that matters, and a dual-path loader would be a
+ * permanent second format to keep working for a one-off that has already
+ * passed. A save that reaches inflateSync but is not a DEFLATE stream throws
+ * there, for the same reason and to the same effect.
+ */
+export function decodeSave(payload: string): string {
+  let bytes: Uint8Array;
+  try {
+    const binary = atob(payload);
+    bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  } catch {
+    throw new Error(
+      '[save] the stored value is not base64, so it is not a compressed save. '
+      + 'Saves written before the save was compressed are discarded by design.',
+    );
+  }
+  return strFromU8(inflateSync(bytes));
+}
+
+/**
+ * The envelope as it goes to storage: stripped, serialised, compressed.
+ *
+ * ⚠ THIS IS THE FIGURE THE BUDGET IS ABOUT, and serialiseSave's is not. The
+ * size gate measures this one; the round-trip gate goes out and back through
+ * this one. Measuring the pre-compression string would be the reportedYear
+ * mistake — a value produced and never compared proves nothing about itself.
+ */
+export function packSave(env: SaveEnvelope): string {
+  return encodeSave(serialiseSave(env));
+}
+
+/** Storage payload back to the parsed envelope. Throws — see decodeSave. */
+export function unpackSave(payload: string): unknown {
+  return JSON.parse(decodeSave(payload));
 }
 
 /**
@@ -205,7 +376,7 @@ export type SaveOutcome =
  * the failure, and let the UI make it impossible to miss.
  */
 export function writeSave(env: SaveEnvelope, store: SaveStore): SaveOutcome {
-  const payload = serialiseSave(env);
+  const payload = packSave(env);
   try {
     store.setItem(SAVE_KEY, payload);
     return { ok: true, chars: payload.length };

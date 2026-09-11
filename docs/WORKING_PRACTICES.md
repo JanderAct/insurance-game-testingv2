@@ -747,6 +747,45 @@ paths SEPARATE, not where they share a source.** Upstream of the fork, every
 perturbation is invisible by construction, and a green run there proves the gate
 is well-derived rather than that it is watching anything.
 
+## ⚠ MEASURE THE REPRESENTATION THE BUDGET IS ABOUT, NOT THE ONE IN FRONT OF YOU
+
+A companion to the section above, met at the save-compression commit, and the
+difference is that here the two representations are not two views of one number
+— one of them is simply not the quantity being asserted.
+
+**The rule: when a threshold is about a resource, measure the resource. A count
+of the thing in memory is a proxy, and a proxy is wrong exactly when the
+encoding changes — which is the moment you are most likely to be measuring it.**
+
+`save-size-check` asserted `serialiseSave(env).length` against a character
+budget, and that was right for as long as the payload went to `localStorage` as
+raw ASCII JSON, because Chromium charges one byte per character for an ASCII
+value. Compressing the save broke the equivalence in two ways at once:
+
+- The stored string is no longer the measured one. Pointing the gate at the
+  pre-compression string would have asserted a number that never reaches
+  storage — the `reportedYear` fault, a value produced and never compared.
+- **And the byte cost per character is not a constant.** Chromium stores a
+  non-ASCII value as UTF-16, at *two* bytes per character. `lz-string`'s
+  `compress()` shortens this project's save by 10.5x on `length` and by 5.3x on
+  bytes, because every character it saved is charged double. Reporting the
+  apparent figure would have overstated the result by exactly 2x — and it would
+  have been a *measurement*, run and recorded, not a guess.
+
+Two things follow, and the second is the one worth the space.
+
+**Prefer the encoding that makes the proxy exact.** base64's alphabet is ASCII,
+so stored bytes equal string length for every possible save — a property of the
+codec, which is why the denser codec lost despite winning on ratio. It is worth
+paying for a representation that cannot be mis-measured.
+
+**And assert the property you are relying on, rather than resting on it.** The
+gate now checks that the payload is ASCII and fails if it is not, naming the 2x.
+Without that, a future codec that packs denser into UTF-16 would make every
+figure the gate prints a half-truth *while the gate went greener* — the failure
+mode that reads as success, which is how the original quota defect survived for
+the life of the project.
+
 ## Rulings and stopping
 - **A failed verification check stops the work UNCOMMITTED. Whether it blocks is the user's call, not
   Claude Code's.** Diagnosing the cause is exactly right; deciding it doesn't count is not. This applies
