@@ -26,6 +26,7 @@
 //   npx tsx scripts/gates.ts --slow      the slow tier
 //   npx tsx scripts/gates.ts --all       both
 //   npx tsx scripts/gates.ts --list      print the manifest and exit
+//   npx tsx scripts/gates.ts --all --record-timings   rewrite gate-timings.json
 //   npx tsx scripts/gates.ts --jobs N    concurrency (default 3 of 4 cores)
 //
 // or `npm run gates`, `npm run gates:slow`, `npm run gates:all`.
@@ -40,9 +41,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIAG = path.join(__dirname, 'diagnostics');
 
 // ============================================================================
-// FAST — the tier that runs on every commit. 47 gates, about 10 minutes of CPU
-// and a little over 2 minutes of wall clock at 3-way concurrency. Seconds are
-// measured, not estimated, on a 4-core box.
+// FAST — the tier that runs on every commit. 52 gates, 18 minutes of CPU and a
+// MEASURED 5m59s of wall clock at 3-way concurrency.
+//
+// ⚠ MEMBERSHIP IS DECIDED BY TIER_THRESHOLD_SECONDS, NOT BY JUDGEMENT, and the
+// manifest check enforces it. See that constant for how the boundary was
+// derived; the short version is head/tail breaks on the measured distribution,
+// which put it at 88 seconds.
 //
 // ⚠ FOUR OF THESE WERE SITTING IN PROBES WITH A BROKEN EXIT PATH, not with
 // nothing to say. gl-claim-check, gl-cutover-check, reinsurance-tower-check and
@@ -54,42 +59,33 @@ const DIAG = path.join(__dirname, 'diagnostics');
 // built and used as gates throughout.
 //
 // ⚠ THE SPLIT IS BY MEASURED COST, NOT BY IMPORTANCE, and nothing in SLOW is
-// less load-bearing than what is here. It is three scripts — see SLOW's note
-// for why it was one, which was an unfinished measurement rather than a finding.
+// less load-bearing than what is here. SLOW now names what deferring each of
+// its gates costs, because a tier assignment recording only a runtime is how a
+// gate's value gets forgotten.
 //
-// ⚠ AND THE COST WAS NOT WHERE IT WAS EXPECTED. cohort-stock-check runs SIXTY
-// YEARS and was assumed to be one of the expensive ones; it takes 4 seconds,
-// because it runs 4 games. The only genuinely slow gate is property-tower-mc at
-// 571s, which is a Monte Carlo and is 63% of the whole set's CPU on its own.
-// Every other gate finishes inside 44 seconds. Splitting by reputation would
-// have moved the wrong four scripts and saved nothing.
+// ⚠ AND THE COST WAS NOT WHERE REPUTATION PUT IT — TWICE. cohort-stock-check
+// runs SIXTY YEARS and takes 4 seconds, because it runs 4 games. Meanwhile
+// cession-path-independence sat in this tier at 1015 seconds — 30% of its whole
+// CPU — for as long as nothing measured it. The threshold exists because the
+// second of those is the one that repeats.
 // ============================================================================
 const FAST: string[] = [
   'actuarial-memo-check',            //   5s
   'audit-formula-check',             //  18s
-  'cession-path-independence',       // 785s   GAMES=600 — it could not resolve its subject below 300, and the
-                                     //         calendar blend thinned it further; see the note at its own GAMES
   'cession-uplift-basis',            //  22s
   'claims-memo-check',                //   8s   every displayed row names its member; 3 controls
   'claims-workbook-check',           //  17s
-  'clf-label-backtest-check',        //  20s   GREEN since the maturation book — worst label error -3.2pp against 5pp
   'closure-draw-check',              //   3s
   'cohort-stock-check',              //   4s   (sixty years, four games)
   'composition-table-check',         //  17s   STAGE 1 — the magnitude law against 200/(age+1); GL only
   'development-cession-check',       //  14s
   'ending-position-check',           //   6s
   'enrolment-independence-check',    //   2s
-  'experience-pricing-check',        //  66s   PRICING_TRIANGLE's retirement condition — GREEN, see the flag
   'export-number-format-check',      //  12s
   'funding-basis-check',             //  10s
   'funding-expected-check',          //   2s
   'gl-claim-check',                  //  12s   PROMOTED at this commit — it always asserted; it could not exit
   'gl-cutover-check',                //   6s   PROMOTED at this commit
-  'gl-supplied-clf-check',           //  44s
-  'ibner-null-check',                //  40s
-  'marketplace-generation-check',    //  28s   200 seeds — the sample size IS the claim, see its header
-  'maturity-anchor-check',           //  76s   the cohort must develop back to its own register, both arms
-                                     //         GAMES 16 -> 48 at IBNER_CALENDAR_RHO — see the note at its own GAMES
   'member-experience-basis-check',   //   5s   expectedAtManual is the expectation at NEUTRAL risk quality and
                                      //         out-ranks expectedAtOwnRq in every measured game-year
   'member-experience-mod-check',     //  11s   the mod is centred on the book it rates, cannot see the year it
@@ -102,9 +98,7 @@ const FAST: string[] = [
   'paid-headroom-check',             //   7s
   'paid-ledger-check',               //   4s
   'panel-engine-parity-check',       //   4s
-  'pin-vs-band-check',               //  27s
   'pool-aggregation-check',          //   2s
-  'pregame-acceptance-check',        //  38s   STAGE 1 BLOCKER — the search must still accept on the shipped path
   'property-claim-check',            //   3s
   'ratemaking-loop-check',           //  80s   THE ACCEPTANCE TEST — 4/4; condition 3 is paired with two null controls
   'ratio-basis-check',               //   7s
@@ -166,10 +160,58 @@ const FAST: string[] = [
 // reset a real failure to 0.)
 // ============================================================================
 const SLOW: string[] = [
-  'martingale-equivalence-check',    // 348s — STAGE 1; sized so its own SE is a fifth of the tolerance
-  'property-tower-mc',               // 571s — Monte Carlo over the tower
-  'gl-clf-grid-derive',              // 702s — derives GL's CLF grid; asserts monotonicity on it
-  'wc-clf-grid-derive',              // 166s — the same, for WC, with the same exit semantics
+  // --- were here already -------------------------------------------------
+  'martingale-equivalence-check',    // 339s — STAGE 1; sized so its own SE is a fifth of the tolerance
+  'property-tower-mc',               // 956s — Monte Carlo over the tower
+  'gl-clf-grid-derive',              // 830s — derives GL's CLF grid; asserts monotonicity on it
+  'wc-clf-grid-derive',              // 224s — the same, for WC, with the same exit semantics
+
+  // --- moved out of FAST by TIER_THRESHOLD_SECONDS -------------------------
+  // ⚠ EACH LINE NAMES WHAT DEFERRING IT COSTS. A tier assignment that records
+  // only a runtime is how a gate's value gets forgotten and its move gets
+  // re-litigated. These run at merge; a regression any of them owns now
+  // arrives at merge rather than at commit.
+  //
+  // 1015s — ⚠ THE ONE WITH A NAMED INCIDENT, AND THE MOST EXPENSIVE DEFERRAL
+  // HERE. It went GAMES 300 -> 600 because it could not resolve its subject at
+  // 300: a common factor collapses the effective sample of anything averaging
+  // over cohorts within a line-year, and the correlated-cohort work made that
+  // bite. At the departure rebuild (68cbeb9) it caught a real regression that
+  // was first called pre-existing from its own header, then run at the parent
+  // and shown not to be. That catch now arrives at merge. It is 16.9 minutes on
+  // its own — 30% of the old FAST tier — and it is the single reason FAST cost
+  // what it did.
+  'cession-path-independence',       // 1015s
+  // 285s — GL's supplied-CLF path. Pricing, not display; an engine commit that
+  // moves GL's CLF handling loses its commit-time cover.
+  'gl-supplied-clf-check',           //  285s
+  // 230s — the IBNER null arm. Already EXPECTED_RED (its null is built from the
+  // cohort law's constants and the per-claim law does not read them), so what
+  // defers is the detection of a NEW failure inside a file already known red.
+  'ibner-null-check',                //  230s
+  // 162s — PRICING_TRIANGLE's retirement condition. Green, and it guards a flag
+  // that is off; the deferral costs least of the nine.
+  'experience-pricing-check',        //  162s
+  // 149s — 200 seeds, and the sample size IS the claim. Marketplace generation
+  // is upstream of every roster, so this is a wide subject cheaply deferred
+  // only because marketplace generation rarely changes.
+  'marketplace-generation-check',    //  149s
+  // 135s — already EXPECTED_RED (exit 3) and currently an UNEXPECTED PASS; the
+  // open item it was built for appears fixed. Deferring a gate in that state
+  // costs little and its EXPECTED_RED entry wants revisiting either way.
+  'pin-vs-band-check',               //  135s
+  // 112s — STAGE 1 BLOCKER: the pre-game search must still accept on the
+  // shipped path. ⚠ THE DEFERRAL WITH THE SHARPEST EDGE: a change that makes
+  // the search reject would now ship and be found at merge, and a pool that
+  // cannot open its book is not a subtle failure.
+  'pregame-acceptance-check',        //  112s
+  // 106s — the cohort must develop back to its own register, both arms. Thinned
+  // 16 -> 48 games by the same common-factor effect as cession-path-
+  // independence, so it is expensive for the same measured reason.
+  'maturity-anchor-check',           //  106s
+  //  96s — CLF label backtest, green since the maturation book at -3.2pp
+  // against a 5pp tolerance. Stable and well inside its bound.
+  'clf-label-backtest-check',        //   96s
 ];
 
 // ============================================================================
@@ -466,6 +508,76 @@ const PROBES: Record<string, string> = {
 // A gate that does not fire on the wrong perturbation has not been tested yet.
 // ============================================================================
 
+// ============================================================================
+// THE TIER BOUNDARY IS A MEASURED NUMBER, AND IT IS DERIVED RATHER THAN PICKED.
+//
+// ⚠ A THRESHOLD CHOSEN BY JUDGEMENT IS HOW THE NEXT SLOW GATE LANDS IN FAST THE
+// WAY cession-path-independence DID. It sat in FAST at 1015s — 30% of that
+// tier's whole CPU — because nothing said it could not.
+//
+// DERIVED BY HEAD/TAIL BREAKS, which is the standard method for a heavy-tailed
+// distribution: take the mean, keep what is above it, repeat. On the 65 measured
+// runtimes:
+//
+//   round 1   n=65   mean  88s   13 gates above it
+//   round 2   n=13   mean 357s    3 gates above it
+//   round 3   n= 3   mean 934s    2 gates above it
+//
+// The first break is the boundary: 88 seconds. It reproduces the reading the
+// table gives by eye — a dozen gates carrying most of the cost above a long
+// cheap tail — without anyone choosing where the dozen stops.
+//
+// ⚠ A SECOND DERIVATION WAS TRIED AND REJECTED, and the reason matters. The
+// largest RATIO gap in the sorted runtimes is 2.45x (830s -> 339s), with nothing
+// else above 1.38x; its geometric mean gives 530s. That finds the biggest cliff
+// in the distribution — but the cliff is not where the cost is. At 530s only one
+// gate moves and FAST lands at 13.1 minutes of wall clock; at 88s nine move and
+// it lands at 6.1. A boundary that identifies a real feature of the data and
+// does not solve the problem is still the wrong boundary.
+//
+// ⚠ AND A THIRD WAS VACUOUS, recorded so it is not re-derived. "A gate longer
+// than FAST's own wall clock IS the wall clock" is self-consistent and sounds
+// principled: solve tau = max(sum/P, max). It never binds here, because the
+// tail is long enough that sum/P exceeds the largest gate at every cut. It
+// would bind on a set with one dominant gate and few others.
+// ============================================================================
+const TIER_THRESHOLD_SECONDS = 88;
+
+/**
+ * Recorded runtimes, seconds per gate, from a full FAST+SLOW sweep.
+ *
+ * ⚠ RECORDED RATHER THAN MEASURED IN PLACE, BECAUSE MEASURING IS CIRCULAR. To
+ * know whether a gate belongs in the tier that runs it, you would have to run
+ * it — which is the cost the tier exists to avoid. So the manifest check reads
+ * a committed figure.
+ *
+ * ⚠ WHICH MEANS THE FIGURE CAN GO STALE, AND TWO THINGS KEEP IT HONEST:
+ *
+ *   the manifest check      fails if a FAST gate's RECORDED time is over the
+ *                           threshold, and fails if a gate has no recorded time
+ *                           at all. A new gate cannot enter FAST unmeasured.
+ *   the full sweep          measures everything anyway. `--all --record-timings`
+ *                           rewrites this file from that run, and the merge-time
+ *                           sweep is where a gate that got slower is caught.
+ *
+ * So the recorded figure gates ADMISSION cheaply and the real measurement gates
+ * DRIFT at merge. Neither alone is sufficient: the recorded one cannot see a
+ * gate that grew, and the measured one is too expensive to consult per commit.
+ *
+ * ⚠ RUNTIMES MOVE WITH MACHINE AND LOAD, so the threshold is not a tight
+ * tolerance and should not be read as one. 88s against a gate measured at 96s is
+ * a real signal; 88s against one measured at 90s is noise, and the remedy there
+ * is to re-record rather than to reshuffle tiers.
+ */
+const TIMINGS_PATH = path.join(__dirname, 'gate-timings.json');
+function recordedTimings(): Record<string, number> {
+  try {
+    return JSON.parse(fs.readFileSync(TIMINGS_PATH, 'utf8')).seconds ?? {};
+  } catch {
+    return {};
+  }
+}
+
 // ---------------------------------------------------------------- manifest
 // ⚠ EVERY FILE IN THE DIRECTORY IS IN EXACTLY ONE LIST, AND THIS IS WHAT KEEPS
 // THE SWEEP COMPLETE. A gate added without a line here does not quietly sit
@@ -492,6 +604,23 @@ function checkManifest(): string[] {
     if (!FAST.includes(name) && !SLOW.includes(name)) {
       errs.push(`EXPECTED_RED names '${name}', which is in no tier. An expectation is not an exclusion — `
         + 'the gate has to keep running for the expectation to mean anything.');
+    }
+  }
+
+  // ⚠ THE ANTI-DRIFT CHECK. Without this the tiering is a one-off tidy-up and
+  // the next expensive gate lands in FAST exactly as the last one did — tiered
+  // by whoever wrote it rather than by what it costs.
+  const rec = recordedTimings();
+  for (const n of FAST) {
+    const t = rec[n];
+    if (t === undefined) {
+      errs.push(`${n} is in FAST with no recorded runtime. A gate cannot enter the every-commit tier `
+        + 'unmeasured — run `npx tsx scripts/gates.ts --all --record-timings` and commit '
+        + 'scripts/gate-timings.json.');
+    } else if (t > TIER_THRESHOLD_SECONDS) {
+      errs.push(`${n} is in FAST at a recorded ${t}s, over the ${TIER_THRESHOLD_SECONDS}s tier `
+        + 'threshold. Move it to SLOW with a line saying what deferring it costs, or re-record if '
+        + 'the figure is stale.');
     }
   }
   return errs;
@@ -777,9 +906,48 @@ else if (argv.includes('--all')) { set = [...FAST, ...SLOW]; label = 'FAST + SLO
 else if (argv.includes('--slow')) { set = SLOW; label = 'SLOW'; }
 else { set = FAST; label = 'FAST'; }
 
-console.log(`=== GATE SWEEP: ${label} — ${set.length} scripts, ${JOBS} at a time ===\n`);
+console.log(`=== GATE SWEEP: ${label} — ${set.length} scripts, ${JOBS} at a time ===`);
+
+// ⚠ NAME WHAT IS DEFERRED, EVERY TIME, WITH ITS COST. A tier is a decision to
+// not run something, and a decision that shows up only as a tier NAME is one
+// nobody re-reads. Printing the skipped gates and their wall-clock cost puts the
+// trade in front of whoever ran the sweep at the moment they made it — which is
+// the whole difference between this and a heuristic.
+if (label === 'FAST' && SLOW.length > 0) {
+  const rec = recordedTimings();
+  const deferred = SLOW.map(n => ({ n, t: rec[n] ?? 0 })).sort((a, b) => b.t - a.t);
+  const total = deferred.reduce((a, d) => a + d.t, 0);
+  console.log(`\nDEFERRED TO MERGE — ${deferred.length} gates, ${(total / 60).toFixed(0)} min of CPU:`);
+  for (const d of deferred) {
+    console.log(`  ${d.t ? `${(d.t / 60).toFixed(1)} min`.padStart(8) : '       ?'}  ${d.n}`);
+  }
+  console.log('  run them with `npm run gates:slow`, or `npm run gates:all` before a merge.');
+}
+console.log('');
 
 const results = await pool(set, JOBS);
+
+// ⚠ --record-timings REWRITES gate-timings.json, AND ONLY FROM A FULL SWEEP.
+// Recording from a partial run would drop every gate the run did not touch,
+// and the manifest check reads a missing entry as "unmeasured" — so a partial
+// record would turn the anti-drift check into a wall of false failures.
+if (argv.includes('--record-timings')) {
+  if (label !== 'FAST + SLOW') {
+    console.log('\n--record-timings needs --all: a partial run would drop the gates it did not execute.');
+    process.exit(1);
+  }
+  const seconds = Object.fromEntries(
+    results.map(r => [r.name, Math.round(r.ms / 1000)]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+  );
+  fs.writeFileSync(TIMINGS_PATH, `${JSON.stringify({
+    _note: 'Seconds per gate, from a full FAST+SLOW sweep. Regenerate with: npx tsx scripts/gates.ts '
+      + '--all --record-timings. Read by the manifest check to enforce TIER_THRESHOLD_SECONDS; see scripts/gates.ts.',
+    _recordedAt: new Date().toISOString().slice(0, 10),
+    _parallelism: JOBS,
+    seconds,
+  }, null, 2)}\n`);
+  console.log(`\nrecorded ${Object.keys(seconds).length} runtimes to scripts/gate-timings.json`);
+}
 
 // ⚠ A PROBE THAT CRASHES IS STILL A FAILURE. allocation-grid asserts nothing and
 // exited 1 for a whole commit because it threw. Under --probes a non-zero exit

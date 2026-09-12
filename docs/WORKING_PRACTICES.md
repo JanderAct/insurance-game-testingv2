@@ -985,3 +985,46 @@ Established by the WC and GL builds. Property and any future line inherit these.
 - **The baseline generator once held its own copy of the result-metric list** and drifted from the app
   twice. Now extracted to `src/utils/resultMetrics.ts` (`RESULT_METRICS`), imported by both. Keep it that
   way.
+
+## ⚠ TWO COVERAGE GAPS FOUND WHILE TIERING THE SWEEP, NEITHER OF THEM A TIERING QUESTION
+
+Both surfaced from building an import graph over `scripts/diagnostics/` to ask
+whether a gate tier could be derived from the diff. The tiering answer was no —
+86 of 89 gates reach `src/types/simulation.ts`, so a hub change selects
+everything — but the graph answered two questions nobody had asked.
+
+### 27 of 86 `src` files are reachable from no gate at all
+
+11 pages, 9 components, `App.tsx`, `main.tsx`, and two utils. **A UI-only commit
+is unverified today**, and no tier changes that: the gates that exist do not
+reach those files, so no selection rule can route work to them.
+
+This is ABSENT COVERAGE, not deferred coverage, and the distinction matters. A
+gate moved to SLOW still runs at merge. A file no gate reaches is never checked
+by anything, and a green sweep after a page rewrite says only that the engine
+still works.
+
+Two of the three gates that DO reach render paths were written this month —
+`surface-privacy-check` (a text assertion over `src/pages` and
+`src/components`) and `save-flush-wiring-check` (a static parse of one React
+effect). Both are static: they read source rather than running it. That is the
+shape available without a rendering harness, and it is worth knowing that the
+shape works before concluding a page cannot be gated.
+
+### Five gates reach their baselines through `readFileSync`, which no import graph can see
+
+`value-identity-check` and `solo-export-guard` resolve their baselines through
+`path.join(__dirname, '../../baselines/...')`. An import graph cannot see a
+filesystem read, so those edges do not exist in it.
+
+**Measured on a real commit: `c3af16f` deleted a baseline and an import-derived
+selector would have selected ZERO gates.** The two guards that read
+`baselines/` were run by hand there; a derived tier would not have run them.
+
+**The rule this gives: any future diff-derived selection needs DECLARED
+dependencies, not inferred ones.** A marker beside the `readFileSync` call —
+`// @gate-reads baselines/VALUE_IDENTITY_v37.json` — is hand-maintained, which
+is the thing to avoid in general, but it is five lines, it sits beside the call
+it describes, and a marker pointing at a missing file can be failed by the
+manifest check. Inferring filesystem reads from source is the fragile
+alternative, and it is fragile in the direction that silently under-selects.
