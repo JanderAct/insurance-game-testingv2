@@ -742,6 +742,26 @@ export const BASE_NEW_MEMBERS_PER_YEAR = 1.0;
 // RECORDED READING and nothing gates it. Nothing else asserts it either.
 //
 //     k = (63 x 0.0445 - 0.5852) / (200 - 63) = 2.2183 / 137 = 0.016192
+//
+// ⚠ IT SURVIVES THE INTAKE REBUILD UNCHANGED, AND THE REASON IS WORTH STATING.
+// Applications becoming a share of the unenrolled pool did not replace this
+// constant, because the two govern different sides. This one sets DEMAND — how
+// many members the pool wants, and it is calibrated so that number holds the
+// book level. APPLICATION_RATE sets SUPPLY — how many of the marketplace turn
+// up to be chosen from. Before the rebuild supply was effectively infinite
+// (~140 applicants for 4 slots), so demand was the only thing that mattered and
+// this constant alone decided the book.
+//
+// It still decides the book on the Accept All path: measured after the rebuild,
+// Accept All holds at 58.8 (WC) / 59.5 (GL), which is where it held before. The
+// calibration is intact and the neutral point is unmoved.
+//
+// ⚠ WHAT CHANGED IS THAT THE BOOK CAN NOW SIT BELOW EQUILIBRIUM BY CHOICE. At
+// the strict appetite bar supply binds in about a third of years and the book
+// settles around 53-56 instead of 59. That is not the calibration failing — it
+// is a player declining members the equilibrium assumed would be written. The
+// constant describes where the book sits when the pool accepts everyone, which
+// is the only state it was ever calibrated against.
 export const MEMBERSHIP_EQUILIBRIUM_ENROLLMENT = 63;
 
 // The measured contribution of the adjustment ladder at ALL-DEFAULT decisions,
@@ -801,7 +821,22 @@ export const MEMBERSHIP_DEFAULT_ADJUSTMENT = 0.5852;
 // corrected it shows 4.43% and the three lines agree to within 0.04pp.
 export const MEMBERSHIP_DEFAULT_DEPARTURE_RATE = 0.0445;
 
-// Hard caps on annual membership movement
+// Hard caps on annual membership movement.
+//
+// ⚠ MAX_NEW_MEMBERS_PER_YEAR SURVIVES THE INTAKE REBUILD AND IS STILL DOING
+// WORK. The question was whether making applications a share of the unenrolled
+// pool made it redundant — it does not. Measured at the shipped 6%, room lands
+// on the flat cap in 24-37% of line-years at EVERY tier, including the strict
+// one. It is what stops a cheap year (low price, high satisfaction, high
+// surplus all pushing newMemberAdjustment up at once) flooding the book in a
+// single step, and the application layer does not do that job: applications
+// scale with the UNENROLLED pool, which is largest exactly when the book is
+// smallest and the pool can least absorb a flood.
+//
+// ⚠ THE TWO CAPS ANSWER DIFFERENT QUESTIONS AND BOTH ARE KEPT FOR THAT REASON.
+// The flat cap bounds the DEMAND draw. The application rate bounds the SUPPLY.
+// A year can now be limited by either, and the result records which
+// (ResultSet.intakeRoom against eligibleApplicants).
 export const MAX_NEW_MEMBERS_PER_YEAR = 4;
 export const MAX_WITHDRAWN_PER_YEAR = 4;
 
@@ -827,8 +862,93 @@ export const MAX_WITHDRAWN_PER_YEAR = 4;
  * of what is left per year, which is the hazard direction worth capping — a
  * shrinking pool refilling fast with whoever is available is exactly how a book
  * goes bad quietly.
+ *
+ * ⚠ RE-MEASURED AFTER THE INTAKE REBUILD: IT HAS STILL NEVER FIRED. Across
+ * every tier and all 112 line-years per arm at the shipped application rate,
+ * the share cap set the intake room in 0% of years. The deepest book any arm
+ * reaches is 52.9 at the strict bar, where a tenth is still above the flat 4.
+ *
+ * It is therefore a GUARD, not a live constraint, and it is kept as one
+ * knowingly: it costs nothing, it binds only in a state no measured game has
+ * reached, and that state — a book under 40 — is the one where an uncapped
+ * refill would do the most damage. A guard that has never fired is worth
+ * distinguishing from a constraint that is doing work, which is why this says
+ * so rather than leaving a reader to infer it from the 0%.
  */
 export const MAX_NEW_MEMBER_SHARE = 0.10;
+
+/**
+ * THE APPLICATION RATE — the share of the unenrolled marketplace that applies
+ * to this pool in a given year. DERIVED — see the sweep below.
+ *
+ * ⚠ WHY THIS EXISTS: THE OLD MODEL SHOWED THE POOL ~140 APPLICANTS FOR 4 SLOTS.
+ * Every unenrolled, cooled-off member of the 200-strong marketplace was treated
+ * as an applicant every year. No real pool has a 35:1 applicant-to-slot ratio,
+ * and the consequence was that New Business Appetite could not do anything: even
+ * the strictest bar left 35-49 members clearing it against an intake of 4, so
+ * the bar only ever chose WHICH applicants the draw reached, never HOW MANY. The
+ * measured book across all four tiers read 58.8 / 58.2 / 58.4 / 58.1.
+ *
+ * With applications a small share of the unenrolled pool, a strict bar can leave
+ * the pool SHORT OF ITS OWN QUOTA — and that is the point at which "accept
+ * everyone" and "be picky" become different decisions rather than the same book
+ * with two members swapped.
+ *
+ * ⚠ WHAT THIS IS NOT, RECORDED SO IT IS NOT REDISCOVERED AS AN OVERSIGHT. The
+ * realistic model is two-stage: a district goes shopping because its OWN
+ * experience turned bad, and then chooses this pool on price. That produces
+ * adverse selection from the mechanism instead of by imposition, and it is the
+ * refinement this single number would become.
+ *
+ * It was considered and rejected, twice over. It makes EVERY applicant
+ * adversely selected unless a tilt parameter is calibrated to say how much of
+ * the shopping decision is bad experience and how much is price — and nobody
+ * has measured that parameter. And it is a great deal of machinery for a
+ * result one percentage reaches. Revisit it with a measurement of the tilt, not
+ * with an argument about realism.
+ *
+ * ============================================================================
+ * ⚠ DERIVED FROM THE SHORT-YEAR CONDITION, NOT PICKED.
+ *
+ * THE CONDITION, stated before it was measured: the strict bar must SOMETIMES
+ * leave the pool short of its own quota — short being a line-year where
+ * eligibleApplicants < intakeRoom, the pool having space and the bar leaving
+ * nobody to fill it. Accept All must essentially never be short, or the rate is
+ * starving the pool rather than the bar being selective.
+ *
+ * Swept over whole played games, 8 games x 14 years, WC and GL pooled
+ * (new-business-appetite-derive section 3). Share of line-years SHORT:
+ *
+ *   rate   applicants/yr   Accept All   below 1.50   below 1.00   below 0.75   book at 0.75
+ *     3%        4.0            0%           22%          51%          68%          51.3
+ *     4%        5.6            0%            5%          36%          54%          53.8
+ *     5%        6.9            0%            1%          21%          46%          55.2
+ *     6%        8.3            0%            0%          10%          34%          56.6
+ *     8%       11.1            0%            0%           3%          25%          58.1
+ *    10%       13.9            0%            0%           1%           8%          58.6
+ *    15%       20.8            0%            0%           0%           1%          58.9
+ *
+ * At 15% the strict bar is short in one year in a hundred and the book is
+ * untouched — that is the old model again, where the tier only chooses WHICH
+ * members join. At 3-4% the pool is short in half to two thirds of years at the
+ * strict bar and the book collapses to 51-54: there the RATE is doing the work
+ * and the bar is incidental.
+ *
+ * 6% is where the grading is a decision at every tier — Accept All and the
+ * permissive bar never short, the middle bar short about one year in ten, the
+ * strict bar about one year in three at a standing cost of 2.5 members. It
+ * lands at 8.3 applications a year against ~140 unenrolled, which is the 8-10
+ * the ruling's arithmetic predicted; the arithmetic was right and this is the
+ * measurement behind it.
+ *
+ * ⚠ A SHARE OF THE UNENROLLED POOL IS SELF-CORRECTING, AND THAT IS WHY IT IS A
+ * SHARE. A pool that shrinks has more unenrolled members to draw applications
+ * from, so intake pressure rises as the book falls. Measured at the strict bar:
+ * the applicant pool runs 138 -> 145 over a game while the book runs 59 -> 53.
+ * A flat count would have compounded the shrinkage instead of damping it.
+ * ============================================================================
+ */
+export const APPLICATION_RATE = 0.06;
 
 // Funding confidence level factor (CLF) table
 // Represents the multiplier applied to expected losses to set funding targets

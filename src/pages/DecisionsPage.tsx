@@ -17,6 +17,7 @@ import type { FundingConsequence } from '../utils/fundingConsequence';
 import { RENEWAL_THRESHOLDS, renewalDeclines } from '../utils/renewalUnderwriting';
 import { EXPERIENCE_MOD } from '../utils/memberExperienceMod';
 import { NEW_BUSINESS_TIERS, appetiteEligible } from '../utils/newBusinessAppetite';
+import { APPLICATION_RATE } from '../data/defaultAssumptions';
 import { canReenroll } from '../utils/membershipHistory';
 
 export interface LineLoanInfo {
@@ -719,16 +720,30 @@ function NewBusinessAppetite({
   // The applicant pool as the engine will build it: marketplace minus enrolled,
   // minus anyone inside their two-year cooldown. Same source as
   // simulateMemberMovement so the counts cannot drift from the draw.
+  // ⚠ WHAT IS SHOWN IS AN EXPECTATION, NOT THE DRAW, AND THE LABELS SAY SO.
+  // Only APPLICATION_RATE of the unenrolled pool applies in a given year and
+  // WHICH of them apply is drawn at movement time, so the exact number clearing
+  // a bar is not knowable here. What is knowable is the SHARE of the pool that
+  // clears each bar, which is exact, times the application count, which is
+  // deterministic. That product is the expected eligible count and it is what a
+  // player needs to judge whether a bar will leave them short.
   const eligible = React.useMemo(() => {
     const enrolled = new Set(members.map(m => m.id));
     const available = allMarketMembers.filter(
       m => !enrolled.has(m.id) && canReenroll(membershipHistory, m.id, line, yearNumber),
     );
+    const applications = Math.min(
+      available.length, Math.round(available.length * APPLICATION_RATE),
+    );
     return {
-      all: available.length,
-      byTier: NEW_BUSINESS_TIERS.map(
-        t => appetiteEligible(available, line, history, yearNumber, t).length,
-      ),
+      pool: available.length,
+      applications,
+      byTier: NEW_BUSINESS_TIERS.map(t => {
+        if (available.length === 0) return 0;
+        const share = appetiteEligible(available, line, history, yearNumber, t).length
+          / available.length;
+        return Math.round(applications * share);
+      }),
     };
   }, [members, allMarketMembers, membershipHistory, history, line, yearNumber]);
 
@@ -743,7 +758,7 @@ function NewBusinessAppetite({
             <div onClick={() => !disabled && onChange(null)}>
               <PreviewBox
                 title="Accept All"
-                description={`${eligible.all} applicants`}
+                description={`~${eligible.applications} apply`}
                 selected={value === null}
                 active={!disabled}
               />
@@ -752,7 +767,7 @@ function NewBusinessAppetite({
               <div key={t} onClick={() => !disabled && onChange(t)}>
                 <PreviewBox
                   title={`Below ${t.toFixed(2)}x`}
-                  description={`${eligible.byTier[i]} eligible`}
+                  description={`~${eligible.byTier[i]} of ~${eligible.applications}`}
                   selected={value === t}
                   active={!disabled}
                 />
@@ -762,10 +777,13 @@ function NewBusinessAppetite({
           <p className="flex items-start gap-1 text-[11px] text-gray-500 leading-relaxed">
             <Info size={12} className="mt-0.5 flex-shrink-0" />
             <span>
-              Applicants hand the pool {EXPERIENCE_MOD.windowYears} years of their own claims when they
-              apply. This sets the standard that loss run has to clear. Those who clear it are written in
+              About {(100 * APPLICATION_RATE).toFixed(0)}% of the {eligible.pool} entities not currently in
+              this line apply each year, and each hands over {EXPERIENCE_MOD.windowYears} years of its own
+              claims. This sets the standard that loss run has to clear. Those who clear it are written in
               the order they come, not best first — the pool underwrites against a standard, it does not
-              rank the queue.
+              rank the queue.{' '}
+              <strong>A strict bar can leave the pool short of the members it had room for</strong>, which
+              is the cost of being picky rather than a fault.
             </span>
           </p>
           <p className="flex items-start gap-1 text-[11px] text-gray-400 leading-relaxed">

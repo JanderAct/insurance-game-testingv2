@@ -25,9 +25,11 @@ import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { processYear } from '../../src/utils/simulationEngine';
 import { memberExperienceMods, EXPERIENCE_MOD } from '../../src/utils/memberExperienceMod';
-import { appetiteEligible, NEW_BUSINESS_TIERS } from '../../src/utils/newBusinessAppetite';
+import { NEW_BUSINESS_TIERS } from '../../src/utils/newBusinessAppetite';
 import { canReenroll } from '../../src/utils/membershipHistory';
-import { MAX_NEW_MEMBERS_PER_YEAR, MAX_NEW_MEMBER_SHARE } from '../../src/data/defaultAssumptions';
+import {
+  APPLICATION_RATE, MAX_NEW_MEMBERS_PER_YEAR, MAX_NEW_MEMBER_SHARE,
+} from '../../src/data/defaultAssumptions';
 import type { CoverageLine, DecisionSet, GameState, Member } from '../../src/types/simulation';
 
 const RULE = '='.repeat(96);
@@ -42,22 +44,27 @@ const ARMS: (number | null)[] = [null, ...NEW_BUSINESS_TIERS];
 interface YearRow {
   line: string; game: number; year: number;
   book: number; joined: number; withdrew: number; exposure: number;
-  /** Applicants available before the tier. */
+  /** The unenrolled, cooled-off pool the applications are drawn FROM. */
   pool: number;
-  /** Applicants the tier leaves. */
+  /** How many of that pool applied this year. */
+  applicants: number;
+  /** How many applicants cleared the bar. */
   eligible: number;
-  /** The intake cap in force this year. */
-  cap: number;
-  /** The tier removed at least one applicant the draw could otherwise reach. */
-  tierBit: boolean;
-  /** Intake landed on the cap. */
-  capBit: boolean;
-  /** The eligible pool was smaller than the cap — the tier, not the cap, is
-   *  what the draw actually ran out of. */
-  poolStarved: boolean;
+  /** How many the pool had space for, after demand and both caps. */
+  room: number;
+  flatBit: boolean;
+  shareBit: boolean;
 }
 
-function play(appetite: number | null): { rows: YearRow[]; ratios: { line: string; r: number }[] } {
+/**
+ * Play every game at one appetite and one application rate.
+ *
+ * The three intake counts are READ OFF THE RESULT rather than recomputed here —
+ * the engine records them for exactly this reason. A probe that re-derived
+ * `room` from its own copy of the cap arithmetic would be measuring its own
+ * copy, which is the drift this project keeps finding.
+ */
+function play(appetite: number | null, rate: number): { rows: YearRow[]; ratios: { line: string; r: number }[] } {
   const rows: YearRow[] = [];
   const ratios: { line: string; r: number }[] = [];
   for (let g = 0; g < GAMES; g++) {
@@ -74,30 +81,34 @@ function play(appetite: number | null): { rows: YearRow[]; ratios: { line: strin
       for (const l of LINES) d.byLine[l].newBusinessAppetite = appetite;
       const bookBefore: Record<string, number> = {};
       for (const l of LINES) bookBefore[l] = gs.poolState.lines[l].members.length;
-      const p = processYear(gs, d);
+      const p = processYear(gs, d, { applicationRate: rate });
       const hist = p.updatedPoolState.memberLossHistory ?? {};
       const mh = p.updatedPoolState.membershipHistory;
       for (const lr of p.lineResults) {
         const l = lr.line as string;
-        const x = lr.result as never as Record<string, unknown>;
+        const x = lr.result as never as Record<string, number>;
         const enrolled = p.updatedPoolState.lines[l as CoverageLine].members;
         const ids = new Set(enrolled.map(m => m.id));
         const avail: Member[] = p.updatedPoolState.allMarketMembers.filter(
           m => !ids.has(m.id) && canReenroll(mh, m.id, l as CoverageLine, y + 1));
-        const elig = appetiteEligible(avail, l as CoverageLine, hist, y + 1, appetite);
-        const cap = Math.min(MAX_NEW_MEMBERS_PER_YEAR,
-          Math.floor(bookBefore[l] * MAX_NEW_MEMBER_SHARE));
-        const joined = x.newMembers as number;
+        const shareCap = Math.floor(bookBefore[l] * MAX_NEW_MEMBER_SHARE);
+        const room = x.intakeRoom ?? 0;
         rows.push({
           line: l, game: g, year: y,
-          book: enrolled.length, joined, withdrew: x.withdrawnMembers as number,
-          exposure: x.activeExposure as number,
-          pool: avail.length, eligible: elig.length, cap,
-          tierBit: elig.length < avail.length,
-          capBit: joined >= cap && cap > 0,
-          poolStarved: elig.length < cap,
+          book: enrolled.length, joined: x.newMembers, withdrew: x.withdrawnMembers,
+          exposure: x.activeExposure,
+          pool: avail.length,
+          applicants: x.applicants ?? 0,
+          eligible: x.eligibleApplicants ?? 0,
+          room,
+          // room = min(rawDemand, flat, share). Which of the three it equals
+          // says which one cut it; rawDemand itself is not recorded, so
+          // "flat bit" is room landing exactly on the flat cap while the share
+          // cap was not tighter, and vice versa.
+              flatBit: room === MAX_NEW_MEMBERS_PER_YEAR && shareCap >= MAX_NEW_MEMBERS_PER_YEAR,
+          shareBit: room === shareCap && shareCap < MAX_NEW_MEMBERS_PER_YEAR,
         });
-        if (y >= WARM && appetite === null) {
+        if (y >= WARM && appetite === null && rate === APPLICATION_RATE) {
           const mods = memberExperienceMods(avail, l as CoverageLine, hist, y + 1);
           for (const m of mods) if (m.rated && m.rawRatio !== null) ratios.push({ line: l, r: m.rawRatio });
         }
@@ -123,7 +134,7 @@ console.log(RULE);
 console.log(`tiers ${NEW_BUSINESS_TIERS.join(' / ')} on the applicant's RAW ratio; `
   + `caps: flat ${MAX_NEW_MEMBERS_PER_YEAR}, share ${(100 * MAX_NEW_MEMBER_SHARE).toFixed(0)}% of book\n`);
 
-const base = play(null);
+const base = play(null, APPLICATION_RATE);
 
 // --------------------------------------------------- 1. the ratio distribution
 console.log('--- 1. THE APPLICANT DISTRIBUTION THE TIERS SIT ON ---\n');
@@ -156,13 +167,46 @@ for (const l of LINES) {
 }
 console.log('');
 
-// --------------------------------- 3. each arm: book, exposure, what binds
-console.log('--- 3. EACH TIER OVER A FULL GAME — and WHAT ACTUALLY BINDS ---\n');
-console.log('  tier        line   mean book   final book   exposure $M   joins/yr   cap bit   tier bit   pool < cap');
+// ---------------------------------------- 3. THE RATE SWEEP — the derivation
+//
+// THE CONDITION, stated before it is measured: the strict bar must SOMETIMES
+// leave the pool short of its own quota. Short ⟺ eligibleApplicants <
+// intakeRoom — the pool had space and the bar left nobody to fill it.
+//
+// At the old model's implicit 100% the strict bar left 35-49 eligible against
+// an intake of 4 and was never short, which is why the tier could only ever
+// change WHICH members joined. A rate is right when Accept All is essentially
+// never short and the 0.75 bar is short in a bad year but not most years.
+console.log('--- 3. THE RATE SWEEP — where do short years begin? ---\n');
+console.log(`  short = a line-year where the bar left fewer eligible applicants than the pool had`);
+console.log('  room for. Room is min(demand draw, flat cap, share cap).\n');
+console.log('  rate    tier         applicants/yr   eligible/yr   room/yr   SHORT   joins/yr   mean book');
+const SWEEP = [0.03, 0.04, 0.05, 0.06, 0.08, 0.10, 0.15];
+for (const rate of SWEEP) {
+  for (const a of ARMS) {
+    const rows = play(a, rate).rows.filter(x => RATED.includes(x.line as CoverageLine));
+    const short = rows.filter(x => x.eligible < x.room).length;
+    console.log(
+      `  ${(100 * rate).toFixed(0).padStart(4)}%`
+      + `  ${(a === null ? 'Accept All' : `below ${a.toFixed(2)}`).padEnd(12)}`
+      + `${mean(rows.map(x => x.applicants)).toFixed(1).padStart(14)}`
+      + `${mean(rows.map(x => x.eligible)).toFixed(2).padStart(14)}`
+      + `${mean(rows.map(x => x.room)).toFixed(2).padStart(10)}`
+      + `${pct(short, rows.length).padStart(8)}`
+      + `${mean(rows.map(x => x.joined)).toFixed(2).padStart(11)}`
+      + `${mean(rows.map(x => x.book)).toFixed(1).padStart(12)}`,
+    );
+  }
+  console.log('');
+}
+
+// ------------------------------------ 4. the shipped rate, per line and arm
+console.log(`--- 4. AT THE SHIPPED RATE (${(100 * APPLICATION_RATE).toFixed(0)}%) — per line ---\n`);
+console.log('  tier         line   applicants   eligible   room   SHORT   room filled   joins/yr   mean book   final book');
 for (const a of ARMS) {
-  const r = a === null ? base.rows : play(a).rows;
+  const rows = play(a, APPLICATION_RATE).rows;
   for (const l of RATED) {
-    const rr = r.filter(x => x.line === l);
+    const rr = rows.filter(x => x.line === l);
     const finals: number[] = [];
     for (let g = 0; g < GAMES; g++) {
       const gr = rr.filter(x => x.game === g);
@@ -170,39 +214,63 @@ for (const a of ARMS) {
     }
     console.log(
       `  ${(a === null ? 'Accept All' : `below ${a.toFixed(2)}`).padEnd(12)}${l.padEnd(7)}`
-      + `${mean(rr.map(x => x.book)).toFixed(1).padStart(10)}`
-      + `${mean(finals).toFixed(1).padStart(13)}`
-      + `${mean(rr.map(x => x.exposure)).toFixed(0).padStart(14)}`
+      + `${mean(rr.map(x => x.applicants)).toFixed(1).padStart(11)}`
+      + `${mean(rr.map(x => x.eligible)).toFixed(2).padStart(11)}`
+      + `${mean(rr.map(x => x.room)).toFixed(2).padStart(7)}`
+      + `${pct(rr.filter(x => x.eligible < x.room).length, rr.length).padStart(8)}`
+      + `${pct(rr.filter(x => x.joined >= x.room && x.room > 0).length, rr.length).padStart(13)}`
       + `${mean(rr.map(x => x.joined)).toFixed(2).padStart(11)}`
-      + `${pct(rr.filter(x => x.capBit).length, rr.length).padStart(10)}`
-      + `${pct(rr.filter(x => x.tierBit).length, rr.length).padStart(11)}`
-      + `${pct(rr.filter(x => x.poolStarved).length, rr.length).padStart(13)}`,
+      + `${mean(rr.map(x => x.book)).toFixed(1).padStart(12)}`
+      + `${mean(finals).toFixed(1).padStart(13)}`,
     );
   }
 }
 console.log('');
-console.log('  cap bit    = intake landed on the cap in force that year');
-console.log('  tier bit   = the tier removed at least one applicant the draw could otherwise reach');
-console.log('  pool < cap = fewer eligible applicants than the cap allows, so the TIER is what the');
-console.log('               draw ran out of rather than the cap. Where this is 0% the cap is the');
-console.log('               only thing limiting intake and the tier is choosing WHICH, not HOW MANY.\n');
 
-// ----------------------------------------------- 4. the ceiling
-console.log('--- 4. THE CEILING — does growth exhaust the applicant pool in ten years? ---\n');
-console.log('  The marketplace is a fixed 200. Pool + applicants + cooled-off members = 200.\n');
-console.log('  tier        line   pool yr1   pool yr10   eligible yr1   eligible yr10   min eligible seen');
+// --------------------------------- 5. what the caps still do
+console.log('--- 5. DO THE CAPS STILL DO ANYTHING? ---\n');
+console.log(`  flat cap ${MAX_NEW_MEMBERS_PER_YEAR}, share cap ${(100 * MAX_NEW_MEMBER_SHARE).toFixed(0)}% of book.`);
+console.log('  "flat bit" = room landed exactly on the flat cap with the share cap slack, so the flat');
+console.log('  cap is what set it. "share bit" = the same for the share cap. Room can also land on the');
+console.log('  flat cap from the demand draw alone, so flat bit is an UPPER BOUND on how often the cap');
+console.log('  truly bound rather than a count of it.\n');
+console.log('  tier         line   flat bit   share bit   room/yr   eligible/yr');
 for (const a of ARMS) {
-  const r = a === null ? base.rows : play(a).rows;
+  const rows = play(a, APPLICATION_RATE).rows;
   for (const l of RATED) {
-    const rr = r.filter(x => x.line === l);
-    const at = (y: number, f: (x: YearRow) => number) => mean(rr.filter(x => x.year === y).map(f));
+    const rr = rows.filter(x => x.line === l);
     console.log(
       `  ${(a === null ? 'Accept All' : `below ${a.toFixed(2)}`).padEnd(12)}${l.padEnd(7)}`
-      + `${at(1, x => x.pool).toFixed(0).padStart(9)}`
-      + `${at(Math.min(10, YEARS), x => x.pool).toFixed(0).padStart(12)}`
-      + `${at(1, x => x.eligible).toFixed(0).padStart(15)}`
-      + `${at(Math.min(10, YEARS), x => x.eligible).toFixed(0).padStart(16)}`
-      + `${Math.min(...rr.map(x => x.eligible)).toFixed(0).padStart(20)}`,
+      + `${pct(rr.filter(x => x.flatBit).length, rr.length).padStart(11)}`
+      + `${pct(rr.filter(x => x.shareBit).length, rr.length).padStart(12)}`
+      + `${mean(rr.map(x => x.room)).toFixed(2).padStart(10)}`
+      + `${mean(rr.map(x => x.eligible)).toFixed(2).padStart(14)}`,
+    );
+  }
+}
+console.log('');
+
+// --------------------------------- 6. growth
+console.log('--- 6. IS GROWTH REACHABLE? ---\n');
+console.log('  line   tier         joins/yr   withdrew/yr   net/yr   book yr1   book final   applicant pool yr1 -> final');
+for (const a of ARMS) {
+  const rows = play(a, APPLICATION_RATE).rows;
+  for (const l of RATED) {
+    const rr = rows.filter(x => x.line === l);
+    const at = (pick: (x: YearRow) => number, first: boolean) => {
+      const v: number[] = [];
+      for (let g = 0; g < GAMES; g++) {
+        const gr = rr.filter(x => x.game === g);
+        if (gr.length) v.push(pick(first ? gr[0] : gr[gr.length - 1]));
+      }
+      return mean(v);
+    };
+    const j = mean(rr.map(x => x.joined)), w = mean(rr.map(x => x.withdrew));
+    console.log(
+      `  ${l.padEnd(7)}${(a === null ? 'Accept All' : `below ${a.toFixed(2)}`).padEnd(12)}`
+      + `${j.toFixed(2).padStart(11)}${w.toFixed(2).padStart(14)}${(j - w).toFixed(2).padStart(9)}`
+      + `${at(x => x.book, true).toFixed(1).padStart(11)}${at(x => x.book, false).toFixed(1).padStart(13)}`
+      + `${`${at(x => x.pool, true).toFixed(0)} -> ${at(x => x.pool, false).toFixed(0)}`.padStart(29)}`,
     );
   }
 }

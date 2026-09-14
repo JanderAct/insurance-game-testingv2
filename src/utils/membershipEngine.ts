@@ -13,6 +13,7 @@ import {
   MEMBERSHIP_EQUILIBRIUM_ENROLLMENT,
   MEMBERSHIP_DEFAULT_ADJUSTMENT,
   MEMBERSHIP_DEFAULT_DEPARTURE_RATE,
+  APPLICATION_RATE,
   MAX_NEW_MEMBERS_PER_YEAR,
   MAX_NEW_MEMBER_SHARE,
   MAX_WITHDRAWN_PER_YEAR,
@@ -46,6 +47,19 @@ export interface MemberMovementInputs {
   // the pure premium is not positive.
   rateLoad?: number | null;
   competitivePressure: number;
+  /**
+   * DIAGNOSTIC SEAM. Overrides APPLICATION_RATE for one call.
+   *
+   * ⚠ THE ENGINE NEVER SETS THIS AND THE UI CANNOT REACH IT. It exists so
+   * new-business-appetite-derive can sweep the rate over whole played games and
+   * report where short years actually begin, rather than computing the answer
+   * from acceptance shares and calling arithmetic a measurement. The rate is a
+   * single scalar with no other input, so a sweep is the only way to see its
+   * effect on a book that responds to it — and re-deriving the constant is
+   * exactly what this seam is for. Same precedent as the injected clock on
+   * createSaveScheduler.
+   */
+  applicationRateOverride?: number;
   memberSensitivity: number;
   yearNumber: number;
   calendarYear: number;
@@ -56,6 +70,17 @@ export interface MemberMovementResult {
   activeMembers: Member[];
   newMembers: Member[];
   withdrawnMembers: Member[];
+  // ⚠ THE THREE INTAKE COUNTS, RECORDED BECAUSE WITHOUT THEM "THE POOL CAME UP
+  // SHORT" IS NOT OBSERVABLE FROM OUTSIDE. newMembers.length is the only thing
+  // a result used to carry, and it is min(demand, cap, eligible) — three
+  // different constraints collapsed into one number, so a year limited by a
+  // strict bar looks exactly like a year nobody wanted to join. These separate
+  // them: `intakeRoom` is what the pool had space for after demand and both
+  // caps, `applicantCount` is how many applied, `eligibleCount` how many
+  // cleared the bar. Short ⟺ eligibleCount < intakeRoom.
+  intakeRoom: number;
+  applicantCount: number;
+  eligibleCount: number;
   retentionRate: number;
   memberSatisfaction: number;
   averageRiskQuality: number;
@@ -346,14 +371,27 @@ export function simulateMemberMovement(inputs: MemberMovementInputs): MemberMove
   // replacing it would loosen intake in the ~27% of line-years where 4
   // currently binds, which moves the default path.
   //
-  // ⚠ AND NEITHER CAP MAKES GROWTH REACHABLE, WHICH IS THE THING TO KNOW
-  // BEFORE REACHING FOR EITHER. Intake measures 2.63/yr against withdrawals of
-  // 2.65 (WC) and 2.94 (GL), so the book sits flat-to-shrinking at defaults. The
-  // constraint is DEMAND: baseNewMembers is pinned to MEMBERSHIP_EQUILIBRIUM_-
-  // ENROLLMENT and MEMBERSHIP_DEFAULT_DEPARTURE_RATE precisely so the book holds
-  // its level. Lifting the cap can only release the tail of the noise draw —
-  // bounded above by the uncapped mean of ~2.9 — which does not flip net
-  // movement positive. Growth is a change to the capture rate, not to a cap.
+  // ⚠ AND GROWTH IS STILL NOT REACHABLE AFTER THE INTAKE REBUILD. RE-MEASURED,
+  // AND THE ANSWER DID NOT CHANGE. Net movement per line-year runs -0.03 (WC)
+  // and -0.35 (GL) at Accept All, and between -0.15 and -0.58 at every appetite
+  // tier: the book is flat-to-shrinking everywhere, and the strict bar makes it
+  // shrink faster. The rebuild made SHRINKAGE reachable — being picky now costs
+  // members — and left growth where it was.
+  //
+  // The constraint is DEMAND, not either cap and not the application rate.
+  // baseNewMembers is pinned to MEMBERSHIP_EQUILIBRIUM_ENROLLMENT and
+  // MEMBERSHIP_DEFAULT_DEPARTURE_RATE precisely so the book holds its level, and
+  // raising supply cannot push intake past a demand that is calibrated to
+  // equilibrium. Lifting the flat cap only releases the tail of the noise draw,
+  // bounded above by an uncapped mean near 2.9 against withdrawals of 2.65-2.94.
+  //
+  // ⚠ SO THE RAPID-GROWTH HAZARD REMAINS UNREACHABLE BY CONSTRUCTION. The
+  // framework lists it among the things the game exists to demonstrate, and no
+  // decision available to a player produces it. Reaching it means changing
+  // prospectCaptureRate — giving the player a channel that moves the capture
+  // rate rather than the intake cap — which is its own commit and its own
+  // re-calibration of the equilibrium. Recorded here rather than left for the
+  // next reader to rediscover from a flat book.
   const actualNewCount = Math.min(
     rawNewCount,
     MAX_NEW_MEMBERS_PER_YEAR,
@@ -408,11 +446,45 @@ export function simulateMemberMovement(inputs: MemberMovementInputs): MemberMove
   // this commit. Any other tier shortens the pool and diverges the stream, which
   // is correct: it is a different decision.
   // ============================================================================
+  // ============================================================================
+  // WHO APPLIES, THEN WHO CLEARS THE BAR, THEN WHO GETS WRITTEN. Three steps,
+  // and the first one is new.
+  //
+  // ⚠ APPLICATIONS ARE A SHARE OF THE UNENROLLED POOL, NOT THE WHOLE OF IT.
+  // Every unenrolled member used to be treated as an applicant every year —
+  // ~140 of them for 4 slots — which is why New Business Appetite could only
+  // ever change WHICH members joined and never HOW MANY. See APPLICATION_RATE.
+  //
+  // ⚠ ONE SHUFFLE, AND IT IS OVER THE FULL AVAILABLE POOL, WHICH IS WHAT KEEPS
+  // THE DRAW STABLE. Shuffling `availableMembers` and then taking a prefix is
+  // the same draw the old code made, so at Accept All the members selected are
+  // IDENTICAL to before this commit — take the first 9 and then the first 3 of
+  // those, and you have the first 3. It also means the appetite tier no longer
+  // perturbs the RNG stream at all: every arm shuffles the same array to the
+  // same order, and only the filter downstream differs. Comparing two tiers is
+  // therefore comparing two decisions on one game rather than two games.
+  //
+  // ⚠ THE APPLICATION COUNT IS DETERMINISTIC AND THE VARIANCE IS IN WHO APPLIES.
+  // A noisy count would need its own draw and would move every downstream
+  // stream; it is not needed. With ~9 applicants and roughly a third clearing
+  // the strict bar, the number eligible is already binomial with a standard
+  // deviation near 1.4, which is where short years come from.
+  // ============================================================================
+  const shuffledPool = [...availableMembers];
+  rng.shuffle(shuffledPool);
+
+  const applicationCount = Math.min(
+    shuffledPool.length,
+    Math.round(shuffledPool.length * (inputs.applicationRateOverride ?? APPLICATION_RATE)),
+  );
+  const applicants = shuffledPool.slice(0, applicationCount);
+
+  // The bar. Order is preserved, so the survivors are still in shuffled order
+  // and taking a prefix of them is random-among-eligible.
   const candidatePool = appetiteEligible(
-    availableMembers, line, inputs.memberLossHistory, yearNumber,
+    applicants, line, inputs.memberLossHistory, yearNumber,
     inputs.decisions.newBusinessAppetite ?? null,
   );
-  rng.shuffle(candidatePool);
 
   const newMembers: Member[] = candidatePool.slice(0, Math.min(actualNewCount, candidatePool.length)).map(m => ({
     ...m,
@@ -438,6 +510,9 @@ export function simulateMemberMovement(inputs: MemberMovementInputs): MemberMove
     activeMembers,
     newMembers,
     withdrawnMembers,
+    intakeRoom: actualNewCount,
+    applicantCount: applicants.length,
+    eligibleCount: candidatePool.length,
     retentionRate,
     memberSatisfaction: newSatisfaction,
     averageRiskQuality: newRiskQuality,

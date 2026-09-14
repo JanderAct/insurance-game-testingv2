@@ -439,6 +439,9 @@ interface LineYearContext {
   instance: GameInstance;
   yearNumber: number;
   calendarYear: number;
+  /** DIAGNOSTIC SEAM — see processYear's `derivation` parameter. Undefined in
+   *  every shipped path. */
+  applicationRateOverride?: number;
   allMarketMembers: Member[];
   // The authoritative per-line enrollment ledger (as of this year's entry,
   // plus earlier-processed lines' same-year updates — irrelevant to this
@@ -816,6 +819,7 @@ export function processLineYear(
   const memberRng = deriveSubRng(instance.seed, yearNumber, lineRngLabel('members', line));
 
   const memberResult = simulateMemberMovement({
+    applicationRateOverride: ctx.applicationRateOverride,
     currentMembers: currentActiveMembers,
     allMarketMembers: ctx.allMarketMembers,
     membershipHistory: ctx.membershipHistory,
@@ -1993,6 +1997,12 @@ export function processLineYear(
     // The COUNT only, not the ids: nothing renders a declined roster yet and
     // the save sits at 96% of budget, so ids go in when something needs them.
     declinedMembers: declinedMembers.length,
+    // The intake, separated into its three constraints — see ResultSet. Carried
+    // so "the pool came up short" is readable from a played game rather than
+    // only from inside the movement engine.
+    applicants: memberResult.applicantCount,
+    eligibleApplicants: memberResult.eligibleCount,
+    intakeRoom: memberResult.intakeRoom,
     activeExposure: parseFloat(activeExposure.toFixed(2)),
     totalMarketExposure: parseFloat(totalMarketExposure.toFixed(2)),
     marketShare: parseFloat(marketShare.toFixed(4)),
@@ -2250,7 +2260,16 @@ export interface ProcessYearResult {
 // of the loan logic is inert — a healthy WC-only game is byte-identical to v3.
 export function processYear(
   gameState: GameState,
-  rawDecisions: DecisionSet
+  rawDecisions: DecisionSet,
+  /**
+   * DIAGNOSTIC SEAM, threaded straight to simulateMemberMovement. See
+   * MemberMovementInputs.applicationRateOverride for why it exists and why the
+   * shipped engine never sets it: APPLICATION_RATE is a single scalar with no
+   * other input, so re-deriving it needs whole played games at several values,
+   * and the book responds to the rate. Optional and absent everywhere except
+   * new-business-appetite-derive.
+   */
+  derivation?: { applicationRate?: number },
 ): ProcessYearResult {
   // Pool-wide decisions (investment allocation, risk-control intensity) are
   // projected into every line's decision slice here — single source of truth
@@ -2404,6 +2423,7 @@ export function processYear(
       instance,
       yearNumber,
       calendarYear,
+      applicationRateOverride: derivation?.applicationRate,
       allMarketMembers: currentAllMarketMembers,
       membershipHistory,
       // Ends at yearNumber - 1 — see the field's note on LineYearContext.

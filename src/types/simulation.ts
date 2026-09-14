@@ -938,6 +938,28 @@ export interface ResultSet {
    * and deliberately absent from memberRetentionRate for the same reason.
    */
   declinedMembers?: number;
+  /**
+   * THE INTAKE, SEPARATED INTO ITS THREE CONSTRAINTS. `newMembers` is
+   * min(intakeRoom, eligibleApplicants) and collapses two very different years
+   * into one number: a year nobody applied in looks identical to a year the
+   * pool turned applicants away. These say which it was.
+   *
+   *   applicants          how many of the unenrolled pool applied (a share of
+   *                       it — see APPLICATION_RATE)
+   *   eligibleApplicants  how many of those cleared New Business Appetite
+   *   intakeRoom          how many the pool had space for, after demand and
+   *                       both caps
+   *
+   * SHORT YEAR ⟺ eligibleApplicants < intakeRoom: the pool had room and the bar
+   * left nobody to fill it with. That is the state that makes the appetite a
+   * decision rather than a relabelling, and it is not derivable from
+   * `newMembers` alone.
+   *
+   * Optional because saves written before the intake rebuild do not carry them.
+   */
+  applicants?: number;
+  eligibleApplicants?: number;
+  intakeRoom?: number;
   activeExposure: number;
   totalMarketExposure: number;
   marketShare: number;          // exposure-based

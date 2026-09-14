@@ -85,33 +85,33 @@ import type { CoverageLine, Member, MemberLossHistory } from '../types/simulatio
  * better-than-expected half, everyone but the worst fifth, and everyone.
  *
  * ============================================================================
- * ⚠ WHAT THE TIER ACTUALLY CHANGES — AND IT IS NOT HOW MANY MEMBERS JOIN.
+ * ⚠ WHAT THE TIER CHANGES — REBUILT, AND THE OLD ANSWER IS NOW WRONG.
  *
- * Measured over 8 games x 14 years with every other decision at default:
+ * Before the intake rebuild this block recorded that the tier changed
+ * composition and not count: the book read 58.8 / 58.2 / 58.4 / 58.1 across the
+ * four arms and the strictest bar cost 0.16 members a year. The cause was that
+ * every unenrolled member was treated as an applicant, so ~140 of them competed
+ * for 4 slots and the bar could only ever choose WHICH ones the draw reached.
  *
- *   tier         WC mean book   joins/yr   eligible applicants   pool < cap
- *   Accept All       58.8         2.63           137                0%
- *   below 1.50       58.2         2.59           113                0%
- *   below 1.00       58.4         2.56            72                0%
- *   below 0.75       58.1         2.47            49                0%
+ * With applications a 6% share of the unenrolled pool (APPLICATION_RATE),
+ * measured over 8 games x 14 years:
  *
- * THE BOOK DOES NOT MOVE. The tightest tier costs 0.16 members a year of
- * intake — a 6% reduction — and leaves the book statistically where it started.
+ *   tier         applicants/yr   eligible/yr   SHORT   joins/yr   final book
+ *   Accept All        8.3            8.25        0%       2.61      59.9 / 57.9
+ *   below 1.50        8.3            6.7         0%       2.54      58.1 / 59.1
+ *   below 1.00        8.3            4.5        10%       2.53      58.0 / 58.8
+ *   below 0.75        8.4            3.0        34%       2.15      52.9 / 54.6
  *
- * The reason is the last column: the eligible pool NEVER falls below the cap.
- * Even at 0.75 there are 35-49 applicants clearing the standard against an
- * intake cap of 4, and the minimum ever seen across every game and year is 30.
- * So the tier is not rationing applicants. It is choosing WHICH applicants the
- * draw can reach, which is exactly what "random among eligible" was ruled to
- * do — the mechanism is working as designed, and the design's effect is on
- * composition rather than on count.
+ * SHORT is a line-year where fewer applicants cleared the bar than the pool had
+ * room for — the state that makes this a decision. It runs at zero for Accept
+ * All and the permissive bar, one year in ten at the middle bar, and one in
+ * three at the strict one, where the book ends 5-7 members below Accept All.
  *
- * ⚠ AND THE COMPOSITION EFFECT IS NOT RESOLVED AT THIS SAMPLE SIZE. Mean
- * exposure across the arms reads 506 / 548 / 508 / 473 $M on WC, which is not
- * monotone in tier strictness and therefore cannot be read as a selection
- * signal — 8 games does not separate it from year-to-year noise on books of
- * identical size. Anyone wanting the quality effect should measure the enrolled
- * book's own ratio distribution over many more games, not its exposure.
+ * So being picky now costs members, which is the trade the control is for. The
+ * permissive bar still costs almost nothing, which is correct: 1.50 excludes
+ * only the worst fifth of applicants and the pool rarely wanted four of them in
+ * the same year anyway.
+ * ============================================================================
  * ============================================================================
  */
 export const NEW_BUSINESS_TIERS = [0.75, 1.00, 1.50] as const;
