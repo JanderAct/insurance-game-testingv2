@@ -805,6 +805,31 @@ export const MEMBERSHIP_DEFAULT_DEPARTURE_RATE = 0.0445;
 export const MAX_NEW_MEMBERS_PER_YEAR = 4;
 export const MAX_WITHDRAWN_PER_YEAR = 4;
 
+/**
+ * The intake cap as a SHARE OF THE BOOK, applied alongside the flat cap above.
+ *
+ * ⚠ MEASURE FIRST: THE FLAT 4 IS THE BINDING ONE ON A NORMAL BOOK, AND THIS IS
+ * NOT. Intake at all-default decisions measures 2.61 / 2.60 / 2.69 new members
+ * per line-year (10 games x 14 years), and the flat cap of 4 binds in 24-29% of
+ * line-years — joins land exactly on 4 that often and never exceed it. On the
+ * observed mean books of 53-58 members this share works out at 5.3-5.8, i.e.
+ * ABOVE the flat 4, so `min(4, share)` is 4 and the share changes nothing.
+ *
+ * ⚠ SO THE FLAT CAP ALREADY IS ~7.5% OF THE BOOK, which sits between the 5%
+ * that would shrink the pool and the 10% ruled here. Raising the effective cap
+ * to 10% is a LOOSENING that would let intake through in the ~27% of years
+ * where 4 currently binds, and that moves the default path — both baselines
+ * would have to be recaptured for it. They were not, so the flat cap stands and
+ * this share caps only where it is the tighter of the two.
+ *
+ * WHERE IT ACTUALLY BINDS: below a 40-member book, where 10% drops under 4. A
+ * pool that has shed members cannot recruit its way back at more than a tenth
+ * of what is left per year, which is the hazard direction worth capping — a
+ * shrinking pool refilling fast with whoever is available is exactly how a book
+ * goes bad quietly.
+ */
+export const MAX_NEW_MEMBER_SHARE = 0.10;
+
 // Funding confidence level factor (CLF) table
 // Represents the multiplier applied to expected losses to set funding targets
 // 0.60 ALIGNED TO 1.000, matching the reference chart — the chart is the

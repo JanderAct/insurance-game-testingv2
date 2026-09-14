@@ -235,7 +235,17 @@ if (dead.length > 0) {
 // module, EVERY mention of risk quality must be a neutral override.
 // ===========================================================================
 {
-  const RATIO_MODULE = 'utils/memberExperienceMod.ts';
+  // ⚠ TWO MODULES, BECAUSE THE RATIO NOW FEEDS TWO DECISIONS. memberExperienceMod
+  // computes it; newBusinessAppetite thresholds APPLICANTS on it. A prospect's
+  // ratio has to be computed at neutral risk quality on both legs for exactly
+  // the reason a member's does — more so, in fact, since an applicant is chosen
+  // ON that number rather than merely billed by it. newBusinessAppetite gets
+  // its ratio by delegating to memberExperienceMods, so today it inherits the
+  // property; it is listed here so that the day someone computes a prospect
+  // ratio locally instead, the gate is already watching the file they will
+  // write it in.
+  const RATIO_MODULES = ['utils/memberExperienceMod.ts', 'utils/newBusinessAppetite.ts'];
+  for (const RATIO_MODULE of RATIO_MODULES) {
   const p = path.join(SRC, RATIO_MODULE);
   console.log('');
   if (!fs.existsSync(p)) {
@@ -268,10 +278,13 @@ if (dead.length > 0) {
         + 'member of their class" and starts encoding the member\'s own hidden score — which the '
         + 'Loss Ratio column on MembershipPage then renders, and Renewal Underwriting then acts on.');
     }
-    // ⚠ CONTROLLED THE SAME WAY THE SCAN ABOVE IS. If the overrides were
-    // refactored out of existence the loop finds nothing and reports PASS on
-    // zero mentions, which is the inert-probe failure wearing a green tick.
-    const RATIO_CONTROL_MIN = 4;
+    // ⚠ CONTROLLED THE SAME WAY THE SCAN ABOVE IS, BUT ONLY WHERE THE OVERRIDES
+    // SHOULD EXIST. memberExperienceMod is where the expectation is computed, so
+    // zero mentions there means the neutral basis is gone and the assertion
+    // above is passing on nothing — the inert-probe failure wearing a green
+    // tick. newBusinessAppetite DELEGATES and is expected to have none, so the
+    // same control there would fail a correct file.
+    const RATIO_CONTROL_MIN = RATIO_MODULE.includes('memberExperienceMod') ? 4 : 0;
     const ratioSane = clean >= RATIO_CONTROL_MIN;
     console.log(`  probe control: ${clean} neutral-override mention(s) found `
       + `(>= ${RATIO_CONTROL_MIN})   ${ratioSane ? 'PASS' : 'FAIL'}`);
@@ -280,6 +293,7 @@ if (dead.length > 0) {
         + 'above passes trivially when there is nothing to check. Either the expectation is no longer '
         + 'computed at neutral risk quality, or this check is looking at the wrong module.');
     }
+  }
   }
 }
 

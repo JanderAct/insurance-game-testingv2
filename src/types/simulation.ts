@@ -425,6 +425,18 @@ export interface LineDecisionSet {
   dividendPct: number;            // 0.00 to 0.15 of premium
   assessmentPct: number;          // 0.00 to 0.25 of premium
   /**
+   * New Business Appetite: decline to WRITE an applicant whose own raw
+   * experience ratio is at or above this. null accepts every applicant, which
+   * is the default and is the only value that leaves the recruitment draw
+   * untouched — see newBusinessAppetite.ts on why ACCEPT_ALL is "do not filter"
+   * rather than an admitting threshold.
+   *
+   * ⚠ ON THE APPLICANT'S OWN RATIO, WHICH IS NOT ON A MEMBER'S BASIS.
+   * Prospects generate at k = 1 with no risk control, so the two numbers are
+   * comparable but not identical. Stated at the control rather than hidden.
+   */
+  newBusinessAppetite?: number | null;
+  /**
    * Renewal Underwriting: decline members whose DISPLAYED experience modifier
    * exceeds this. null renews everyone, which is the default.
    *

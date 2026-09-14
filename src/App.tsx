@@ -675,6 +675,8 @@ export default function App() {
         {activeTab === 'decisions' && gameState && (
           <DecisionsPage
             memberLossHistory={gameState.poolState.memberLossHistory ?? {}}
+            allMarketMembers={gameState.poolState.allMarketMembers}
+            membershipHistory={gameState.poolState.membershipHistory}
             decisions={currentDecisions}
             onChange={handleDecisionsChange}
             yearNumber={gameState.currentYearNumber}

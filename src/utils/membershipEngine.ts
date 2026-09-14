@@ -4,6 +4,7 @@
 import type { Member, LineDecisionSet, CoverageLine, MembershipHistory, MemberLossHistory } from '../types/simulation';
 import { SeededRandom } from './random';
 import { canReenroll } from './membershipHistory';
+import { appetiteEligible } from './newBusinessAppetite';
 import { getMemberExposure } from './lineHelpers';
 import { departureRisks } from './memberDeparture';
 import {
@@ -13,6 +14,7 @@ import {
   MEMBERSHIP_DEFAULT_ADJUSTMENT,
   MEMBERSHIP_DEFAULT_DEPARTURE_RATE,
   MAX_NEW_MEMBERS_PER_YEAR,
+  MAX_NEW_MEMBER_SHARE,
   MAX_WITHDRAWN_PER_YEAR,
   RATE_NEUTRAL_CHANGE_PCT,
   RATE_NEUTRAL_LOAD,
@@ -336,7 +338,27 @@ export function simulateMemberMovement(inputs: MemberMovementInputs): MemberMove
 
   const expectedNew = calcExpectedNewMembers(inputs);
   const rawNewCount = Math.round(expectedNew * rng.range(0.3, 1.7));
-  const actualNewCount = Math.min(rawNewCount, MAX_NEW_MEMBERS_PER_YEAR);
+  // ⚠ TWO CAPS, AND THE FLAT ONE IS THE BINDING ONE ON A NORMAL BOOK. See
+  // MAX_NEW_MEMBER_SHARE for the measurement: at 53-58 members the share works
+  // out at 5.3-5.8 against a flat 4, so this min is 4 and the share is slack.
+  // It binds below a 40-member book, where a tenth of what is left is under 4.
+  // Ordered min(flat, share) rather than replacing the flat cap because
+  // replacing it would loosen intake in the ~27% of line-years where 4
+  // currently binds, which moves the default path.
+  //
+  // ⚠ AND NEITHER CAP MAKES GROWTH REACHABLE, WHICH IS THE THING TO KNOW
+  // BEFORE REACHING FOR EITHER. Intake measures 2.63/yr against withdrawals of
+  // 2.65 (WC) and 2.94 (GL), so the book sits flat-to-shrinking at defaults. The
+  // constraint is DEMAND: baseNewMembers is pinned to MEMBERSHIP_EQUILIBRIUM_-
+  // ENROLLMENT and MEMBERSHIP_DEFAULT_DEPARTURE_RATE precisely so the book holds
+  // its level. Lifting the cap can only release the tail of the noise draw —
+  // bounded above by the uncapped mean of ~2.9 — which does not flip net
+  // movement positive. Growth is a change to the capture rate, not to a cap.
+  const actualNewCount = Math.min(
+    rawNewCount,
+    MAX_NEW_MEMBERS_PER_YEAR,
+    Math.floor(currentMembers.length * MAX_NEW_MEMBER_SHARE),
+  );
 
   // Candidate-pool eligibility reads EXCLUSIVELY from membershipHistory,
   // NEVER from Member.status. The shared status field is fold-corrupted
@@ -372,7 +394,24 @@ export function simulateMemberMovement(inputs: MemberMovementInputs): MemberMove
   // unchanged for them — which is why both baselines still hold across this
   // deletion. A game saved at strictness > 6 would draw differently, and
   // there is no such game: the field is gone from the decision set.
-  const candidatePool = [...availableMembers];
+  // ============================================================================
+  // NEW BUSINESS APPETITE — the tier filter, and it runs BEFORE the shuffle.
+  //
+  // RANDOM AMONG ELIGIBLE, NOT BEST-FIRST. Filter to who clears the standard,
+  // then shuffle, then take the cap off the top. Best-first would collapse every
+  // tier into the cap — at "accept everyone" the pool would still take the best
+  // four and a tighter tier would barely differ. See newBusinessAppetite.ts.
+  //
+  // ⚠ AT THE DEFAULT (null) appetiteEligible RETURNS A COPY AND FILTERS NOTHING,
+  // so the pool handed to the shuffle is the same length it has always been and
+  // consumes the same draws. That is what keeps both baselines holding across
+  // this commit. Any other tier shortens the pool and diverges the stream, which
+  // is correct: it is a different decision.
+  // ============================================================================
+  const candidatePool = appetiteEligible(
+    availableMembers, line, inputs.memberLossHistory, yearNumber,
+    inputs.decisions.newBusinessAppetite ?? null,
+  );
   rng.shuffle(candidatePool);
 
   const newMembers: Member[] = candidatePool.slice(0, Math.min(actualNewCount, candidatePool.length)).map(m => ({

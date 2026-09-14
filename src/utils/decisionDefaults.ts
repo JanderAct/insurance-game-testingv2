@@ -21,6 +21,7 @@ export function defaultLineDecisionSet(line: CoverageLine): LineDecisionSet {
     // Renew everyone. A pool that declines by default would be making an
     // underwriting decision nobody took.
     renewalThreshold: null,
+    newBusinessAppetite: null,
     dividendPct: SLIDER_RANGES.dividendPct.default,
     assessmentPct: SLIDER_RANGES.assessmentPct.default,
     riskControlPct: SLIDER_RANGES.riskControlPct.default,

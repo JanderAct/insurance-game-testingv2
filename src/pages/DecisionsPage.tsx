@@ -1,6 +1,6 @@
 import React from 'react';
-import { DollarSign, TrendingUp, BarChart2, Shield, RotateCcw, Lock, Info } from 'lucide-react';
-import type { DecisionSet, LineDecisionSet, CoverageLine, LineView, LineResultSet, Member, MemberLossHistory } from '../types/simulation';
+import { DollarSign, TrendingUp, BarChart2, Shield, RotateCcw, Info } from 'lucide-react';
+import type { DecisionSet, LineDecisionSet, CoverageLine, LineView, LineResultSet, Member, MemberLossHistory, MembershipHistory } from '../types/simulation';
 import SliderInput from '../components/SliderInput';
 import AllocationBar from '../components/AllocationBar';
 import { SLIDER_RANGES, ASSET_ALLOCATION_DEFAULT } from '../data/defaultAssumptions';
@@ -16,6 +16,8 @@ import { hasStaticClf, staticClf } from '../data/clfTables';
 import type { FundingConsequence } from '../utils/fundingConsequence';
 import { RENEWAL_THRESHOLDS, renewalDeclines } from '../utils/renewalUnderwriting';
 import { EXPERIENCE_MOD } from '../utils/memberExperienceMod';
+import { NEW_BUSINESS_TIERS, appetiteEligible } from '../utils/newBusinessAppetite';
+import { canReenroll } from '../utils/membershipHistory';
 
 export interface LineLoanInfo {
   balance: number;
@@ -46,6 +48,11 @@ interface DecisionsPageProps {
   /** The rolling loss ledger, for Renewal Underwriting's live decline counts.
    *  Same source MembershipPage reads — see its note on why not the shares. */
   memberLossHistory: MemberLossHistory;
+  // The full canonical marketplace and the per-line enrolment ledger — the two
+  // inputs New Business Appetite needs to build the applicant pool the same way
+  // simulateMemberMovement does, rather than estimating it.
+  allMarketMembers: Member[];
+  membershipHistory: MembershipHistory;
   // The line's ACTIVE enrolled members. The reinsurance tower prices off the
   // book itself now, not off a frozen per-$100 rate card times exposure — both
   // E[ceded] and SD[ceded] depend on who is actually enrolled and on the year.
@@ -88,7 +95,7 @@ function resetLineToDefaults(decisions: DecisionSet, line: CoverageLine): Decisi
   };
 }
 
-export default function DecisionsPage({ decisions, onChange, yearNumber, estimatedExpectedLoss, estimatedAggregateTermsRetained, disabled = false, lineView, lineLoanInfo, lastLineResult, fundingConsequence, activeMembers, memberLossHistory }: DecisionsPageProps) {
+export default function DecisionsPage({ decisions, onChange, yearNumber, estimatedExpectedLoss, estimatedAggregateTermsRetained, disabled = false, lineView, lineLoanInfo, lastLineResult, fundingConsequence, activeMembers, memberLossHistory, allMarketMembers, membershipHistory }: DecisionsPageProps) {
   // Pool tab: the two pool-wide decisions. One allocation policy and one
   // risk-control intensity for the whole pool — each line applies them to its
   // OWN base (own segregated portfolio / own premium).
@@ -211,7 +218,17 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
             onChange={v => set('renewalThreshold', v)}
             disabled={disabled}
           />
-          <NewBusinessAppetitePreview line={selectedLine} />
+          <NewBusinessAppetite
+            line={selectedLine}
+            members={lastLineResult?.memberList ?? []}
+            allMarketMembers={allMarketMembers}
+            membershipHistory={membershipHistory}
+            history={memberLossHistory}
+            yearNumber={yearNumber}
+            value={d.newBusinessAppetite ?? null}
+            onChange={v => set('newBusinessAppetite', v)}
+            disabled={disabled}
+          />
         </SectionCard>
 
         {outstandingLoanSlider(d, set, selectedLoanInfo, disabled)}
@@ -495,40 +512,28 @@ function FundingConsequencePanel({ c, lastLineResult, line }: { c: FundingConseq
 
 // Inactive marker (Part 3). Both new underwriting controls render but are
 // deliberately NOT wired to anything — see the module comment on why.
-function InactiveBadge() {
-  return (
-    <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-gray-500 bg-gray-200 px-1.5 py-0.5 rounded">
-      <Lock size={10} /> Inactive
-    </span>
-  );
-}
 
 // Wrapper that visually greys out an inactive preview control and attaches
 // the "why" as persistent helper text, rather than only a hover tooltip — a
 // control that LOOKS live but is not is the failure this exists to prevent.
-function InactivePreview({ title, children }: { title: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/70 p-3 space-y-2 opacity-80">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-semibold text-gray-600">{title}</span>
-        <InactiveBadge />
-      </div>
-      <div className="pointer-events-none select-none grayscale-[35%]">{children}</div>
-      <p className="flex items-start gap-1 text-[11px] text-gray-500 leading-relaxed">
-        <Info size={12} className="mt-0.5 flex-shrink-0" />
-        Activates once member loss history exists (Stage 4 of the marketplace-generation work).
-      </p>
-    </div>
-  );
-}
+// ⚠ InactivePreview IS DELETED, NOT LEFT UNUSED. It wrapped New Business
+// Appetite while that control was a preview, and its footer read "Activates
+// once member loss history exists (Stage 4 of the marketplace-generation
+// work)". The history exists and the control reads it, so the wrapper has no
+// remaining consumer. Leaving it would leave the next inactive-looking control
+// a ready-made way to ship dark. InactiveBadge went with it — it was the
+// wrapper's own badge and had no other caller.
 
-// Shared box-selection styling for both inactive previews below — the SAME
-// classes as the Reinsurance Level boxes (bold title, description beneath
-// allowed to wrap, selected box filled blue with reversed-out text), so a
-// selected preview box reads as "chosen" rather than "disabled." The
-// distinction from a live Reinsurance box is carried entirely by the
-// InactivePreview wrapper around these (dashed border, grayscale filter,
-// opacity, pointer-events-none, INACTIVE badge) — not by a different color.
+// Shared box-selection styling for Renewal Underwriting and New Business
+// Appetite — the SAME classes as the Reinsurance Level boxes (bold title,
+// description beneath allowed to wrap, selected box filled blue with
+// reversed-out text).
+//
+// ⚠ THE NAME IS NOW WRONG AND IS KEPT ANYWAY, DELIBERATELY. It was built for
+// two INACTIVE previews and both controls are live, so "Preview" describes
+// nothing. Renaming it touches every call site for no behavioural gain and
+// would bury the one thing worth reading here in a diff of identifier churn.
+// Rename it in a commit that is only that.
 function PreviewBox({ title, description, selected, active = false }: { title: string; description: string; selected: boolean; active?: boolean }) {
   return (
     <button
@@ -677,51 +682,106 @@ function RenewalUnderwriting({
   );
 }
 
-// NEW BUSINESS APPETITE (Part 3) — inactive preview, rendered directly beneath
-// Renewal Underwriting in the same Growth & Underwriting card: both are one
-// decision about pool membership (existing members vs. applicants) and belong
-// in one place.
+// ============================================================================
+// NEW BUSINESS APPETITE — live. The mirror of Renewal Underwriting above it,
+// in the same card because both are one decision about pool membership:
+// existing members versus applicants.
 //
-// ⚠ TWO OPTIONS, NOT FIVE, AND IT IS THE SAME ARGUMENT AS RENEWAL'S. Five
-// tiers — Open / Broad / Unchanged / Selective / Strict — described a
-// selectivity DIAL, and the middle three had no number behind them. "Accept
-// average or better" and "Accept good experience only" are not distinguishable
-// statements about a distribution; they are adjectives in selectivity order,
-// which is what made the row read as a control rather than a choice. And
-// "Unchanged" is not an appetite at all: it is a refusal to state one, which
-// on a screen with no prior appetite to maintain means nothing.
+// FOUR TIERS ON THE APPLICANT'S OWN LOSS RATIO. Measured shares accepted:
+// 0.75 takes the best ~39%, 1.00 the better-than-expected ~56%, 1.50 all but
+// the worst ~19%, and Accept All everyone. Well spaced, and each states
+// something a player can mean.
 //
-// ⚠ AND IT SHOULD USE RENEWAL'S NUMBER WHEN IT ACTIVATES, not a second scale.
-// The pool has one view of what "too expensive to write" means. Applying
-// RENEWAL_THRESHOLDS[0] to an applicant's own ratio makes the two controls one
-// standard applied in two directions — decline the members above it, decline
-// the applicants above it — rather than two dials a player has to reconcile.
-// An applicant with no rated history is accepted, exactly as an unrated member
-// is never declined: there is nothing to judge them on.
-const APPETITE_OPTIONS = [
-  { title: 'Open', description: 'Accept all applicants' },
-  {
-    title: `Decline above ${RENEWAL_THRESHOLDS[0].toFixed(2)}x`,
-    description: 'Same standard as renewal',
-  },
-] as const;
+// ⚠ THE COUNT SHOWN IS THE ELIGIBLE POOL, NOT THE EXPECTED INTAKE, and the
+// difference is the point. Intake measures 2.6 a year against an eligible pool
+// in the dozens, so the tier is not rationing applicants — it is choosing WHICH
+// applicants the draw can reach. Showing "eligible" rather than "you will get
+// N" avoids promising a number the recruitment model does not deliver.
+//
+// ⚠ NEXT STEP, DELIBERATELY NOT THIS COMMIT: per-applicant accept/decline.
+// That turns a policy into a queue of decisions every year and is its own UI
+// question — a list, a per-row action, and a rule for what happens to the ones
+// the player never looks at. Noted at the control so it is not rediscovered.
+// ============================================================================
+function NewBusinessAppetite({
+  line, members, allMarketMembers, membershipHistory, history, yearNumber, value, onChange, disabled,
+}: {
+  line: CoverageLine;
+  members: Member[];
+  allMarketMembers: Member[];
+  membershipHistory: MembershipHistory;
+  history: MemberLossHistory;
+  yearNumber: number;
+  value: number | null;
+  onChange: (v: number | null) => void;
+  disabled?: boolean;
+}) {
+  // The applicant pool as the engine will build it: marketplace minus enrolled,
+  // minus anyone inside their two-year cooldown. Same source as
+  // simulateMemberMovement so the counts cannot drift from the draw.
+  const eligible = React.useMemo(() => {
+    const enrolled = new Set(members.map(m => m.id));
+    const available = allMarketMembers.filter(
+      m => !enrolled.has(m.id) && canReenroll(membershipHistory, m.id, line, yearNumber),
+    );
+    return {
+      all: available.length,
+      byTier: NEW_BUSINESS_TIERS.map(
+        t => appetiteEligible(available, line, history, yearNumber, t).length,
+      ),
+    };
+  }, [members, allMarketMembers, membershipHistory, history, line, yearNumber]);
 
-function NewBusinessAppetitePreview({ line }: { line: CoverageLine }) {
-  // Starts unselected, matching Renewal Underwriting above it — an inactive
-  // control has no active choice to show, and the sensible default depends
-  // on the modifier distribution Stage 4 will report.
-  const [selected, setSelected] = React.useState<number | null>(null);
+  const rated = line !== 'Property';
+
   return (
-    <InactivePreview title="New Business Appetite">
-      <div className="grid grid-cols-2 gap-1.5">
-        {APPETITE_OPTIONS.map((opt, i) => (
-          <div key={opt.title} onClick={() => setSelected(i)}>
-            <PreviewBox title={opt.title} description={opt.description} selected={i === selected} />
+    <div className="rounded-lg border border-gray-200 bg-white p-3 space-y-2">
+      <span className="text-sm font-semibold text-gray-700">New Business Appetite</span>
+      {rated ? (
+        <>
+          <div className="grid grid-cols-4 gap-1">
+            <div onClick={() => !disabled && onChange(null)}>
+              <PreviewBox
+                title="Accept All"
+                description={`${eligible.all} applicants`}
+                selected={value === null}
+                active={!disabled}
+              />
+            </div>
+            {NEW_BUSINESS_TIERS.map((t, i) => (
+              <div key={t} onClick={() => !disabled && onChange(t)}>
+                <PreviewBox
+                  title={`Below ${t.toFixed(2)}x`}
+                  description={`${eligible.byTier[i]} eligible`}
+                  selected={value === t}
+                  active={!disabled}
+                />
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      {line === 'Property' && <PropertyNoSignalNote />}
-    </InactivePreview>
+          <p className="flex items-start gap-1 text-[11px] text-gray-500 leading-relaxed">
+            <Info size={12} className="mt-0.5 flex-shrink-0" />
+            <span>
+              Applicants hand the pool {EXPERIENCE_MOD.windowYears} years of their own claims when they
+              apply. This sets the standard that loss run has to clear. Those who clear it are written in
+              the order they come, not best first — the pool underwrites against a standard, it does not
+              rank the queue.
+            </span>
+          </p>
+          <p className="flex items-start gap-1 text-[11px] text-gray-400 leading-relaxed">
+            <Info size={12} className="mt-0.5 flex-shrink-0" />
+            <span>
+              An applicant&rsquo;s ratio is not on quite the same footing as a member&rsquo;s: it carries no
+              pool risk-control credit and none of the pool&rsquo;s own loss-mix correction, because they
+              have had neither. An applicant with under {EXPERIENCE_MOD.windowYears} years of record has no
+              loss run to judge and is accepted.
+            </span>
+          </p>
+        </>
+      ) : (
+        <PropertyNoSignalNote />
+      )}
+    </div>
   );
 }
 
