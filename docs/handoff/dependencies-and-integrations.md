@@ -238,10 +238,14 @@ benefit, and its presence actively misleads — a reader inspecting
 `package.json` will reasonably conclude the application has a backend, a
 database and authentication. It has none of those.
 
-Most plausibly it is residue from a project scaffold. **Flagged, not
-remediated** — removing it is a `package.json` change and this exercise is
-documentation only. It is the single cheapest cleanup available and is first on
-`wishlist.md`.
+**It is residue from the Bolt (bolt.new / StackBlitz) scaffold the project
+started from** — established, not guessed: it is one of only four dependencies
+in the founding commit's `package.json`, which is that template's default set.
+See `source-provenance.md` §1.1. **Nothing here was ever planned as a backend.**
+
+**Flagged, not remediated** — removing it is a `package.json` change and this
+exercise is documentation only. It is the single cheapest cleanup available and
+is first on `wishlist.md`.
 
 ### 5.3 Full audit position
 

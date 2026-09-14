@@ -25,17 +25,208 @@ Review** at the end.
 
 ## 1. Authorship of the code
 
-### 1.1 Essentially all of this code was written by Claude Code
+### 1.0 Three AI tools contributed, in sequence
 
 This needs saying plainly rather than being left implied, because it is the
-single most consequential fact about the codebase's provenance and it is not
-obvious from reading the source.
+single most consequential fact about the codebase's provenance and **none of it
+is visible from reading the source**.
 
-**Essentially all of the code in this repository was written by Claude Code (an
-AI coding tool) working under human direction.** The human — the repository
-owner — set the direction, made the rulings, specified each piece of work,
-challenged findings and accepted or rejected results. The typing was done by
-the model.
+| # | Tool | What it did | Where it is in the record |
+|---|---|---|---|
+| 1 | **Bolt** (bolt.new / StackBlitz) | Generated the initial scaffold — the Vite + React structure, build configuration and starting application shell. | §1.1. Pre-dates this repository's history; its output is still recognisable at HEAD. |
+| 2 | **Codex / ChatGPT** (OpenAI) | Several days of manual, human-directed editing on that scaffold. Hand-guided, not agentic. | §1.2. Pre-dates this repository's history entirely. |
+| 3 | **Claude Code** (Anthropic) | Everything after that — 363 of 365 commits. | §1.3. The whole of this repository's traceable history. |
+
+**The sequence matters for a reviewer**, because the three carry different
+questions. Bolt's contribution is a *template*, which is the kind of output most
+likely to be shared verbatim across thousands of projects. Codex's contribution
+is *hand-edited work* with a human in the loop on every change. Claude Code's is
+*agentic* — directed at the level of intent and outcome rather than of edit.
+
+**⚠ And the first two are not in this repository's git history.** The earliest
+commit here already contains the finished product of both (§1.4). So for stages
+1 and 2 the repository holds the *output* and none of the *process* — no
+prompts, no intermediate commits, no dates. Everything below about Bolt and
+Codex is inferred from surviving artefacts and is labelled as such.
+
+### 1.1 Bolt (bolt.new / StackBlitz) — the scaffold
+
+**`REVIEW NEEDED — SOURCE OR USAGE RIGHTS UNCLEAR`**
+
+**What it produced:** the project's initial scaffold — Vite + React + TypeScript
++ Tailwind, the build configuration, and the starting application shell. This
+was pushed to GitHub before anything else.
+
+**Is any of it still recognisable at HEAD? Yes — and more than "recognisable".**
+
+The evidence is specific rather than impressionistic. `vite.config.ts` is
+**byte-identical** from the founding commit to HEAD and reads:
+
+```js
+export default defineConfig({
+  plugins: [react()],
+  optimizeDeps: {
+    exclude: ['lucide-react'],
+  },
+});
+```
+
+That `optimizeDeps.exclude: ['lucide-react']` line is the signature of the
+bolt.new React template. It has no relationship to anything this project does —
+`lucide-react` is an ordinary icon package that needs no exclusion — and it has
+survived two months of work untouched because nothing ever had cause to look at
+it.
+
+The founding `package.json`'s dependency set is the same story:
+
+```json
+"dependencies": {
+  "@supabase/supabase-js": "^2.57.4",
+  "lucide-react": "^0.344.0",
+  "react": "^18.3.1",
+  "react-dom": "^18.3.1"
+}
+```
+
+**This explains `@supabase/supabase-js`.** Elsewhere in this handoff it is
+recorded as declared-and-entirely-unused, and described as "almost certainly
+residue from a project scaffold". That inference is now confirmed: it is a
+template default that arrived with the scaffold, was never wired to anything,
+and is still declared at HEAD. **It was never a design decision and should not
+be read as evidence that a backend was ever planned.**
+
+**Ten files are byte-identical from the founding upload to HEAD:**
+
+| Configuration (5) | Source (5) |
+|---|---|
+| `vite.config.ts` | `src/main.tsx` |
+| `postcss.config.js` | `src/index.css` |
+| `eslint.config.js` | `src/vite-env.d.ts` |
+| `tsconfig.app.json` | `src/components/SliderInput.tsx` |
+| `tsconfig.node.json` | `src/components/StatCard.tsx` |
+
+`src/main.tsx` is the stock Vite/React entry point (`createRoot` +
+`<StrictMode>`), `src/index.css` is the three bare Tailwind directives, and
+`index.html` still links `/vite.svg` as its favicon — **a file that has never
+existed in this repository**, because there is no `public/` directory. That dead
+favicon reference, recorded elsewhere in `known-issues.md` as a harmless 404, is
+a scaffold leftover.
+
+*I cannot distinguish which of `SliderInput.tsx` and `StatCard.tsx` are Bolt
+output and which are Codex-era work — only that neither has been touched since
+the upload. The five configuration files are template-shaped and are very likely
+Bolt's.*
+
+**A second, independent signal — the package manager changes.** The committed
+`dist/app.js.map` in the founding commit resolves its sources through
+`node_modules/.pnpm/…`, i.e. the build was produced by **pnpm**. But the
+`package-lock.json` committed alongside it is an **npm lockfile
+(`lockfileVersion: 3`)**, and no `pnpm-lock.yaml` or `yarn.lock` has ever been
+committed. StackBlitz's WebContainer environment — which is what bolt.new runs
+in — uses pnpm by default. So the bundle and the lockfile came from two
+different environments, which is what a browser-generated scaffold later worked
+on locally looks like. The `dist/` output is also not a standard `vite build`:
+it emits flat `/app.js` and `/app.css` rather than Vite's hashed
+`assets/index-<hash>.js`.
+
+**Terms as they apply to generated output: NOT ESTABLISHABLE FROM HERE.** I
+attempted to retrieve bolt.new's terms of service directly; **this environment's
+network egress proxy blocks the domain**, so I have not read them and will not
+characterise them from memory. Two things a reviewer should note when they do:
+
+1. **The terms that matter are the ones in force when the scaffold was
+   generated, not today's.** The repository records no generation date for the
+   Bolt work — it pre-dates the first commit of 2026-07-15 by an unknown
+   interval — so establishing *which* version of the terms applied requires
+   information only the project owner has.
+2. Scaffold output is, by its nature, near-identical across many projects. Whether
+   that affects protectability or the terms' allocation of ownership is a
+   question for counsel, not for this document.
+
+### 1.2 Codex / ChatGPT — the pre-upload editing period
+
+**`REVIEW NEEDED — SOURCE OR USAGE RIGHTS UNCLEAR`**
+
+**What it did:** several days of manual, human-directed editing on the Bolt
+scaffold, before Claude Code took over. Hand-guided rather than agentic — a
+person driving each change rather than delegating a task.
+
+**Where it sits, and the honest answer about the early history.**
+
+**This work is not in this repository.** Checked directly:
+
+- The first commit, `116b96d` (2026-07-15), is already the finished product of
+  both prior stages — 44 files, 41,185 insertions, a working three-tab
+  application with a 1,043-line `CalculationAuditPage`, a 688-line
+  `simulationEngine.ts` and a 390-line type module. **That is not a scaffold.**
+  A scaffold is `main.tsx`, `App.tsx` and a config file; this is a built
+  application.
+- Every branch in the repository roots at `116b96d`. I verified the two oldest
+  (`origin/claude/desktop-browser-playback-v5n0rl`,
+  `origin/claude/repo-stack-setup-wij5yw`, both 2026-07-16):
+  `git merge-base` returns `116b96d` for each. **Nothing here predates it.**
+- The first AI commit after the upload, `386d042` (2026-07-16, authored
+  `Claude`), adds a `.gitignore`. Claude Code's involvement begins there.
+
+So the Bolt and Codex stages both lived **elsewhere** — in bolt.new's own
+environment and then on a local machine — and reached GitHub as a single
+flattened `"Add files via upload"`. **The GitHub web upload interface discards
+whatever history the files previously had**, which is why the repository holds
+two stages of work and zero commits describing them.
+
+**Roughly where the Codex period sits:** between the Bolt scaffold and
+2026-07-15, ending at the upload. Duration is "several days" per the project
+owner; the repository cannot corroborate or date it.
+
+**What it touched — inference, clearly labelled as such.** Everything in the
+founding commit that is *not* scaffold is, by elimination, the Codex period's
+work. That is essentially the whole application as it then stood:
+
+```
+src/App.tsx                            309 lines
+src/pages/        (9 pages)         ~3,540 lines
+src/components/   (4 components)      ~279 lines
+src/utils/        (9 engines)       ~1,927 lines   simulationEngine,
+                                                   financialStatementEngine,
+                                                   membershipEngine,
+                                                   investmentEngine,
+                                                   instanceGenerator,
+                                                   historyGenerator,
+                                                   narrativeEngine,
+                                                   reinsuranceEngine, random
+src/types/simulation.ts                390 lines
+src/data/         (2 files)            305 lines
+```
+
+**I cannot draw the Bolt/Codex line more finely than that**, because the
+repository contains no commit boundary between them. The split above is "what a
+scaffold plausibly contains" versus "what it plausibly does not", and a reviewer
+should treat it as a reasoned partition rather than a record.
+
+**Two of those files are gone at HEAD** (`historyGenerator.ts`,
+`reinsuranceEngine.ts` — both retired by later work). **Twenty-three were
+modified.** The lineage is real: `simulationEngine.ts`,
+`financialStatementEngine.ts`, the page structure and the
+`riskpool_gamestate_v10` storage key all descend from this period and still
+ship. `gameSave.ts:145` still explains why the key survived the later rename.
+
+**Terms as they apply to generated output: NOT ESTABLISHABLE FROM HERE.** As with
+Bolt, I attempted to retrieve OpenAI's terms of use directly and **the egress
+proxy blocks the domain**; I have not read them and will not paraphrase them from
+memory. The same timing caveat applies with more force — this work is dated only
+as "several days before 2026-07-15", and the applicable terms are those in force
+then. A reviewer should also establish **which product** was used (the ChatGPT
+consumer product, a ChatGPT Team/Enterprise plan, or the Codex developer
+offering), because output and data-use terms have historically differed between
+them and the repository does not record which.
+
+### 1.3 Claude Code — everything after the upload
+
+**Everything from `386d042` (2026-07-16) onward was written by Claude Code (an
+AI coding tool, Anthropic) working under human direction.** The human — the
+repository owner — set the direction, made the rulings, specified each piece of
+work, challenged findings and accepted or rejected results. The typing was done
+by the model.
 
 The commit record supports this directly:
 
@@ -47,7 +238,14 @@ The commit record supports this directly:
 | Commits carrying a `Co-Authored-By` trailer | **204** |
 
 The two human-authored commits are both `"Add files via upload"` — GitHub
-web-interface uploads, not hand-written code (see §1.2 and §1.3).
+web-interface uploads, not hand-written code (see §1.4).
+
+**⚠ Do not read "363 of 365" as "Claude Code wrote 99.5% of the project."** It
+wrote 99.5% of the *commits recorded here*, and those commits are the whole of
+this repository's history — but the application they started from was already
+built, by the two tools above, and none of that work produced a commit. The
+proportion of *surviving code* attributable to each stage is not derivable from
+the commit record.
 
 **What this means for a team inheriting the project**, stated neutrally:
 
@@ -66,10 +264,11 @@ web-interface uploads, not hand-written code (see §1.2 and §1.3).
 **`REVIEW NEEDED — SOURCE OR USAGE RIGHTS UNCLEAR`** — *the ownership and
 copyright status of AI-generated source code, and whether the organisation's
 policy permits AI-generated code in a distributed product, should be confirmed
-by whoever is responsible for that policy. This is a governance question, not a
-defect.*
+by whoever is responsible for that policy. Note that this question now has to be
+answered **three times, against three different vendors' terms** — see §1.1 and
+§1.2. This is a governance question, not a defect.*
 
-### 1.2 The founding commit is an upload of unknown origin
+### 1.4 The founding commit — one upload carrying two tools' work
 
 **`REVIEW NEEDED — SOURCE OR USAGE RIGHTS UNCLEAR`**
 
@@ -89,23 +288,27 @@ dist/app.js                         29,968 lines   (a committed build artifact)
 dist/app.css, dist/app.js.map, dist/index.html
 ```
 
-**The repository records nothing about where this came from.** There is no
-README of origin, no attribution, no licence header, no import note. It arrived
-through the GitHub web upload interface, which by construction discards whatever
-history the files previously had.
+**This single commit is the join between stage 2 and stage 3**, and it is where
+the provenance record breaks. Per the project owner it carries the Bolt scaffold
+*and* several days of Codex-assisted editing on top of it. **The repository
+itself records none of that** — there is no README of origin, no attribution, no
+licence header, no import note, and no commit boundary between the two stages.
+The GitHub web upload interface discards whatever history the files previously
+had.
 
-Everything after it is incremental and traceable. The foundation is not. Several
-things in it — `simulationEngine.ts`, `financialStatementEngine.ts`, the page
-structure, the `riskpool_gamestate_v10` storage key that survives to this day —
-are ancestors of code still shipping.
+What remains unresolved, now that the tools are known:
 
-The most likely explanations are benign: an earlier prototype by the same
-person, or output from a code-generation tool (the `dist/` bundle and the
-`"risk-pool-simulation"` package name are consistent with a browser-based
-scaffold). **But the repository does not say, and a documentation exercise
-should not guess.** The person who performed that upload can resolve this in
-one sentence; until they do, the provenance of the project's foundation is
-unestablished.
+- **Where the pre-upload work physically lived.** bolt.new keeps projects in its
+  own environment; the Codex-era editing was presumably local. If either
+  retained a repository, a `.git` directory or a project history, **that is the
+  record this one is missing**, and it is the only place the Bolt/Codex boundary
+  could be drawn precisely.
+- **When the Bolt scaffold was generated.** Needed to identify which version of
+  which terms applied (§1.1).
+- **Which OpenAI product was used** for the Codex period (§1.2).
+
+Everything after this commit is incremental and traceable. Everything before it
+is a single 41,185-line insertion.
 
 The second human commit, `fbc4027` (2026-07-20), is the same kind of upload and
 contains three documents — `CLAUDE_CODE_PLAYBOOK.md`, `DECISIONS.md`,
@@ -113,14 +316,21 @@ contains three documents — `CLAUDE_CODE_PLAYBOOK.md`, `DECISIONS.md`,
 spec documents, and they read as originally authored, but their origin is
 likewise unrecorded.
 
-### 1.3 The committed `dist/` build
+### 1.5 The committed `dist/` build
 
 The founding commit included a 29,968-line `dist/app.js` plus its source map.
 These were later untracked (`e54410c`, "Untrack the stale pre-Vite dist/ build
-artifacts"). Noted because they are still in git history, and a source map in
-history can reveal the pre-upload source tree — which may be the fastest way
-for the owner to answer §1.2, and is also worth knowing before the repository
-is made public.
+artifacts"). They are still in git history.
+
+**The source map is the single most informative artefact about the pre-upload
+period**, and it is worth reading rather than deleting. Its `sources` array
+resolves through `node_modules/.pnpm/…` — the package-manager evidence in §1.1 —
+and it maps the bundle back to the pre-upload source tree file by file. For
+anyone trying to reconstruct where the Bolt scaffold ended and the Codex work
+began, it is the best evidence in the repository.
+
+It is also worth knowing before the repository is made public, for exactly the
+same reason: a source map in history exposes the source tree it was built from.
 
 ---
 
@@ -477,9 +687,13 @@ Three dependency-provenance notes:
 
 3. **`@supabase/supabase-js` is declared and entirely unused** — it appears only
    in `package.json` and `package-lock.json`, with no import, client, key or
-   configuration anywhere. It is almost certainly scaffold residue. It matters
-   for provenance because its presence implies a backend, a database and an
-   authentication provider that **do not exist**, and it drags an unused
+   configuration anywhere. **It is Bolt scaffold residue, and that is now
+   established rather than inferred**: it is present in the founding commit's
+   `package.json` as one of only four dependencies, which is the bolt.new React
+   template's default set (§1.1). It matters for provenance because its presence
+   implies a backend, a database and an authentication provider that **do not
+   exist** — and a reader could reasonably conclude one was once planned. None
+   was; it is a template default nobody removed. It also drags an unused
    transitive subtree into the licence surface above. Flagged, not removed.
 
 ---
@@ -533,10 +747,11 @@ The repository is therefore **unlicensed** in the legal sense: with no licence
 grant, default copyright applies and no one other than the rights-holder has
 permission to use, copy, modify or distribute it. That is a perfectly coherent
 position for private work, and it may well be the intended one. But it is
-currently implicit, and the combination of unlicensed status, unestablished
-foundation provenance (§1.2) and AI authorship (§1.1) means the question "who
-owns this and what may be done with it" has **no answer recorded anywhere in
-the project**.
+currently implicit, and the combination of unlicensed status, a foundation
+assembled by two tools whose output terms are unestablished (§1.1, §1.2), and
+AI authorship throughout (§1.3) means the question "who owns this and what may
+be done with it" has **no answer recorded anywhere in the project** — and now
+has to be answered against three vendors rather than one.
 
 This should be settled before the code is shared with a development team,
 published, or used in a commercial product. Note also the Apache-2.0
@@ -583,7 +798,7 @@ retrieved or incorporated, and because negative findings are part of the audit.
 | Copied documentation or prose | **None identified.** The `docs/` corpus (7,867 lines) is project-specific throughout. |
 | Bundled external datasets | **None.** No downloaded table, no third-party CSV, no licensed data file. |
 | Fonts, images, icon files | **None bundled.** Icons via `lucide-react` (ISC). |
-| Generated content of unclear origin | The code itself — see §1.1. |
+| Generated content of unclear origin | The code itself — see §1.0–§1.3. **Three AI tools**, only one of which left commits. |
 
 **`REVIEW NEEDED — SOURCE OR USAGE RIGHTS UNCLEAR`** — *I reviewed the code for
 signs of copied third-party material and found none, but a manual review of
@@ -643,34 +858,63 @@ and permitted use are recorded nowhere. → **Settle before sharing, publishing 
 commercialising.** Note the Apache-2.0 dependencies carry a NOTICE obligation on
 distribution.
 
-**5. The founding commit is an upload of unknown origin.**
+**5. Three AI tools contributed, and only one left commits.**
+`REVIEW NEEDED — SOURCE OR USAGE RIGHTS UNCLEAR`
+**Bolt (bolt.new / StackBlitz)** generated the scaffold; **Codex / ChatGPT
+(OpenAI)** was then hand-driven over it for several days; **Claude Code
+(Anthropic)** wrote everything after — 363 of 365 commits. Stages 1 and 2
+pre-date this repository entirely and arrived as one flattened upload. → **The
+AI-generated-code question has to be answered three times, against three
+vendors' terms, not once.** Confirm organisational policy permits AI-generated
+code in a distributed product and take a position on copyright status — for each
+tool. See §1.0–§1.3.
+
+**5a. Bolt's terms as applied to generated output are unestablished.**
+`REVIEW NEEDED — SOURCE OR USAGE RIGHTS UNCLEAR`
+I could not read them: **this environment's egress proxy blocks bolt.new**, and I
+will not characterise terms I have not read. Bolt's output is demonstrably still
+in the tree — ten files byte-identical from the founding upload to HEAD,
+including `vite.config.ts` with the template's `optimizeDeps.exclude:
+['lucide-react']` signature, and the `@supabase/supabase-js` dependency that has
+never been used. → **Establish the terms, and note that the ones that matter are
+those in force when the scaffold was generated** — a date the repository does not
+record.
+
+**5b. The OpenAI product used, and its terms, are unestablished.**
+`REVIEW NEEDED — SOURCE OR USAGE RIGHTS UNCLEAR`
+Same blocked-egress limitation. → **Establish which product was used** — the
+ChatGPT consumer product, a Team/Enterprise plan, or the Codex developer
+offering — **because output and data-use terms have differed between them**, and
+the repository does not record which. Dated only as "several days before
+2026-07-15".
+
+**5c. The pre-upload history exists nowhere in this repository.**
 `REVIEW NEEDED — SOURCE OR USAGE RIGHTS UNCLEAR`
 `116b96d` ("Add files via upload", 2026-07-15) delivered a complete working
-application — ~7,000 lines of `src/` plus a 29,968-line `dist/` bundle — with no
-recorded provenance. Ancestors of that code still ship. The second upload
-`fbc4027` added three documents, same question. → **One sentence from the person
-who uploaded it resolves this.** The `dist/app.js.map` still in git history may
-reveal the pre-upload source tree, which is both the fastest way to answer and a
-thing to know before making the repo public.
+application — ~7,000 lines of `src/` plus a 29,968-line `dist/` bundle — as a
+single 41,185-line insertion. Verified: every branch roots at it, so **nothing
+here predates it**. There is no commit boundary between the Bolt and Codex
+stages and no record of either. Ancestors of that code still ship. The second
+upload `fbc4027` added three documents, same question. → **Recover the
+pre-upload project if bolt.new or the local working copy still holds it** — that
+is the only place the boundary can be drawn. Failing that, the
+`dist/app.js.map` still in git history maps the bundle back to the pre-upload
+source tree file by file, which is both the best remaining evidence and a thing
+to know before making the repo public.
 
-**6. Essentially all code is AI-generated.** `REVIEW NEEDED — SOURCE OR USAGE RIGHTS UNCLEAR`
-363 of 365 commits authored by Claude Code under human direction. → **Confirm
-organisational policy permits AI-generated code in a distributed product, and
-take a position on the copyright status of that output.**
-
-**7. Transitive dependencies are not licence-audited.**
+**6. Transitive dependencies are not licence-audited.**
 `REVIEW NEEDED — SOURCE OR USAGE RIGHTS UNCLEAR`
 23 direct packages verified permissive (20 MIT / 2 Apache-2.0 / 1 ISC); the
 remaining ~284 of 307 lockfile entries were not checked. → **Run a licence scan
 over the full tree before commercial distribution.**
 
-**8. No automated provenance scan of the source was performed.**
+**7. No automated provenance scan of the source was performed.**
 `REVIEW NEEDED — SOURCE OR USAGE RIGHTS UNCLEAR`
 I found no copied third-party code, but manual review of 68,000+ lines cannot
 prove absence. → **Consider a code-similarity scan.** This flags the limit of my
 verification, not a finding.
 
-**9. The "Ripple" brand mark is described as a recreation.**
+**8. The "Ripple" brand mark is described as a recreation.**
 `REVIEW NEEDED — SOURCE OR USAGE RIGHTS UNCLEAR`
 `src/assets/RippleLogo.tsx` — "Vector recreation of the Ripple brand mark". The
 original's owner is not stated. The project was renamed from "Risk Pool
@@ -680,7 +924,7 @@ intended market.**
 
 ### Priority 3 — citation and documentation gaps
 
-**10. The roster is synthetic and the repository never says so.**
+**9. The roster is synthetic and the repository never says so.**
 `REVIEW NEEDED` *(documentation gap, not a rights problem)*
 200 members across six `roster_canonical*.csv` files and the generated
 `memberCatalog.ts`. Names like "Brookhaven School District 001" are generated;
@@ -692,35 +936,37 @@ SEVERITY COME FROM REAL DATA; THE TIV BASE IS CHOSEN", so the synthetic roster
 carries real calibration. → **Add one header line to the canonical CSV and to
 `memberCatalog.ts`.** Cheapest item on this list.
 
-**11. WCIRB figures are cited without a source document.**
+**10. WCIRB figures are cited without a source document.**
 `REVIEW NEEDED — SOURCE OR USAGE RIGHTS UNCLEAR`
 The 3.67% blended severity trend and its medical/indemnity decomposition cite
 the organisation but no report, number or date. Some WCIRB material is public,
 some is member-restricted. → **Identify the publication and confirm its terms.**
 
-**12. NCCI references are unsourced.** `REVIEW NEEDED — SOURCE OR USAGE RIGHTS UNCLEAR`
+**11. NCCI references are unsourced.** `REVIEW NEEDED — SOURCE OR USAGE RIGHTS UNCLEAR`
 An *a priori* assumption and a statement of incentive direction, neither tied to
 a document. NCCI material is predominantly subscription-licensed; nothing
 licensed appears to have been copied. → **Confirm these are restatements of
 general position, not content from a subscription product.**
 
-**13. Mahler (1996) lacks a full citation.** `REVIEW NEEDED` *(completeness, not rights)*
+**12. Mahler (1996) lacks a full citation.** `REVIEW NEEDED` *(completeness, not rights)*
 Author, year and venue are given; no title or URL. CAS Ratemaking Seminar
 proceedings are freely available on casact.org, and implementing a published,
 attributed method is standard practice — **this is the best-placed of the three
 external sources.** → **Add the full citation**, since the method is central to
 the experience modifier.
 
-**14. `welcomeGuide.ts` cites a source file that does not exist.**
+**13. `welcomeGuide.ts` cites a source file that does not exist.**
 `REVIEW NEEDED` *(minor)*
 "Source: 01A_WELCOME_TO_RIPPLE.md" — not in the repository, not in git history.
 → **Locate it or drop the reference.**
 
-**15. `@supabase/supabase-js` is declared and completely unused.**
+**14. `@supabase/supabase-js` is declared and completely unused.**
 *(not a rights flag; recorded here because it misrepresents the system)*
-Its presence implies a backend, database and auth provider that do not exist,
-and it drags an unused transitive subtree into the licence surface. → **Remove
-it.** First item on `wishlist.md`.
+**Confirmed Bolt scaffold residue** — one of only four dependencies in the
+founding `package.json`, which is the bolt.new template's default set (§1.1).
+Its presence implies a backend, database and auth provider that do not exist and
+were never planned, and it drags an unused transitive subtree into the licence
+surface. → **Remove it.** First item on `wishlist.md`.
 
 ---
 
