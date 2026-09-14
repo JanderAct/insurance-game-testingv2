@@ -1,4 +1,10 @@
-// MEMBERSHIP EQUILIBRIUM — THE FACTS, MEASURED BEFORE ANY FIX.
+// THE MEMBERSHIP SUPPLY SIDE — THE FACTS.
+//
+// ⚠ RETARGETED. This measured the inputs needed to derive k for the
+// marketplace-scaled join rule. There is no k: the membership target and the
+// demand term were deleted. What it measures is now MORE relevant rather than
+// less, because intake is a share of the pool it reports — items 1 and 3 below
+// ARE the supply side now, not inputs to a calibration.
 //
 // Run: npx tsx scripts/diagnostics/membership-equilibrium-facts.ts
 //
@@ -25,7 +31,7 @@ import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { processYear } from '../../src/utils/simulationEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
-import { BASE_RETENTION, BASE_NEW_MEMBERS_PER_YEAR } from '../../src/data/defaultAssumptions';
+import { BASE_RETENTION, APPLICATION_RATE } from '../../src/data/defaultAssumptions';
 import type { CoverageLine } from '../../src/types/simulation';
 
 const LINES: CoverageLine[] = ['WC', 'GL', 'Property'];
@@ -40,7 +46,7 @@ const q = (xs: number[], p: number) => {
 
 console.log('=== MEMBERSHIP EQUILIBRIUM: FACTS BEFORE THE FIX ===\n');
 console.log(`BASE_RETENTION ${BASE_RETENTION}  ->  ${((1 - BASE_RETENTION) * 100).toFixed(1)}% leave/yr`);
-console.log(`BASE_NEW_MEMBERS_PER_YEAR ${BASE_NEW_MEMBERS_PER_YEAR}\n`);
+console.log(`APPLICATION_RATE ${APPLICATION_RATE}\n`);
 
 // --- 1. roster and per-line eligible roster ---------------------------------
 console.log('--- 1. ROSTER ---');
@@ -117,13 +123,13 @@ console.log('  line       enrolled  leave/yr  join/yr(base)  net/yr   drift');
 for (const line of LINES) {
   const enrolled = q(startCounts[line], 0.5);
   const leave = enrolled * (1 - BASE_RETENTION);
-  const join = BASE_NEW_MEMBERS_PER_YEAR;
+  const join = APPLICATION_RATE;
   const net = join - leave;
   console.log(`  ${line.padEnd(10)} ${String(enrolled).padStart(8)} ${leave.toFixed(2).padStart(9)} ` +
     `${join.toFixed(2).padStart(14)} ${net.toFixed(2).padStart(7)}   ${net < 0 ? 'DECLINE' : 'growth'}`);
 }
 console.log('\n  Fixed-count equilibrium (where join == leave) = BASE_NEW / (1 - BASE_RETENTION) = ' +
-  `${(BASE_NEW_MEMBERS_PER_YEAR / (1 - BASE_RETENTION)).toFixed(1)} members, the same for every line ` +
+  `${(APPLICATION_RATE / (1 - BASE_RETENTION)).toFixed(1)} members, the same for every line ` +
   'regardless of that line\'s book — which is the defect.');
 
 console.log('\nDONE — facts only. Nothing changed.');

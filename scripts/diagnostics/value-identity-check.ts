@@ -443,6 +443,30 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // basis. The mechanism's own correctness is held by cohort-ledger-check (three
 // identities, both arms), martingale-equivalence-check (term by term) and
 // terminal-severity-check (phi on its anchor), all green at this commit.
+// v38: THE MEMBERSHIP TARGET CAME OUT, AND THE BOOK IS NOW AN OUTCOME.
+// MEMBERSHIP_EQUILIBRIUM_ENROLLMENT, its two calibration constants, and both
+// movement caps are deleted. Intake is no longer a demand term steered toward a
+// level — it is a share of the unenrolled marketplace, filtered by the appetite
+// bar, written up to a capacity guard. Departures are proportional and uncapped.
+//
+// 540 fields ADDED (applicants / eligibleApplicants / intakeRoom, 3 x 180),
+// 0 removed, and 75 fields moved.
+//
+// ⚠ THE MOVEMENT IS CONFINED TO ONE CHANNEL AND IT IS CHECKABLE, WHICH IS WHY
+// THIS CAPTURE IS NOT A WHOLE-TREE RE-ROLL LIKE v36. The rng handed to
+// simulateMemberMovement is deriveSubRng(seed, year, 'members|<line>') — its own
+// stream, one consumer — so adding or removing a draw there cannot re-phase any
+// other stream. Every one of the 75 moved fields traces to a DIFFERENT BOOK:
+// activeMembers 49 -> 73 in the first instance, and exposure, premium, expense,
+// losses and every ratio built on them follow from it.
+//
+// ⚠ THE ONE FIELD THAT LOOKED LIKE AN INDEPENDENT DRAW WAS CHECKED RATHER THAN
+// ASSUMED. investmentReturnRate appears in the moved list, which would mean the
+// market draw had shifted. It moved on 32 of 300 instances, by
+// 0.09979629615566948 -> 0.0997962961556695 — the sixteenth decimal place. Same
+// draw, different summation magnitude. Nothing else in the list is independent
+// of the enrolled book.
+
 // v37: THE DEPARTURE REBUILD. Who LEAVES the pool changed basis entirely —
 // from `satisfaction + 0.3 x riskQuality` ascending to a price-shock x
 // marketability model with fresh annual noise, sorted descending. Different
@@ -468,7 +492,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // capture is sufficient alone here: the hash guard cannot tell "different
 // members enrolled" from "the arithmetic broke", and this one says the
 // changed set is exactly the set a roster change explains.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v37.json');
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v38.json');
 
 function seedOf(id: string) {
   let h = 5381;

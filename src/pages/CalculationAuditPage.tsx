@@ -24,12 +24,11 @@ import {
   LOSS_TREND,
   MEMBER_LOSS_VOLATILITY,
   BASE_RETENTION,
-  BASE_NEW_MEMBERS_PER_YEAR,
-  MAX_NEW_MEMBERS_PER_YEAR,
-  MAX_WITHDRAWN_PER_YEAR,
   FUNDING_CLF_TABLE,
   ASSET_CLASS_ASSUMPTIONS,
   ASSET_ALLOCATION_DEFAULT,
+  APPLICATION_RATE,
+  MAX_NEW_MEMBER_SHARE,
   MEMBER_MOVEMENT_WEIGHTS,
   RISK_CONTROL_PARAMS,
   EXPOSURE_RANGES,
@@ -1108,25 +1107,24 @@ function buildAssumptionRows(): AuditRow[] {
         'Public entity pools usually have high retention. If too high, membership becomes too stable; if too low, the pool churns unrealistically.',
     },
     {
-      metric: 'Base New Members Per Year',
-      value: BASE_NEW_MEMBERS_PER_YEAR.toFixed(2),
-      formula: 'Expected new members in a neutral year before movement adjustments and hard caps.',
+      metric: 'New Member Intake',
+      value: `${(100 * APPLICATION_RATE).toFixed(0)}% of unenrolled, capped at ${(100 * MAX_NEW_MEMBER_SHARE).toFixed(0)}% of book`,
+      formula:
+        'Applications = share of the unenrolled marketplace. Those clearing New Business Appetite are written, '
+        + 'up to the onboarding capacity guard. There is no target book size and no expected-joins term.',
       note:
-        'Keeps growth modest. This should prevent the game from adding too many members in a single year under normal conditions.',
+        'The book is an outcome of who applies, who clears the bar and who leaves — not a level the model holds. '
+        + 'Growth happens when more clear the bar than depart; shrinkage when they do not. Neither is prevented. '
+        + 'The capacity guard is a judgement, not a measured figure: nothing in the model prices onboarding.',
     },
     {
-      metric: 'Max New Members Per Year',
-      value: String(MAX_NEW_MEMBERS_PER_YEAR),
-      formula: 'Hard cap on new members added in one year.',
+      metric: 'Member Withdrawals',
+      value: 'proportional, uncapped',
+      formula: 'Expected withdrawals = book x (1 - retention probability), times a noise factor in [0.4, 1.6].',
       note:
-        'Important gameplay control. Prevents unrealistic sudden growth even if the pool is financially strong or competitively priced.',
-    },
-    {
-      metric: 'Max Withdrawn Members Per Year',
-      value: String(MAX_WITHDRAWN_PER_YEAR),
-      formula: 'Hard cap on members withdrawn in one year.',
-      note:
-        'Prevents the pool from collapsing too quickly from a single bad year. If set too low, retention risk may feel muted.',
+        'No count cap. Retention is already clamped to a 0.80-0.99 band, so departures cannot exceed a fifth of '
+        + 'the book in any year. A flat cap here suppressed proportionally more departures the larger the book '
+        + 'grew, which made growth compound against a brake that weakened as it was needed.',
     },
     {
       metric: 'Payout Pattern',
@@ -1233,9 +1231,12 @@ function buildAssumptionRows(): AuditRow[] {
       value: Object.entries(MEMBER_MOVEMENT_WEIGHTS.attraction)
         .map(([k, v]) => `${labelize(k)}: ${formatPct(v)}`)
         .join('\n'),
-      formula: 'Weights used in new member attraction scoring.',
+      formula: 'Weights used in new member attraction scoring. NOT CURRENTLY APPLIED.',
       note:
-        'Controls why new members join. If growth is too easy, reduce attraction weights or lower max new members per year.',
+        'Dormant. These acted through a recruitment ladder that was retired when the membership target was '
+        + 'removed, so nothing reads them today and changing them changes nothing. They are shown because they '
+        + 'return when price and satisfaction are reconnected to recruitment through a market model. Until then '
+        + 'a pool that prices low does not attract more applicants.',
     },
     {
       metric: 'Starting Financial Ranges',

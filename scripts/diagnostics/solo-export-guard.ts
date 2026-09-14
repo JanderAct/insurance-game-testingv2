@@ -357,7 +357,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // reports the same thing in both cases. value-identity v37 is what separates
 // them, and its note records the confinement check: every changed field is
 // downstream of the roster, nothing roster-independent moved, no NaN.
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v37.json');
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v38.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

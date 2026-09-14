@@ -645,235 +645,83 @@ export const GL_LOSS_MODEL = {
 // Base retention probability per member per year — high by default for realistic public entity pools
 export const BASE_RETENTION = 0.95;
 
-// RETIRED as the join base — kept only because CalculationAuditPage still
-// displays it and removing it would silently blank an audit row. Nothing in
-// membershipEngine reads it any more. See MEMBERSHIP_EQUILIBRIUM_ENROLLMENT
-// below for what replaced it and why.
-export const BASE_NEW_MEMBERS_PER_YEAR = 1.0;
+// ============================================================================
+// ⚠ THE MEMBERSHIP TARGET IS DELETED. FOUR CONSTANTS WENT WITH IT.
+//
+//   BASE_NEW_MEMBERS_PER_YEAR            1.0      already dead; kept only so an
+//                                                 audit row would not blank
+//   MEMBERSHIP_EQUILIBRIUM_ENROLLMENT    63       the target itself
+//   MEMBERSHIP_DEFAULT_ADJUSTMENT        0.5852   netted the ladder out of k
+//   MEMBERSHIP_DEFAULT_DEPARTURE_RATE    0.0445   the other half of the k solve
+//
+// They existed to hold the book level. k was solved by requiring expected joins
+// to equal expected departures at N* = 63, which made the enrolled book a
+// quantity the model STEERED TOWARD rather than an outcome of who applies, who
+// clears the bar and who leaves.
+//
+// ⚠ EVERY MEASUREMENT TAKEN AGAINST THEM MEASURED THE TARGET, NOT THE
+// MECHANISM. "Growth is unreachable at any cap", "intake runs 2.6/yr against
+// withdrawals of 2.65-2.94", "the book holds near 62" — all true, all
+// consequences of a constant, and all now void. Anything in this file still
+// reasoning from a book near 62 is stale by construction; clfTables.ts is the
+// one that matters and carries its own re-derivation note.
+//
+// WHAT REPLACES THEM: nothing on the demand side. Intake is supply — a share of
+// the unenrolled marketplace applies (APPLICATION_RATE), the appetite bar
+// filters them, everyone who clears is written up to the capacity guard.
+// Departures stay proportional. The two flows cross where
+//
+//     APPLICATION_RATE x (roster - N)  =  N x (1 - retention)
+//
+// which is an emergent fixed point, not a target. A book settling there is two
+// flows meeting; a book settling at 63 would mean something is still steering.
+// See membership-flows-report.
+// ============================================================================
 
-// --- the join base: marketplace-scaled, not a fixed count -------------------
+// ⚠ MAX_NEW_MEMBERS_PER_YEAR AND MAX_WITHDRAWN_PER_YEAR ARE BOTH DELETED.
 //
-// THE DEFECT THIS REPLACES. Joins used to be a flat BASE_NEW_MEMBERS_PER_YEAR
-// (1.0) while departures are proportional (a member leaves with probability
-// 1 - BASE_RETENTION, so a book of N sheds 0.05N per year). A flat join count
-// against a proportional leave rate has exactly one equilibrium,
+// MAX_NEW_MEMBERS_PER_YEAR = 4 capped a demand term that no longer exists.
 //
-//     BASE_NEW_MEMBERS_PER_YEAR / (1 - BASE_RETENTION) = 1.0 / 0.05 = 20 members,
+// MAX_WITHDRAWN_PER_YEAR = 4 WAS A GROWTH ACCELERATOR, and that is the finding
+// worth keeping. Departures are PROPORTIONAL — book x (1 - retention) — while
+// the cap was a flat count. At 62 members expected departures are 2.76 and the
+// cap only clipped the noise tail; at 120 they are 5.34 and it would have bound
+// almost every year, suppressing roughly 1.3 departures annually. The brake
+// weakened exactly as it was needed most, so the first growth arm measured would
+// have run away and would have looked like the intake model doing it.
 //
-// and it is the SAME 20 for every line whatever that line's book actually is.
-// Measured starting books are 56 (WC), 57 (GL), 58 (Property), so every line
-// began roughly 2.9 members/yr out and drifted down toward 20 no matter what
-// the player did. Every GL and WC run's 10-12% "decline" was this, not a
-// decision — which made decline uninterpretable, since a badly-run pool looked
-// exactly like the default.
-//
-// THE RULE. Joins now scale with the REMAINING marketplace:
-//
-//     expectedNewMembers = k x (roster - enrolled)
-//
-// which is self-correcting in the way a fixed count is not: a bigger book has
-// fewer prospects left to recruit, so growth slows on its own, and there is a
-// natural ceiling at the roster. A shrinking book frees prospects and recovers.
-//
-// k IS NOT A FREE PARAMETER. It is pinned by requiring TOTAL expected joins to
-// equal expected departures at the enrolled book the game actually starts from:
-//
-//     k x (roster - N*) + adj = N* x d
-//     k = (N* x d - adj) / (roster - N*)
-//
-// where d is MEMBERSHIP_DEFAULT_DEPARTURE_RATE — the REALISED departure rate at
-// defaults (4.45%), NOT the nominal 1 - BASE_RETENTION (5.0%). See that constant
-// for why the two differ and why using the nominal one would re-tilt the fix.
-//
-// It is derived at the call site from the LIVE roster length rather than frozen
-// as a literal, so it stays correct if BASE_RETENTION moves or the roster is
-// ever resized — the basis of a calibrated rate is part of its value (the
-// sdOverExpected lesson).
-//
-// ⚠ THE CONDITION IS ON TOTAL JOINS, NOT ON THE BASE ALONE, and the `adj` term
-// is why. The adjustment ladder in membershipEngine's newMemberAdjustment does
-// NOT sit at zero when every decision is at its default: measured at +0.611
-// members/yr at the last measurement and +0.5852 now (WC +0.494, GL +0.590,
-// Property +0.671 — no longer near-identical; see that constant). Two channels drive it — competitivePressure, drawn in
-// [0.3, 0.8], contributes (1 - cp) x 0.5, mean +0.225; and satisfaction starts
-// in [6.5, 8.5], so the >= 7.5 branch fires about half the time. The rate-LEVEL
-// term added with the price channel contributes essentially nothing here BY
-// CONSTRUCTION, since RATE_NEUTRAL_LOAD is measured at defaults — the residual
-// level deviation at defaults is within a few hundredths of a percent on every
-// line. Pinning k on the base alone would leave the pool growing at
-// defaults, which fails the whole point of the fix.
-//
-// Folding it in is not a fudge, it is what makes the adjustments DIFFERENTIAL:
-// all-defaults is now the neutral point, so a player who raises assessments or
-// tightens underwriting moves the book relative to a book that would otherwise
-// have held still. Decline becomes attributable to a decision, which is the
-// entire objective. Leaving `adj` out would measure every decision against a
-// silently growing baseline instead.
-//
-// N* = 63 is the pooled median starting book with all three lines active
-// (WC 64, GL 62, Property 63), re-measured after the funding basis moved to net. Starting
-// books are drawn as an exposure SHARE (STARTING_EXPOSURE_SHARE, 25-35%), never
-// as a count, so the count is emergent.
-//
-// ONE k STILL SERVES ALL THREE, and this was re-checked rather than assumed.
-// The price channel is the first mechanism here with a genuinely per-line
-// neutral point, so the question was reopened. Per-line k values come out at
-// WC 0.017289, GL 0.014912, Property 0.015467 — a 1.159x spread, still TIGHTER
-// than the 1.359x spread in the adjustment alone, because each line's higher
-// adjustment is offset by its own departure rate and starting book. The pooled
-// 0.016192 sits inside that range. Re-checked at Property's netting rather than
-// carried forward: Property's adjustment moved the most of the three, so this
-// was exactly the change that could have broken the one-k assumption, and it
-// did not — the spread widened from 1.097x to 1.159x and stayed well inside
-// the adjustment's own.
-//
-// ⚠ N* IS MILDLY SELF-REFERENTIAL, and that is understood rather than
-// overlooked: runPriorHistory simulates three pre-game years through this same
-// membership engine, so the book handed to year 1 already reflects whatever k
-// is in force — and now the pre-game runs the price channel too. Measured under
-// the shipped k the starting book settles within a member or two of the value it
-// was calibrated from, well inside seed noise (the per-seed starting book spans
-// 45 to 88). It does not iterate away: the measured ten-year trajectory holds
-// flat from wherever it opens, which is the property that actually matters and
-// is measured in scripts/diagnostics/membership-equilibrium-report.ts.
-//
-// ⚠ "VERIFIED" WAS THE WRONG WORD AND THE FILE'S OLD NAME (-check) IS WHY. That
-// script prints the trajectory and exits 0 either way, so the flatness is a
-// RECORDED READING and nothing gates it. Nothing else asserts it either.
-//
-//     k = (63 x 0.0445 - 0.5852) / (200 - 63) = 2.2183 / 137 = 0.016192
-//
-// ⚠ IT SURVIVES THE INTAKE REBUILD UNCHANGED, AND THE REASON IS WORTH STATING.
-// Applications becoming a share of the unenrolled pool did not replace this
-// constant, because the two govern different sides. This one sets DEMAND — how
-// many members the pool wants, and it is calibrated so that number holds the
-// book level. APPLICATION_RATE sets SUPPLY — how many of the marketplace turn
-// up to be chosen from. Before the rebuild supply was effectively infinite
-// (~140 applicants for 4 slots), so demand was the only thing that mattered and
-// this constant alone decided the book.
-//
-// It still decides the book on the Accept All path: measured after the rebuild,
-// Accept All holds at 58.8 (WC) / 59.5 (GL), which is where it held before. The
-// calibration is intact and the neutral point is unmoved.
-//
-// ⚠ WHAT CHANGED IS THAT THE BOOK CAN NOW SIT BELOW EQUILIBRIUM BY CHOICE. At
-// the strict appetite bar supply binds in about a third of years and the book
-// settles around 53-56 instead of 59. That is not the calibration failing — it
-// is a player declining members the equilibrium assumed would be written. The
-// constant describes where the book sits when the pool accepts everyone, which
-// is the only state it was ever calibrated against.
-export const MEMBERSHIP_EQUILIBRIUM_ENROLLMENT = 63;
-
-// The measured contribution of the adjustment ladder at ALL-DEFAULT decisions,
-// in members/yr. Folded into k so that defaults are the neutral point — see the
-// note above. Measured, not chosen: 40 games x 10 years x 3 lines, calling the
-// engine's own newMemberAdjustment.
-//
-// ⚠ If any adjustment branch's coefficient changes, THIS NUMBER MUST BE
-// RE-MEASURED. It is a property of the ladder, not a constant of nature, and a
-// stale value here silently re-tilts the equilibrium. It has already had to move
-// twice for exactly that reason: reconnecting the price channel added the
-// rate-LEVEL term to this ladder (0.60 -> 0.619), and moving the pool premium to
-// a net funding basis moved every line's load and with it the level term
-// (0.619 -> 0.611). NOW THREE TIMES: Property's own netting moved its load the
-// same way WC's and GL's moved at fab85e4 (0.611 -> 0.5852).
-//
-// ⚠ THE PER-LINE SPREAD WIDENED AND IT IS PROPERTY THAT MOVED. WC +0.494,
-// GL +0.590, Property +0.671 — a 1.36x spread against the 1.21x recorded when
-// this was last measured. Property sits highest because its satisfaction runs
-// highest (mean 8.10 against WC 7.27 / GL 7.66), so the >= 7.5 branch of the
-// ladder fires far more often on it. One pooled value still serves all three —
-// see the k note above, where the per-line k spread is checked directly and is
-// tighter than this one, for the same offsetting reason.
-export const MEMBERSHIP_DEFAULT_ADJUSTMENT = 0.5852;
-
-// The REALISED share of the book that leaves per year at all-default decisions.
-//
-// ⚠ THIS IS NOT 1 - BASE_RETENTION, AND USING THAT INSTEAD IS THE SAME MISTAKE
-// AS IGNORING THE JOIN ADJUSTMENT. BASE_RETENTION 0.95 is only the base of
-// calcRetentionProbability, which then adds a satisfaction term and a
-// financial-strength term — both POSITIVE at defaults, since satisfaction
-// starts in [6.5, 8.5] against a 5.0 reference and the surplus ratio climbs
-// through the 0.6 reference as the pool builds surplus. MAX_WITHDRAWN_PER_YEAR
-// then truncates the top of the noise distribution on top of that. The measured
-// result is 4.4%, not 5.0% — WC 4.36%, GL 4.42%, Property 4.41%, over 40 games
-// x 10 years x 3 lines at defaults.
-//
-// Both sides of the equilibrium therefore have to be taken as they actually
-// behave at defaults, not as their nominal constants read. Pinning k on 5.0%
-// while the book only sheds 4.4% builds in a permanent upward tilt.
-//
-// ⚠ RE-MEASURE THIS TOO whenever the retention ladder changes. It moved from
-// 0.042 to 0.044 when the price channel was reconnected (and held at 0.044
-// through the move to net funding), then to 0.0445 at Property's netting, and
-// the mechanism is worth naming: the rate-change retention penalty is
-// PENALTY-ONLY, so ordinary year-to-year rate noise around the neutral point
-// produces penalties in up years and nothing in down years. That asymmetry is a
-// genuine, permanent increase in the departure rate at defaults, not a
-// measurement artefact.
-//
-// ⚠ PROPERTY'S SHARE OF THAT ASYMMETRY WAS SWITCHED OFF UNTIL NOW, which is
-// the substantive part of this re-measurement rather than the third decimal
-// place. Its RATE_NEUTRAL_CHANGE_PCT stood at +4.10 while its actual rate ran
-// at -0.21%/yr, so actual-minus-neutral was permanently about -4.3pp and a
-// penalty-only term could never fire on it at any realistic decision. Property
-// therefore shed 4.24%/yr against WC's 4.45% and GL's 4.47%. With the neutral
-// corrected it shows 4.43% and the three lines agree to within 0.04pp.
-export const MEMBERSHIP_DEFAULT_DEPARTURE_RATE = 0.0445;
-
-// Hard caps on annual membership movement.
-//
-// ⚠ MAX_NEW_MEMBERS_PER_YEAR SURVIVES THE INTAKE REBUILD AND IS STILL DOING
-// WORK. The question was whether making applications a share of the unenrolled
-// pool made it redundant — it does not. Measured at the shipped 6%, room lands
-// on the flat cap in 24-37% of line-years at EVERY tier, including the strict
-// one. It is what stops a cheap year (low price, high satisfaction, high
-// surplus all pushing newMemberAdjustment up at once) flooding the book in a
-// single step, and the application layer does not do that job: applications
-// scale with the UNENROLLED pool, which is largest exactly when the book is
-// smallest and the pool can least absorb a flood.
-//
-// ⚠ THE TWO CAPS ANSWER DIFFERENT QUESTIONS AND BOTH ARE KEPT FOR THAT REASON.
-// The flat cap bounds the DEMAND draw. The application rate bounds the SUPPLY.
-// A year can now be limited by either, and the result records which
-// (ResultSet.intakeRoom against eligibleApplicants).
-export const MAX_NEW_MEMBERS_PER_YEAR = 4;
-export const MAX_WITHDRAWN_PER_YEAR = 4;
+// ⚠ NOTHING REPLACES THE OUTFLOW CAP, AND THAT IS DELIBERATE. A share cap would
+// be the right FORM, but there is nothing left to cap: calcRetentionProbability
+// already clamps retention to [0.80, 0.99], so departures cannot exceed a fifth
+// of the book in any year however bad it gets, and the noise multiplier is
+// bounded at 1.6. A second bound over a bounded quantity only hides the first.
 
 /**
- * The intake cap as a SHARE OF THE BOOK, applied alongside the flat cap above.
+ * THE CAPACITY GUARD — the most members the pool will onboard in one year, as a
+ * share of its own book. The only limit left on intake.
  *
- * ⚠ MEASURE FIRST: THE FLAT 4 IS THE BINDING ONE ON A NORMAL BOOK, AND THIS IS
- * NOT. Intake at all-default decisions measures 2.61 / 2.60 / 2.69 new members
- * per line-year (10 games x 14 years), and the flat cap of 4 binds in 24-29% of
- * line-years — joins land exactly on 4 that often and never exceed it. On the
- * observed mean books of 53-58 members this share works out at 5.3-5.8, i.e.
- * ABOVE the flat 4, so `min(4, share)` is 4 and the share changes nothing.
+ * ⚠ THIS IS A JUDGEMENT AND THERE IS NO MEASUREMENT BEHIND THE NUMBER. Said
+ * plainly, in the house style that separates the two: the FORM is defensible
+ * and the VALUE is not derived. Onboarding capacity — underwriting time, board
+ * approval, getting a new member's data in — is a real constraint and it scales
+ * with the size of the organisation, so a share is the right shape and a flat
+ * count is not. But nothing in this model can produce the number: there is no
+ * staffing, no expense per new member, no onboarding cost line. Ten percent is
+ * a plausible ceiling asserted, not a figure fitted.
  *
- * ⚠ SO THE FLAT CAP ALREADY IS ~7.5% OF THE BOOK, which sits between the 5%
- * that would shrink the pool and the 10% ruled here. Raising the effective cap
- * to 10% is a LOOSENING that would let intake through in the ~27% of years
- * where 4 currently binds, and that moves the default path — both baselines
- * would have to be recaptured for it. They were not, so the flat cap stands and
- * this share caps only where it is the tighter of the two.
+ * ⚠ AND IT NOW BINDS, WHICH IT NEVER DID BEFORE. Under the old model the flat
+ * cap of 4 was always tighter and this fired in 0% of line-years. With the flat
+ * cap gone it is the only intake limit, and it binds whenever applications
+ * exceed a tenth of the book — which the arithmetic says happens below about 75
+ * members:
  *
- * WHERE IT ACTUALLY BINDS: below a 40-member book, where 10% drops under 4. A
- * pool that has shed members cannot recruit its way back at more than a tenth
- * of what is left per year, which is the hazard direction worth capping — a
- * shrinking pool refilling fast with whoever is available is exactly how a book
- * goes bad quietly.
+ *     APPLICATION_RATE x (roster - N)  >  MAX_NEW_MEMBER_SHARE x N
+ *     0.06 x (200 - N) > 0.10 x N   =>   N < 75
  *
- * ⚠ RE-MEASURED AFTER THE INTAKE REBUILD: IT HAS STILL NEVER FIRED. Across
- * every tier and all 112 line-years per arm at the shipped application rate,
- * the share cap set the intake room in 0% of years. The deepest book any arm
- * reaches is 52.9 at the strict bar, where a tenth is still above the flat 4.
- *
- * It is therefore a GUARD, not a live constraint, and it is kept as one
- * knowingly: it costs nothing, it binds only in a state no measured game has
- * reached, and that state — a book under 40 — is the one where an uncapped
- * refill would do the most damage. A guard that has never fired is worth
- * distinguishing from a constraint that is doing work, which is why this says
- * so rather than leaving a reader to infer it from the 0%.
+ * So it shapes the EARLY growth path of a pool accepting everyone and then
+ * stops binding. new-business-appetite-derive reports how often it actually
+ * fires per tier; if it turns out to bind throughout, it is steering the book
+ * and this value needs an argument it does not currently have.
  */
 export const MAX_NEW_MEMBER_SHARE = 0.10;
 
@@ -908,45 +756,49 @@ export const MAX_NEW_MEMBER_SHARE = 0.10;
  * with an argument about realism.
  *
  * ============================================================================
- * ⚠ DERIVED FROM THE SHORT-YEAR CONDITION, NOT PICKED.
+ * ⚠ RE-DERIVED AFTER THE MEMBERSHIP TARGET CAME OUT. THE VALUE DID NOT MOVE
+ * AND THE REASONING IS ENTIRELY REPLACED.
  *
- * THE CONDITION, stated before it was measured: the strict bar must SOMETIMES
- * leave the pool short of its own quota — short being a line-year where
- * eligibleApplicants < intakeRoom, the pool having space and the bar leaving
- * nobody to fill it. Accept All must essentially never be short, or the rate is
- * starving the pool rather than the bar being selective.
+ * 6% was first derived against ONE condition: make the appetite tiers grade, by
+ * leaving a strict bar short of a fixed quota. That was the right question while
+ * the book was held level. With the target and the intake count cap deleted the
+ * rate does a different job — it SETS THE BOOK'S TRAJECTORY — so it was swept
+ * again against three questions it had never been asked.
  *
- * Swept over whole played games, 8 games x 14 years, WC and GL pooled
- * (new-business-appetite-derive section 3). Share of line-years SHORT:
+ * 8 games x 14 years, WC and GL, all other decisions at default. Mean book:
  *
- *   rate   applicants/yr   Accept All   below 1.50   below 1.00   below 0.75   book at 0.75
- *     3%        4.0            0%           22%          51%          68%          51.3
- *     4%        5.6            0%            5%          36%          54%          53.8
- *     5%        6.9            0%            1%          21%          46%          55.2
- *     6%        8.3            0%            0%          10%          34%          56.6
- *     8%       11.1            0%            0%           3%          25%          58.1
- *    10%       13.9            0%            0%           1%           8%          58.6
- *    15%       20.8            0%            0%           0%           1%          58.9
+ *   rate   tier         yr1    yr5   yr10   yr14    guard binds
+ *    3%    Accept All   75.9   74.1   73.0   72.8        0%
+ *    3%    below 0.75   74.1   64.9   55.1   50.2        0%
+ *    6%    Accept All   78.9   85.9   93.2   97.1        6%
+ *    6%    below 0.75   75.8   71.3   66.8   63.5        1%
+ *    8%    Accept All   79.6   90.1  101.9  108.0       30%
+ *    8%    below 0.75   76.6   74.8   73.1   71.1        3%
+ *   12%    Accept All   79.6   91.1  109.0  121.0       71%
+ *   20%    Accept All   79.6   91.1  110.3  128.6       93%
  *
- * At 15% the strict bar is short in one year in a hundred and the book is
- * untouched — that is the old model again, where the tier only chooses WHICH
- * members join. At 3-4% the pool is short in half to two thirds of years at the
- * strict bar and the book collapses to 51-54: there the RATE is doing the work
- * and the bar is incidental.
+ *   CAN A POOL THAT ACCEPTS EVERYONE GROW? Yes. At 6% the book runs 79 -> 97,
+ *   growing THROUGHOUT rather than plateauing — the year-by-year trajectory
+ *   climbs in every one of the fourteen years.
  *
- * 6% is where the grading is a decision at every tier — Accept All and the
- * permissive bar never short, the middle bar short about one year in ten, the
- * strict bar about one year in three at a standing cost of 2.5 members. It
- * lands at 8.3 applications a year against ~140 unenrolled, which is the 8-10
- * the ruling's arithmetic predicted; the arithmetic was right and this is the
- * measurement behind it.
+ *   CAN A PICKY ONE SHRINK TO A PROBLEM? Yes. At 6% the strict bar runs
+ *   76 -> 63, and at 3-4% it reaches 50-56, which is a pool in trouble.
  *
- * ⚠ A SHARE OF THE UNENROLLED POOL IS SELF-CORRECTING, AND THAT IS WHY IT IS A
- * SHARE. A pool that shrinks has more unenrolled members to draw applications
- * from, so intake pressure rises as the book falls. Measured at the strict bar:
- * the applicant pool runs 138 -> 145 over a game while the book runs 59 -> 53.
- * A flat count would have compounded the shrinkage instead of damping it.
- * ============================================================================
+ *   IS EITHER THE ACCIDENT OF A CONSTANT? No, and the guard column is how that
+ *   is checked. Above 8% the capacity guard binds in 30-93% of line-years on
+ *   Accept All, which means the GUARD is setting the trajectory rather than the
+ *   flows — the failure mode this whole change exists to remove, reappearing in
+ *   a different constant. At 6% it binds in 6% of years and only early.
+ *
+ * 6% is the rate at which both directions are real and neither is the guard's
+ * doing: +23% over fourteen years accepting everyone, -16% being strict, and a
+ * guard that acts in one line-year in sixteen.
+ *
+ * ⚠ AND THE PLATEAU TEST PASSES. See membership-flows-report: the measured
+ * crossing lands at 107 (Accept All), 73 (below 1.00) and 55 (below 0.75)
+ * against predicted 109 / 80 / 62. NO TIER SETTLES NEAR 63, which is what the
+ * deleted target would have looked like. The book is an outcome.
+ *
  */
 export const APPLICATION_RATE = 0.06;
 
@@ -1127,6 +979,11 @@ export const MEMBER_MOVEMENT_WEIGHTS = {
     assessmentPenalty: 0.20,
     rateIncreasePenalty: 0.15,
   },
+  // ⚠ DORMANT SINCE THE MEMBERSHIP TARGET WAS DELETED. newMemberAdjustment was
+  // the only engine consumer of these six weights and it is retired; nothing
+  // reads them now except the Calculation Audit page, which labels them as
+  // inactive. `retention` below is untouched and still live — departure reads
+  // it every year. Kept as data because they return with the market derivation.
   attraction: {
     competitiveness: 0.25,
     underwritingAccessibility: 0.20,
@@ -1250,7 +1107,8 @@ export const RATE_RETENTION_SENSITIVITY = 0.02;
 // increases far more than decreases), but it has a measurable cost: year-to-year
 // rate noise around the neutral point produces penalties in up years and nothing
 // in down years, so it is a small net drag even at defaults. That drag is real,
-// is absorbed into the re-measured MEMBERSHIP_DEFAULT_DEPARTURE_RATE, and is the
+// was absorbed into the then-live MEMBERSHIP_DEFAULT_DEPARTURE_RATE (deleted
+// with the membership target — see that record above), and is the
 // reason that constant had to be re-measured rather than carried over.
 
 // Satisfaction response, in satisfaction points per percentage point of rate
@@ -1273,6 +1131,10 @@ export const RATE_SATISFACTION_SENSITIVITY = 0.015;
 // competitive pressure of 0.55: 0.20 x 0.55 x 0.10 x 65 = 0.72. Against a base
 // of about 2.5 joins/yr that is a material but not dominating penalty, which is
 // the intended weight for a deliberate risk-transfer decision.
+// ⚠ DORMANT SINCE THE MEMBERSHIP TARGET WAS DELETED. Its only consumer was
+// newMemberAdjustment's price term, which went with the recruitment ladder. It
+// is kept as data because it returns with the market derivation; it currently
+// acts on nothing.
 export const RATE_LEVEL_SENSITIVITY = 0.10;
 
 // Risk control rolling effectiveness parameters
@@ -4091,6 +3953,47 @@ export const PER_CLAIM_REVISION = { enabled: true, settlement: true };
 // clocks. Property's horizon is short but sits where 2/(age+1) is largest, which
 // is consistent with its 22%. Confirm before fixing — do not tune the drift
 // constants to close the gap, which would fit the symptom.
+// ============================================================================
+// ============================================================================
+// ⚠ A GROWING BOOK UNDERSTATES INCURRED, AND THE EFFECT IS REAL ON WC. This is
+// a difficulty problem arriving through a membership change, so it is recorded
+// at the mechanism that causes it rather than only in the membership file.
+//
+// Forward booking marks each new cohort DOWN to a contracted initial estimate —
+// measured at ~53% of gross ultimate on WC, which is what booking at 1/2.33 of
+// an eventual 2.33x climb means. Development on PRIOR years brings it back as
+// adverse development. In a mature book the two offset. In a growing book the
+// markdown sits on a larger cohort than the runoff behind it, so the offset
+// never catches up and income is overstated.
+//
+// MEASURED (new-business-appetite-derive section 5), distortion =
+// (markdown + priorYearDevelopment) / grossUltimate, by appetite tier:
+//
+//   line  tier         yrs 1-4   yrs 5-9   yrs 10+   book yr1 -> yr14
+//   WC    Accept All      18.8      21.4      13.9        79 -> 100
+//   WC    below 1.50      19.2      20.9      14.7         78 -> 91
+//   WC    below 1.00      16.9      17.8      11.1         76 -> 74
+//   WC    below 0.75      15.3      14.7       3.1         75 -> 66
+//
+// ⚠ ON WC, LATE IN THE GAME, THE DISTORTION TRACKS GROWTH AND THE SPREAD IS
+// 4.5x: a growing book still understates incurred by 13.9% of ultimate while a
+// shrinking one has come down to 3.1%. A pool that grows looks materially more
+// profitable than it is, and the player is not told.
+//
+// ⚠ ON GL IT IS MASKED BY A LARGER LINE EFFECT AND MUST NOT BE READ THE SAME
+// WAY. GL's distortion RISES late on every arm (33.0-36.5% at years 10+,
+// against WC's 3.1-14.7%) and the spread across tiers is only 3.5pp. Whatever
+// drives GL's late distortion is bigger than growth and is not this. Reporting
+// a growth effect on GL from these numbers would be reading noise.
+//
+// ⚠ AND THE FIRST ATTEMPT AT THIS MEASUREMENT WAS WRONG, WHICH IS WHY IT IS
+// STATED BY LINE. Banding by year-on-year growth rate WITHIN one arm showed no
+// relationship at all (16-24% across every band, unordered) because a single
+// trajectory does not span enough book-age variation to separate the effect
+// from noise. The tiers span it; the growth bands did not.
+//
+// NOT FIXED HERE. The honest fix is a booking basis that does not depend on the
+// book's age profile, which is a reserving change and not a membership one.
 // ============================================================================
 export const FORWARD_BOOKING = { enabled: true };
 

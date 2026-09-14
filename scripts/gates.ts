@@ -251,10 +251,7 @@ const SLOW: string[] = [
 // ============================================================================
 const PROBES: Record<string, string> = {
   'clf-table-derive': 'derives the static CLF tables — a generator, not a check [240s]',
-  'new-business-appetite-derive': "the applicant ratio distribution the appetite tiers sit on, and "
-    + 'the APPLICATION_RATE sweep that derives it — 7 candidate rates x 4 appetite arms x whole played '
-    + 'games, reporting where short years begin, what each tier does to the book, which of the two caps '
-    + 'still binds, and whether growth is reachable. The record for why the rate is 6% [1500s]',
+  'new-business-appetite-derive': 'the APPLICATION_RATE re-derivation after the membership target came out — trajectory per tier year by year, whether the capacity guard binds early or throughout, and whether a growing book understates incurred and so looks more profitable than it is [2400s]',
   'renewal-threshold-derive': 'the experience-ratio distribution the renewal threshold sits on, and what each candidate would decline per line-year. The record for why RENEWAL_THRESHOLDS is 2.50 on the ratio rather than 1.10 on the modifier [330s]',
   'development-cession-size': 'the cession rate by allocation rule; the calibration table [20s]',
   'open-share-derive': "derives TRIANGLE_OPEN_SHARE and asserts the identity that justifies it — cohort compounding against the per-claim mean-of-products, 0.9966 / 1.0000 / 1.0000. A GENERATOR, but one that exits non-zero if the curve stops reproducing the per-claim clock [25s]",
@@ -266,9 +263,8 @@ const PROBES: Record<string, string> = {
   'ibnr-removal-impact': 'one-off impact report for the IBNR removal; historical [14s]',
   'loss-level-diagnostic': 'loss level by line and year; a reading [20s]',
   'loss-ratio-report': 'loss ratio reading; asserts nothing. Renamed from -check [5s]',
-  'membership-equilibrium-report': 'membership equilibrium reading; asserts nothing. Renamed from -check [7s]',
-  'membership-equilibrium-facts': 'membership facts table [5s]',
-  'membership-recalibrate': 'recalibration helper — a generator [7s]',
+  'membership-flows-report': 'the two membership flows and where they cross — intake falls as the book grows, departures rise with it. Reports the MEASURED crossing against the predicted one, which is the discriminator between a book that settles because two rates met and one that settles because something is steering it [180s]',
+  'membership-equilibrium-facts': 'the supply side per line — eligible roster, starting book, and the applicant pool after the cooldown filter [5s]',
   'opening-basis-report': 'opening-surplus basis reading; asserts nothing. Renamed from -check [10s]',
   'price-channel-facts': 'price channel facts table [10s]',
   'property-clf-basis-report': 'Property CLF basis report [21s]',

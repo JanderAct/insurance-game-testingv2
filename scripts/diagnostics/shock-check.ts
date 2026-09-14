@@ -489,9 +489,25 @@ console.log('\n--- 8. #28 Pandemic — THE CROSS-LINE TEST ---');
   // independent per-member streams), so the later movement can only be positive
   // and must decay as the lag distribution runs off. Both are asserted.
   //
-  // GL has no report lag, so GL must still be confined to the single year — the
-  // contrast between the two lines here is the check that this is the lag and
-  // not state leaking somewhere.
+  // ⚠ BOTH LINES NOW TAKE THE SAME TEST, AND GL'S OLD ONE WAS A BOOK-SIZE
+  // ASSUMPTION IN DISGUISE. It required GL gross to be BIT-IDENTICAL after the
+  // shock year, on the reasoning that GL has no report lag so there is no
+  // emergence tail. The first half is right and the conclusion did not follow:
+  // there is a second channel, and it is MEMBERSHIP. A shock moves losses,
+  // losses move satisfaction and retention, and a different book writes
+  // different business in every later year.
+  //
+  // That assertion passed for as long as the book could not move. Intake was a
+  // demand term pinned to MEMBERSHIP_EQUILIBRIUM_ENROLLMENT and capped at a flat
+  // 4, so a shock could not change the roster by enough to show. With the target
+  // deleted the book responds, and GL's Y3-Y5 moved — correctly.
+  //
+  // WC's arm already had the right form ("gross may move ONLY where the book
+  // moved") because WC's report lag was removed earlier and someone had to think
+  // about the remaining channel then. GL now takes the identical test. The
+  // contrast the original check wanted is preserved and sharpened: neither line
+  // has an emergence tail, so on BOTH lines gross may move only where exposure
+  // moved.
   for (const line of ['WC', 'GL'] as CoverageLine[]) {
     const delta = [0, 1, 2, 3, 4].map(i => results[i].byLine[line]!.grossUltimateLoss - clean[i].byLine[line]!.grossUltimateLoss);
     const moved = delta.map(d => d !== 0);
@@ -500,9 +516,7 @@ console.log('\n--- 8. #28 Pandemic — THE CROSS-LINE TEST ---');
     // NOTHING LEAKS BACKWARDS, on either line. A pre-shock year moving would mean
     // the resolver is applying a current-horizon effect before its fire year.
     console.log(`    Y1 (pre-shock) untouched: ${note(!moved[0], `${line} moved BEFORE the shock year`)}`);
-    if (line === 'GL') {
-      console.log(`    Y3-Y5 untouched (GL has no report lag): ${note(!moved[2] && !moved[3] && !moved[4], 'GL moved after its current-horizon shock year')}`);
-    } else {
+    {
       const tail = [delta[2], delta[3], delta[4]];
       console.log(`    Y3-Y5 tail: ${tail.map(d => fmt$(d)).join(', ')}`);
       // ⚠ THIS ASSERTED "every tail year is an ADDITION, never a subtraction",
@@ -540,7 +554,7 @@ console.log('\n--- 8. #28 Pandemic — THE CROSS-LINE TEST ---');
       // move together. That is mechanism, not magnitude, and it stays valid
       // however far the two pools drift apart.
       const expDelta = [0, 1, 2, 3, 4].map(i =>
-        results[i].byLine.WC!.activeExposure - clean[i].byLine.WC!.activeExposure);
+        results[i].byLine[line]!.activeExposure - clean[i].byLine[line]!.activeExposure);
       // Index 1 is the SHOCK YEAR (#28 fires in Y2) and is excluded: that is
       // where the shock is supposed to move losses directly, with no book
       // change at all. Every OTHER year has no direct channel.
@@ -548,9 +562,9 @@ console.log('\n--- 8. #28 Pandemic — THE CROSS-LINE TEST ---');
       const leaked = [0, 1, 2, 3, 4].filter(i =>
         i !== SHOCK_YEAR_IDX && Math.abs(expDelta[i]) < 1e-9 && Math.abs(delta[i]) > 1e-6);
       console.log(`      exposure delta by year: ${expDelta.map(d => d.toFixed(2)).join(', ')}`);
-      console.log(`      gross may move ONLY where the book moved (WC has no report lag, so there is`);
-      console.log(`      no emergence tail — the only channel is membership):  ` +
-        `${note(leaked.length === 0, `WC's gross loss moved in year(s) ${leaked.map(i => i + 1).join(', ')} where exposure did NOT — the shock is reaching losses without going through the book`)}`);
+      console.log(`      gross may move ONLY where the book moved (${line} has no report lag, so there`);
+      console.log(`      is no emergence tail — the only channel is membership):  ` +
+        `${note(leaked.length === 0, `${line}'s gross loss moved in year(s) ${leaked.map(i => i + 1).join(', ')} where exposure did NOT — the shock is reaching losses without going through the book`)}`);
       console.log(`      and the tail is far smaller than the shock year (${fmt$(delta[1])}): ` +
         `${note(Math.max(...tail) < delta[1] * 0.5, 'the emergence tail is not small relative to the shock year — this looks like forward leakage, not a report lag')}`);
     }

@@ -10,18 +10,12 @@ import { departureRisks } from './memberDeparture';
 import {
   MEMBER_MOVEMENT_WEIGHTS,
   BASE_RETENTION,
-  MEMBERSHIP_EQUILIBRIUM_ENROLLMENT,
-  MEMBERSHIP_DEFAULT_ADJUSTMENT,
-  MEMBERSHIP_DEFAULT_DEPARTURE_RATE,
   APPLICATION_RATE,
-  MAX_NEW_MEMBERS_PER_YEAR,
   MAX_NEW_MEMBER_SHARE,
-  MAX_WITHDRAWN_PER_YEAR,
   RATE_NEUTRAL_CHANGE_PCT,
   RATE_NEUTRAL_LOAD,
   RATE_RETENTION_SENSITIVITY,
   RATE_SATISFACTION_SENSITIVITY,
-  RATE_LEVEL_SENSITIVITY,
 } from '../data/defaultAssumptions';
 
 export interface MemberMovementInputs {
@@ -156,117 +150,62 @@ function calcRetentionProbability(inputs: MemberMovementInputs): number {
   return Math.max(0.80, Math.min(0.99, BASE_RETENTION + adjustment));
 }
 
-// The marketplace-scaled join rate, k, derived from the LIVE roster rather than
-// frozen as a literal — see MEMBERSHIP_EQUILIBRIUM_ENROLLMENT for the full
-// derivation and for why the default adjustment is netted off here.
+// ============================================================================
+// ⚠ prospectCaptureRate AND baseNewMembers ARE DELETED. THE BOOK NO LONGER HAS
+// A TARGET.
 //
-// Returns 0 for a roster too small to hold the calibration book (degenerate
-// rather than meaningful), and clamps at 0 if the adjustment ladder were ever
-// re-tuned above the departure rate — a negative capture rate would make a
-// SMALLER book recruit FEWER members, inverting the self-correction.
-export function prospectCaptureRate(rosterSize: number): number {
-  const headroom = rosterSize - MEMBERSHIP_EQUILIBRIUM_ENROLLMENT;
-  if (headroom <= 0) return 0;
-  const netDepartures =
-    MEMBERSHIP_EQUILIBRIUM_ENROLLMENT * MEMBERSHIP_DEFAULT_DEPARTURE_RATE
-    - MEMBERSHIP_DEFAULT_ADJUSTMENT;
-  return Math.max(0, netDepartures / headroom);
-}
-
-// The marketplace-scaled BASE, before any adjustment.
+// They solved a capture rate k from MEMBERSHIP_EQUILIBRIUM_ENROLLMENT by
+// requiring expected joins to equal expected departures at N* = 63:
 //
-// Prospects are counted as (roster - enrolled), NOT as the post-cooldown
-// candidate pool. The 2-year canReenroll cooldown still binds, but it binds
-// downstream in simulateMemberMovement, where the join count is truncated to
-// the pool that actually exists — keeping it out of the base leaves the base a
-// clean function of book size, which is what the equilibrium algebra is
-// written against.
-export function baseNewMembers(rosterSize: number, enrolledCount: number): number {
-  const prospects = Math.max(0, rosterSize - enrolledCount);
-  return prospectCaptureRate(rosterSize) * prospects;
-}
-
-// Everything that is NOT the base, split out so it can be measured on its own.
+//     k = (N* x d - adj) / (roster - N*)
 //
-// ⚠ THESE DO NOT SUM TO ZERO AT DEFAULT DECISIONS, and the calibration of k
-// depends on knowing by how much. assessmentPct 0 and riskControlPct 0 both
-// sit on inert branches (underwritingStrictness did too, and is now gone
-// entirely), but two channels are live and
-// both are positive at defaults: competitivePressure is drawn in [0.3, 0.8], so
-// its term contributes +0.10 to +0.35 (mean +0.225); and satisfaction starts in
-// [6.5, 8.5], so the >= 7.5 branch fires about half the time. The surplusRatio
-// term starts mostly inert but turns positive later in a game as surplus
-// builds. See MEMBERSHIP_EQUILIBRIUM_ENROLLMENT for how the measured total is
-// folded into k.
-export function newMemberAdjustment(a: {
-  assessmentPct: number;
-  riskControlPct: number;
-  memberSatisfaction: number;
-  surplus: number;
-  annualPremium: number;
-  competitivePressure: number;
-  levelDeviationPct?: number;
-}): number {
-  let adj = 0;
+// which made the book a quantity the model STEERED TOWARD rather than an
+// outcome. Every measurement taken against that system — that growth was
+// unreachable at any cap, that intake ran 2.6/yr against withdrawals of
+// 2.65-2.94 — was a measurement of the target, not of the mechanism.
+//
+// WHAT REPLACES IT: nothing on the demand side. Intake is now entirely supply:
+// a share of the unenrolled marketplace applies, the appetite bar filters them,
+// and everyone who clears is written up to the capacity guard. Departures stay
+// proportional to the book. The two flows cross where
+//
+//     APPLICATION_RATE x (roster - N)  =  N x (1 - retention)
+//
+// and that crossing is an OUTCOME of two independent rates rather than a
+// constant. A book that settles there is two flows meeting; a book that settles
+// at 63 would mean something is still steering, which is the discriminator
+// new-business-appetite-derive reports against.
+//
+// ============================================================================
+// ⚠ AND THE PRICE CHANNEL INTO RECRUITMENT IS DARK FROM THIS COMMIT. Ruled
+// deliberately, not overlooked.
+//
+// newMemberAdjustment below carried price, satisfaction, surplus, assessment
+// and risk-control into the join count. Its scale is in MEMBERS PER YEAR —
+// absolute, and netted against k so that all-defaults came out neutral — so it
+// cannot be reused as a multiplier on an application rate without being
+// re-measured from scratch. Re-measuring it against a system that is still
+// moving would mean measuring it twice.
+//
+// So it is retired here and returns with the market derivation, which
+// satisfaction needs anyway. AT DEFAULTS THE LOSS IS NEAR ZERO — the price term
+// reads levelDeviationPct, which is ~0 at defaults — but A PLAYER WHO PRICES
+// LOW NO LONGER ATTRACTS MEMBERS, and that is a live lever going dark for a
+// commit. Named here so it is restored rather than rediscovered.
+// ============================================================================
 
-  // The five-branch rateChange ladder is REPLACED, not restored: prospects
-  // compare LEVELS, not year-over-year changes. A pool that has been overpriced
-  // for five straight years has no rate change left to show and would escape a
-  // change-based ladder entirely, while still being the pool nobody joins.
-  //
-  // Scaled by competitivePressure because that is what the existing hook below
-  // already means here — high pressure is a market where members are harder to
-  // win, so being overpriced costs more in one. Symmetric: below-neutral pricing
-  // attracts, which is what makes declining the tower visible as an upside.
-  adj -= MEMBER_MOVEMENT_WEIGHTS.attraction.rateLevel
-    * a.competitivePressure
-    * RATE_LEVEL_SENSITIVITY
-    * (a.levelDeviationPct ?? 0);
-
-  // ⚠ THE UNDERWRITING-STRICTNESS LADDER IS DELETED (<=2 +0.8, <=4 +0.3,
-  // >=8 -0.4). It was inert at the shipped default of 5 — the header note
-  // above already said so — so its removal moves no baseline. It goes with
-  // the slider rather than being left as a branch on a field nobody sets.
-  if (a.memberSatisfaction >= 8.5) adj += 0.5;
-  else if (a.memberSatisfaction >= 7.5) adj += 0.2;
-  else if (a.memberSatisfaction < 5.0) adj -= 0.5;
-
-  const surplusRatio = a.surplus / Math.max(a.annualPremium, 1);
-  if (surplusRatio >= 1.20) adj += 0.3;
-  else if (surplusRatio < 0.40) adj -= 0.3;
-
-  if (a.assessmentPct > 0.15) adj -= 0.8;
-  else if (a.assessmentPct > 0.05) adj -= 0.3;
-
-  if (a.riskControlPct >= 0.05) adj += 0.2;
-
-  adj += (1 - a.competitivePressure) * 0.5;
-
-  return adj;
-}
-
-function calcExpectedNewMembers(inputs: MemberMovementInputs): number {
-  const {
-    decisions, currentMemberSatisfaction, surplus, annualPremium, competitivePressure,
-    allMarketMembers, currentMembers,
-  } = inputs;
-
-  // BASE: scales with what is left of the marketplace, so the book is
-  // self-limiting upward and self-recovering downward. Every adjustment is
-  // unchanged and still applies ON TOP of this — only the base moved.
-  const expected = baseNewMembers(allMarketMembers.length, currentMembers.length)
-    + newMemberAdjustment({
-      assessmentPct: decisions.assessmentPct,
-      riskControlPct: decisions.riskControlPct,
-      memberSatisfaction: currentMemberSatisfaction,
-      surplus,
-      annualPremium,
-      competitivePressure,
-      levelDeviationPct: priceSignalFor(inputs).levelDeviationPct,
-    });
-
-  return Math.max(0, Math.min(MAX_NEW_MEMBERS_PER_YEAR, expected));
-}
+// ⚠ newMemberAdjustment AND calcExpectedNewMembers ARE DELETED WITH THE TARGET.
+// See the block above for why the ladder cannot simply be re-pointed at the
+// application rate, and for what goes dark in the meantime.
+//
+// ⚠ AND THE DELETION TOOK TWO CONSTANTS WITH IT THAT THE PLAN DID NOT NAME.
+// MEMBER_MOVEMENT_WEIGHTS.attraction (six weights) and RATE_LEVEL_SENSITIVITY
+// had this ladder as their ONLY engine consumer. Both are now dormant: still
+// exported, still rendered on the Calculation Audit page, acting on nothing.
+// They are kept as data because they return with the market derivation, and
+// they are marked dormant at their definitions rather than left to read as
+// live. MEMBER_MOVEMENT_WEIGHTS.retention is untouched — departure still reads
+// it, and that is the half of the object that still does work.
 
 function updateSatisfaction(
   current: number,
@@ -324,10 +263,27 @@ export function simulateMemberMovement(inputs: MemberMovementInputs): MemberMove
 
   const totalMarketExposure = allMarketMembers.reduce((s, m) => s + getMemberExposure(m, line, yearNumber), 0);
 
+  // ⚠ MAX_WITHDRAWN_PER_YEAR IS DELETED, AND IT WAS A GROWTH ACCELERATOR.
+  // Departures are PROPORTIONAL — book x (1 - retention) — and the cap was a
+  // FLAT COUNT of 4. At a 62-member book expected departures are 2.76 and the
+  // cap only clipped the noise tail; at 120 members they are 5.34 and the cap
+  // would have bound almost every year, suppressing ~1.3 departures annually.
+  // The brake weakened exactly as it was needed most, so the first growth arm
+  // measured would have run away and it would have looked like the intake model
+  // doing it.
+  //
+  // ⚠ NO SHARE CAP REPLACES IT, AND THAT IS A DECISION. A share cap on the
+  // outflow would be the right FORM if a cap were wanted, but there is nothing
+  // to cap: retention is already clamped to [0.80, 0.99] in
+  // calcRetentionProbability, so departures cannot exceed 20% of the book in
+  // any year however bad it gets. The noise multiplier is bounded at 1.6. A
+  // second bound on top of a bounded quantity would only mask the first.
   const retentionProb = calcRetentionProbability(inputs);
   const expectedWithdrawals = currentMembers.length * (1 - retentionProb);
-  const rawWithdrawalCount = Math.round(expectedWithdrawals * rng.range(0.4, 1.6));
-  const cappedWithdrawalCount = Math.min(rawWithdrawalCount, MAX_WITHDRAWN_PER_YEAR);
+  const cappedWithdrawalCount = Math.min(
+    currentMembers.length,
+    Math.round(expectedWithdrawals * rng.range(0.4, 1.6)),
+  );
 
   // ============================================================================
   // WHO LEAVES. The COUNT is above (calcRetentionProbability, which reads the
@@ -361,42 +317,34 @@ export function simulateMemberMovement(inputs: MemberMovementInputs): MemberMove
   const withdrawnIds = new Set(withdrawnMembers.map(m => m.id));
   const retainedMembers = currentMembers.filter(m => !withdrawnIds.has(m.id));
 
-  const expectedNew = calcExpectedNewMembers(inputs);
-  const rawNewCount = Math.round(expectedNew * rng.range(0.3, 1.7));
-  // ⚠ TWO CAPS, AND THE FLAT ONE IS THE BINDING ONE ON A NORMAL BOOK. See
-  // MAX_NEW_MEMBER_SHARE for the measurement: at 53-58 members the share works
-  // out at 5.3-5.8 against a flat 4, so this min is 4 and the share is slack.
-  // It binds below a 40-member book, where a tenth of what is left is under 4.
-  // Ordered min(flat, share) rather than replacing the flat cap because
-  // replacing it would loosen intake in the ~27% of line-years where 4
-  // currently binds, which moves the default path.
+  // ============================================================================
+  // INTAKE IS SUPPLY, NOT DEMAND. There is no expected-new-members term left.
   //
-  // ⚠ AND GROWTH IS STILL NOT REACHABLE AFTER THE INTAKE REBUILD. RE-MEASURED,
-  // AND THE ANSWER DID NOT CHANGE. Net movement per line-year runs -0.03 (WC)
-  // and -0.35 (GL) at Accept All, and between -0.15 and -0.58 at every appetite
-  // tier: the book is flat-to-shrinking everywhere, and the strict bar makes it
-  // shrink faster. The rebuild made SHRINKAGE reachable — being picky now costs
-  // members — and left growth where it was.
+  // Everyone who applies and clears the appetite bar is written, up to the
+  // capacity guard. The book is then an OUTCOME of three independent flows —
+  // who applies, who clears, who leaves — rather than a number steered toward.
   //
-  // The constraint is DEMAND, not either cap and not the application rate.
-  // baseNewMembers is pinned to MEMBERSHIP_EQUILIBRIUM_ENROLLMENT and
-  // MEMBERSHIP_DEFAULT_DEPARTURE_RATE precisely so the book holds its level, and
-  // raising supply cannot push intake past a demand that is calibrated to
-  // equilibrium. Lifting the flat cap only releases the tail of the noise draw,
-  // bounded above by an uncapped mean near 2.9 against withdrawals of 2.65-2.94.
+  // ⚠ THE DEMAND NOISE DRAW IS GONE TOO, AND REMOVING A DRAW IS WHY THE
+  // BASELINES MOVE. `Math.round(expectedNew * rng.range(0.3, 1.7))` consumed one
+  // draw from the shared line stream every year; nothing multiplies now, so the
+  // draw goes rather than being spent and discarded. Intake variance comes from
+  // WHICH members apply — binomial through the bar — which is real variance
+  // rather than a multiplier on a point estimate.
   //
-  // ⚠ SO THE RAPID-GROWTH HAZARD REMAINS UNREACHABLE BY CONSTRUCTION. The
-  // framework lists it among the things the game exists to demonstrate, and no
-  // decision available to a player produces it. Reaching it means changing
-  // prospectCaptureRate — giving the player a channel that moves the capture
-  // rate rather than the intake cap — which is its own commit and its own
-  // re-calibration of the equilibrium. Recorded here rather than left for the
-  // next reader to rediscover from a flat book.
-  const actualNewCount = Math.min(
-    rawNewCount,
-    MAX_NEW_MEMBERS_PER_YEAR,
-    Math.floor(currentMembers.length * MAX_NEW_MEMBER_SHARE),
-  );
+  // ⚠ AND THE CONFINEMENT IS STRUCTURAL, NOT HOPEFUL. The rng handed to this
+  // function is `deriveSubRng(seed, yearNumber, lineRngLabel('members', line))`
+  // — its own stream, hashed from a purpose label, with simulateMemberMovement
+  // as its only consumer (simulationEngine's single `rng: memberRng` call site).
+  // Adding or removing a draw here cannot re-phase any other stream, because no
+  // other stream is this one. Member-level claim draws are separately keyed on
+  // (seed, year, memberId), which enrolment-independence-check asserts.
+  //
+  // So the baselines move through exactly one channel: WHICH MEMBERS ARE
+  // ENROLLED. Not through re-phased claim draws, not through development, not
+  // through investment returns. Every moved figure should trace to a different
+  // book, and anything that does not would be the finding.
+  // ============================================================================
+  const intakeRoom = Math.floor(currentMembers.length * MAX_NEW_MEMBER_SHARE);
 
   // Candidate-pool eligibility reads EXCLUSIVELY from membershipHistory,
   // NEVER from Member.status. The shared status field is fold-corrupted
@@ -486,7 +434,7 @@ export function simulateMemberMovement(inputs: MemberMovementInputs): MemberMove
     inputs.decisions.newBusinessAppetite ?? null,
   );
 
-  const newMembers: Member[] = candidatePool.slice(0, Math.min(actualNewCount, candidatePool.length)).map(m => ({
+  const newMembers: Member[] = candidatePool.slice(0, Math.min(intakeRoom, candidatePool.length)).map(m => ({
     ...m,
     status: 'active' as const,
     yearJoined: yearNumber,
@@ -510,7 +458,7 @@ export function simulateMemberMovement(inputs: MemberMovementInputs): MemberMove
     activeMembers,
     newMembers,
     withdrawnMembers,
-    intakeRoom: actualNewCount,
+    intakeRoom,
     applicantCount: applicants.length,
     eligibleCount: candidatePool.length,
     retentionRate,
