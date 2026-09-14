@@ -2095,7 +2095,7 @@ export function buildSupportingRows(
         value: result.poolPremium + result.adminExpense,
         spec: { kind: 'sum', terms: [curTerm(result.poolPremium, 'pool premium'), curTerm(result.adminExpense, 'admin expense')] },
       },
-      explain: 'PRICING basis — the denominator EXCLUDES reinsurance cost. The numerator is the NET loss the pool premium funds (pool premium / CLF), not gross expected loss: since the funding-basis change the denominator contains a net-funded premium, and a gross numerator over it double-counts the ceded loss. The 66.8% target the cutover harnesses carry predates both net funding and the CLF 1.000 default and no longer describes this figure.',
+      explain: 'PRICING basis — the denominator EXCLUDES reinsurance cost. The numerator is the NET loss the pool premium funds (pool premium / CLF), not gross expected loss: the denominator is a net-funded premium, so a gross numerator over it double-counts the ceded loss.',
     },
     {
       metric: 'Expected Loss Ratio (member charge basis)',
@@ -2119,7 +2119,7 @@ export function buildSupportingRows(
         value: result.adminExpense + result.reinsuranceCost,
         spec: { kind: 'sum', terms: [curTerm(result.adminExpense, 'admin expense'), curTerm(result.reinsuranceCost, 'reinsurance cost')] },
       },
-      explain: 'Computed from the actual expense dollars. It was previously defined as 1.0 − loss ratio, a residual that forced the combined ratio to 100% regardless of pricing.',
+      explain: 'Computed from the actual expense dollars, not as a residual of the loss ratio — so the combined ratio can land anywhere pricing puts it rather than being forced to 100%.',
     },
     {
       metric: 'Expected Combined Ratio (member charge basis)',

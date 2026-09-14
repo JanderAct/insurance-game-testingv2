@@ -71,9 +71,20 @@ const GAMES = Number(process.env.GAMES ?? 6);
 const YEARS = Number(process.env.YEARS ?? 14);
 /** Years the ledger needs before anyone can be rated at all. */
 const WARMUP = EXPERIENCE_MOD.minYears + 2;
-/** The tightest shipped level, and the one the ratchet would appear at first. */
+/** The tightest shipped level, and the one the ratchet would appear at first.
+ *  ⚠ ON THE CLAMPED-RATIO SCALE NOW, not the displayed modifier — the threshold
+ *  moved when the screen started showing what an underwriter judges rather than
+ *  what a member is billed. Read from the shipped constant so this gate cannot
+ *  drift from the UI. */
 const TIGHTEST = Math.min(...RENEWAL_THRESHOLDS);
-/** The positive control. Far below anything the UI offers. */
+/** The positive control, RE-DERIVED ON THE RATIO SCALE. 1.00 means "declines
+ *  every member who cost more than their own expectation", which
+ *  renewal-threshold-derive measures at 27.0 declines per WC line-year and 28.2
+ *  on GL — 46-50% of the rated book. It was already 1.00 on the modifier scale
+ *  and it stays 1.00 here, but for a different and much stronger reason: on the
+ *  old scale it sat just under the median displayed mod, on this one it sits at
+ *  roughly the median RATIO and cuts the book in half. A positive control this
+ *  gate cannot fail to detect is the point of it. */
 const ABSURD = 1.00;
 
 const failures: string[] = [];
@@ -118,7 +129,8 @@ function play(g: number, threshold: number | null): Record<string, YearRow[]> {
 console.log(RULE);
 console.log('RENEWAL UNDERWRITING STABILITY');
 console.log(RULE);
-console.log(`${GAMES} games x ${YEARS} years. Shipped levels ${RENEWAL_THRESHOLDS.join(' / ')}; `
+console.log(`${GAMES} games x ${YEARS} years. Shipped level ${RENEWAL_THRESHOLDS.join(' / ')} `
+  + `on the CLAMPED RATIO (clamp [${EXPERIENCE_MOD.ratioFloor}, ${EXPERIENCE_MOD.ratioCeiling}]); `
   + `tightest ${TIGHTEST}, positive control ${ABSURD}. Warm-up ${WARMUP} years excluded from trends.`);
 console.log(`Z: ` + LINES.map(l => `${l} ${CREDIBILITY_Z[l]}`).join(' / ') + '\n');
 
@@ -178,9 +190,16 @@ console.log('--- 1. THE RATCHET: declines per year, early vs late (warmed years 
 // ------------------------------------------------- 2. null A: above the ceiling
 console.log('\n--- 2. NULL A: a threshold above the reachable ceiling declines nobody ---');
 {
-  // The displayed modifier cannot exceed ceiling/floor even in the limit, so
-  // anything past that is unreachable by construction.
-  const unreachable = EXPERIENCE_MOD.ratioCeiling / EXPERIENCE_MOD.ratioFloor + 1;
+  // ⚠ THE DERIVATION CHANGED WITH THE SCALE AND THE OLD VALUE STILL PASSES,
+  // WHICH IS EXACTLY WHY IT IS RE-DERIVED RATHER THAN LEFT. The threshold now
+  // compares `clampedRatio`, which cannot exceed ratioCeiling, and the
+  // comparison is strictly-greater — so ratioCeiling itself is already
+  // unreachable and every value above it equally so. The old expression
+  // (ceiling/floor + 1 = 7) is still above the ceiling and would still decline
+  // nobody, so this null would have kept passing while measuring a bound that
+  // no longer describes the mechanism. Taking the ceiling directly makes the
+  // null test the tightest unreachable value rather than an arbitrary one.
+  const unreachable = EXPERIENCE_MOD.ratioCeiling;
   let mismatched = 0, compared = 0, declines = 0;
   for (let g = 0; g < GAMES; g++) {
     const high = play(g, unreachable);

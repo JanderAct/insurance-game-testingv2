@@ -15,6 +15,7 @@ import { lookupCLF } from '../utils/simulationEngine';
 import { hasStaticClf, staticClf } from '../data/clfTables';
 import type { FundingConsequence } from '../utils/fundingConsequence';
 import { RENEWAL_THRESHOLDS, renewalDeclines } from '../utils/renewalUnderwriting';
+import { EXPERIENCE_MOD } from '../utils/memberExperienceMod';
 
 export interface LineLoanInfo {
   balance: number;
@@ -190,20 +191,17 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
               sorting applicants on the member's true risk quality and keeping
               the best 60% — perfect selection on a number the player can no
               longer see anywhere per member. See membershipEngine.ts at the
-              deleted screen. The note that stood here said the slider "will be
-              replaced by Renewal Underwriting and New Business Appetite once
-              member loss history exists"; that history exists now and the
-              modifier reads it, so the note has come true and the slider goes
-              with it. The two controls below are still INACTIVE. */}
-          <p className="flex items-start gap-1 text-[11px] text-gray-500 leading-relaxed">
-            <Info size={12} className="mt-0.5 flex-shrink-0" />
-            <span>
-              The pool no longer sets a general underwriting standard. Admission will be decided by the
-              two controls below, which read each member&rsquo;s own claims record rather than an
-              assessment of them.{' '}
-              <span className="text-gray-400">Neither is active yet.</span>
-            </span>
-          </p>
+              deleted screen.
+
+              ⚠ AND THE PARAGRAPH THAT ANNOUNCED ITS REMOVAL IS GONE TOO. It
+              opened "The pool no longer sets a general underwriting standard"
+              — which narrates the software's history rather than a mechanism
+              the player is deciding against. A player who never saw the slider
+              does not need to be told it is gone, and one who did will notice.
+              The test applied across this screen: does the note explain a
+              MECHANISM being decided against, or the product's changelog? The
+              GL retention note below survives it because an uncapped exposure
+              is a live financial fact. This one did not. */}
           <RenewalUnderwriting
             line={selectedLine}
             members={lastLineResult?.memberList ?? []}
@@ -556,13 +554,40 @@ function PreviewBox({ title, description, selected, active = false }: { title: s
 // over disjoint three-year windows" is the measurement; "a typical member has
 // about one property claim every other year" is the same fact in a form a
 // pool administrator can check against their own experience.
+// ⚠ PROPERTY SHOWS NOTHING — NOT A RATIO WITH THE TIER GREYED OUT, AND THE
+// DIFFERENCE MATTERS.
+//
+// Property has a ratio in the arithmetic sense: actual over expected exists for
+// any member with a ledger. Three reasons it is not rendered.
+//
+//   IT IS NULL BY CONSTRUCTION, NOT BY A SWITCH. clampedRatioFor returns
+//     rated: false whenever CREDIBILITY_Z is 0, and Property's Z is 0 because
+//     its measured reliability was 0.000 at every split point tried. So
+//     `rawRatio` is null on every Property member and there is no number to
+//     render without computing one specially — which would mean writing code to
+//     surface a quantity the measurement says carries no signal.
+//
+//   AT 1.9 CLAIMS PER WINDOW THE NUMBER IS NOISE WEARING A DECIMAL POINT. A
+//     member with no claims reads 0.00 and one with a single average claim
+//     reads about 2.0. Rendering that as "0.00x" against "2.03x" invites a
+//     reader to conclude one member is infinitely better run than the other,
+//     when the two are one claim apart.
+//
+//   A GREYED-OUT NUMBER STILL RANKS. Showing the ratio with the tier disabled
+//     is worse than showing nothing, because the Membership table would sort on
+//     it and a player would act on the ordering whether or not a control was
+//     attached. Disabling the decision does not disable the inference.
+//
+// So: the note below, and no column. Renewal Underwriting renders this in place
+// of its boxes, and New Business Appetite appends it.
 function PropertyNoSignalNote() {
   return (
     <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 leading-relaxed mt-1">
-      Not available on Property. A typical member has about one property claim every other year — fewer
-      than two in a three-year record — so a quiet stretch cannot be told apart from a safe one. Every
-      Property member is charged the same relativity for their size and location, whatever their recent
-      claims. Workers&rsquo; Compensation and General Liability have enough claims to rate on.
+      Not available on Property, and no loss ratio is shown. A typical member has about one property claim
+      every other year — fewer than two in a three-year record — so a quiet stretch cannot be told apart
+      from a safe one. Every Property member is charged the same relativity for their size and location,
+      whatever their recent claims. Workers&rsquo; Compensation and General Liability have enough claims to
+      rate on.
     </p>
   );
 }
@@ -596,8 +621,10 @@ function RenewalUnderwriting({
   onChange: (v: number | null) => void;
   disabled?: boolean;
 }) {
-  const counts = React.useMemo(
-    () => RENEWAL_THRESHOLDS.map(t => renewalDeclines(members, line, history, yearNumber, t).length),
+  // The count comes from the SAME function the engine calls, so the number
+  // shown is the number the player gets rather than a second estimate of it.
+  const declines = React.useMemo(
+    () => RENEWAL_THRESHOLDS.map(t => renewalDeclines(members, line, history, yearNumber, t)),
     [members, line, history, yearNumber],
   );
   const rated = line !== 'Property';
@@ -607,15 +634,18 @@ function RenewalUnderwriting({
       <span className="text-sm font-semibold text-gray-700">Renewal Underwriting</span>
       {rated ? (
         <>
-          <div className="grid grid-cols-4 gap-1">
+          {/* TWO BOXES. See RENEWAL_THRESHOLDS for why one level and not three:
+              the middle settings were not decisions, they were book-reshaping
+              policies wearing a decision's clothes. */}
+          <div className="grid grid-cols-2 gap-1.5">
             <div onClick={() => !disabled && onChange(null)}>
               <PreviewBox title="Renew All" description="Renew every member" selected={value === null} active={!disabled} />
             </div>
             {RENEWAL_THRESHOLDS.map((t, i) => (
               <div key={t} onClick={() => !disabled && onChange(t)}>
                 <PreviewBox
-                  title={`Above ${t.toFixed(2)}`}
-                  description={`${counts[i]} member${counts[i] === 1 ? '' : 's'} this year`}
+                  title={`Decline above ${t.toFixed(2)}x`}
+                  description={`${declines[i].length} member${declines[i].length === 1 ? '' : 's'} this year`}
                   selected={value === t}
                   active={!disabled}
                 />
@@ -625,9 +655,18 @@ function RenewalUnderwriting({
           <p className="flex items-start gap-1 text-[11px] text-gray-500 leading-relaxed">
             <Info size={12} className="mt-0.5 flex-shrink-0" />
             <span>
-              Declines members charged more than this against the typical member (1.00). A declined member
-              cannot rejoin for two years, so holding a level shrinks the book by more than its yearly
-              count.
+              Declines members whose losses have run more than {RENEWAL_THRESHOLDS[0].toFixed(2)}x their
+              own expected cost over the last {EXPERIENCE_MOD.windowYears} years — the Loss Ratio column on
+              Membership. A declined member cannot rejoin for two years, so holding the level costs more
+              than its yearly count.
+            </span>
+          </p>
+          <p className="flex items-start gap-1 text-[11px] text-gray-400 leading-relaxed">
+            <Info size={12} className="mt-0.5 flex-shrink-0" />
+            <span>
+              Ratios are capped at {EXPERIENCE_MOD.ratioCeiling.toFixed(2)}x for this decision, so a member
+              at {EXPERIENCE_MOD.ratioCeiling.toFixed(2)}x and one at 5x are declined together — the column
+              separates them, the threshold does not.
             </span>
           </p>
         </>
@@ -638,20 +677,33 @@ function RenewalUnderwriting({
   );
 }
 
-// NEW BUSINESS APPETITE (Part 3) — inactive preview, same experience-modifier
-// basis as Renewal Underwriting above, and rendered directly beneath it in
-// the same Growth & Underwriting card: both are one decision about pool
-// membership (existing members vs. applicants) and belong in one place. Five
-// boxes across a half-width column means each is roughly 120px with
-// multi-line wrapped descriptions — deliberately not reduced to fewer
-// columns or shortened text, since the left-to-right selectivity ordering is
-// what makes the control readable.
+// NEW BUSINESS APPETITE (Part 3) — inactive preview, rendered directly beneath
+// Renewal Underwriting in the same Growth & Underwriting card: both are one
+// decision about pool membership (existing members vs. applicants) and belong
+// in one place.
+//
+// ⚠ TWO OPTIONS, NOT FIVE, AND IT IS THE SAME ARGUMENT AS RENEWAL'S. Five
+// tiers — Open / Broad / Unchanged / Selective / Strict — described a
+// selectivity DIAL, and the middle three had no number behind them. "Accept
+// average or better" and "Accept good experience only" are not distinguishable
+// statements about a distribution; they are adjectives in selectivity order,
+// which is what made the row read as a control rather than a choice. And
+// "Unchanged" is not an appetite at all: it is a refusal to state one, which
+// on a screen with no prior appetite to maintain means nothing.
+//
+// ⚠ AND IT SHOULD USE RENEWAL'S NUMBER WHEN IT ACTIVATES, not a second scale.
+// The pool has one view of what "too expensive to write" means. Applying
+// RENEWAL_THRESHOLDS[0] to an applicant's own ratio makes the two controls one
+// standard applied in two directions — decline the members above it, decline
+// the applicants above it — rather than two dials a player has to reconcile.
+// An applicant with no rated history is accepted, exactly as an unrated member
+// is never declined: there is nothing to judge them on.
 const APPETITE_OPTIONS = [
   { title: 'Open', description: 'Accept all applicants' },
-  { title: 'Broad', description: 'Accept average or better' },
-  { title: 'Unchanged', description: 'Maintain current appetite' },
-  { title: 'Selective', description: 'Accept good experience only' },
-  { title: 'Strict', description: 'Accept excellent experience only' },
+  {
+    title: `Decline above ${RENEWAL_THRESHOLDS[0].toFixed(2)}x`,
+    description: 'Same standard as renewal',
+  },
 ] as const;
 
 function NewBusinessAppetitePreview({ line }: { line: CoverageLine }) {
@@ -661,7 +713,7 @@ function NewBusinessAppetitePreview({ line }: { line: CoverageLine }) {
   const [selected, setSelected] = React.useState<number | null>(null);
   return (
     <InactivePreview title="New Business Appetite">
-      <div className="grid grid-cols-5 gap-1">
+      <div className="grid grid-cols-2 gap-1.5">
         {APPETITE_OPTIONS.map((opt, i) => (
           <div key={opt.title} onClick={() => setSelected(i)}>
             <PreviewBox title={opt.title} description={opt.description} selected={i === selected} />
@@ -827,15 +879,21 @@ function TowerControls({
         </p>
       </div>
 
+      {/* ⚠ CUT TO ONE LINE, NOT CUT. Four sentences is too long for a decision
+          screen, but unlike the removal note on this page this one states a
+          LIVE FINANCIAL FACT the player is deciding against: above the top
+          layer the pool carries unlimited uncapped exposure with no cover
+          available at any price. A player who discovers that from a loss
+          rather than from the screen has a fair complaint. What went: the
+          market-capacity explanation (why there is no layer is not the
+          decision) and the pointer to Results and Financial Statements (a
+          reader who wants the figure will find it on the exhibit that carries
+          it). What stays: the band, the word unlimited, and that it cannot be
+          bought. Rendered where the next layer would be, so it reads as the
+          top of the tower rather than as an aside. */}
       {line === 'GL' && (
-        <div className="bg-amber-50 rounded-lg p-3 border border-amber-200 text-xs">
-          <p className="font-bold text-amber-900 mb-1">Nothing above {TOWER_TOP.GL / 1e6 === 25 ? '$25M' : '—'}</p>
-          <p className="text-amber-800 leading-relaxed">
-            Market capacity above $25M per occurrence is hard to find, so no layer is offered.
-            <strong> The pool retains everything above it, unlimited.</strong> That band is this line's
-            largest single exposure and cannot be transferred at any price — it is reported as
-            "Retained Above Tower" on Results and Financial Statements.
-          </p>
+        <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50 px-2.5 py-2 text-xs text-amber-900">
+          <strong>Above ${TOWER_TOP.GL / 1e6}M:</strong> retained in full, unlimited. No cover is available.
         </div>
       )}
 

@@ -3,7 +3,7 @@ import { Users, UserPlus, UserMinus, Globe } from 'lucide-react';
 import type { ResultSet, Member, StartingFinancials, MemberLossHistory } from '../types/simulation';
 import { formatMillions, formatPct } from '../utils/formatters';
 import { getMemberExposure } from '../utils/lineHelpers';
-import { displayedMod, medianRatedMod, memberExperienceMods } from '../utils/memberExperienceMod';
+import { EXPERIENCE_MOD, displayedMod, medianRatedMod, memberExperienceMods } from '../utils/memberExperienceMod';
 
 interface MembershipPageProps {
   lockedResults: ResultSet[];
@@ -33,7 +33,7 @@ export default function MembershipPage({ lockedResults, startingFinancials, init
   // sort by; leaving the key would let a future column reintroduce the
   // attribute with a one-word change. surface-privacy-check asserts the
   // absence across every page and export.
-  const [sortKey, setSortKey] = useState<'name' | 'exposure' | 'satisfaction' | 'mod' | 'yearJoined'>('exposure');
+  const [sortKey, setSortKey] = useState<'name' | 'exposure' | 'satisfaction' | 'ratio' | 'mod' | 'yearJoined'>('exposure');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
   const last = lockedResults[lockedResults.length - 1];
@@ -53,11 +53,29 @@ export default function MembershipPage({ lockedResults, startingFinancials, init
   // "typical member" rather than as "exposure-weighted average member"; see
   // memberExperienceMod.ts for why the charged mod cannot use the median and
   // why this one must.
-  const modByMember = React.useMemo(() => {
+  //
+  // ⚠ TWO COLUMNS, NOT ONE, AND THEY ARE NOT THE SAME NUMBER TWICE. The RATIO
+  // is what the member cost — actual primary loss over their own expected
+  // primary loss. The MOD is what they are charged for it, and it is damped by
+  // design: Z is 0.155 on WC, so 84.5% of the mod is the class average. A
+  // member who ran 3x their expected cost is charged about 1.31.
+  //
+  // Showing only the mod hid that, and it is exactly what made Renewal
+  // Underwriting unreadable while its tiers were mod numbers — a member the
+  // pool might decline looked like a member charged 31% over. Showing only the
+  // ratio would hide what anyone actually pays. Side by side, the gap between
+  // the columns IS the credibility weighting, which is the thing worth seeing.
+  //
+  // ⚠ THE RATIO SHOWN IS RAW, AND THE RENEWAL TIER COMPARES THE CLAMPED ONE.
+  // The raw figure is what the member cost and a reader has to be able to tell
+  // 3.2 from 11.0. The clamp keeps the threshold stable. So a member at 11.0
+  // and one at 3.2 both sit above a 2.50 tier and are declined together — the
+  // decision screen says so rather than leaving it to be discovered here.
+  const expByMember = React.useMemo(() => {
     const mods = memberExperienceMods(activeMembers, 'WC', memberLossHistory, displayYear);
     const median = medianRatedMod(mods);
-    const out = new Map<string, number | null>();
-    for (const m of mods) out.set(m.memberId, displayedMod(m, median));
+    const out = new Map<string, { ratio: number | null; mod: number | null }>();
+    for (const m of mods) out.set(m.memberId, { ratio: m.rawRatio, mod: displayedMod(m, median) });
     return out;
   }, [activeMembers, memberLossHistory, displayYear]);
 
@@ -70,7 +88,12 @@ export default function MembershipPage({ lockedResults, startingFinancials, init
     else if (sortKey === 'mod') {
       // Unrated members sort as if typical rather than as 0, so a book with
       // few rated members does not stack every newcomer at one end.
-      valA = modByMember.get(a.id) ?? 1; valB = modByMember.get(b.id) ?? 1;
+      valA = expByMember.get(a.id)?.mod ?? 1; valB = expByMember.get(b.id)?.mod ?? 1;
+    }
+    else if (sortKey === 'ratio') {
+      // Same convention as the mod column above, and 1 is the right filler on
+      // this scale too: the rated ratio's median measures 0.94 on WC.
+      valA = expByMember.get(a.id)?.ratio ?? 1; valB = expByMember.get(b.id)?.ratio ?? 1;
     }
     else if (sortKey === 'yearJoined') { valA = a.yearJoined; valB = b.yearJoined; }
 
@@ -131,13 +154,14 @@ export default function MembershipPage({ lockedResults, startingFinancials, init
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Size</th>
                 <th className={thClass('exposure')} onClick={() => handleSort('exposure')}>Payroll ($M) {sortKey === 'exposure' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
                 <th className={thClass('yearJoined')} onClick={() => handleSort('yearJoined')}>Yr Joined {sortKey === 'yearJoined' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                <th className={thClass('mod')} onClick={() => handleSort('mod')} title="Actual losses over expected, over the last three years, limited per claim and credibility-weighted. 1.00 is the typical member.">Experience Mod {sortKey === 'mod' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                <th className={thClass('ratio')} onClick={() => handleSort('ratio')} title={`Actual losses over expected, over the last ${EXPERIENCE_MOD.windowYears} years, limited per claim. What the member cost. This is what Renewal Underwriting acts on.`}>Loss Ratio {sortKey === 'ratio' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                <th className={thClass('mod')} onClick={() => handleSort('mod')} title="What the member is charged for that record, credibility-weighted against their class. 1.00 is the typical member. Much flatter than the ratio by design — most of a member's rate is their class, not their own claims.">Experience Mod {sortKey === 'mod' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
                 <th className={thClass('satisfaction')} onClick={() => handleSort('satisfaction')}>Satisfaction {sortKey === 'satisfaction' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {sortedMembers.map(member => (<MemberRow key={member.id} member={member} displayYear={displayYear} mod={modByMember.get(member.id) ?? null} />))}
+              {sortedMembers.map(member => (<MemberRow key={member.id} member={member} displayYear={displayYear} ratio={expByMember.get(member.id)?.ratio ?? null} mod={expByMember.get(member.id)?.mod ?? null} />))}
             </tbody>
           </table>
         </div>
@@ -147,12 +171,20 @@ export default function MembershipPage({ lockedResults, startingFinancials, init
   );
 }
 
-function MemberRow({ member, displayYear, mod }: { member: Member; displayYear: number; mod: number | null }) {
+function MemberRow({ member, displayYear, ratio, mod }: {
+  member: Member; displayYear: number; ratio: number | null; mod: number | null;
+}) {
   // Below 1 is a credit and reads green; above 1 is a debit. Deliberately the
   // SAME direction as the loss ratio elsewhere on this app — lower is better —
   // rather than risk quality's old convention where higher was better.
   const modColor = mod === null ? 'text-gray-400'
     : mod <= 0.95 ? 'text-emerald-600' : mod >= 1.05 ? 'text-red-600' : 'text-gray-700';
+  // ⚠ THE RATIO'S BANDS ARE ITS OWN, NOT THE MOD'S. Its measured spread is an
+  // order of magnitude wider (WC p10 0.24, p90 1.86, max 5.48 against the mod's
+  // 0.93 to 1.35), so reusing 0.95/1.05 here would paint most of the book red.
+  // Banded on the measured quartiles instead.
+  const ratioColor = ratio === null ? 'text-gray-400'
+    : ratio <= 0.6 ? 'text-emerald-600' : ratio >= 1.4 ? 'text-red-600' : 'text-gray-700';
   const satColor = member.satisfaction >= 7 ? 'text-emerald-600' : member.satisfaction >= 5 ? 'text-amber-600' : 'text-red-600';
 
   return (
@@ -162,7 +194,10 @@ function MemberRow({ member, displayYear, mod }: { member: Member; displayYear: 
       <td className="px-4 py-3 text-gray-600"><SizeBadge size={member.sizeCategory} /></td>
       <td className="px-4 py-3 font-mono text-gray-800">{formatMillions(getMemberExposure(member, 'WC', displayYear))}</td>
       <td className="px-4 py-3 text-gray-600">{member.calendarYearJoined > 0 ? member.calendarYearJoined : '—'}</td>
-      <td className={`px-4 py-3 font-semibold ${modColor}`} title={mod === null ? 'Fewer than three years of claims with the pool' : undefined}>
+      <td className={`px-4 py-3 font-semibold ${ratioColor}`} title={ratio === null ? `Fewer than ${EXPERIENCE_MOD.windowYears} years of claims with the pool` : undefined}>
+        {ratio === null ? '—' : `${ratio.toFixed(2)}x`}
+      </td>
+      <td className={`px-4 py-3 font-semibold ${modColor}`} title={mod === null ? `Fewer than ${EXPERIENCE_MOD.windowYears} years of claims with the pool` : undefined}>
         {mod === null ? '—' : mod.toFixed(2)}
       </td>
       <td className={`px-4 py-3 font-semibold ${satColor}`}>{member.satisfaction.toFixed(1)}</td>

@@ -1,6 +1,21 @@
 // ============================================================================
-// RENEWAL UNDERWRITING — the pool declines to renew a member whose displayed
-// experience modifier is above a threshold the player sets.
+// RENEWAL UNDERWRITING — the pool declines to renew a member whose EXPERIENCE
+// RATIO is above a threshold the player sets.
+//
+// ⚠ THE THRESHOLD IS ON THE RATIO, NOT ON THE MODIFIER, AND THAT IS A CHANGE.
+// It used to compare the displayed modifier against 1.25 / 1.15 / 1.10. Those
+// are the right shape for a modifier and meaningless as an underwriting
+// decision, because the modifier is DELIBERATELY DAMPED: Z is 0.155 on WC, so
+// 84.5% of what a member is charged is the class average and only 15.5% is
+// them. Measured over 3,506 rated WC member-years, a member running 3x their
+// own expected cost displays at about 1.31 and the whole displayed range is
+// 0.93 to 1.35. Nothing in that band looks like a decision because nothing in
+// that band IS one — it is a billing consequence.
+//
+// The ratio is what an underwriter judges: actual primary loss over the
+// member's own expected primary loss, on their own class basis, over the
+// window. It runs 0.24 to 5.48 on WC. See renewal-threshold-derive.ts for the
+// distribution and for how the shipped level was picked off it.
 //
 // This is the lever that manages adverse selection. memberDeparture.ts is the
 // pressure: when the price rises, the members with the best experience have
@@ -69,37 +84,93 @@
 // ============================================================================
 
 import { closeInterval } from './membershipHistory';
-import { displayedMod, medianRatedMod, memberExperienceMods } from './memberExperienceMod';
+import { memberExperienceMods } from './memberExperienceMod';
 import type {
   CoverageLine, Member, MemberLossHistory, MembershipHistory,
 } from '../types/simulation';
 
 /**
- * The threshold levels, on the DISPLAYED (median-centred) modifier.
+ * The threshold, on the CLAMPED experience ratio. ONE LEVEL, plus Renew All.
  *
- * ⚠ ON THE DISPLAYED SCALE, NOT THE CHARGED ONE, BECAUSE THAT IS THE NUMBER
- * THE PLAYER IS LOOKING AT. The displayed mod is centred so 1.00 is the
- * typical member; a threshold of 1.15 therefore means "decline members
- * charged more than 15% above typical" in every book, whatever the charged
- * mod's own mean happens to be that year.
+ * ⚠ ONE LEVEL RATHER THAN THREE, AND THE REASON IS THAT THE OTHER TWO WERE
+ * NOT DECISIONS. Renewal underwriting is a single question — decline the
+ * members who cost far more than they were expected to, or do not — and three
+ * levels invited the player to tune a dial whose middle settings reshape the
+ * book rather than manage it. Two boxes state the question.
  *
- * The levels are placed against the measured distribution — WC p75 1.056,
- * p90 1.109, p95 1.148 — so 1.25 is a rare intervention, 1.15 catches roughly
- * one member in twenty and 1.10 roughly one in ten.
+ * ⚠ PICKED OFF THE MEASURED DISTRIBUTION, NOT CHOSEN FOR ITS ROUNDNESS. From
+ * renewal-threshold-derive.ts, 6 games x 14 years, warm years only, per
+ * line-year on a mean book of 58:
+ *
+ *   threshold   WC declines/yr   GL declines/yr   line-years where it fires
+ *      2.00        4.47              4.75              60/60, 59/60
+ *      2.25        2.58              2.85              53/60, 56/60
+ *      2.50        1.77              1.92              47/60, 48/60
+ *      2.75        1.10              1.40              42/60, 43/60
+ *      3.00        0.00              0.00               0/60  (see below)
+ *
+ * 2.50 is the level that declines a couple of members in a typical year — a
+ * renewal decision. 2.00 runs at one member in twelve of the rated book, which
+ * with the two-year cooldown becomes a policy that reshapes the roster. 2.75
+ * does nothing at all in three years out of ten, and a control that is inert a
+ * third of the time reads as broken rather than as strict.
+ *
+ * In plain terms the shipped level declines a member who has run more than
+ * 2.5x their own expected primary loss over the window.
+ *
+ * ⚠ THE COUNT PER YEAR IS NOT THE COST, AND THE BOOK EFFECT IS THE NUMBER TO
+ * JUDGE THIS BY. A decline carries a two-year cooldown, so holding the level
+ * costs more than its yearly count. Measured with the threshold APPLIED for a
+ * whole game (renewal-stability-check, 6 games x 14 years, mean enrolled,
+ * renewal off -> on):
+ *
+ *   WC   53.9 -> 48.9   (-9.3%)     at 0.71-0.90 declines per year
+ *   GL   60.3 -> 51.3   (-15.0%)    at 0.83-1.25 declines per year
+ *
+ * For scale, the retired mod-scale 1.10 took WC from 55.5 to 35.3 — a 36% cut,
+ * which is a different pool rather than a renewal decision. This is under a
+ * third of that.
+ *
+ * ⚠ AND GL RUNS HOTTER THAN WC FOR THE SAME THRESHOLD, WHICH IS NOT A RENEWAL
+ * PROPERTY. GL loses 15% of its book against WC's 9% on a very similar decline
+ * rate, so the difference is in how fast each line's recruitment refills rather
+ * than in how many members each declines. Recorded here because a reader
+ * comparing the two lines will otherwise look for the cause in this file, and
+ * it is not in this file.
+ *
+ * ⚠ THE DECLINE COUNT SHOWN ON THE SCREEN IS HIGHER THAN THE COUNT A HELD
+ * LEVEL PRODUCES, AND BOTH ARE RIGHT. The screen counts against the CURRENT
+ * book, which on a Renew All history is 1.77 (WC) and 1.92 (GL) per year. Once
+ * the level has been held for a few years the worst members are gone and the
+ * rate settles near 0.85. The screen is not over-promising; the book is
+ * improving, which is the mechanism working.
+ *
+ * ⚠ AND EVERY VALUE AT OR ABOVE THE CEILING IS UNREACHABLE. The comparison is
+ * strictly-greater against `clampedRatio`, which cannot exceed
+ * EXPERIENCE_MOD.ratioCeiling (3.0). So a threshold of 3.00 or above declines
+ * nobody on any book, ever — not "rarely", never. That is why the table above
+ * stops where it does, and it is the reason the shipped level has to sit below
+ * the ceiling rather than near it.
  *
  * ⚠ NO PERCENTAGE IN THE LABEL. The share at a threshold moves with the book,
- * so a static "declines ~5%" would go stale the first time the roster
+ * so a static "declines ~3%" would go stale the first time the roster
  * shifted. The UI renders the LIVE count instead, which cannot.
+ *
+ * Kept as an array so a second level is a data change rather than a UI change,
+ * and so the stability gate can keep reading the tightest shipped value.
  */
-export const RENEWAL_THRESHOLDS = [1.25, 1.15, 1.10] as const;
+export const RENEWAL_THRESHOLDS = [2.50] as const;
 
-/** null = renew all. Otherwise the displayed-mod threshold above which a
+/** null = renew all. Otherwise the CLAMPED-RATIO threshold above which a
  *  member is declined. */
 export type RenewalThreshold = number | null;
 
 export interface RenewalDecision {
   memberId: string;
-  displayedMod: number;
+  /** What the member actually cost, Ap/Ep, UNCLAMPED. For display only. */
+  rawRatio: number;
+  /** What the threshold was compared against. */
+  clampedRatio: number;
 }
 
 /**
@@ -109,10 +180,24 @@ export interface RenewalDecision {
  * count from this same function, so the number the player is shown is the
  * number they get rather than a second estimate of it.
  *
- * ⚠ UNRATED MEMBERS ARE NEVER DECLINED AND NEED NO SPECIAL CASE. displayedMod
- * returns null for them, and null is not above any threshold. A member with
- * fewer than three years of history has no experience to decline them on, and
- * Property — whose credibility measured 0.000 — has no rated members at all.
+ * ⚠ UNRATED MEMBERS ARE NEVER DECLINED, AND THE GUARD IS `rated` RATHER THAN
+ * THE RATIO. `clampedRatio` is 1 on an unrated member — a filler, not a
+ * measurement — and 1 sits below every shipped threshold today, so comparing
+ * it would give the right answer for the wrong reason and would start
+ * declining unrated members the moment a threshold below 1.0 was offered. A
+ * member with fewer than EXPERIENCE_MOD.minYears of history has no experience
+ * to decline them on, and Property — whose credibility measured 0.000 — has no
+ * rated members at all, so no Property member can ever be declined.
+ *
+ * ⚠ IT COMPARES THE CLAMPED RATIO WHILE THE SCREEN SHOWS THE RAW ONE, AND THE
+ * DIVERGENCE IS DELIBERATE. The raw figure is what the member cost and a
+ * reader has to be able to tell 3.2 from 11.0. The clamp is Mahler's rule 3
+ * and exists to keep the quantity stable, which is exactly what a threshold
+ * needs. The consequence, which the screen states rather than hides: a member
+ * showing 5.48 and one showing 3.2 both clamp to 3.00 and are declined or
+ * renewed together. Those are measured extremes rather than illustrations: the
+ * raw ratio's observed maximum is 5.48 on WC and 6.12 on GL, and 1.4% of WC
+ * rated member-years sit on the ceiling.
  */
 export function renewalDeclines(
   members: readonly Member[],
@@ -123,11 +208,12 @@ export function renewalDeclines(
 ): RenewalDecision[] {
   if (threshold === null || !(threshold > 0)) return [];
   const mods = memberExperienceMods(members, line, history, yearNumber);
-  const median = medianRatedMod(mods);
   const out: RenewalDecision[] = [];
   for (const m of mods) {
-    const d = displayedMod(m, median);
-    if (d !== null && d > threshold) out.push({ memberId: m.memberId, displayedMod: d });
+    if (!m.rated || m.rawRatio === null) continue;
+    if (m.clampedRatio > threshold) {
+      out.push({ memberId: m.memberId, rawRatio: m.rawRatio, clampedRatio: m.clampedRatio });
+    }
   }
   return out;
 }

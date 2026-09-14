@@ -208,6 +208,81 @@ if (dead.length > 0) {
   }
 }
 
+// ===========================================================================
+// THE EXPERIENCE-RATIO PATH — a second surface, and it needed asserting rather
+// than assuming.
+//
+// MembershipPage now renders a LOSS RATIO column per member, and Renewal
+// Underwriting thresholds on it. The ratio is actual primary loss over the
+// member's own expected primary loss, so it is derived from THEIR OWN CLAIMS —
+// an observable a pool administrator genuinely has — and not from the hidden
+// attribute. That is the claim. This asserts it.
+//
+// ⚠ THE PROPERTY THAT MAKES IT TRUE IS ONE LINE OF ARITHMETIC AND IT IS EASY TO
+// LOSE. `expectedAtManual` is the expectation with RISK QUALITY ALONE OVERRIDDEN
+// TO NEUTRAL (memberLossHistory.ts states it). primaryShare does the same on the
+// other leg. So neither leg of the ratio carries the member's own score, and
+// what survives is how their realized claims compared with a neutral member of
+// their class. Drop the override — write `member.riskQuality` where
+// `riskQualityOverride: NEUTRAL_RQ` stands, or pass the member's own value —
+// and the denominator starts absorbing the attribute. The ratio would still
+// LOOK like a claims statistic while having become a partial readout of the
+// score, and the column would be showing the player exactly what the ruling
+// hides.
+//
+// It would also be invisible to the scan above, because memberExperienceMod.ts
+// is a util and not a surface. So the assertion is here: in the ratio's own
+// module, EVERY mention of risk quality must be a neutral override.
+// ===========================================================================
+{
+  const RATIO_MODULE = 'utils/memberExperienceMod.ts';
+  const p = path.join(SRC, RATIO_MODULE);
+  console.log('');
+  if (!fs.existsSync(p)) {
+    failures.push(`${RATIO_MODULE} is missing — the experience-ratio assertion below cannot run, `
+      + 'and it is the only thing standing between the Loss Ratio column and the hidden attribute.');
+  } else {
+    const lines = fs.readFileSync(p, 'utf8').split('\n');
+    /** A mention is clean only if risk quality enters as an explicit neutral
+     *  override. Anything else — a bare read, or an override of something that
+     *  is not NEUTRAL_RQ — is the defect. */
+    const NEUTRAL = /riskQualityOverride:\s*[A-Z_]*NEUTRAL_RQ\b/;
+    const MENTION = /riskQuality|NEUTRAL_RQ/;
+    let clean = 0;
+    const dirty: string[] = [];
+    lines.forEach((raw, i) => {
+      const code = stripComments(raw);
+      if (!MENTION.test(code)) return;
+      // An import of the neutral constant is how it gets here at all.
+      if (/^\s*import\b/.test(code) && /NEUTRAL_RQ/.test(code)) { clean++; return; }
+      if (NEUTRAL.test(code)) { clean++; return; }
+      dirty.push(`${RATIO_MODULE}:${i + 1}  ${code.trim()}`);
+    });
+    console.log(`  experience-ratio path: ${clean} risk-quality mention(s) in ${RATIO_MODULE}, `
+      + `all neutral overrides   ${dirty.length === 0 ? 'PASS' : 'FAIL'}`);
+    for (const d of dirty) console.log(`      ${d}`);
+    if (dirty.length > 0) {
+      failures.push(`${RATIO_MODULE} reads risk quality somewhere other than as a neutral override `
+        + `(${dirty.length} site(s), listed above). Both legs of the experience ratio must be computed `
+        + 'at NEUTRAL risk quality, or the ratio stops being "what this member cost against a neutral '
+        + 'member of their class" and starts encoding the member\'s own hidden score — which the '
+        + 'Loss Ratio column on MembershipPage then renders, and Renewal Underwriting then acts on.');
+    }
+    // ⚠ CONTROLLED THE SAME WAY THE SCAN ABOVE IS. If the overrides were
+    // refactored out of existence the loop finds nothing and reports PASS on
+    // zero mentions, which is the inert-probe failure wearing a green tick.
+    const RATIO_CONTROL_MIN = 4;
+    const ratioSane = clean >= RATIO_CONTROL_MIN;
+    console.log(`  probe control: ${clean} neutral-override mention(s) found `
+      + `(>= ${RATIO_CONTROL_MIN})   ${ratioSane ? 'PASS' : 'FAIL'}`);
+    if (!ratioSane) {
+      failures.push(`only ${clean} neutral-override mention(s) found in ${RATIO_MODULE} — the assertion `
+        + 'above passes trivially when there is nothing to check. Either the expectation is no longer '
+        + 'computed at neutral risk quality, or this check is looking at the wrong module.');
+    }
+  }
+}
+
 // ⚠ AND THE SCAN ITSELF IS CONTROLLED. If the directories moved or the glob
 // broke, every assertion above would pass on zero files and read as green —
 // the inert-probe failure this project has a named rule about.
