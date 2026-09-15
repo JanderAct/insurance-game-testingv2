@@ -443,6 +443,40 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // basis. The mechanism's own correctness is held by cohort-ledger-check (three
 // identities, both arms), martingale-equivalence-check (term by term) and
 // terminal-severity-check (phi on its anchor), all green at this commit.
+// v40: STARTING_CAPITAL_TO_PREMIUM RE-SOLVED — WC 0.3250 -> 0.2503, GL 0.2062 ->
+// 0.1418. Property untouched. opening-centring-check had gone red on WC and GL:
+// the unfiltered candidate median sat +0.101 and +0.105 off its band midpoint,
+// 9.4 and 6.1 standard errors, against +0.015 / -0.003 / +0.022 when the pin was
+// last solved.
+//
+// 0 fields added, 0 removed, 14,744 of 31,200 moved — far more than the CLF
+// re-derivation's 7,566, and on a much wider set of fields.
+//
+// ⚠ EVERYTHING MOVED, AND THAT IS THE CORRECT OUTCOME RATHER THAN A LEAK. Losses,
+// claim counts, exposure, premium, membership and every ratio built on them are
+// all in the moved list. The reason is that the pin does not adjust a surplus
+// number on an otherwise fixed opening: it changes which pre-game ATTEMPT the
+// band accepts, and a different accepted attempt is a different pre-game history
+// — a different enrolled roster carried through the maturation years, different
+// claims, different reserves. activeMembers 73 -> 62 in the first instance is
+// that, not a membership change.
+//
+// ⚠ THE CONFINEMENT IS STRUCTURAL AND CHECKABLE BY GREP, which is the only
+// argument worth making when this much moves. STARTING_CAPITAL_TO_PREMIUM is read
+// in exactly TWO places in src/, and both construct the OPENING POSITION:
+//
+//   instanceGenerator.ts:547   targetSurplus for the seeded opening state
+//   priorHistoryEngine.ts:247  targetSurplus inside the pre-game search
+//
+// simulationEngine.ts never reads it. No played-year path can see the constant;
+// the played years see only the pre-game's OUTPUT. So every moved value is
+// downstream of a different opening, and there is no second channel for it to
+// have reached them by.
+//
+// investmentReturnRate moves on 25 instances at the sixteenth decimal
+// (0.0997962961556695 -> 0.09979629615566948) — summation magnitude, same draw,
+// the same signature recorded at v38 and v39.
+//
 // v39: THE CLF TABLES WERE RE-DERIVED ONTO THE NEW MEMBERSHIP TRAJECTORY.
 // WC_DERIVED, GL_DERIVED and PROPERTY_DERIVED are re-measured at the book band
 // containing each line's own median book — WC and GL at 72-88, Property at 88+.
@@ -531,7 +565,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // capture is sufficient alone here: the hash guard cannot tell "different
 // members enrolled" from "the arithmetic broke", and this one says the
 // changed set is exactly the set a roster change explains.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v39.json');
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v40.json');
 
 function seedOf(id: string) {
   let h = 5381;

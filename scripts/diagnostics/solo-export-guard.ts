@@ -357,6 +357,31 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // reports the same thing in both cases. value-identity v37 is what separates
 // them, and its note records the confinement check: every changed field is
 // downstream of the roster, nothing roster-independent moved, no NaN.
+// v40: ALL 24 MOVED. STARTING_CAPITAL_TO_PREMIUM was re-solved (WC 0.3250 ->
+// 0.2503, GL 0.2062 -> 0.1418), which changes which pre-game attempt the band
+// accepts and therefore the whole opening position every export is built from.
+//
+// ⚠ AND THE SIX THAT HELD ARE THE CONTROL AGAIN, ON A DIFFERENT LINE. Every
+// PROPERTY-SOLO export is bit-identical across the change, both arms, all three
+// seeds. Property's pin is the one that was NOT re-solved — it read -0.032
+// against a 0.143 tolerance and was left alone — and in a Property-solo game no
+// other line's opening exists to perturb it. So the per-line pin behaves per
+// line, exactly as the constant claims.
+//
+// That is the same shape as v39, where the six GL-solo exports held because GL's
+// curve was untouched. Two consecutive captures have now carried a bit-identical
+// subset that names the untouched thing, which is worth more than the eighteen
+// diffs each time: it bounds the change from the outside rather than arguing
+// about it from the inside.
+//
+// ⚠ I PREDICTED THE OPPOSITE AND WAS WRONG, recorded because the reasoning is a
+// trap worth marking. The first draft of this note said PR-solo would move
+// anyway, on the grounds that Property shares a pool-level cash split and starts
+// from an instanceGenerator opening whose other lines moved. In a SOLO
+// configuration there are no other lines — that is what solo means — so neither
+// half applied. The structural argument at value-identity v40 stands on its own
+// (two read sites, both opening-position constructors, none in simulationEngine),
+// but it did not need to: the control was there to be measured.
 // v39: 18 OF 24 MOVED, AND THE SIX THAT DID NOT ARE THE CONTROL.
 // The CLF tables were re-derived. Every WC-solo, every Property-solo and every
 // tri export moved, in both arms. ALL SIX GL-SOLO EXPORTS MATCH BIT-FOR-BIT.
@@ -372,7 +397,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 //
 // So this capture carries its own negative control: a table change that reaches
 // two lines and provably does not reach the third.
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v39.json');
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v40.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

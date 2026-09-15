@@ -255,6 +255,7 @@ const SLOW: string[] = [
 // ============================================================================
 const PROBES: Record<string, string> = {
   'clf-table-derive': 'derives the static CLF tables — a generator, not a check [240s]',
+  'opening-pin-solve': 'bisects STARTING_CAPITAL_TO_PREMIUM onto each band midpoint — a generator, not a check. Writes nothing; prints a pin to paste. Exists because the constant has drifted three times and every re-solve before this was rebuilt from prose in its own header [420s]',
   'clf-surplus-effect-report': 'what a CLF re-derivation does to ending surplus, in two arms — '
     + 'it cannot hold two tables in one process, so it is run before and after and diffed by hand. '
     + 'No pass condition: "the game got harder" is a judgement [190s]',
@@ -717,25 +718,24 @@ const EXPECTED_RED: Record<string, { code: number; why: string }> = {
       + 'are the ONLY assertions in this file, so a generic code would make the whole file unwatchable. '
       + 'Anything that is not one of those four still exits 1.',
   },
-  'pin-vs-band-check': {
-    code: 3,
-    why: 'THE PROBE, NOT THE PIN. Every assertion this gate makes about the pin still passes at the '
-      + 'shipped values — at SEEDS=120, WC 42x, GL 12x, Property 41x elasticity ratio against the 10x floor, and no '
-      + 'line moves its opening beyond the permitted share of its band. What fails is the gate\'s x2 '
-      + 'PERTURBED arm exhausting MAX_HISTORY_ATTEMPTS: IBNER_CALENDAR_RHO widens the pre-game candidate '
-      + 'distribution, WC\'s in-band share falls, and a doubled pin now falls back on about 3% of seeds. '
-      + 'Measured at 120 seeds: 0 of 120 at the SHIPPED pin, 4 of 120 perturbed. The shipped pre-game is '
-      + 'healthy on its own gate — pregame-acceptance-check passes with room, and mean attempts at the '
-      + 'shipped pin are 4.72 at SEEDS=120 (3.35 at the 40-seed default) against a 500 cap. '
-      + '⚠ THE TWO AVAILABLE SHORTCUTS ARE BOTH REFUSED: lowering '
-      + 'PERTURB is the exact "tune the perturbation until the headline numbers come true" this file warns '
-      + 'against in its own header, and raising MAX_HISTORY_ATTEMPTS would change the shipped engine to '
-      + 'suit a diagnostic. SUCCESSOR: a probe that measures redraw elasticity without a fallback-prone '
-      + 'arm — perturb the BAND rather than the pin, or read the elasticity off the in-band share, which '
-      + 'is continuous and never falls back. That is a measurement commit and not a re-pointing. ⚠ EXIT 3 '
-      + 'IS ONLY THE FALLBACK CONTAMINATION: any real pin defect — opening shift or elasticity — still '
-      + 'exits 1 and is never excused. See the note at `fallOnly` in the gate.',
-  },
+  // ⚠ pin-vs-band-check's ENTRY WAS HERE AND IS RETIRED — THE PIN RE-SOLVE FIXED
+  // IT, WITHOUT AIMING AT IT. The entry read: every assertion the gate makes
+  // about the pin passes at the shipped values, and what failed was its x2
+  // PERTURBED arm exhausting MAX_HISTORY_ATTEMPTS — 0 of 120 seeds falling back
+  // at the shipped pin against 4 of 120 perturbed. It named the two available
+  // shortcuts and refused both: lowering PERTURB is tuning the perturbation until
+  // the headline comes true, and raising MAX_HISTORY_ATTEMPTS changes the shipped
+  // engine to suit a diagnostic.
+  //
+  // Neither was needed. STARTING_CAPITAL_TO_PREMIUM was re-solved because
+  // opening-centring-check caught it drifting, and the perturbed arm stopped
+  // falling back as a side effect: a centred proposal distribution can absorb a
+  // doubling without leaving the band. All three lines now read ok, no
+  // fallbacks, and the gate exits 0.
+  //
+  // The lesson is the one its own successor note half-predicted: the fallback
+  // contamination was downstream of the pin being off-centre, not a defect in the
+  // probe's design.
   // ⚠ audit-formula-check IS OUT OF THIS MAP AND IT WAS A PAGE DEFECT, NOT A
   // STALE ASSERTION. Its entry said `netUltimateLoss = grossUltimateLoss -
   // reinsuranceRecovery` was false on the shipped mechanism. It was — but the

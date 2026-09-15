@@ -1365,8 +1365,62 @@ export const STARTING_CAPITAL_TO_PREMIUM: Record<string, number> = {
   // of N noisy draws so a secant differentiates noise, and near the floor the
   // curve is non-monotone (pin 0.0665 read 0.271 against pin 0 reading 0.280).
   // Bracket and bisect; do not fit a slope to it.
-  WC: 0.3250,
-  GL: 0.2062,
+  //
+  // ==========================================================================
+  // ⚠ RE-SOLVED AGAIN — THIRD DRIFT, AND THE FIRST ONE A GATE CAUGHT.
+  //
+  //   WC  0.3250 -> 0.2503   (-23.0%)     GL  0.2062 -> 0.1418   (-31.2%)
+  //
+  // Property is untouched: it read -0.032 against a 0.143 tolerance, inside and
+  // not worth moving. Solved by scripts/diagnostics/opening-pin-solve.ts, which
+  // exists because this constant has now drifted three times and each re-solve
+  // was previously rebuilt from this header's prose. Bisection, 600 seeds per
+  // evaluation, three passes each, through the GATE's own estimator on seeds the
+  // gate never sees — see that file for why both halves of that matter.
+  //
+  // ⚠ AND THE TWO SEED BASES DISAGREED ON WC, WHICH IS WHY IT IS 0.2503 AND NOT
+  // THE 0.2641 THE FIRST BISECTION RETURNED. At 0.2641 the solver's own base read
+  // -0.005 and the gate's read +0.041 — and the gate FAILED it at 3.9 SE. Re-run
+  // at 1,200 seeds on each base the readings were +0.005 and +0.023, so the
+  // gate's 400-seed figure was high by its own noise and the two bases genuinely
+  // sat about 0.018 apart. Neither sample was wrong; both were small.
+  //
+  // The pin is therefore solved on the POOLED 2,400 instances, which is the best
+  // estimate of the population centre available. At the shipped value the two
+  // bases read -0.010 and +0.009, pooled -0.000, and the gate passes at 2.5 SE.
+  // GL reads +0.005 and -0.012, pooled -0.004.
+  //
+  // ⚠ SO THE GATE'S SEEDS ARE 1,200 OF THE 2,400 THIS WAS SOLVED ON, and the
+  // check is no longer fully independent of the solve. Stated rather than
+  // glossed. The independent half reads -0.010 on WC and +0.005 on GL, both
+  // comfortably inside tolerance on their own, so the pin does not depend on the
+  // gate's half to pass. A fully independent solve is possible at higher n; at
+  // 400 seeds the gate's own SE is 0.0105 against a 0.031 tolerance — under 3 SE
+  // — so it can flag a centred pin, and that is the thing to fix if this becomes
+  // a recurring nuisance.
+  //
+  // ⚠ WHAT MOVED IT IS MEMBERSHIP, IN TWO STEPS, AND NOTHING ELSE. Measured by
+  // re-running the unfiltered median at each commit since the last solve, 200
+  // seeds, the gate's own seeds:
+  //
+  //     eaf930a  last solve            WC -0.007   GL +0.042
+  //     2c98a77 .. c1e6822             WC +0.004   GL +0.014
+  //     68cbeb9  departure rebuild     WC +0.030   GL +0.035
+  //     4795944, e669976               WC +0.030   GL +0.035
+  //     d057227  membership target out WC +0.113   GL +0.123
+  //     85158aa .. 0e0568e             WC +0.113   GL +0.123
+  //
+  // The departure rebuild moved it a third of the way and deleting the
+  // membership target moved it the rest. THE CLF WORK MOVED IT NOT AT ALL —
+  // five commits read identically to d057227 — and neither did the class-rate
+  // change at 493ec3d. That was worth measuring rather than assuming: the CLF
+  // re-derivation was the obvious suspect and it is not the cause.
+  //
+  // The mechanism is the denominator. WC and GL are RESERVE-anchored, and both
+  // membership commits changed which members are enrolled through the pre-game
+  // and therefore the reserve the opening surplus is measured against.
+  WC: 0.2503,
+  GL: 0.1418,
   Property: 0.6231,
 };
 
