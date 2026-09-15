@@ -91,6 +91,12 @@ const FAST: string[] = [
   'member-experience-mod-check',     //  11s   the mod is centred on the book it rates, cannot see the year it
                                      //         is pricing, and reaches neither the total, the rate nor the roster
   'member-loss-history-check',       //   2s
+  'member-satisfaction-check',       //   9s   the per-member stock MOVES (93-97% of member-years), feeds nothing
+                                     //         on a STATIC allow-list, and does not drift at defaults; carries a
+                                     //         null arm at weight 0 and a seed-matched priced-up control
+  'market-conditions-check',         //   9s   the benchmark reproduces RATE_NEUTRAL_CHANGE_PCT exactly, every
+                                     //         component is positive and mean 1, and it is QUIETER than the rate
+                                     //         it judges — the assertion that disqualified the calendar component
   'member-premium-check',            //  55s   members pay their own WC class rate; the pool total is untouched
                                      //         and the allocation reaches nothing that decides who is enrolled
   'net-funding-fields-check',        //   6s

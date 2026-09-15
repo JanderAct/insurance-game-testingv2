@@ -71,6 +71,25 @@ export default function MembershipPage({ lockedResults, startingFinancials, init
   // 3.2 from 11.0. The clamp keeps the threshold stable. So a member at 11.0
   // and one at 3.2 both sit above a 2.50 tier and are declined together — the
   // decision screen says so rather than leaving it to be discovered here.
+  // ⚠ TWO SATISFACTION NUMBERS ON THIS PAGE AND THEY ARE NOT THE SAME QUANTITY.
+  // The CHIP above reads `last.memberSatisfaction`, the POOL-LEVEL scalar that
+  // feeds retention; this one is the mean of the per-member column below, which
+  // feeds nothing. They can and do disagree, and the metric is relabelled rather
+  // than left reading "Avg. Satisfaction" beside a column it is not the average
+  // of. See memberSatisfaction.ts's seam note on why converging them is a
+  // measurement commit rather than a tidy-up.
+  //
+  // ⚠ AND THE ROSTER'S SATISFACTION IS THE FIRST ACTIVE LINE'S. Satisfaction is
+  // per member per line — the drivers are a bill on one line — while
+  // Member.satisfaction is one field, so processYear's roster fold keeps the
+  // first line's copy exactly as it folds `status`. This page is already a WC
+  // view (payroll, loss ratio and mod are all WC), so on any pool writing WC the
+  // column matches the page. On a pool without WC it is whichever line comes
+  // first in activeLines.
+  const memberMeanSatisfaction = activeMembers.length > 0
+    ? activeMembers.reduce((s, m) => s + m.satisfaction, 0) / activeMembers.length
+    : satisfaction;
+
   const expByMember = React.useMemo(() => {
     const mods = memberExperienceMods(activeMembers, 'WC', memberLossHistory, displayYear);
     const median = medianRatedMod(mods);
@@ -125,7 +144,7 @@ export default function MembershipPage({ lockedResults, startingFinancials, init
         <SummaryChip icon={<UserPlus size={16} />} label="New This Year" value={`+${newThisYear}`} valueColor="text-emerald-600" />
         <SummaryChip icon={<UserMinus size={16} />} label="Withdrawn" value={withdrawnThisYear > 0 ? `-${withdrawnThisYear}` : '0'} valueColor={withdrawnThisYear > 0 ? 'text-red-600' : 'text-gray-700'} />
         <SummaryChip icon={<Globe size={16} />} label="Market Share" value={formatPct(marketShare)} valueColor="text-sky-600" />
-        <SummaryChip label="Satisfaction" value={`${satisfaction.toFixed(1)} / 10`} />
+        <SummaryChip label="Pool Satisfaction" value={`${satisfaction.toFixed(1)} / 10`} />
         <SummaryChip label="Retention" value={formatPct(retentionRate)} />
       </div>
 
@@ -133,7 +152,7 @@ export default function MembershipPage({ lockedResults, startingFinancials, init
         <Metric label="Payroll Exposure ($M)" value={formatMillions(activeExposure)} />
         <Metric label="Total Market Payroll ($M)" value={formatMillions(totalMarketExposure)} />
         <Metric label="Avg. Risk Quality" value={`${avgRiskQuality.toFixed(1)} / 10`} />
-        <Metric label="Avg. Satisfaction" value={`${satisfaction.toFixed(1)} / 10`} />
+        <Metric label="Avg. Member Satisfaction" value={`${memberMeanSatisfaction.toFixed(2)} / 10`} />
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
@@ -156,7 +175,7 @@ export default function MembershipPage({ lockedResults, startingFinancials, init
                 <th className={thClass('yearJoined')} onClick={() => handleSort('yearJoined')}>Yr Joined {sortKey === 'yearJoined' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
                 <th className={thClass('ratio')} onClick={() => handleSort('ratio')} title={`Actual losses over expected, over the last ${EXPERIENCE_MOD.windowYears} years, limited per claim. What the member cost. This is what Renewal Underwriting acts on.`}>Loss Ratio {sortKey === 'ratio' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
                 <th className={thClass('mod')} onClick={() => handleSort('mod')} title="What the member is charged for that record, credibility-weighted against their class. 1.00 is the typical member. Much flatter than the ratio by design — most of a member's rate is their class, not their own claims.">Experience Mod {sortKey === 'mod' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                <th className={thClass('satisfaction')} onClick={() => handleSort('satisfaction')}>Satisfaction {sortKey === 'satisfaction' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                <th className={thClass('satisfaction')} onClick={() => handleSort('satisfaction')} title="What this member thinks of the pool, 1-10. It moves each year on their own bill measured against what the market's rate did, damped by how much their own claims explain the increase. It is a scoreboard: nothing in the model reads it.">Satisfaction {sortKey === 'satisfaction' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
               </tr>
             </thead>
@@ -200,7 +219,11 @@ function MemberRow({ member, displayYear, ratio, mod }: {
       <td className={`px-4 py-3 font-semibold ${modColor}`} title={mod === null ? `Fewer than ${EXPERIENCE_MOD.windowYears} years of claims with the pool` : undefined}>
         {mod === null ? '—' : mod.toFixed(2)}
       </td>
-      <td className={`px-4 py-3 font-semibold ${satColor}`}>{member.satisfaction.toFixed(1)}</td>
+      {/* TWO DECIMALS, BECAUSE THE STOCK MOVES IN HUNDREDTHS. A year's move at
+          the shipped weight is a few hundredths; displayed to one decimal most
+          years would read as no change at all and the rebuilt field would look
+          exactly as frozen as the one it replaces. See memberSatisfaction.ts. */}
+      <td className={`px-4 py-3 font-semibold ${satColor}`}>{member.satisfaction.toFixed(2)}</td>
       <td className="px-4 py-3"><span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${member.status === 'active' ? 'bg-emerald-100 text-emerald-700' : member.status === 'withdrawn' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-500'}`}>{member.status}</span></td>
     </tr>
   );

@@ -7,6 +7,7 @@ import { canReenroll } from './membershipHistory';
 import { appetiteEligible } from './newBusinessAppetite';
 import { getMemberExposure } from './lineHelpers';
 import { departureRisks } from './memberDeparture';
+import { applySatisfaction, satisfactionMoves, satisfactionMovesById } from './memberSatisfaction';
 import {
   MEMBER_MOVEMENT_WEIGHTS,
   BASE_RETENTION,
@@ -40,6 +41,18 @@ export interface MemberMovementInputs {
   // This line's total member charge rate over its pure premium rate. Null when
   // the pure premium is not positive.
   rateLoad?: number | null;
+  // What the MARKET's rate did this year, in percentage points — see
+  // marketConditions.ts. Per-member satisfaction reads it and nothing else does
+  // yet; the recruitment ladder and departure's marketability are the other two
+  // consumers named there.
+  //
+  // ⚠ PASSED IN RATHER THAN DERIVED HERE, and the reason is the same one that
+  // keeps this module out of the instance: marketRateChangePct needs the game's
+  // seed and id, and handing this function a GameInstance would give the
+  // membership model reach over the loss environment, the investment
+  // environment and the shock schedule to get at two identifiers. The engine
+  // already holds both and passes a number.
+  marketChangePct: number;
   competitivePressure: number;
   /**
    * DIAGNOSTIC SEAM. Overrides APPLICATION_RATE for one call.
@@ -315,7 +328,34 @@ export function simulateMemberMovement(inputs: MemberMovementInputs): MemberMove
     .slice(0, cappedWithdrawalCount)
     .map(m => ({ ...m, status: 'withdrawn' as const, yearWithdrawn: yearNumber }));
   const withdrawnIds = new Set(withdrawnMembers.map(m => m.id));
-  const retainedMembers = currentMembers.filter(m => !withdrawnIds.has(m.id));
+  // ============================================================================
+  // PER-MEMBER SATISFACTION — A SCOREBOARD, AND IT FEEDS NOTHING.
+  //
+  // Computed over `currentMembers`, the book that was BILLED, so its rebase
+  // divisor is the same one departureRisks just used; applied by id to the book
+  // that remains. See memberSatisfaction.ts for the model, for the ruling that
+  // it feeds nothing, and for what would have to be true before departure reads
+  // it.
+  //
+  // ⚠ IT IS NOT THE SCALAR BELOW. `updateSatisfaction` maintains the POOL-LEVEL
+  // memberSatisfaction, which DOES feed retention through
+  // MEMBER_MOVEMENT_WEIGHTS.retention.satisfaction and reads the rate as a
+  // deviation from the line's static neutral. This one is per member, per line,
+  // reads the member's own bill against the MARKET, and is read by nothing but
+  // the members table. Two numbers, one name, and averaging one into the other
+  // would put a per-member price signal into retention.
+  //
+  // ⚠ PURE — NO DRAWS, SO IT CANNOT RE-PHASE THIS STREAM. That is what keeps
+  // both export baselines bit-identical across the commit that built it, and it
+  // is the test of the "feeds nothing" claim rather than a hope: a baseline that
+  // moved would mean something reads Member.satisfaction.
+  // ============================================================================
+  const satisfactionByMember = satisfactionMovesById(satisfactionMoves(
+    currentMembers, line, inputs.memberLossHistory, inputs.rateChangePct, inputs.marketChangePct,
+  ));
+  const retainedMembers = applySatisfaction(
+    currentMembers.filter(m => !withdrawnIds.has(m.id)), satisfactionByMember,
+  );
 
   // ============================================================================
   // INTAKE IS SUPPLY, NOT DEMAND. There is no expected-new-members term left.

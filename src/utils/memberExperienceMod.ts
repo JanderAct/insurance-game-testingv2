@@ -150,7 +150,7 @@
 // ============================================================================
 
 import {
-  EXPERIENCE_SPLIT_POINT, EXPERIENCE_WINDOW_YEARS, experienceWindow,
+  EXPERIENCE_SPLIT_POINT, EXPERIENCE_WINDOW_YEARS, experienceWindow, priorExperienceWindow,
 } from './memberLossHistory';
 import { getMemberExposure } from './lineHelpers';
 import { expectedWcGrossLossForPricing, NEUTRAL_RQ as WC_NEUTRAL_RQ, ratingGroupOf } from './wcClaimEngine';
@@ -325,6 +325,87 @@ export function memberExperienceMods(
     clampedRatio: r.clamped,
     mod: r.raw === null ? 1 : 1 + Z * (r.clamped / M - 1),
   }));
+}
+
+// ============================================================================
+// THE BEHAVIOURAL FRAME — ONE MEMBER'S OWN EXPERIENCE AND THEIR OWN PRICE
+// CHANGE, ON THE BASIS A MEMBER CAN SEE.
+//
+// ⚠ TWO CONSUMERS AND IT EXISTS SO THERE IS ONE COPY. memberDeparture.ts needs
+// mod_t / mod_(t-1) to know who is being asked for more; memberSatisfaction.ts
+// needs the same ratio to know what a member was billed, and the same clamped
+// ratio to know whether they earned it. The arithmetic ran in memberDeparture
+// alone until satisfaction was built, and clampedRatioFor's own header already
+// says why a second copy would be wrong: "the clamp and the expected-primary
+// basis have to be identical on both sides, or the ratio mod_t/mod_(t-1) would
+// measure the difference between two implementations rather than between two
+// years." Two consumers of a drifting copy would measure the difference between
+// two BEHAVIOURAL MODELS, which is worse.
+//
+// ⚠ THE DIVISOR IS UNWEIGHTED AND memberExperienceMods' IS EXPOSURE-WEIGHTED.
+// THE TWO ARE NOT INTERCHANGEABLE AND BOTH ARE RIGHT. The charged mod's divisor
+// has to be exposure-weighted or the allocation would not rebase to 1 — it is
+// an accounting constraint. This one is a behavioural reference point, "how does
+// my experience compare to a typical member", and a member compares themselves
+// to other MEMBERS rather than to other dollars. That argument is
+// memberDeparture's, moved here with the code it justifies.
+//
+// ⚠ AND BOTH SIDES OF ownChangePct USE THE SAME M, WHICH ISOLATES THE MEMBER.
+// Using each year's own divisor would fold a move in the book AROUND the member
+// into a number that is supposed to be about the member. The pool-wide rate
+// change already carries the book's move, and both consumers add it separately,
+// so a moving divisor here would count it twice.
+// ============================================================================
+
+export interface OwnExperienceFrame {
+  memberId: string;
+  /** False on Property, and on anyone short of a full window. */
+  rated: boolean;
+  /** c_i, the clamped three-year primary ratio. 1 when unrated. */
+  clamped: number;
+  /** 100 x (mod_t / mod_(t-1) - 1), in percentage points. 0 when unrated. */
+  ownChangePct: number;
+}
+
+/**
+ * The frame for every member on this line's book, in the order given, with the
+ * shared rebase divisor.
+ *
+ * PURE — no draws, no state. Both consumers add their own randomness after it.
+ */
+export function ownExperienceFrames(
+  members: readonly Member[],
+  line: CoverageLine,
+  history: MemberLossHistory,
+): { divisor: number; frames: OwnExperienceFrame[] } {
+  const Z = CREDIBILITY_Z[line] ?? 0;
+  const { windowYears } = EXPERIENCE_MOD;
+
+  const now = new Map<string, ReturnType<typeof clampedRatioFor>>();
+  const prior = new Map<string, ReturnType<typeof clampedRatioFor>>();
+  let weighted = 0, count = 0;
+  for (const m of members) {
+    const c = clampedRatioFor(m, line, experienceWindow(history, m.id, line, windowYears));
+    now.set(m.id, c);
+    prior.set(m.id, clampedRatioFor(m, line, priorExperienceWindow(history, m.id, line, windowYears)));
+    if (c.rated) { weighted += c.clamped; count++; }
+  }
+  const divisor = count > 0 ? weighted / count : 1;
+
+  const frames = members.map(m => {
+    const c = now.get(m.id)!;
+    const p = prior.get(m.id)!;
+    const modNow = c.rated ? 1 + Z * (c.clamped / divisor - 1) : 1;
+    const modPrior = p.rated ? 1 + Z * (p.clamped / divisor - 1) : 1;
+    return {
+      memberId: m.id,
+      rated: c.rated,
+      clamped: c.clamped,
+      ownChangePct: modPrior > 0 ? (modNow / modPrior - 1) * 100 : 0,
+    };
+  });
+
+  return { divisor, frames };
 }
 
 // ============================================================================

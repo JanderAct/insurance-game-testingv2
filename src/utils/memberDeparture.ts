@@ -107,8 +107,7 @@
 // only part that persists.
 // ============================================================================
 
-import { CREDIBILITY_Z, EXPERIENCE_MOD, clampedRatioFor } from './memberExperienceMod';
-import { experienceWindow, priorExperienceWindow } from './memberLossHistory';
+import { EXPERIENCE_MOD, ownExperienceFrames } from './memberExperienceMod';
 import type { CoverageLine, Member, MemberLossHistory } from '../types/simulation';
 import type { SeededRandom } from './random';
 
@@ -197,39 +196,25 @@ export function departureRisks(
   poolChangeDeviationPct: number,
   rng: SeededRandom,
 ): DepartureRisk[] {
-  const Z = CREDIBILITY_Z[line] ?? 0;
-  const { windowYears } = EXPERIENCE_MOD;
+  // ⚠ THE FRAME MOVED TO memberExperienceMod.ts AND NOTHING ELSE MOVED WITH IT.
+  // The rebase divisor, the clamped ratio and mod_t/mod_(t-1) are now shared
+  // with memberSatisfaction.ts, which needs the identical basis — see
+  // ownExperienceFrames for why a second copy of this arithmetic would measure
+  // two implementations rather than two years. The expressions are unchanged
+  // character for character and in the same order, so this is a move rather
+  // than a rewrite and both baselines hold across it.
+  //
+  // ⚠ AND THE DRAW ORDER IS UNCHANGED, WHICH IS THE PART THAT WOULD NOT SHOW UP
+  // AS AN ARITHMETIC DIFFERENCE. The frames are built with no randomness at all,
+  // then this map takes ONE draw per member in roster order, exactly as the
+  // inlined version did. Hoisting a pure loop cannot re-phase the stream; adding
+  // a draw to it silently could.
+  const { divisor: M, frames } = ownExperienceFrames(members, line, history);
 
-  // The rebase divisor over the CURRENT book, on the same basis
-  // memberExperienceMods uses. Unexposed members are not on the book.
-  const now = new Map<string, ReturnType<typeof clampedRatioFor>>();
-  const prior = new Map<string, ReturnType<typeof clampedRatioFor>>();
-  let weighted = 0, count = 0;
-  for (const m of members) {
-    const c = clampedRatioFor(m, line, experienceWindow(history, m.id, line, windowYears));
-    now.set(m.id, c);
-    prior.set(m.id, clampedRatioFor(m, line, priorExperienceWindow(history, m.id, line, windowYears)));
-    if (c.rated) { weighted += c.clamped; count++; }
-  }
-  // ⚠ UNWEIGHTED HERE, AND memberExperienceMods WEIGHTS BY EXPOSURE. The
-  // divisor there has to be exposure-weighted or the allocation would not
-  // rebase to 1. Here it is a behavioural reference point — "how does my
-  // experience compare to a typical member" — and a member shopping their
-  // coverage compares themselves to other MEMBERS, not to other dollars.
-  const M = count > 0 ? weighted / count : 1;
-
-  return members.map(m => {
-    const c = now.get(m.id)!;
-    const p = prior.get(m.id)!;
-    // Their own modifier's year-over-year change, in percentage points. Both
-    // sides use the SAME M, so this isolates the member's own experience
-    // rather than mixing in a move in the book around them.
-    const modNow = c.rated ? 1 + Z * (c.clamped / M - 1) : 1;
-    const modPrior = p.rated ? 1 + Z * (p.clamped / M - 1) : 1;
-    const ownChangePct = modPrior > 0 ? (modNow / modPrior - 1) * 100 : 0;
-
-    const priceShock = Math.max(0, poolChangeDeviationPct + ownChangePct);
-    const marketability = c.rated ? marketabilityOf(c.clamped, M) : 0;
+  return members.map((m, i) => {
+    const f = frames[i];
+    const priceShock = Math.max(0, poolChangeDeviationPct + f.ownChangePct);
+    const marketability = f.rated ? marketabilityOf(f.clamped, M) : 0;
     const noise = rng.range(0, 1);
     return {
       memberId: m.id,

@@ -32,6 +32,7 @@ import {
 } from './developmentAllocation';
 import { isClaimClosed } from './claimClosure';
 import { allocateMemberPremium } from './memberPremium';
+import { marketRateChangePct } from './marketConditions';
 import { applyRenewalDeclines, renewalDeclines } from './renewalUnderwriting';
 import { memberExperienceMods } from './memberExperienceMod';
 import { claimRevisionUnit, normalQuantile, reviseDevelopingSet, settleClosingSet } from './claimRevision';
@@ -842,6 +843,14 @@ export function processLineYear(
     priorYearLossRatio,
     rateChangePct,
     rateLoad,
+    // What a carrier with no pool-specific news would have done with its rate
+    // this year. PURE — marketRateChangePct builds nothing and draws nothing;
+    // its pool-year component calls the same `poolYearFactor(seed, year)` this
+    // function already calls a few hundred lines down, so it returns the
+    // identical value and consumes nothing.
+    marketChangePct: marketRateChangePct(line, yearNumber, {
+      seed: instance.seed, gameId: instance.instanceId,
+    }),
     competitivePressure: instance.marketEnvironment.competitivePressure,
     memberSensitivity: instance.marketEnvironment.memberSensitivity,
     yearNumber,
@@ -4173,8 +4182,14 @@ function processIbner(
 // sigma solved before the mutation and the null test would silently measure the
 // wrong thing — passing or failing for a reason unrelated to the code under
 // test. Keying on the value makes the mutation work by construction.
+// ⚠ EXPORTED FOR ONE READER AND IT IS A GATE, NOT THE ENGINE. marketConditions.ts
+// carries MARKET_CALENDAR_SIGMA as a RECORDED constant rather than calling this,
+// because it is imported by membershipEngine and importing the engine back would
+// close a cycle. market-conditions-check ties the recorded numbers to this
+// function on every run, so the constant cannot drift away from the solve it was
+// taken from. Nothing in src/ outside this file calls it.
 const RESERVE_STEP_SIGMA_CACHE = new Map<string, number>();
-function reserveStepSigma(line: CoverageLine): number {
+export function reserveStepSigma(line: CoverageLine): number {
   // ⚠ THE SCALE IS A SEPARATE CONSTANT AND IT MULTIPLIES HERE, NOT AT
   // IBNER_TOTAL_SD. The three values there carry a provenance their own header
   // asks the reader to keep — they are the RECORDED PREDECESSORS of a target
