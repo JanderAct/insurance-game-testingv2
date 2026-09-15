@@ -171,10 +171,13 @@ measured justification, a paired control and a named fix. Two fired as `xfail`
 in the FAST run (`actuarial-memo-check`, `cession-uplift-basis`).
 
 A later entry, `clf-label-backtest-check`, is of a different kind from the rest
-and worth separating: it is not a threshold awaiting re-derivation. GL prices off
-a curve that was never derived from this engine, and the fix is a product
-decision — raise GL's claim frequency, or give up the real-pool anchor — rather
-than a measurement anyone can just take. See §1.3.1 note in the gate table above.
+and worth separating: it is not a threshold awaiting re-derivation. The tables
+are derived on calendar-year incurred while the gate now measures accident-year
+ultimate — the basis the slider's label actually promises. Closing it means
+deciding what the label should mean, not correcting a number. It also carries
+the sharpest cautionary tale in the repository: the gate was wrong about its own
+denominator once and its own numerator once, and each wrong headline was used to
+argue for changing the loss model. See the note in the gate table above.
 
 **The register's own comment is the sharpest criticism in this document, and it
 was written by the project:**
@@ -260,15 +263,24 @@ All 13, measured at `62e0481`:
 | `maturity-anchor-check` | ok | — |
 | `clf-label-backtest-check` | **xfail (expected)** | — |
 
-> ⚠ **`clf-label-backtest-check` changed status after this document was written.**
-> It was recorded as `ok` on a statistic that divided every line-year by one
-> pooled mean of `netUltimateLoss` — valid only while the enrolled book holds
-> its size, which it no longer does. On each year's own `poolPremium` it reads
-> **−21.9pp on GL**, and the basis reproduces `gl-supplied-clf-check`'s
-> independently recorded +10.5pp at the 60% stop where the old one could not.
-> WC and Property were re-derived and are green at every gated band; GL reads
-> `GL_SUPPLIED`, which is a real-pool placeholder and not re-derivable. It now
-> carries an `EXPECTED_RED` entry naming the open product decision.
+> ⚠ **`clf-label-backtest-check` changed status twice after this document was
+> written, and the second change retracts the first.**
+> It was recorded as `ok` on a statistic dividing every line-year by one pooled
+> mean of `netUltimateLoss`. That was replaced by each year's own `poolPremium`,
+> which reported **−21.9pp on GL** — and that figure was itself an artefact. It
+> scored an accident-year curve against a calendar-year statistic; calendar-year
+> incurred blends up to eight open accident years at different ages and halves
+> the spread. Measured on settled accident years, GL's ratio CV is 0.4168
+> against `GL_SUPPLIED`'s implied 0.3979, and the curve reads −0.5 to +1.7pp
+> from the 70% stop up.
+>
+> **Two routes were proposed and rejected on that wrong number** — installing
+> `GL_DERIVED` (−16.2pp pooled on the corrected basis, against `GL_SUPPLIED`'s
+> −8.8pp) and raising GL's claim frequency (worse at every band, and impossible
+> in principle since frequency only lowers CV). The gate now measures
+> accident-year ultimate. It stays `xfail`, but for a different reason: the
+> three tables are still *derived* on the calendar basis, and re-deriving them
+> is an open decision rather than a repair.
 
 | `cession-path-independence` | ok | — |
 

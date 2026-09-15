@@ -447,9 +447,15 @@ const WC_DERIVED: ClfTable = {
 // substitution is a deliberate placeholder rather than a correction — the
 // derived curve is the more accurate description of THIS model's GL book.
 //
-// ⚠ IT DESCRIBES A BIGGER, SMOOTHER BOOK. Its implied annual CV is about 0.40
-// against GL's own measured 0.79 when that was taken — and GL's has since fallen
-// with the membership change, which is why the error below changed SHAPE. Everything below follows from that one fact.
+// ⚠ IT DESCRIBES A BIGGER, SMOOTHER BOOK — and the CV comparison this block used
+// to rest on was between two different statistics. Its implied annual CV is
+// about 0.40; the 0.79 it was set against is GL's annual GROSS loss CV, not the
+// loss-to-premium ratio this table is percentiles of. On the accident-year basis
+// the labels promise, that ratio's CV is 0.4168 against the supplied 0.3979 —
+// within 5%. The supplied curve describes this model's GL almost exactly, and
+// the "bigger, smoother book" reading overstated a difference that is mostly a
+// basis artefact. The measured error rows below are on the CALENDAR-year basis
+// and are kept because the shape they show is what the artefact looks like.
 //
 // MEASURED CONSEQUENCE — this curve OVER-DELIVERS against GL's own distribution
 // by up to 19pp through the middle of the working range and UNDER-delivers by
@@ -501,10 +507,30 @@ const WC_DERIVED: ClfTable = {
 // toward the supplied curve's shape — but 8.0pp is still a large gap and the
 // supplied curve is still a placeholder.
 //
-// ⚠ RAISING GL'S FREQUENCY IS THE LEVER THAT WOULD CLOSE THE GAP — more claims
-// per year at the same expected loss lowers the annual CV toward the supplied
-// curve's 0.40 and moves the crossing down toward 57.7% on the model's own
-// terms. That is the real fix. This table is not it.
+// ⚠ RAISING GL'S FREQUENCY WAS NAMED HERE AS "THE REAL FIX" AND IT IS NOT ONE.
+// The claim was that more claims per year at the same expected loss lowers the
+// annual CV toward the supplied curve's 0.40. The arithmetic is right and the
+// direction is wrong, for two reasons that were both measured:
+//
+//   THE GAP NEEDS CV TO RISE, NOT FALL. The statistic this table describes is
+//   not the annual gross loss whose CV is 0.79. On the accident-year basis the
+//   labels actually promise, GL's ratio CV is 0.4168 against the supplied
+//   curve's implied 0.3979 — already a match. On the calendar-year basis the
+//   derivation used, it is 0.1936, LESS THAN HALF the supplied curve. Frequency
+//   only ever lowers CV, so it moves away from the target on either reading.
+//
+//   MEASURED ON THE ENGINE. Severity shrunk threefold with the rate re-derived
+//   from the same external anchor — 11.6 claims per member-year against 5.5 —
+//   moved GL's per-band error from -18.5 / -21.1 / -21.9 to -22.3 / -22.3 /
+//   -24.2. Worse at every band. A Monte Carlo predicted an improvement and had
+//   the sign wrong because it modelled the annual aggregate rather than the
+//   statistic the gate reads.
+//
+// THERE WAS NEVER A GAP OF THE SIZE THIS BLOCK DESCRIBES. See the basis note at
+// the head of clf-label-backtest-check.ts: the supplied curve describes accident
+// years and the derivation measured calendar years, which blend up to eight open
+// accident years at different ages and halve the spread. That is the whole 22pp.
+// This table is not the fix because there is much less to fix than it says.
 //
 // RANGE: 25-95, narrower than the derived table's 10-99. No slider change was
 // needed: SLIDER_RANGES.fundingConfidenceLevel is 0.30-0.95, and the only other

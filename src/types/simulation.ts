@@ -777,12 +777,24 @@ export interface ReserveCohort {
 // being readable. A development triangle needs both. Hence an append-only
 // ledger that no engine arithmetic reads.
 //
-// ⚠ NOTHING IN THE ENGINE CONSUMES THIS. It is written by processLineYear and
-// read only by the Actuarial memorandum. Adding it moved no value and spent no
-// RNG draw, which is the property that let a display feature ship against
-// unchanged gates. Keep it that way: if a priced or booked quantity ever starts
-// reading this ledger, the ledger has become engine state and needs the
-// scrutiny that goes with it.
+// ⚠ THIS SAID "NOTHING IN THE ENGINE CONSUMES THIS" AND THE WARNING BESIDE IT
+// HAS SINCE FIRED. It read: written by processLineYear, read only by the
+// Actuarial memorandum, no value moved and no RNG draw spent — "keep it that
+// way: if a priced or booked quantity ever starts reading this ledger, the
+// ledger has become engine state and needs the scrutiny that goes with it."
+//
+// A priced quantity now does. simulationEngine builds
+// experienceBasis.rows = windowRows(lineState.reserveDevelopment) and PRICES off
+// it; experienceRating.ts's own header opens by saying so ("THIS READS
+// reserveDevelopment, NOT claimTriangle.ts. That is the whole point of S3"). So
+// this ledger IS engine state, and the two properties that followed from it
+// being inert no longer follow: it is not free to change its contents, and a
+// change here moves priced values rather than only a memorandum.
+//
+// What is still true, and is what the display note was protecting: it is
+// APPEND-ONLY and never pruned, so a reader can rely on a row surviving its
+// cohort's closure. PRICING is windowed to ten accident years at the read site,
+// never by trimming the ledger.
 export interface ReserveDevelopmentRow {
   yearNumber: number;          // the ACCIDENT year this row describes
   calendarYear: number;

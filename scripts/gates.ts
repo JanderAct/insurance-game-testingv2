@@ -209,12 +209,13 @@ const SLOW: string[] = [
   // 16 -> 48 games by the same common-factor effect as cession-path-
   // independence, so it is expensive for the same measured reason.
   'maturity-anchor-check',           //  106s
-  // 105s — CLF label backtest. EXPECTED RED on GL; see its EXPECTED_RED entry.
-  // It grew from 96s when it moved to each year's own premium as the denominator,
-  // ten years instead of eight, and four appetite arms at 60 games each instead
-  // of one at 120 — the arms are what let it split the result by book size at
-  // all, and the per-band split is the whole reason the GL error is visible.
-  'clf-label-backtest-check',        //  105s
+  // 104s — CLF label backtest. EXPECTED RED; see its EXPECTED_RED entry.
+  // Its runtime has been flat across two basis changes and that is a coincidence
+  // worth not reading anything into: it is now 40 games x 4 arms x 22 YEARS
+  // rather than 60 x 4 x 10, because an accident year cannot be scored until it
+  // has run off and WC's horizon reaches twelve. Same cost, different shape —
+  // fewer games, each carrying more than twice the history.
+  'clf-label-backtest-check',        //  104s
 ];
 
 // ============================================================================
@@ -840,35 +841,49 @@ const EXPECTED_RED: Record<string, { code: number; why: string }> = {
   // "labels on a distribution nobody is drawing from" is retired: they are labels
   // on the distribution the pool is now actually drawing from.
   //
-  // ⚠ AND IT IS BACK, ON GL ALONE, BECAUSE THE GATE COULD NOT SEE THIS BEFORE.
-  // The retraction above was measured on the gate's OLD statistic, which divided
-  // every line-year by one pooled mean of netUltimateLoss. That is only valid
-  // while the book holds its size, and the book is now a trajectory. On each
-  // year's own poolPremium — the denominator the table is derived against — GL
-  // reads -21.9pp at its 30% stop. The entry below is that, and the -3.2pp figure
-  // quoted above is retained as what the old statistic reported, not as a
-  // measurement anyone should rely on. WC and Property were re-derived in the
-  // same commit and are green at every gated band.
+  // ⚠ AND IT CAME BACK ON GL, THEN TURNED OUT TO BE THE GATE'S OWN BASIS. The
+  // retraction above was measured on the gate's FIRST statistic, loss over a
+  // pooled mean. Its replacement divided by each year's own premium and reported
+  // -21.9pp on GL. That number was real arithmetic and the wrong comparison: it
+  // scored an ACCIDENT-YEAR curve against a CALENDAR-YEAR statistic. Measured on
+  // the same accident years, GL's accident-year ratio has CV 0.4168 against the
+  // supplied curve's implied 0.3979, and its calendar-year ratio 0.1936 — the
+  // calendar basis blends up to eight open accident years at different ages and
+  // halves the spread. The gate now measures settled accident-year ultimate and
+  // GL reads -0.5 to +1.7pp from the 70% stop up. Both earlier figures are kept
+  // above as what those statistics reported, not as measurements to rely on.
+  //
+  // ⚠ TWO ROUTES WERE MEASURED AND REJECTED ON THAT WRONG NUMBER, which is the
+  // reason this history is written out rather than trimmed. Putting GL_DERIVED
+  // in force scores -16.2pp pooled on the corrected basis against GL_SUPPLIED's
+  // -8.8pp, worst exactly where players fund for margin. Raising GL's frequency
+  // cannot work in principle: frequency only lowers CV and the gap needs it to
+  // rise. clfTables.ts still names the frequency route as "the real fix" and is
+  // corrected in the same commit as this entry.
   'clf-label-backtest-check': {
     code: 1,
-    why: 'GL READS A CURVE THAT WAS NEVER DERIVED FROM THIS ENGINE, AND THAT IS THE WHOLE RED. '
-      + 'GL_SUPPLIED is a real public-entity pool\'s measured curve at a scale this model does not '
-      + 'have — source: \'supplied\', a deliberate placeholder, and clfTables.ts has said so since it '
-      + 'landed. Measured on the premium basis at 240 games x 10 years x 4 appetite arms: GL\'s worst '
-      + 'label error is -21.9pp at the 30% stop, and it is -18.5 / -21.1 / -21.9 across the small, mid '
-      + 'and large book bands, so it is NOT a book-size error and re-deriving at a different band does '
-      + 'nothing for it. The same run puts WC at -4.4pp worst and Property at -3.6pp, both inside the '
-      + '5pp bar at every gated band, on tables re-derived in this commit. '
-      + 'CROSS-CHECK ON THE BASIS: gl-supplied-clf-check measures the same defect by a different '
-      + 'route (GL solo, all defaults, 1,000 games) and reads +14.6pp at the 60% stop and +19.4pp at '
-      + 'the 70% at this commit, against this gate\'s +11.0pp at the 60%. Same sign, same order, both '
-      + 'far outside 5pp, on populations that do not overlap — so they corroborate rather than agree. '
-      + 'FIX, AND IT IS A PRODUCT DECISION RATHER THAN A DERIVATION: either raise GL\'s claim '
-      + 'frequency so the model\'s own annual CV falls toward the supplied curve\'s ~0.40 (clfTables.ts '
-      + 'names this as the real fix), or put GL_DERIVED in force and give up the real-pool anchor. '
-      + 'GL_DERIVED is re-derived and sitting beside it; swapping the one line in STATIC_CLF_TABLE is '
-      + 'all the code that would take. Not done here because it changes what the shipped curve IS, '
-      + 'which is not a call a re-derivation gets to make on its own.',
+    why: 'THE TABLES ARE DERIVED ON ONE BASIS AND THE GATE NOW MEASURES ANOTHER, AND CLOSING THAT IS '
+      + 'A DECISION RATHER THAN A REPAIR. clf-table-derive.ts derives percentiles of netIncurredLoss / '
+      + 'poolPremium — a CALENDAR year. This gate asks the question the slider\'s label actually makes: '
+      + 'did THIS accident year come in under what was charged for it. Measured at 160 games x 22 '
+      + 'years x 4 appetite arms, worst error per band, accident-year basis: '
+      + 'WC -7.0 / -11.0 / -7.5, GL +5.2 / -7.6 / -11.6, Property +7.9 (thin) / -4.4 / -1.7. '
+      + 'On the calendar basis the same run reads WC -7.2 / -2.2 / -1.2 and Property within 7.5pp — '
+      + 'which is what those tables were fitted to, so the reds are the basis and not a broken curve. '
+      + 'GL IS THE LINE THAT MOVED THE RIGHT WAY: -21.7pp calendar becomes -0.5 to +1.7pp accident-year '
+      + 'from the 70% stop up, its residual confined to the deliberate-underfunding end (-11.6pp at the '
+      + '30% stop, where the supplied curve carries a fatter low tail than this model produces). '
+      + 'WHAT RE-DERIVING WOULD COST, from the indicated curve the gate prints: WC +3.2% to +6.0% on '
+      + 'every working stop, GL -1.8% to +8.2%, Property -2.6% to +4.0%. So a WC re-derivation is a '
+      + '4-6% premium rise at every off-Expected stop. '
+      + '⚠ AND WC HAS AN OBJECTION THE OTHER TWO DO NOT. Only 16.4% of WC accident years written in a '
+      + 'ten-year game reach their own runoff horizon before it ends, against GL 45.3% and Property '
+      + '71.0%. A WC table on settled ultimate charges for cost the player never sees land in their own '
+      + 'P&L in five games out of six. That does not make the basis wrong — funding is a claim about '
+      + 'ultimate cost, unobservable at the moment of the decision in real ratemaking too — but it is '
+      + 'why WC is not simply re-derived along with the rest. '
+      + 'DELIBERATELY NOT FIXED IN THE COMMIT THAT CHANGED THE BASIS: re-deriving three tables onto a '
+      + 'new basis is its own measurement commit, and the WC question above wants answering first.',
   },
 };
 
