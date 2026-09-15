@@ -67,7 +67,7 @@ interface DecisionsPageProps {
 // ⚠ THE 0.60 = 'Expected' MAP IS GONE, AND PROPERTY WAS ITS LAST CONSUMER.
 // It labelled 60% as the anchor because that was where FUNDING_CLF_TABLE's
 // CLF hit exactly 1.000 — true only for a line reading the generic table.
-// Property has its own derived table now (crossing 54.0%), so every line
+// Property has its own derived table now (crossing 52.8%), so every line
 // surfaces 'Expected' as the book's real break-even via fundingAtExpected
 // rather than as a fixed rung, and one ladder serves all three.
 //

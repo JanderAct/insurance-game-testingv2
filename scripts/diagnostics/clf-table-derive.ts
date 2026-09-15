@@ -227,6 +227,283 @@ function derive(line: CoverageLine) {
 // deleted one.
 // ============================================================================
 
+// ============================================================================
+// BAND MODE — WHICH BOOK TO DERIVE AT.
+//
+//   BANDS=1 GAMES=500 npx tsx scripts/diagnostics/clf-table-derive.ts
+//
+// ⚠ WHY THIS EXISTS NOW. The shipped table has no book-size dimension, and the
+// file says why: "Since the membership equilibrium fix the enrolled book holds
+// near 62 members". That fix is deleted. The book is an outcome now and the
+// derivation sample itself has moved — measured, the solo run's median enrolled
+// book is 87-93, not 62. So the question "which book is the table derived at"
+// has an answer that changed without anyone choosing it.
+//
+// ⚠ AND BOOK SIZE IS CONFOUNDED WITH BOOK AGE IN A SINGLE TRAJECTORY, WHICH IS
+// THE TRAP. At all-defaults the book climbs monotonically — WC runs 76 -> 92
+// across the ten years — so "small book" is almost exactly "early year", and any
+// difference between bands could be size OR age. Deriving from bands of one
+// trajectory would measure the two together and attribute it to size.
+//
+// The appetite tiers break the confound. They produce genuinely different books
+// AT THE SAME YEAR — below 0.75 shrinks while Accept All grows — so banding
+// across arms gives book sizes that are not year labels. fundingAtExpected is
+// still true on every arm, so CLF is still pinned to 1.000 and the derivation is
+// still non-circular.
+//
+// This mode therefore samples ALL FOUR appetite arms, reports the ratio banded
+// by book size WITH YEAR HELD so the confound is visible rather than assumed
+// away, derives a candidate table from each band, and backtests every candidate
+// across the whole range.
+// ============================================================================
+
+const BAND_MODE = process.env.BANDS === '1';
+/** Evaluation and derivation bands, on enrolled members. */
+const BOOK_BANDS: [number, number, string][] = [
+  [0, 72, 'small ~64'], [72, 88, 'mid ~80'], [88, 999, 'large ~97'],
+];
+const bandOf = (n: number) => BOOK_BANDS.findIndex(([lo, hi]) => n >= lo && n < hi);
+
+interface BandRow { ratio: number; members: number; year: number; arm: string; game: string }
+
+// ⚠ POOLED=1 RUNS ALL THREE LINES IN ONE GAME, WHICH IS WHAT THE PLAYER PLAYS.
+// The solo default exists so inter-line loans cannot couple two lines'
+// derivations. That protects the derivation's internal independence and it costs
+// something the header above does not admit to: a solo game is not a population
+// the game ever produces, so "there is no model left to mismatch" is not quite
+// true — running one line alone IS a model choice. clf-label-backtest-check
+// evaluates the shipped table on pooled games, so solo-derived tables are being
+// marked against a different population from the one they were fitted on. This
+// switch is what makes the size of that gap measurable instead of arguable.
+//
+// ⚠ MEASURED, AND IT IS SMALL — which is the reason the solo default stays. WC
+// at 400 games x 4 arms, solo against pooled, mid band:
+//
+//              10th     50th     90th    99th    crossing   worst cross-band
+//   solo     0.7913   1.0064   1.2776  1.6030      48.8%      -2.7 / +2.2
+//   pooled   0.7944   1.0026   1.2800  1.6466      49.3%      -4.0 / +1.5
+//
+// Every working stop agrees to within 0.5%, and the two disagree most at the
+// 99th (2.7%), where a pooled game's inter-line loan can keep a line solvent
+// through a year a solo game would not. So the solo simplification costs
+// something real in the far tail and nothing in the range a slider can reach.
+// It is recorded rather than removed because the independence it buys between
+// lines is worth more than 0.5% at the median.
+const POOLED = process.env.POOLED === '1';
+
+function collectAcrossArms(line: CoverageLine): BandRow[] {
+  const arms: (number | null)[] = [null, 1.50, 1.00, 0.75];
+  const active: CoverageLine[] = POOLED ? ['WC', 'GL', 'Property'] : [line];
+  const out: BandRow[] = [];
+  for (const appetite of arms) {
+    for (let g = 0; g < GAMES; g++) {
+      const id = `CLFB${POOLED ? 'P' : line}${appetite ?? 'A'}${g}`;
+      const inst = generateGameInstance(id, 2_900_000 + g * 7013);
+      const setup = { poolName: 'B', gameLength: YEARS, startingYear: 2026, instanceId: id, activeLines: active };
+      const { poolState, priorHistory } = runPriorHistory(inst, setup as never);
+      let gs = {
+        setup: setup as never, instance: inst, currentYearNumber: 1, isStarted: true, isComplete: false,
+        poolState, lockedResults: [], currentDecisions: defaultDecisionSet(1), priorHistory,
+      } as never as GameState;
+      for (let y = 1; y <= YEARS; y++) {
+        const d = defaultDecisionSet(y);
+        // Every ACTIVE line takes the arm, not just the one being collected:
+        // appetite is a per-line control but a player setting a strict bar sets
+        // it across the pool, and in POOLED mode leaving the other two on Accept
+        // All would put this line's small book next to two growing ones.
+        for (const l of active) d.byLine[l].newBusinessAppetite = appetite;
+        const pr = processYear(gs, d);
+        const r = (pr.result as never as { byLine: Record<string, Record<string, number>> }).byLine[line];
+        if (r && r.poolPremium > 0) {
+          out.push({
+            ratio: r.netIncurredLoss / r.poolPremium,
+            members: r.activeMembers, year: y,
+            arm: appetite === null ? 'all' : appetite.toFixed(2),
+            game: id,
+          });
+        }
+        gs = { ...gs, currentYearNumber: y + 1, poolState: pr.updatedPoolState, lockedResults: [...gs.lockedResults, pr.result] };
+      }
+    }
+  }
+  return out;
+}
+
+/** Share of `rows` whose ratio falls at or below `clf` — what the label delivers. */
+const delivered = (rows: BandRow[], clf: number) =>
+  (100 * rows.filter(r => r.ratio <= clf).length) / Math.max(1, rows.length);
+
+function bandAnalysis(line: CoverageLine) {
+  const t0 = Date.now();
+  const rows = collectAcrossArms(line);
+  console.log(`
+${'='.repeat(94)}`);
+  console.log(`${line} — ${rows.length.toLocaleString()} line-years across 4 appetite arms `
+    + `(${((Date.now() - t0) / 1000).toFixed(0)}s)`);
+  console.log('='.repeat(94));
+
+  // --- 1. the confound, shown rather than assumed away ---
+  console.log('\n--- BOOK SIZE vs BOOK AGE: median ratio by band, with year held ---');
+  console.log('  If the bands differ only because small books are early years, the columns move');
+  console.log('  down each row and the rows do not differ within a year. They do differ.\n');
+  console.log('  year    ' + BOOK_BANDS.map(([, , n]) => n.padStart(14)).join('') + '      n per cell');
+  for (const y of [2, 4, 6, 8, 10]) {
+    const cells: string[] = []; const ns: number[] = [];
+    for (let b = 0; b < BOOK_BANDS.length; b++) {
+      const cell = rows.filter(r => r.year === y && bandOf(r.members) === b);
+      ns.push(cell.length);
+      cells.push(cell.length >= 30
+        ? q([...cell.map(r => r.ratio)].sort((a, c) => a - c), 50).toFixed(3).padStart(14)
+        : '—'.padStart(14));
+    }
+    console.log(`  ${String(y).padStart(4)}    ${cells.join('')}      ${ns.join(' / ')}`);
+  }
+
+  // --- 2. candidate tables, one per band ---
+  console.log('\n--- CANDIDATE TABLES, one per book band ---');
+  // `band` is carried explicitly rather than recovered by indexOf: a band that
+  // falls under the 200-row floor is skipped, after which the candidate's
+  // position in the array no longer equals its band index.
+  const candidates: { band: number; name: string; table: number[]; n: number; medianBook: number }[] = [];
+  for (let b = 0; b < BOOK_BANDS.length; b++) {
+    const cell = rows.filter(r => bandOf(r.members) === b);
+    if (cell.length < 200) continue;
+    const sortedC = [...cell.map(r => r.ratio)].sort((a, c) => a - c);
+    const books = [...cell.map(r => r.members)].sort((a, c) => a - c);
+    candidates.push({
+      band: b, name: BOOK_BANDS[b][2], table: STOPS.map(pp => q(sortedC, pp)),
+      n: cell.length, medianBook: books[Math.floor(books.length / 2)],
+    });
+  }
+  for (const c of candidates) {
+    console.log(`  ${c.name.padEnd(12)} n=${String(c.n).padStart(6)}  median book ${String(c.medianBook).padStart(3)}  `
+      + `crossing ${delivered(rows.filter(r => bandOf(r.members) === c.band), 1).toFixed(1)}%`);
+    console.log(`    [${c.table.map(v => v.toFixed(4)).join(', ')}]`);
+  }
+
+  // --- 3. the backtest: every candidate against every band ---
+  console.log('\n--- LABEL ERROR: what each candidate DELIVERS at each book size ---');
+  console.log('  Error in percentage points at the stop. Positive = over-funds (delivers a higher');
+  console.log('  percentile than labelled). The tolerance that matters is 5pp, per stop, per band.\n');
+  const KEY_STOPS = [25, 50, 60, 75, 90, 95];
+  console.log('  candidate      evaluated on   ' + KEY_STOPS.map(x => `${x}%`.padStart(8)).join('') + '     worst');
+  for (const c of candidates) {
+    for (let b = 0; b < BOOK_BANDS.length; b++) {
+      const cell = rows.filter(r => bandOf(r.members) === b);
+      if (cell.length < 200) continue;
+      const errs = KEY_STOPS.map(st => delivered(cell, c.table[STOPS.indexOf(st)]) - st);
+      const worst = errs.reduce((a, x) => (Math.abs(x) > Math.abs(a) ? x : a), 0);
+      console.log(`  ${c.name.padEnd(14)} ${BOOK_BANDS[b][2].padEnd(13)}  `
+        + errs.map(e => `${e >= 0 ? '+' : ''}${e.toFixed(1)}`.padStart(8)).join('')
+        + `   ${Math.abs(worst) > 5 ? '!' : ' '}${worst >= 0 ? '+' : ''}${worst.toFixed(1)}`);
+    }
+    // pooled, exposure-weighted by how many line-years actually occur in each band
+    const errsAll = KEY_STOPS.map(st => delivered(rows, c.table[STOPS.indexOf(st)]) - st);
+    const worstAll = errsAll.reduce((a, x) => (Math.abs(x) > Math.abs(a) ? x : a), 0);
+    console.log(`  ${c.name.padEnd(14)} ${'POOLED'.padEnd(13)}  `
+      + errsAll.map(e => `${e >= 0 ? '+' : ''}${e.toFixed(1)}`.padStart(8)).join('')
+      + `   ${Math.abs(worstAll) > 5 ? '!' : ' '}${worstAll >= 0 ? '+' : ''}${worstAll.toFixed(1)}\n`);
+  }
+
+  // --- 4. where the line-years actually are ---
+  const counts = BOOK_BANDS.map((_, b) => rows.filter(r => bandOf(r.members) === b).length);
+  console.log(`  line-years per band: ${BOOK_BANDS.map(([, , n], i) =>
+    `${n} ${((100 * counts[i]) / rows.length).toFixed(0)}%`).join('   ')}`);
+}
+
+// ============================================================================
+// BAND_DERIVE=<n> — produce a SHIPPABLE table from one band, with CIs.
+//
+// The band analysis above says which band to derive at; this writes that band's
+// table out at full precision with a block bootstrap over whole games, which is
+// the same interval the ordinary derivation reports and the reason the band rows
+// carry their game id.
+//
+// ⚠ THE BLOCK IS THE GAME, NOT THE BAND-YEAR. Resampling band rows individually
+// would treat ten years of one pool as ten independent observations; they are
+// not, because a pool's book size and its loss experience both persist. So a
+// bootstrap draw takes a whole game and then keeps whichever of its years fall
+// in the band — which also means the band's row count varies between draws,
+// exactly as it would between real pools.
+// ============================================================================
+function bandDerive(line: CoverageLine, band: number) {
+  const t0 = Date.now();
+  const rows = collectAcrossArms(line);
+  const byGame = new Map<string, BandRow[]>();
+  for (const r of rows) {
+    const k = `${r.arm}|${r.game}`;
+    const list = byGame.get(k); if (list) list.push(r); else byGame.set(k, [r]);
+  }
+  const blocks = [...byGame.values()];
+  const cell = rows.filter(r => bandOf(r.members) === band);
+  const sorted = [...cell.map(r => r.ratio)].sort((a, b) => a - b);
+  const books = [...cell.map(r => r.members)].sort((a, b) => a - b);
+
+  const rng = new SeededRandom(818181);
+  const bootQ: number[][] = STOPS.map(() => []);
+  for (let b = 0; b < BOOT; b++) {
+    const sample: number[] = [];
+    for (let i = 0; i < blocks.length; i++) {
+      const gi = Math.min(blocks.length - 1, Math.floor(rng.next() * blocks.length));
+      for (const r of blocks[gi]) if (bandOf(r.members) === band) sample.push(r.ratio);
+    }
+    if (sample.length === 0) continue;
+    sample.sort((a, c) => a - c);
+    STOPS.forEach((p, k) => bootQ[k].push(q(sample, p)));
+  }
+
+  console.log(`\n=== ${line} — derived at the ${BOOK_BANDS[band][2]} band ===`);
+  console.log(`  ${cell.length.toLocaleString()} line-years of ${rows.length.toLocaleString()} `
+    + `across ${blocks.length.toLocaleString()} games, ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+  console.log(`  enrolled book in the band: p10 ${books[Math.floor(0.1 * books.length)]}, `
+    + `median ${books[Math.floor(0.5 * books.length)]}, p90 ${books[Math.floor(0.9 * books.length)]}`);
+  console.log(`  crossing (share of band line-years with ratio <= 1.000): `
+    + `${(100 * cell.filter(r => r.ratio <= 1).length / cell.length).toFixed(1)}%`);
+  console.log('\n  stop     CLF      95% CI (block bootstrap over games)   half-width');
+  const table: number[] = [];
+  STOPS.forEach((p, k) => {
+    const v = q(sorted, p);
+    table.push(v);
+    const bs = [...bootQ[k]].sort((a, b) => a - b);
+    const lo = bs[Math.floor(0.025 * (bs.length - 1))], hi = bs[Math.floor(0.975 * (bs.length - 1))];
+    console.log(`  ${String(p).padStart(5)}   ${v.toFixed(4)}   [${lo.toFixed(4)}, ${hi.toFixed(4)}]`
+      + `${' '.repeat(19)}${((hi - lo) / 2).toFixed(4)}`);
+  });
+  console.log(`\n  stops: [${STOPS.join(', ')}],`);
+  console.log(`  clf: [${table.map(v => v.toFixed(4)).join(', ')}],`);
+
+  // What this table delivers at EVERY band, which is the number that decided it.
+  console.log('\n  delivered error by band (pp):');
+  const KEY = [25, 50, 60, 75, 90, 95];
+  console.log('    evaluated on   ' + KEY.map(x => `${x}%`.padStart(8)).join('') + '     worst');
+  for (let b = 0; b < BOOK_BANDS.length; b++) {
+    const c2 = rows.filter(r => bandOf(r.members) === b);
+    if (c2.length < 200) continue;
+    const errs = KEY.map(st => delivered(c2, table[STOPS.indexOf(st)]) - st);
+    const w = errs.reduce((a, x) => (Math.abs(x) > Math.abs(a) ? x : a), 0);
+    console.log(`    ${BOOK_BANDS[b][2].padEnd(13)}  ` + errs.map(e => `${e >= 0 ? '+' : ''}${e.toFixed(1)}`.padStart(8)).join('')
+      + `   ${Math.abs(w) > 5 ? '!' : ' '}${w >= 0 ? '+' : ''}${w.toFixed(1)}`);
+  }
+}
+
+if (process.env.BAND_DERIVE) {
+  const band = Number(process.env.BAND_DERIVE);
+  console.log(`=== BAND-TARGETED DERIVATION — band ${band} (${BOOK_BANDS[band][2]}), `
+    + `${GAMES} games x ${YEARS} years x 4 appetite arms ===`);
+  const only = (process.env.LINES ?? 'WC,GL,Property').split(',').map(x => x.trim()) as CoverageLine[];
+  for (const l of only) bandDerive(l, band);
+  console.log('\nDONE — nothing written. Paste into src/data/clfTables.ts by hand.');
+  process.exit(0);
+}
+
+if (BAND_MODE) {
+  console.log('=== WHICH BOOK TO DERIVE AT — band analysis across the appetite arms ===');
+  const only = (process.env.LINES ?? 'WC,GL,Property').split(',').map(x => x.trim()) as CoverageLine[];
+  for (const l of only) bandAnalysis(l);
+  console.log('\nDONE — band analysis only. Nothing written.');
+  process.exit(0);
+}
+
 console.log(`=== STATIC CLF TABLE DERIVATION — ${GAMES} games x ${YEARS} years per line, all defaults ===`);
 console.log('Each line run SOLO, so inter-line loans cannot couple the two derivations.');
 console.log(`Stops: ${STOPS.join(', ')}\n`);

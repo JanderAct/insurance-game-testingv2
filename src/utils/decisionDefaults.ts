@@ -15,7 +15,7 @@ export function defaultLineDecisionSet(line: CoverageLine): LineDecisionSet {
     // each, rather than a per-line percentage stop (WC at 60%, GL at 65% — two
     // numbers that meant two different, both wrong, things before their own
     // derived tables existed). Property was the last line for which this flag
-    // did nothing; its derived table crosses at 54.0%, not 60%, so it now
+    // did nothing; its derived table crosses at 52.8%, not 60%, so it now
     // carries the same meaning here as on WC and GL.
     fundingAtExpected: true,
     // Renew everyone. A pool that declines by default would be making an

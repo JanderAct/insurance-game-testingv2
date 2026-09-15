@@ -16,7 +16,7 @@
 //   3. Every confidence level the UI can request falls INSIDE the supplied
 //      curve's 25-95 range, so no reachable slider position is answered by a
 //      clamp.
-//   4. WC's table still crosses where its own derivation puts it (54.7%),
+//   4. WC's table still crosses where its own derivation puts it (48.6%),
 //      i.e. the GL swap did not reach it.
 //
 // WHAT IS MEASURED AND REPORTED (not gated — it is a property of a placeholder,
@@ -76,8 +76,17 @@ check(wc.source === 'derived', 'WC table is still tagged `derived`');
   // tail (the 99th stop went 5.6018 -> 6.5251 while the median FELL), and a more
   // right-skewed distribution crosses 1.000 at a higher percentile. Re-derived
   // and confirmed over two passes. See clfTables.ts's crossing block.
-  check(Math.abs(crossingOf(GL_DERIVED) - 0.708) < 0.002,
-    'GL_DERIVED is retained beside it and still crosses at 70.8%', `${(crossingOf(GL_DERIVED) * 100).toFixed(2)}%`);
+  //
+  // SECOND MOVE, 70.8% -> 65.6%, at the mid-band re-derivation, and it is the
+  // first move that ran the OTHER way. The membership target came out, so the
+  // derivation sample no longer contains the book drifting toward twenty members
+  // — and a twenty-member pool is where one above-tower GL occurrence lands on a
+  // tiny premium base and produces a ratio of six. Removing those line-years
+  // removes the skew they generated: the 99th stop went 6.5251 -> 1.4523 and the
+  // crossing came back toward the median. The above-tower hazard is untouched;
+  // what changed is the size of the denominator it lands on.
+  check(Math.abs(crossingOf(GL_DERIVED) - 0.656) < 0.002,
+    'GL_DERIVED is retained beside it and still crosses at 65.6%', `${(crossingOf(GL_DERIVED) * 100).toFixed(2)}%`);
   // GUARDS AGAINST THE GL SWAP LEAKING INTO WC, not against WC ever changing.
   // This constant tracks WC's current derived value and must be updated whenever
   // WC is deliberately re-derived.
@@ -105,14 +114,26 @@ check(wc.source === 'derived', 'WC table is still tagged `derived`');
   // development is the retired wobble rather than IBNER; re-deriving on the
   // branch's own distribution is what moved it. Not a pricing change — WC's
   // premium is untouched — a table catching up with the engine it prices for.
-  check(Math.abs(crossingOf(wc) - 0.547) < 0.002,
-    'WC still crosses where its own derivation puts it (54.7%) — the GL swap did not reach it',
+  //
+  // Fifth, 54.7% -> 48.6%, at the mid-band re-derivation. Same cause as GL's move
+  // above and the same direction: the old table was fitted on a sample that still
+  // held very small books, whose ratios swing hard in both directions, so it was
+  // too WIDE. The new one is tighter and its crossing sits nearer the median.
+  //
+  // ⚠ AND THIS ASSERTION WENT RED AT THE COMMIT THAT CAUSED IT, WHICH IS THE
+  // THIRD TIME AND THE FIRST TIME THAT WAS THE POINT. The note above says the
+  // lesson is that a re-derivation has more consumers than the file it edits and
+  // that grepping the old value is what finds them. Here the full sweep found it
+  // instead, at the commit that moved the tables, before they were pushed. That
+  // is the cheaper mechanism and it is the one to rely on.
+  check(Math.abs(crossingOf(wc) - 0.486) < 0.002,
+    'WC still crosses where its own derivation puts it (48.6%) — the GL swap did not reach it',
     `${(crossingOf(wc) * 100).toFixed(2)}%`);
 }
 
 console.log('\n--- 2. "EXPECTED" IS STILL EXACTLY 1.000 ---');
 console.log('  fundingAtExpected bypasses the table entirely. Only the DISPLAYED crossing');
-console.log('  percentile moves (70.8% -> 57.7%); the multiplier charged must not.\n');
+console.log('  percentile moves (65.6% -> 57.7%); the multiplier charged must not.\n');
 {
   // The engine's own dispatch is `fundingAtExpected ? 1.0 : staticClf(...)`, so
   // the assertion that matters is that the literal survives — checked here by

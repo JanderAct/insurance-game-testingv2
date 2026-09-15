@@ -357,7 +357,22 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // reports the same thing in both cases. value-identity v37 is what separates
 // them, and its note records the confinement check: every changed field is
 // downstream of the roster, nothing roster-independent moved, no NaN.
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v38.json');
+// v39: 18 OF 24 MOVED, AND THE SIX THAT DID NOT ARE THE CONTROL.
+// The CLF tables were re-derived. Every WC-solo, every Property-solo and every
+// tri export moved, in both arms. ALL SIX GL-SOLO EXPORTS MATCH BIT-FOR-BIT.
+//
+// That is not luck and it is worth more than the 18 diffs. GL prices off
+// GL_SUPPLIED, a real-pool curve the re-derivation deliberately did not touch,
+// and GL's 90% stop (1.5020, the reserve risk margin) is therefore unchanged
+// too. GL_DERIVED moved a long way — its 99th stop went 6.5251 -> 1.4523 — and
+// it is exported from clfTables.ts, so if anything on the export path were
+// reading the derived curve instead of the supplied one, these six would have
+// moved. They did not. The only consumer of GL_DERIVED is
+// gl-supplied-clf-check.ts, exactly as its comment claims.
+//
+// So this capture carries its own negative control: a table change that reaches
+// two lines and provably does not reach the third.
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v39.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

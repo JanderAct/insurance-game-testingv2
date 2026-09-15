@@ -416,7 +416,7 @@ export interface LineDecisionSet {
   // ⚠ PROPERTY USED TO IGNORE THIS FIELD and no longer does. It read the
   // generic FUNDING_CLF_TABLE, whose 60% entry is exactly 1.000, so its
   // "Expected" and its 60% stop coincided and the flag was inert. Its own
-  // derived table crosses at 54.0%, so the two no longer coincide and the flag
+  // derived table crosses at 52.8%, so the two no longer coincide and the flag
   // is what keeps "Expected" meaning break-even rather than a 60% stop.
   // fundingConfidenceLevel is NOT read for pricing while this is true (it is
   // only the fallback the slider lands on if the player later drags away from

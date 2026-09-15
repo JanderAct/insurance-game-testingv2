@@ -1,36 +1,49 @@
-// STATIC CLF TABLES for WC and GL.
+// STATIC CLF TABLES for WC, GL and Property.
 //
 // CLF(p) is the multiplier applied to the pool premium so that the funded
 // amount covers the year's retained loss p% of the time.
 //
 // ============================================================================
-// ⚠ READ THIS FIRST: THE TWO LINES NO LONGER COME FROM THE SAME PLACE.
+// ⚠ READ THIS FIRST: THE THREE LINES DO NOT COME FROM THE SAME PLACE.
 //
-//   WC  DERIVED  — backtested on this engine. Everything in the derivation
-//                  note below applies to it, and its stop labels mean what
-//                  they say against WC's own retained distribution.
-//   GL  SUPPLIED — a real pool's measured curve at a scale this model does not
-//                  have. It is IN FORCE for GL, it does NOT describe GL's own
-//                  distribution, and it over-delivers by about 10pp through the
-//                  working range. See GL_SUPPLIED below for the measured cost;
-//                  GL's own derived curve is kept beside it as GL_DERIVED.
+//   WC        DERIVED  — backtested on this engine. Everything in the derivation
+//                        note below applies to it, and its stop labels mean what
+//                        they say against WC's own retained distribution.
+//   Property  DERIVED  — the same, on the net basis. Added after this block was
+//                        first written, which is why it used to say "two lines".
+//   GL        SUPPLIED — a real pool's measured curve at a scale this model does
+//                        not have. It is IN FORCE for GL, it does NOT describe
+//                        GL's own distribution, and it over-delivers by about
+//                        15pp through the middle of the working range while
+//                        UNDER-delivering by up to 18pp at the bottom of it.
+//                        See GL_SUPPLIED below
+//                        for the measured cost; GL's own derived curve is kept
+//                        beside it as GL_DERIVED.
 //
 // The derivation note that follows describes how the DERIVED tables were made.
-// It is the provenance of WC's shipped curve and of GL_DERIVED — NOT of the
-// GL curve the engine actually reads.
+// It is the provenance of WC's and Property's shipped curves and of GL_DERIVED —
+// NOT of the GL curve the engine actually reads.
 //
 // ============================================================================
 // HOW THESE WERE DERIVED, AND WHY IT IS A BACKTEST.
 //
-// The engine was run at ALL-DEFAULT decisions for 3,000 games x 10 years per
-// line, each line SOLO so inter-line loans could not couple them, and for every
-// line-year the realised retained loss was divided by the retained loss that was
-// funded:
+// The engine is run over many games and years, and for every line-year the
+// realised retained loss is divided by the retained loss that was funded:
 //
 //     ratio = netIncurredLoss / poolPremium
 //
 // The percentiles of that ratio ARE this table. See
 // scripts/diagnostics/clf-table-derive.ts.
+//
+// ⚠ THE SAMPLE IS DESCRIBED AT EACH TABLE, NOT HERE, BECAUSE IT DIFFERS BY LINE.
+// This block used to say "3,000 games x 10 years per line, at ALL-DEFAULT
+// decisions, each line SOLO". Solo is still true and still deliberate — inter-line
+// loans cannot then couple two lines' derivations, at a cost measured in the
+// script's POOLED note. All-defaults is no longer true: the tables are now drawn
+// from FOUR new-business appetite arms, because the appetite control is what
+// moves the enrolled book, and a table meant to hold across the book's range has
+// to be fitted across it. Each table's own header gives its games, arms, band and
+// line-year count.
 //
 // ⚠ THIS REPLACES A MONTE CARLO THAT WAS WRONG IN A WAY ONLY A BACKTEST COULD
 // SEE. The previous WC_CLF_GRID and GL_CLF_GRID were derived from a separate
@@ -42,9 +55,11 @@
 // its own generating process. Deriving from the engine absorbs any such
 // mismatch by construction: there is no second model left to disagree with.
 //
-// ⚠ NO CIRCULARITY. At all-defaults fundingAtExpected pins CLF to exactly 1.000
-// and no table is consulted, so the derivation run does not depend on its own
-// output.
+// ⚠ NO CIRCULARITY, AND THE APPETITE ARMS DO NOT WEAKEN IT. fundingAtExpected
+// pins CLF to exactly 1.000 and no table is consulted, so the derivation run does
+// not depend on its own output. The arms vary newBusinessAppetite only; not one
+// of them touches the funding flag, so the pin holds on every line-year in the
+// sample, not just the default ones.
 //
 // ============================================================================
 // THE NUMERATOR IS netIncurredLoss, NOT netUltimateLoss, AND THE CHOICE MATTERS
@@ -82,13 +97,54 @@
 //   if that ever matters — 8 masks per line, applied to the same draws in one
 //   pass, not 8 passes.
 //
-//   NO BOOK-SIZE DIMENSION. Since the membership equilibrium fix the enrolled
-//   book holds near 62 members rather than drifting toward 20, so the size axis
-//   the old grids interpolated over buys little. Median book in the derivation
-//   run: 62 members on both lines.
+//   NO BOOK-SIZE DIMENSION, AND THE REASON IS NO LONGER "THE BOOK HOLDS STILL".
+//   This block used to say the size axis bought little because the book held
+//   near 62 members. There is no equilibrium now — the target came out, and the
+//   book is an outcome that runs roughly 76 -> 92 enrolled at defaults, reaches
+//   97 on Accept All and settles near 64 at the strict appetite bar. One curve
+//   was kept anyway, deliberately: a size axis makes the rate move as the book
+//   moves, which is a second feedback between membership and pricing on top of
+//   the ones already in the engine, and the measured cost of going without one is
+//   small. THE RULE IS: each line is derived at the band that CONTAINS ITS OWN
+//   MEDIAN BOOK, measured on the played game. WC and GL land in the 72-88 band,
+//   Property — whose book runs about eleven members higher — lands in the 88+
+//   one. See each table's own note.
+//
+//   ⚠ WHAT THE SINGLE CURVE COSTS, MEASURED RATHER THAN ASSERTED. Deriving at
+//   the small, middle and large bands and backtesting each against all three
+//   gives the worst label error across the range:
+//
+//       derived at      WC       GL      Property
+//       small ~64     +4.5     +6.5        -9.7
+//       mid ~80       -2.7     -4.4        +4.6
+//       large ~97     -4.2     -6.3       +10.2
+//
+//   ⚠ READ THAT TABLE WITH ITS OWN LIMITATION IN VIEW, WHICH IS THAT THE THREE
+//   COLUMNS ARE NOT WEIGHTED BY WHERE EACH LINE ACTUALLY SITS. It says the middle
+//   is the only row inside 5pp on every line, and that was the first decision
+//   taken here. It held for WC and GL and did NOT hold for Property, because
+//   Property spends 63% of its line-years in the large band and only 26% in the
+//   middle one: a mid-band Property table reads -5.2pp and -7.9pp on those two,
+//   i.e. outside tolerance on 89% of the line's own exposure, while scoring +4.6
+//   in the unweighted row above. The per-line median-book rule replaced it.
+//
+//   Deriving at the top was the stated instinct — a factor slightly light on a
+//   small book being safer than one heavy on a large one. On WC and GL that
+//   instinct costs 4-6pp against the middle's 2-4pp and was not taken. On
+//   Property the same instinct IS the answer, for a reason the instinct did not
+//   name: not safety, but that the top is where Property's book lives.
+//
+//   ⚠ AND BOOK SIZE ENTERS AS SHAPE, NOT LEVEL, WHICH BOUNDS HOW BIG THIS CAN
+//   EVER BE. The CLF is loss over PREMIUM, and premium scales with the book, so
+//   a bigger pool cannot move the curve by being bigger — only by having a
+//   differently shaped ratio distribution. Measured, the 50% stop moves 1.6% on
+//   WC and 1.9% on GL between a 65-member and a 92-member book. Anyone reasoning
+//   that a 1.5x book needs a 1.5x-different factor is reasoning about a level
+//   effect that the ratio has already divided out.
 //
 // ⚠ RE-DERIVE THIS TABLE if DEFAULT_LAYERS_PLACED changes, if the funding basis
-// changes again, if the membership equilibrium moves materially, or if any loss
+// changes again, if the MEMBERSHIP TRAJECTORY moves materially — the band it is
+// derived at, not an equilibrium, since there is no longer one — or if any loss
 // model is re-fitted. It is a measurement of the engine, so any change to the
 // engine's loss or pricing path invalidates it.
 //
@@ -127,9 +183,20 @@
 // ============================================================================
 // THE MEASURED CROSSING of the DERIVED curves — where the ratio reaches 1.000,
 // i.e. what "Expected" (CLF exactly 1.000) delivers against each line's own
-// distribution:
+// distribution. AT THE MID BAND, which is where they are now derived:
 //
-//     WC 54.7%  (95% CI 54.0-55.3)      GL 70.9%  (95% CI 70.2-71.5)
+//     WC 48.8%      GL 65.7%      Property 52.8%
+//
+// ⚠ ALL THREE MOVED AT THE RE-DERIVATION — WC 54.7% -> 48.8%, GL 70.9% -> 65.7%,
+// Property 54.0% -> 52.8% — and the two that fell most did so because the curve
+// TIGHTENED rather than because the book got worse. A narrower distribution puts
+// more of its mass near the mean, so the percentile at which the ratio reaches
+// 1.000 moves toward the median from wherever the skew had pushed it. WC and GL
+// were both right-skewed by the small-book line-years that are now gone.
+//
+// The figures below are the PREVIOUS measurements, kept because the reasoning
+// that follows them is still the reasoning, and a reader who finds 54.7% quoted
+// in another file needs to be able to place it.
 //
 // ⚠ GL AND PROPERTY WERE MEASURED ON THIS BRANCH TOO AND ARE NOT RE-DERIVED.
 // IBNER changes every line's development, so "WC needs re-deriving" is not by
@@ -236,10 +303,12 @@
 // percentile. That skew is not a side effect to be tidied away: a fixed ceiling
 // lightening a line's tail a little more every year was the defect.
 //
-// ⚠ GL's SHIPPED crossing is 57.7%, not 70.9%, because the supplied curve is in
-// force — and the supplied curve did NOT move, so GL's shipped pricing is
-// unchanged by the trending ceiling. 70.9% is the truth about GL's
-// distribution; 57.7% is what the supplied curve reports. See GL_SUPPLIED.
+// ⚠ GL's SHIPPED crossing is 57.7%, not its derived one, because the supplied
+// curve is in force — and the supplied curve did NOT move, so GL's shipped
+// pricing is unchanged by the trending ceiling. The derived figure was 70.9%
+// when this was written and is 65.7% after the mid-band re-derivation; either
+// way it is the truth about GL's distribution and 57.7% is what the supplied
+// curve reports. See GL_SUPPLIED.
 //
 // THE SANITY CHECK AGAINST REAL EXPERIENCE, and it needs the right basis to
 // read. Real public-entity pools put the mean year near the 55th percentile.
@@ -339,16 +408,34 @@ export interface ClfTable {
 }
 
 // ============================================================================
-// WC — DERIVED from this engine. Unchanged. See the derivation note above.
+// WC — DERIVED from this engine, at the MID BAND of the membership trajectory.
 //
-// ⚠ WC's TOP STOPS ARE PRECISE; GL's DERIVED ONES WERE NOT. At 30,000 line-years
-// WC's 95th stop has a 95% CI half-width of +/-0.0085.
+// 7,345 line-years falling in the 72-88 member band, drawn from 16,000 across
+// 1,600 solo games and FOUR new-business appetite arms, via
+// scripts/diagnostics/clf-table-derive.ts (BAND_DERIVE=1 GAMES=400). Enrolled
+// book within the band: p10 73, median 79, p90 86. CROSSING 48.8%.
+//
+// 95% CI half-widths (block bootstrap over whole games) run 0.0042 at the 35th
+// stop to 0.0312 at the 99th — tighter through the working range than the
+// 30,000-line-year table this replaces, because the sample is less dispersed
+// rather than because it is bigger.
+//
+// ⚠ IT REPLACES A TABLE THAT WAS TOO WIDE, AND BOOK SIZE IS NOT THE WHOLE
+// REASON. The previous curve ran 0.6698 to 1.9329; this one runs 0.7913 to
+// 1.6030. Re-deriving at a book of 65 — essentially the 62 the old header
+// claimed — still gives 0.7903 at the 10th stop, so the old curve's fat lower
+// tail is not a size effect at all. It is the DELETED EQUILIBRIUM: the old
+// sample was drawn while the book still drifted toward 20 members, and a
+// twenty-member pool's loss ratio swings in both directions hard enough to widen
+// every percentile. The membership rewrite removed those line-years from the
+// population, which is exactly the trigger this file's own re-derivation note
+// names.
 const WC_DERIVED: ClfTable = {
   source: 'derived',
   stops: [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 97.5, 99],
   clf: [
-    0.6698, 0.7242, 0.7700, 0.8090, 0.8433, 0.8765, 0.9073, 0.9401, 0.9709, 1.0022,
-    1.0349, 1.0695, 1.1069, 1.1487, 1.1962, 1.2535, 1.3294, 1.4562, 1.6017, 1.9329,
+    0.7913, 0.8314, 0.8641, 0.8915, 0.9156, 0.9391, 0.9617, 0.9842, 1.0064, 1.0302,
+    1.0550, 1.0788, 1.1061, 1.1373, 1.1734, 1.2161, 1.2776, 1.3854, 1.4866, 1.6030,
   ],
 };
 
@@ -361,36 +448,58 @@ const WC_DERIVED: ClfTable = {
 // derived curve is the more accurate description of THIS model's GL book.
 //
 // ⚠ IT DESCRIBES A BIGGER, SMOOTHER BOOK. Its implied annual CV is about 0.40
-// against GL's own measured 0.79. Everything below follows from that one fact.
+// against GL's own measured 0.79 when that was taken — and GL's has since fallen
+// with the membership change, which is why the error below changed SHAPE. Everything below follows from that one fact.
 //
 // MEASURED CONSEQUENCE — this curve OVER-DELIVERS against GL's own distribution
-// by roughly 10pp through the working range, because it is priced off a less
-// volatile book than the one the engine draws. Measured, not predicted (see
+// by up to 19pp through the middle of the working range and UNDER-delivers by
+// up to 18pp at the bottom of it, because it is priced off a less volatile book
+// than the one the engine draws. Measured, not predicted (see
 // scripts/diagnostics/gl-supplied-clf-check.ts):
 //
 //     label      30%    40%    50%    60%    70%    80%    90%    95%
-//     delivers  35.5%  47.8%  59.6%  70.5%  80.1%  87.4%  92.4%  94.0%
-//     error     +5.5   +7.8   +9.6  +10.5  +10.1   +7.4   +2.4   -1.0
+//     delivers  12.1%  30.8%  53.4%  74.6%  89.4%  97.1%  99.4%  99.9%
+//     error    -17.9   -9.2   +3.4  +14.6  +19.4  +17.1   +9.4   +4.9
 //
-// Peak over-delivery is +10.5pp at the 60% stop. It converges at the top and
-// slightly UNDER-delivers at 95%. And its top stop of 1.701 covers only 94.0% of
-// GL line-years against GL's own 99th percentile of 6.53, so on this curve
-// NEAR-CERTAINTY IS NOT PURCHASABLE at any slider position — the most a player
-// can buy is about the 94th percentile of the real retained distribution.
+// ⚠ THOSE ARE NOT THE FIGURES THIS BLOCK CARRIED, AND THE MOVE IS THE MEMBERSHIP
+// CHANGE RATHER THAN THE CURVE. The recorded row was 35.5 / 47.8 / 59.6 / 70.5 /
+// 80.1 / 87.4 / 92.4 / 94.0, peaking at +10.5pp. GL_SUPPLIED itself has never
+// been touched. What moved is the distribution it is being marked against: with
+// the membership target gone, GL's own retained ratio distribution is far tighter
+// (its 99th percentile went 6.53 -> 1.45), so a curve built for a bigger, smoother
+// book now sits too WIDE at both ends rather than uniformly too high. The error
+// changed shape, not just size — it is now strongly negative at the bottom of the
+// range and strongly positive through the middle.
 //
-// THE CROSSING MOVES 70.9% -> 57.7% AS DISPLAYED, and the difference is BOOK
+// Peak over-delivery is +19.4pp at the 70% stop, and the curve now UNDER-delivers
+// badly at 30-40% where it used to over-deliver. Its top stop of 1.701 covers
+// 99.9% of GL line-years against GL's own 99th percentile of 1.4523 — so the old
+// note that NEAR-CERTAINTY IS NOT PURCHASABLE on this curve has RETIRED ITSELF.
+// The opposite is now true: the top of the slider buys more than the distribution
+// has to offer.
+//
+// THE CROSSING MOVES 65.7% -> 57.7% AS DISPLAYED, and the difference is BOOK
 // SIZE. Note what does NOT move: "Expected" still covers 68.1% of GL line-years
 // in measurement, because it bypasses the table entirely. (That 68.1% is a
-// BACKTEST COVERAGE figure, not the crossing, and it has not been re-measured
-// since the ceilings started trending — the 10.4pp below is therefore on the
-// pre-trending basis. The crossing it is often confused with moved 68.6% ->
-// 70.9%; these are two different quantities and only one was re-derived.) So the displayed
-// figure now UNDERSTATES GL's real coverage at Expected by 10.4pp. GL's
-// derived curve crosses at 70.9% because a 62-member pool's retained loss is
-// genuinely more volatile and more skewed than the pool this curve came from;
-// a skewed distribution has its median well below its mean, so funding at the
-// mean covers more than half the years. The supplied curve, from a larger and
-// smoother book, crosses much closer to the middle.
+// BACKTEST COVERAGE figure, not the crossing; re-measured at this commit it is
+// 70.2%, so the displayed 57.7% understates GL's real coverage at Expected by
+// 12.5pp. The crossing it is often confused with moved 68.6% -> 70.9% -> 65.7%;
+// these are two different quantities and only one was re-derived.) So the
+// displayed figure UNDERSTATES GL's real coverage at Expected. GL's derived curve crosses above the supplied one because a pool of
+// this size has retained loss that is genuinely more volatile and more skewed
+// than the pool the supplied curve came from; a skewed distribution has its
+// median well below its mean, so funding at the mean covers more than half the
+// years. The supplied curve, from a larger and smoother book, crosses much
+// closer to the middle.
+//
+// ⚠ THE GAP NARROWED FROM 13.2pp TO 8.0pp AT THE RE-DERIVATION, AND NOT BECAUSE
+// ANYTHING WAS AIMED AT IT. Deriving at a 72-88 member book instead of a sample
+// that still contained the drift toward 20 removed most of the skew that put
+// GL's derived crossing at 70.9%. The supplied curve is unchanged, so the whole
+// move is on the derived side. The convergence is real and is evidence for the
+// frequency argument below — a bigger, less lumpy book does move this model
+// toward the supplied curve's shape — but 8.0pp is still a large gap and the
+// supplied curve is still a placeholder.
 //
 // ⚠ RAISING GL'S FREQUENCY IS THE LEVER THAT WOULD CLOSE THE GAP — more claims
 // per year at the same expected loss lowers the annual CV toward the supplied
@@ -415,19 +524,34 @@ const GL_SUPPLIED: ClfTable = {
 // GL — DERIVED from this engine. NOT IN FORCE, KEPT DELIBERATELY.
 //
 // This is a measured property of the model and must not be lost: it is what
-// GL's retained loss distribution actually does at the equilibrium book, and
-// anyone revisiting the supplied curve needs both to compare. Derived by the
-// same backtest and the same iteration-to-fixed-point as WC's — see the header.
+// GL's retained loss distribution actually does at the book the game produces,
+// and anyone revisiting the supplied curve needs both to compare. Re-derived at
+// the MID BAND alongside WC and Property: 7,680 line-years in the 72-88 member
+// band of 16,000 across 1,600 games and four appetite arms, book p10 73 /
+// median 80 / p90 86. CROSSING 65.7%, down from 70.9%.
 //
-// Crosses at 70.9%. Its 97.5 and 99 stops (3.3484, 6.5251) are imprecise and
-// that is the distribution rather than the sample: GL's retained tail carries
-// the unhedgeable above-tower band, so its upper percentiles are genuinely
-// unstable (95% CI half-width +/-0.28 at the 97.5th against WC's +/-0.012).
+// ⚠ ITS TAIL STOPS WERE THIS FILE'S STANDING EXAMPLE OF AN IMPRECISE ESTIMATE
+// AND THEY ARE NO LONGER THAT. The previous curve put the 97.5th at 3.3484 and
+// the 99th at 6.5251, with a 95% CI half-width of +/-0.28 at the 97.5th against
+// WC's +/-0.012; the note here said that was the distribution rather than the
+// sample, GL's retained tail carrying the unhedgeable above-tower band. On the
+// re-derived curve they are 1.3293 and 1.4523 at half-widths of 0.0180 and
+// 0.0220 — a factor of fifteen tighter, and the same order as WC's.
 //
-// ⚠ THOSE TWO STOPS MOVED MOST WHEN THE CEILING STARTED TRENDING — the 99th
-// from 5.6018 to 6.5251 — because they are exactly the region a fixed ceiling
-// was truncating. Their imprecision means the MOVE is less well resolved than
-// the bulk of the curve; the direction is not in doubt, the third decimal is.
+// THAT IS TOO LARGE A MOVE TO BOOK AS PRECISION AND IT IS NOT ONE. The old tail
+// was measured on a sample that still contained the drifting-to-20 book, where a
+// single above-tower GL occurrence lands on a tiny premium base and produces a
+// ratio of six. Those line-years no longer exist, so the tail they generated is
+// gone with them. The above-tower exposure itself is untouched — GL still
+// retains everything over $25M and the excess market still stops there. What
+// changed is the size of the denominator it lands on, not the hazard.
+//
+// ⚠ SO THE OLD 99th STOP IS NOT SIMPLY SUPERSEDED. It remains the right shape
+// for a pool small enough that one uncapped occurrence can be six times its
+// annual funding, and if the book is ever allowed to run small again this curve
+// will understate that end badly. The re-derivation note at the head of this
+// file is the mechanism for catching that; this paragraph is why it matters most
+// on GL.
 //
 // EXPORTED, and it has a real consumer: gl-supplied-clf-check.ts measures the
 // supplied curve against it. That keeps it type-checked and honest rather than
@@ -436,18 +560,44 @@ export const GL_DERIVED: ClfTable = {
   source: 'derived',
   stops: [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 97.5, 99],
   clf: [
-    0.5306, 0.5822, 0.6230, 0.6622, 0.6982, 0.7316, 0.7646, 0.7963, 0.8307, 0.8662,
-    0.9046, 0.9469, 0.9918, 1.0443, 1.1080, 1.1954, 1.3407, 1.8318, 3.3484, 6.5251,
+    0.7536, 0.7850, 0.8123, 0.8364, 0.8574, 0.8780, 0.8994, 0.9170, 0.9360, 0.9548,
+    0.9761, 0.9972, 1.0218, 1.0463, 1.0778, 1.1161, 1.1672, 1.2550, 1.3293, 1.4523,
   ],
 };
 
 // ============================================================================
 // PROPERTY — DERIVED from this engine, on the NET basis.
 //
-// 20,000 line-years from 2,000 solo games at all defaults, via
-// scripts/diagnostics/clf-table-derive.ts (LINES=Property GAMES=2000). Same
+// 10,942 line-years in the 88+ member band of 16,000 across 1,600 solo games
+// and four new-business appetite arms, via
+// scripts/diagnostics/clf-table-derive.ts (BAND_DERIVE=2 GAMES=400). Same
 // statistic, same block bootstrap over whole games, same script that produced
-// WC's. 95% CI half-widths run 0.007 at the working stops to 0.034 at the 99th.
+// WC's. Book within the band: p10 89, median 95, p90 103. CI half-widths run
+// 0.0062 at the 25th stop to 0.0402 at the 99th.
+//
+// ⚠ A DIFFERENT BAND FROM WC's AND GL's, AND THE RULE IS THE SAME ONE. Each line
+// is derived at the band that CONTAINS ITS OWN MEDIAN BOOK. Measured on the
+// played game — all three lines active, four appetite arms, ten years:
+//
+//     line       book p10   median   p90      band derived at
+//     WC              61       78     93      mid   (72-88)
+//     GL              62       79     94      mid   (72-88)
+//     Property        70       91    101      large (88+)
+//
+// Property's book runs about eleven members above the other two, so the middle
+// band is its LOWER TAIL rather than its middle: 63% of its line-years fall in
+// the large band and only 26% in the mid one. Deriving it at the mid band was
+// tried first, on the reasoning that the middle of the range is the safe place
+// to sit, and it put the table away from most of Property's own exposure —
+// clf-label-backtest-check read -5.2pp at the mid band and -7.9pp at the large
+// one, both outside tolerance, on the 89% of line-years those two bands hold.
+//
+// ⚠ WHAT THIS COSTS, STATED RATHER THAN AVERAGED AWAY. On a SMALL Property book
+// this curve over-funds by up to +10.2pp at the 25% stop. That band is 7% of the
+// derivation sample and 11% of the gate's, and reaching it needs sustained
+// strict underwriting on a line whose book otherwise grows — but it is a real
+// player choice and the error is real. It is the largest single cost of having
+// no book-size dimension anywhere in this file.
 //
 // ⚠ A GROSS-BASIS TABLE FOR PROPERTY WAS OFFERED AND REJECTED, and the reason
 // is the whole point of deriving this one. That candidate curve (crossing
@@ -461,30 +611,32 @@ export const GL_DERIVED: ClfTable = {
 // 0.809 — because the occurrence layer removes the top of every large claim,
 // and that is exactly the difference a net-basis table has to capture.
 //
-// CROSSING 54.0% (95% CI 53.4-54.8), stationary across the ten years (52-55%).
-// So "Expected" on Property is a ~54% stop, not the 60% the generic
-// FUNDING_CLF_TABLE labelled it — the -5.7pp mislabelling measured in
-// scripts/diagnostics/property-clf-basis-report.ts, now corrected at source.
+// CROSSING 52.8%, down from 54.0%. So "Expected" on Property is a ~53% stop, not
+// the 60% the generic FUNDING_CLF_TABLE labelled it — the mislabelling
+// measured in scripts/diagnostics/property-clf-basis-report.ts, corrected at
+// source and still corrected.
 //
-// CONVERGENCE: the second pass, with this table installed, is BYTE-IDENTICAL to
-// the first at every stop, CI and crossing. That is the outcome the derive-twice
-// note above PREDICTS rather than a lucky result — a3d7760 moved the pre-game
-// band onto premium, cutting the 90%-stop-to-opening-surplus loop, and at all
-// defaults fundingAtExpected pins the CLF to 1.000 so the derivation never
-// consults the table it is deriving. Property is the first line derived entirely
-// after that link was cut, which is why it converges in one pass where WC moved
-// 49.9% -> 47.2%.
+// ⚠ PROPERTY IS THE ONE LINE WHOSE CURVE MOVED UP WITH BOOK SIZE, WHICH IS THE
+// OPPOSITE OF WC AND GL. Measured across the bands, Property's 50% stop runs
+// 0.9705 (small ~64) -> 0.9469 (mid ~80) -> 1.0157 (large ~97), so it is not
+// even monotone; WC's and GL's fall steadily as the book grows. Nothing here
+// explains that, and it is recorded as unexplained rather than smoothed over.
+// Property's loss model is the one that concentrates a year's outcome in a few
+// large events, so a bigger book need not diversify it the way frequency-driven
+// WC does — but that is a hypothesis with no measurement behind it yet.
 //
 // VALIDATED OUT OF SAMPLE, which the derivation alone cannot do: a derived table
 // is by construction the percentiles of its own sample. property-clf-basis-report
-// draws a different population and finds every labelled stop within 0.9pp of
-// what it delivers, +0.1pp at the default.
+// draws a different population; it was last run against the table this replaces,
+// where it found every labelled stop within 0.9pp of what it delivers, +0.1pp at
+// the default. ⚠ THAT FIGURE IS NOT RE-MEASURED HERE and should not be read as
+// validating the curve below.
 const PROPERTY_DERIVED: ClfTable = {
   source: 'derived',
   stops: [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 97.5, 99],
   clf: [
-    0.4808, 0.5551, 0.6224, 0.6820, 0.7387, 0.7903, 0.8463, 0.8994, 0.9542, 1.0108,
-    1.0688, 1.1339, 1.1998, 1.2754, 1.3594, 1.4608, 1.5923, 1.8043, 2.0037, 2.2466,
+    0.6398, 0.6974, 0.7442, 0.7883, 0.8260, 0.8641, 0.9043, 0.9417, 0.9781, 1.0157,
+    1.0587, 1.0993, 1.1471, 1.1996, 1.2603, 1.3378, 1.4414, 1.6040, 1.7555, 1.9477,
   ],
 };
 
@@ -530,13 +682,14 @@ export function staticClf(line: StaticClfLine, confidenceLevel: number): number 
 // The percentile at which a table crosses 1.000 — what "Expected" delivers.
 //
 // DERIVED FROM THE TABLE, never stored alongside it, so the two cannot drift.
-// WC 44.1% (its own measured crossing, since its table is derived from that same
-// sample); GL 57.7% on the supplied curve, against 70.9% on its derived one.
+// WC 48.8% (its own measured crossing, since its table is derived from that same
+// sample); Property 52.8%; GL 57.7% on the supplied curve, against 65.7% on its
+// derived one.
 //
 // ⚠ ON GL THIS IS NOW A DISPLAY FIGURE FOR A CURVE THAT IS NOT THE MODEL'S OWN.
 // It correctly reports where the SUPPLIED table crosses, which is what the pool
 // is actually being charged against; it is NOT where GL's real retained
-// distribution crosses. Those differ by 13.2pp and the gap is recorded above.
+// distribution crosses. Those differ by 8.0pp and the gap is recorded above.
 //
 // Returns a 0-1 fraction, clamped to the table's stop range.
 export function crossingOf(table: ClfTable): number {

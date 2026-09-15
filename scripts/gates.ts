@@ -209,9 +209,12 @@ const SLOW: string[] = [
   // 16 -> 48 games by the same common-factor effect as cession-path-
   // independence, so it is expensive for the same measured reason.
   'maturity-anchor-check',           //  106s
-  //  96s — CLF label backtest, green since the maturation book at -3.2pp
-  // against a 5pp tolerance. Stable and well inside its bound.
-  'clf-label-backtest-check',        //   96s
+  // 105s — CLF label backtest. EXPECTED RED on GL; see its EXPECTED_RED entry.
+  // It grew from 96s when it moved to each year's own premium as the denominator,
+  // ten years instead of eight, and four appetite arms at 60 games each instead
+  // of one at 120 — the arms are what let it split the result by book size at
+  // all, and the per-band split is the whole reason the GL error is visible.
+  'clf-label-backtest-check',        //  105s
 ];
 
 // ============================================================================
@@ -251,6 +254,9 @@ const SLOW: string[] = [
 // ============================================================================
 const PROBES: Record<string, string> = {
   'clf-table-derive': 'derives the static CLF tables — a generator, not a check [240s]',
+  'clf-surplus-effect-report': 'what a CLF re-derivation does to ending surplus, in two arms — '
+    + 'it cannot hold two tables in one process, so it is run before and after and diffed by hand. '
+    + 'No pass condition: "the game got harder" is a judgement [190s]',
   'new-business-appetite-derive': 'the APPLICATION_RATE re-derivation after the membership target came out — trajectory per tier year by year, whether the capacity guard binds early or throughout, and whether a growing book understates incurred and so looks more profitable than it is [2400s]',
   'renewal-threshold-derive': 'the experience-ratio distribution the renewal threshold sits on, and what each candidate would decline per line-year. The record for why RENEWAL_THRESHOLDS is 2.50 on the ratio rather than 1.10 on the modifier [330s]',
   'development-cession-size': 'the cession rate by allocation rule; the calibration table [20s]',
@@ -833,6 +839,37 @@ const EXPECTED_RED: Record<string, { code: number; why: string }> = {
   // anyone can measure — and the note that the funding slider's percentages were
   // "labels on a distribution nobody is drawing from" is retired: they are labels
   // on the distribution the pool is now actually drawing from.
+  //
+  // ⚠ AND IT IS BACK, ON GL ALONE, BECAUSE THE GATE COULD NOT SEE THIS BEFORE.
+  // The retraction above was measured on the gate's OLD statistic, which divided
+  // every line-year by one pooled mean of netUltimateLoss. That is only valid
+  // while the book holds its size, and the book is now a trajectory. On each
+  // year's own poolPremium — the denominator the table is derived against — GL
+  // reads -21.9pp at its 30% stop. The entry below is that, and the -3.2pp figure
+  // quoted above is retained as what the old statistic reported, not as a
+  // measurement anyone should rely on. WC and Property were re-derived in the
+  // same commit and are green at every gated band.
+  'clf-label-backtest-check': {
+    code: 1,
+    why: 'GL READS A CURVE THAT WAS NEVER DERIVED FROM THIS ENGINE, AND THAT IS THE WHOLE RED. '
+      + 'GL_SUPPLIED is a real public-entity pool\'s measured curve at a scale this model does not '
+      + 'have — source: \'supplied\', a deliberate placeholder, and clfTables.ts has said so since it '
+      + 'landed. Measured on the premium basis at 240 games x 10 years x 4 appetite arms: GL\'s worst '
+      + 'label error is -21.9pp at the 30% stop, and it is -18.5 / -21.1 / -21.9 across the small, mid '
+      + 'and large book bands, so it is NOT a book-size error and re-deriving at a different band does '
+      + 'nothing for it. The same run puts WC at -4.4pp worst and Property at -3.6pp, both inside the '
+      + '5pp bar at every gated band, on tables re-derived in this commit. '
+      + 'CROSS-CHECK ON THE BASIS: gl-supplied-clf-check measures the same defect by a different '
+      + 'route (GL solo, all defaults, 1,000 games) and reads +14.6pp at the 60% stop and +19.4pp at '
+      + 'the 70% at this commit, against this gate\'s +11.0pp at the 60%. Same sign, same order, both '
+      + 'far outside 5pp, on populations that do not overlap — so they corroborate rather than agree. '
+      + 'FIX, AND IT IS A PRODUCT DECISION RATHER THAN A DERIVATION: either raise GL\'s claim '
+      + 'frequency so the model\'s own annual CV falls toward the supplied curve\'s ~0.40 (clfTables.ts '
+      + 'names this as the real fix), or put GL_DERIVED in force and give up the real-pool anchor. '
+      + 'GL_DERIVED is re-derived and sitting beside it; swapping the one line in STATIC_CLF_TABLE is '
+      + 'all the code that would take. Not done here because it changes what the shipped curve IS, '
+      + 'which is not a call a re-derivation gets to make on its own.',
+  },
 };
 
 // ---------------------------------------------------------------- runner

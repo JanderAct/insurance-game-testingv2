@@ -533,22 +533,29 @@ export function processLineYear(
   // engine cannot carry that class of error.
   //
   // Two consequences of the table being one curve per line: it takes NO book
-  // argument (the book holds near 62 members since the membership equilibrium
-  // fix, so the size axis bought little), and it is calibrated at the DEFAULT
-  // layer placement (declining layers costs up to ~8.9pp of label accuracy —
-  // measured, and recorded at clfTables.ts).
+  // argument, and it is calibrated at the DEFAULT layer placement (declining
+  // layers costs up to ~8.9pp of label accuracy — measured, and recorded at
+  // clfTables.ts).
   //
-  // ⚠ PROPERTY STILL READS THE GENERIC FUNDING_CLF_TABLE, and the REASON it
-  // used to be unaffected has expired. This said "it has no Claim/Occurrence
-  // objects, was never in scope"; it has had both since its loss-model cutover,
-  // and a tower and net funding since dbd9138. The DISPATCH is simply unchanged
-  // — Property has no derived table to dispatch to yet.
+  // ⚠ THE NO-BOOK-ARGUMENT DECISION NO LONGER RESTS ON WHAT IT USED TO. This
+  // said the size axis bought little "because the book holds near 62 members
+  // since the membership equilibrium fix". There is no equilibrium any more —
+  // the target came out and the book is an outcome, running roughly 76 -> 92
+  // enrolled at defaults and reaching 64 at the strict appetite bar. The
+  // decision to keep one curve SURVIVED that, but for a different reason: a
+  // size axis makes the rate move as the book moves, which is a second feedback
+  // between membership and pricing, and the measured cost of not having one is
+  // small. The tables are now derived at the middle of the trajectory rather
+  // than at a static book. clfTables.ts carries the per-band numbers.
   //
-  // That is now a measured defect, not a neutral gap: the generic table is a
-  // gross-basis chart and Property funds net, so its 60% stop delivers 54.3%
-  // (-5.7pp) and the error runs -18.7pp to +7.5pp across the range. Sized in
-  // scripts/diagnostics/property-clf-basis-report.ts; Property's own derived
-  // table is what corrects it.
+  // ⚠ PROPERTY READS ITS OWN DERIVED TABLE. The paragraph that stood here said
+  // it "STILL READS THE GENERIC FUNDING_CLF_TABLE" and had "no derived table to
+  // dispatch to yet", and it was flatly contradicted by the hasStaticClf note
+  // twenty lines below in this same comment. PROPERTY_DERIVED landed and
+  // hasStaticClf has covered all three lines since. The generic table's error on
+  // Property — its 60% stop delivered 54.3%, the range running -18.7pp to
+  // +7.5pp, sized in scripts/diagnostics/property-clf-basis-report.ts — is what
+  // that table fixed, and is history rather than a live defect.
   const selectedFundingConfidenceLevel = lineDecisions.fundingConfidenceLevel;
   // ⚠ THE PRE-MOVEMENT k_line / k_GL THAT USED TO BE COMPUTED HERE IS GONE.
   // It existed only to index the retired CV/lambda grids, and the static tables

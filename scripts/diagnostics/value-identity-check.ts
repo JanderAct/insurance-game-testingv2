@@ -443,6 +443,45 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // basis. The mechanism's own correctness is held by cohort-ledger-check (three
 // identities, both arms), martingale-equivalence-check (term by term) and
 // terminal-severity-check (phi on its anchor), all green at this commit.
+// v39: THE CLF TABLES WERE RE-DERIVED ONTO THE NEW MEMBERSHIP TRAJECTORY.
+// WC_DERIVED, GL_DERIVED and PROPERTY_DERIVED are re-measured at the book band
+// containing each line's own median book — WC and GL at 72-88, Property at 88+.
+// GL_SUPPLIED, which is the curve GL actually prices off, is untouched.
+//
+// 0 fields added, 0 removed, 7,566 of 31,200 moved.
+//
+// ⚠ THE MOVEMENT SPLITS EXACTLY ALONG THE TWO ARMS, AND THAT IS THE WHOLE
+// CONFINEMENT ARGUMENT. Counted from the two baselines directly:
+//
+//     def   735 values, and SEVEN field names, nothing else
+//     sqz 6,831 values
+//
+// The seven are reserveRiskMarginNeeded, fundingMarginNeeded, fundingGap,
+// capitalFundingGap, excessAvailableSurplus, excessCapitalRatio and
+// capitalAdequacyRatio — 105 instances each. Every one is the same quantity or a
+// ratio built on it: simulationEngine reads staticClf(line, 0.90) on EVERY run to
+// size the reserve risk margin, so a re-derived 90th stop moves it whatever the
+// player decides. AT DEFAULTS NOT ONE DOLLAR OF PREMIUM, LOSS, SURPLUS, CASH,
+// RESERVE OR MEMBERSHIP MOVES, which is the direct evidence that the margin is a
+// DISCLOSURE figure and not a charge — endingSurplus is computed independently of
+// it (availableSurplus = endingSurplus, not the reverse). The margin moved by
+// exactly the factor ratio: 7958396.25 -> 6706893.74 is 0.8428, against WC's
+// 0.2776/0.3294 = 0.8427.
+//
+// The sqz arm is where the PRICING channel lives, because that is the only arm
+// with fundingAtExpected off — at defaults the CLF is pinned to 1.000 and the
+// table is never consulted for price at all. selectedFundingCLF 0.6698 -> 0.7913
+// on WC is the change itself; poolPremium, surplus, reserves and every ratio
+// follow from it. activeMembers, withdrawnMembers and memberRetentionRate move
+// there too (35 / 21 / 32 instances) and that is EXPECTED rather than a leak:
+// membership responds to price, so a different premium is a different book. They
+// do NOT move in the def arm, where the premium is identical, which is the
+// control that makes the sqz-arm movement readable.
+//
+// investmentReturnRate moves on 12 instances at the sixteenth decimal
+// (0.06703899471230997 -> 0.06703899471230995) — summation magnitude, same draw,
+// the same signature recorded at v38.
+//
 // v38: THE MEMBERSHIP TARGET CAME OUT, AND THE BOOK IS NOW AN OUTCOME.
 // MEMBERSHIP_EQUILIBRIUM_ENROLLMENT, its two calibration constants, and both
 // movement caps are deleted. Intake is no longer a demand term steered toward a
@@ -492,7 +531,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // capture is sufficient alone here: the hash guard cannot tell "different
 // members enrolled" from "the arithmetic broke", and this one says the
 // changed set is exactly the set a roster change explains.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v38.json');
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v39.json');
 
 function seedOf(id: string) {
   let h = 5381;

@@ -66,8 +66,9 @@ function clfFor(line: CoverageLine, confidenceLevel: number, atExpected: boolean
 // so even though computeFundingConsequence's no longer can. The retired grids
 // computed a per-book crossing because they interpolated on the book's own
 // CV/lambda; the static tables are one curve per line, so the crossing is one
-// number per line — WC 54.7%, GL 57.7% as currently measured (GL reads its
-// SUPPLIED curve; its own derived one crosses at 70.8%).
+// number per line — WC 48.8%, GL 57.7% as currently measured (GL reads its
+// SUPPLIED curve, which the re-derivation did not touch; its own
+// derived one now crosses at 65.7%, down from 70.9%).
 //
 // computeFundingConsequence DOES take members and yearNumber again, for the
 // tower — which genuinely prices off the book. This helper deliberately does
@@ -77,7 +78,7 @@ function clfFor(line: CoverageLine, confidenceLevel: number, atExpected: boolean
 // ⚠ EVERY LINE HAS A TABLE NOW, so the 0.60 fallback is unreachable. It used to
 // be Property's branch: with no table of its own, its 60% stop coincided with
 // CLF 1.000 in FUNDING_CLF_TABLE, so returning 0.60 was the honest answer.
-// Property's derived table crosses at 54.0%, and hasStaticClf now covers it, so
+// Property's derived table crosses at 52.8%, and hasStaticClf now covers it, so
 // the real crossing is returned for all three. The fallback is kept rather than
 // removed because a future fourth line would land on it before it had a table.
 function expectedPercentileFor(line: CoverageLine): number {
