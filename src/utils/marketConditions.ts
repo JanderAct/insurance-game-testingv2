@@ -31,37 +31,27 @@
 //                           another, and pointing departure at this is a
 //                           separate measurement because it moves who leaves.
 //
-// ⚠ IT IS A CHANGE, NOT A LEVEL, AND THAT IS THE BIGGEST THING MISSING FROM
-// THIS FILE — BIGGER THAN ANY UNBUILT COMPONENT BELOW.
+// ⚠ THERE ARE NOW TWO QUANTITIES HERE AND THEY ANSWER DIFFERENT QUESTIONS.
 //
-// Every component is mean 1 by construction, so the INDEX has no absolute
-// meaning — only its year-over-year ratio does. Satisfaction compares two
-// CHANGES, which means A POOL THAT HAS BEEN 20% ABOVE THE MARKET FOREVER AND
-// HOLDS STEADY COSTS NOTHING. A member does not compare changes. They compare
-// their BILL to what they would pay elsewhere, and that is a level.
+//   marketRateChangePct   what the market's rate DID this year. Derived from
+//                         mean-1 components through a trailing window; the index
+//                         has no absolute meaning, only its ratio does.
+//   marketLevelGapPct     where the pool's price SITS against the market's.
+//                         Modelled from a target loss ratio — see below.
 //
-// AND THE LEVEL IS NOT A NEUTRAL ONE, WHICH IS THE PART WORTH BUILDING TOWARD.
-// A commercial carrier funds ABOVE its expected loss — risk load and profit —
-// and a pool does not. That difference IS the pool's reason to exist, and it
-// means the pool holds a COMPETITIVE CUSHION it can spend before members
-// object: some amount of funding above expected still leaves a member cheaper
-// than the alternative. Today the funding slider has no natural price at all,
-// because every level reads the same once the year-over-year change has passed.
-// A market CLF would give it one.
+// The change term alone had a hole the level closes: a pool that has been 20%
+// above the market forever and holds steady shows NO rate change and costs
+// nothing. A member does not compare changes. They compare their bill to what
+// they would pay elsewhere, and that is a level.
 //
-// ⚠ IT NEEDS A NUMBER NEITHER THE MODEL NOR THIS FILE HAS: what a carrier
-// charges over expected loss for these lines. FUNDING_CLF_TABLE and the three
-// derived tables in clfTables.ts describe what THIS BOOK's own losses do at a
-// confidence level — they are not a market price and must not be read as one.
-// RATE_NEUTRAL_LOAD (WC 1.472 / GL 1.457 / Property 1.521) is the POOL's own
-// load over pure premium at defaults, which is the pool's expense and
-// reinsurance stack, not a competitor's margin. Recorded here as the gap rather
-// than half-built, because a level derived from either of those would be this
-// pool measured against itself.
+// ⚠ AND THE LEVEL IS NOT NEUTRAL, WHICH IS THE POINT OF BUILDING IT. A carrier
+// funds ABOVE expected loss for expenses and profit and a pool does not, so the
+// pool holds a CUSHION it can spend before members object. That cushion is what
+// gives the funding slider a price it did not have.
 //
-// The join ladder needs the same level for the same reason — RATE_NEUTRAL_LOAD's
-// own header says "a pool overpriced for five straight years shows NO rate
-// change" — so one derivation would serve both.
+// prospectCaptureRate wants this same level and not the change —
+// RATE_NEUTRAL_LOAD's own header says "a pool overpriced for five straight years
+// shows NO rate change" — so the derivation below serves it when it is rebuilt.
 //
 // ============================================================================
 // ⚠ PURE. NO DRAWS. THIS CANNOT MOVE A BASELINE AND THE PROPERTY IS STRUCTURAL.
@@ -339,6 +329,124 @@ export const MARKET_COMPONENTS_UNBUILT: ReadonlyArray<{
       + 'pass-through the calendar component needs',
   },
 ];
+
+// ============================================================================
+// THE MARKET'S LEVEL — WHAT A CARRIER WOULD CHARGE FOR THE SAME RISK.
+//
+//     market rate per $100  =  expected loss per $100 / TARGET LOSS RATIO
+//
+// ⚠ MODELLED, NOT MEASURED, AND LABELLED THAT WAY. There is no carrier data in
+// this project and there is not going to be any. What is available is the
+// STRUCTURE of commercial pricing, which needs nothing from this pool: a carrier
+// prices to a target loss ratio, with expenses and profit on top of expected
+// loss. The target itself is a JUDGEMENT.
+//
+// ⚠ AND THE EXPECTED LOSS IS THE POOL'S OWN, WHICH IS NOT THE CIRCULARITY THAT
+// KILLED THE FIRST ATTEMPT. A loss cost is a property of the RISK, not of who
+// carries it: the same school district generates the same claims whoever writes
+// it. What was circular about reading a market level off FUNDING_CLF_TABLE or
+// RATE_NEUTRAL_LOAD is that both describe THIS POOL'S OWN LOAD — its confidence
+// level, its admin ratio, its reinsurance tower — so a "market" built from
+// either was the pool measured against itself. The loss cost is shared; only
+// the load is contested, and only the load is modelled here.
+//
+// ============================================================================
+// ⚠ THE CUSHION IS ABOUT 7%, NOT 35%, AND THE DIFFERENCE IS THE POOL'S OWN
+// LOAD. This corrects the figure the level term was commissioned on.
+//
+// "A pool funding at 1.000 is about 35% cheaper" compares CLF 1.000 against
+// 1/0.65 = 1.538 — but CLF 1.000 prices only the POOL PREMIUM leg, and a
+// member's bill also carries admin expense on the gross pure premium and the
+// whole occurrence tower. The comparison that matters is total member charge
+// against total carrier charge, both per unit of GROSS expected loss. Measured
+// on the engine, 4 games x 8 years, at a 65% target:
+//
+//   stop        WC load / cushion    GL load / cushion    Property load / cushion
+//   Expected    1.4052   -8.66%      1.4392   -6.45%      1.4255   -7.34%
+//   0.30        1.3415  -12.80%      1.3064  -15.09%      1.2921  -16.01%
+//   0.50        1.4085   -8.45%      1.4040   -8.74%      1.4054   -8.65%
+//   0.65        1.4619   -4.98%      1.4885   -3.25%      1.4991   -2.56%
+//   0.70        1.4820   -3.67%      1.5217   -1.09%      1.5344   -0.26%
+//   0.75        1.5044   -2.21%      1.5621   +1.54%      1.5782   +2.59%
+//   0.80        1.5324   -0.39%      1.6032   +4.21%      1.6238   +5.55%
+//   0.90        1.6085   +4.55%      1.7391  +13.04%      1.7778  +15.55%
+//   0.95        1.6905   +9.88%      1.8454  +19.95%      1.8951  +23.18%
+//
+// THE SLIDER CROSSES FROM CHEAPER TO DEARER AT ABOUT THE 0.80 STOP ON WC, 0.72
+// ON GL AND 0.70 ON PROPERTY, and that crossing is the mechanic: a pool can
+// fund well above expected and still be the cheaper option, until it cannot.
+// The three lines cross in different places because their own loads differ, not
+// because the market target does.
+//
+// ⚠ AND RATE_NEUTRAL_LOAD IS STALE AGAINST THIS. It records WC 1.472 / GL 1.457
+// / Property 1.521 as the load at all-default decisions; measured here the same
+// quantity reads 1.405 / 1.439 / 1.426. WC is 4.6% out. That constant asks to be
+// re-measured "if any trend constant moves, if DEFAULT_LAYERS_PLACED changes, or
+// if the admin ratio changes", and several of those have. Nothing acts on it —
+// its only consumer, RATE_LEVEL_SENSITIVITY, went dormant with the recruitment
+// ladder — so this is a finding rather than a defect, and this file does NOT
+// read it: `marketLevelGapPct` takes the live rate and the live pure premium.
+//
+// ============================================================================
+// SHOULD THE TARGET VARY BY LINE? YES — AND IT IS A SCALAR HERE ON PURPOSE.
+//
+// A carrier's expense ratio on Property is not its expense ratio on WC. The
+// direction is even fairly clear: long-tail casualty carries more claims
+// handling and more capital per premium dollar than short-tail property, so a
+// property target loss ratio usually sits BELOW a workers' compensation one.
+// So the right structure is per line.
+//
+// It ships as a SCALAR anyway, and that is the honest form of not knowing. A
+// Record<CoverageLine, number> holding the same number three times reads like
+// three measurements and invites exactly one of them to be nudged; a scalar
+// cannot be misread. Differentiating it is a one-line type change plus three
+// numbers, and the three numbers are the part nobody has.
+//
+// ⚠ AND THE TARGET IS LOW-RISK IN A SPECIFIC WAY WORTH STATING. It does NOT set
+// how hard satisfaction reacts — that scale is absorbed by the level weight, so
+// a 60% target and a 70% one produce the same behaviour with a different weight.
+// What it DOES set is WHERE THE CUSHION CROSSES ZERO, and the level reaction is
+// kinked there (see memberSatisfaction.ts). So the number nobody has measured
+// moves the crossing point, not the sensitivity.
+// ============================================================================
+
+/**
+ * ⚠ JUDGEMENT. Not measured, not measurable here, and not derived from anything
+ * in this repo. 65% is a plausible commercial target loss ratio for these lines
+ * — a ~35% expense-and-profit load — and that is the whole of its provenance.
+ * It is recorded as a judgement in the same terms RATE_RETENTION_SENSITIVITY's
+ * own header uses, which is the house form for a number that had to be picked.
+ */
+export const MARKET_TARGET_LOSS_RATIO = 0.65;
+
+/** What a carrier charges per unit of gross expected loss. 1.538 at a 65% target. */
+export function marketLoadOverExpectedLoss(): number {
+  return 1 / MARKET_TARGET_LOSS_RATIO;
+}
+
+/**
+ * How the pool's price compares with the market's, in percentage points.
+ * NEGATIVE is cheaper than the market — the pool's cushion.
+ *
+ *     gap = 100 . ( poolRate / (purePremium / target) - 1 )
+ *         = 100 . ( load . target - 1 )
+ *
+ * Both sides are per $100 of the SAME exposure and both are over the same GROSS
+ * expected loss, which is what makes the comparison meaningful: the pool's load
+ * carries admin and the occurrence tower explicitly, and the carrier's carries
+ * its expenses, its profit and its own reinsurance inside the 35%. That last
+ * point is an assumption of the structure and is stated rather than buried.
+ *
+ * Returns 0 when there is no positive expected loss to compare against, which
+ * is the same neutral-on-missing-data rule priceSignalFor uses.
+ */
+export function marketLevelGapPct(
+  poolTotalRatePer100: number,
+  grossPurePremiumPer100: number,
+): number {
+  if (!(grossPurePremiumPer100 > 0) || !(poolTotalRatePer100 > 0)) return 0;
+  return ((poolTotalRatePer100 / grossPurePremiumPer100) * MARKET_TARGET_LOSS_RATIO - 1) * 100;
+}
 
 /** The ratemaker's experience window. The pool's own, deliberately. */
 export const MARKET_RATING_WINDOW = TRIANGLE_HISTORY_YEARS;

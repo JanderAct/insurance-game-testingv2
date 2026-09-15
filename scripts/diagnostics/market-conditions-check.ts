@@ -12,7 +12,7 @@
 // unhappy for a reason nobody chose. So the properties the module's header
 // rests on are asserted here rather than argued there.
 //
-// SIX SECTIONS, AND SECTION 5 IS THE ONE A FUTURE COMPONENT WILL MEET.
+// SEVEN SECTIONS, AND SECTION 5 IS THE ONE A FUTURE COMPONENT WILL MEET.
 //
 //   1. THE TREND IDENTITY, TO FLOAT. With only the deterministic component,
 //      the benchmark must reproduce RATE_NEUTRAL_CHANGE_PCT exactly at every
@@ -43,6 +43,20 @@
 //      component with its deviation scaled up must red it — a noise test that
 //      has never gone red is not a noise test.
 //
+//   7. THE LEVEL, WHICH IS A DIFFERENT QUANTITY FROM THE OTHER SIX. The change
+//      benchmark is derived from mean-1 components; the LEVEL is MODELLED from a
+//      target loss ratio that nobody has measured. What is asserted is therefore
+//      not its size but its SHAPE and its REACH: the reaction is linear with a
+//      kink at zero rather than a copy of the change term's curvature, the
+//      cushion is monotone in the funding stop, and the slider can actually
+//      spend all of it. That last one is the load-bearing test — the kink at
+//      zero is the only place MARKET_TARGET_LOSS_RATIO does any work, so a pool
+//      that could never reach it would make the target inert.
+//
+// ⚠ AND SECTION 7 PRINTS THE PER-LINE CUSHION AT FIVE STOPS ON EVERY RUN. The
+// full fourteen-stop table is recorded at marketConditions.ts; this is the
+// sampled version, because each stop costs a run of the engine.
+//
 // ⚠ AND THE RECORDED CALENDAR FIGURES ARE TIED BACK TO THE ENGINE HERE, which
 // is the only reason simulationEngine exports reserveStepSigma. The module
 // cannot call it (membershipEngine imports the module, so importing the engine
@@ -57,8 +71,12 @@ import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { processYear, reserveStepSigma } from '../../src/utils/simulationEngine';
 import {
   MARKET_COMPONENTS, MARKET_COMPONENTS_UNBUILT, MARKET_RATING_WINDOW,
-  marketBreakdown, marketCostIndex, marketRateChangePct, type MarketComponent,
+  MARKET_TARGET_LOSS_RATIO, marketBreakdown, marketCostIndex, marketLevelGapPct,
+  marketLoadOverExpectedLoss, marketRateChangePct, type MarketComponent,
 } from '../../src/utils/marketConditions';
+import {
+  SATISFACTION, satisfactionLevelReaction, satisfactionReaction,
+} from '../../src/utils/memberSatisfaction';
 import {
   IBNER_CALENDAR_RHO, RATE_NEUTRAL_CHANGE_PCT, TRIANGLE_HISTORY_YEARS, openShareAtStep,
 } from '../../src/data/defaultAssumptions';
@@ -91,6 +109,9 @@ const DRAWS = Number(process.env.DRAWS ?? 3000);
  * dispersion by exactly this factor.
  */
 const CONTROL_POWER = 4;
+/** Section 7 runs the engine per funding stop, so it is deliberately thin. */
+const LEVEL_GAMES = Number(process.env.LEVEL_GAMES ?? 3);
+const LEVEL_YEARS = Number(process.env.LEVEL_YEARS ?? 6);
 
 const failures: string[] = [];
 const mean = (v: number[]) => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : NaN);
@@ -290,6 +311,87 @@ console.log(`\n--- 6. positive control: every non-deterministic component raised
   if (fired < 3) {
     failures.push(`the positive control reddened only ${fired} of 3 lines at power ${CONTROL_POWER}. `
       + `Section 5's assertion has not been shown to fire, and a noise test that cannot go red is not one.`);
+  }
+}
+
+// --- 7. the market LEVEL, and the cushion at every stop --------------------
+console.log('\n--- 7. the market level: the cushion, and where it crosses zero ---');
+console.log(`  target loss ratio ${MARKET_TARGET_LOSS_RATIO} (JUDGEMENT — see the constant), so a carrier`);
+console.log(`  charges ${marketLoadOverExpectedLoss().toFixed(4)}x gross expected loss.`);
+{
+  // The kink's arithmetic, which is where the unmeasured target earns its keep.
+  const up = satisfactionLevelReaction(10), down = satisfactionLevelReaction(-10);
+  const kinkOk = Math.abs(up - 10) < 1e-12 && Math.abs(down + 10 / SATISFACTION.gratitudeLambda) < 1e-12;
+  console.log(`  level reaction: +10pp -> ${up.toFixed(3)}, -10pp -> ${down.toFixed(3)}, `
+    + `kinked at zero by gratitudeLambda ${SATISFACTION.gratitudeLambda}  ${kinkOk ? 'OK' : 'FAIL'}`);
+  if (!kinkOk) failures.push('the level reaction is not linear-with-a-kink as its header states.');
+  // ⚠ LINEAR, NOT CONVEX, AND THE GATE ASSERTS THE DIFFERENCE RATHER THAN
+  // TRUSTING THE COMMENT. Doubling the gap must exactly double the level
+  // reaction; the change reaction must more than double it.
+  const linDouble = satisfactionLevelReaction(16) / satisfactionLevelReaction(8);
+  const cvxDouble = satisfactionReaction(16) / satisfactionReaction(8);
+  const shapeOk = Math.abs(linDouble - 2) < 1e-12 && cvxDouble > 3.9;
+  console.log(`  doubling the gap: level x${linDouble.toFixed(3)} (must be 2), `
+    + `change x${cvxDouble.toFixed(3)} (must exceed 2)  ${shapeOk ? 'OK' : 'FAIL'}`);
+  if (!shapeOk) {
+    failures.push('the two reactions no longer have different shapes. The level term is linear on '
+      + 'purpose — see satisfactionLevelReaction — and copying the change term\'s curvature across '
+      + 'would compound a standing gap year after year.');
+  }
+}
+{
+  const stops: Array<number | 'expected'> = ['expected', 0.50, 0.65, 0.80, 0.95];
+  const loads: Record<string, Record<string, number>> = {};
+  for (const st of stops) {
+    const key = String(st);
+    loads[key] = {};
+    for (const line of LINES) loads[key][line] = NaN;
+    const acc: Record<string, number[]> = { WC: [], GL: [], Property: [] };
+    for (let g = 0; g < LEVEL_GAMES; g++) {
+      const id = `LVL${g}`;
+      const instance = generateGameInstance(id, 9_000_000 + g * 7919);
+      const setup = { poolName: 'L', gameLength: LEVEL_YEARS, startingYear: 2026, instanceId: id, activeLines: LINES };
+      const { poolState, priorHistory } = runPriorHistory(instance, setup as never);
+      let gs: GameState = {
+        setup: setup as never, instance, currentYearNumber: 1, isStarted: true, isComplete: false,
+        poolState, lockedResults: [], currentDecisions: defaultDecisionSet(1), priorHistory,
+      };
+      for (let y = 1; y <= LEVEL_YEARS; y++) {
+        const d = defaultDecisionSet(y) as DecisionSet;
+        if (st !== 'expected') {
+          for (const l of LINES) { d.byLine[l].fundingAtExpected = false; d.byLine[l].fundingConfidenceLevel = st; }
+        }
+        const p = processYear(gs, d);
+        gs = { ...gs, currentYearNumber: y + 1, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result] };
+        for (const lr of p.lineResults) {
+          const x = lr.result as never as Record<string, number>;
+          acc[lr.line as string].push(marketLevelGapPct(x.ratePer100, x.purePremiumPer100));
+        }
+      }
+    }
+    for (const line of LINES) loads[key][line] = mean(acc[line]);
+    console.log(`  ${key.padEnd(9)} ` + LINES.map(l =>
+      `${l} ${(loads[key][l] >= 0 ? '+' : '') + loads[key][l].toFixed(2)}%`).join('   '));
+  }
+  // MONOTONE IN THE STOP, and it CROSSES. Both are the mechanic: funding higher
+  // must erode the cushion, and the slider must be able to spend all of it.
+  for (const line of LINES) {
+    const series = stops.slice(1).map(st => loads[String(st)][line]);
+    let monotone = true;
+    for (let i = 1; i < series.length; i++) if (series[i] <= series[i - 1]) monotone = false;
+    const crosses = loads.expected[line] < 0 && loads['0.95'][line] > 0;
+    console.log(`  ${line.padEnd(9)} monotone in the stop ${monotone ? 'yes' : 'NO'}   `
+      + `crosses zero inside the slider ${crosses ? 'yes' : 'NO'}  ${monotone && crosses ? 'OK' : 'FAIL'}`);
+    if (!monotone) {
+      failures.push(`${line}: the cushion is not monotone in the funding stop. Funding higher must cost `
+        + `the pool cushion, or the level term is not reporting the decision it exists for.`);
+    }
+    if (!crosses) {
+      failures.push(`${line}: the cushion does not cross zero anywhere on the slider — it reads `
+        + `${loads.expected[line].toFixed(2)}% at Expected and ${loads['0.95'][line].toFixed(2)}% at 0.95. `
+        + `The kink at zero is where MARKET_TARGET_LOSS_RATIO does its only work; if the pool can never `
+        + `reach it, the target is doing nothing and the level term is a one-sided slope.`);
+    }
   }
 }
 

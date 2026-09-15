@@ -1,17 +1,44 @@
 // ============================================================================
 // MEMBER SATISFACTION — what one member thinks of the pool, and it MOVES.
 //
+// TWO LIMBS, BECAUSE A PRICE HAS TWO THINGS TO SAY:
+//
+//   THE CHANGE — what happened to the bill this year, once.
+//
 //     delta_i = -K . r(excess_i) . (1 - FAULT . ownFault_i)
+//     r(x)    = x^2 for x >= 0, -x^2/LAMBDA for x < 0     CONVEX and ASYMMETRIC
 //
-//     excess_i   = the member's own bill change, in percentage points, MINUS
-//                  what the market's rate did this year
-//     r(x)       = x^2 for x >= 0, and -x^2/LAMBDA for x < 0 — CONVEX, so the
-//                  reaction grows faster than the gap, and ASYMMETRIC, so
-//                  grievance outruns gratitude
-//     ownFault_i = how much of their own increase their own claims explain,
-//                  on [0, 1]
+//   THE LEVEL — where the pool's price SITS against the market, every year it
+//   persists. It is an ANCHOR the stock decays toward, not a second flow.
 //
-// applied to the member's carried satisfaction and clamped to [1, 10].
+//     anchor_i = CENTRE - A . L(levelGap)
+//     L(x)     = x for x >= 0, x/LAMBDA for x < 0         LINEAR, kinked at 0
+//
+//   sat_t = sat_(t-1) + delta_i  +  PULL . (anchor_i - (sat_(t-1) + delta_i))
+//
+// clamped to [1, 10].
+//
+// ⚠ A LEVEL AS A FLOW WOULD BE UNBOUNDED, WHICH IS THE WHOLE REASON FOR THE
+// ANCHOR. A change gap happens once and a flow is the right shape for it. A
+// standing 10% gap added year after year would only ever be stopped by the
+// [1, 10] clamp — and a model whose limit is its clamp is not a model. As an
+// anchor the stock walks to what the standing price implies and stays there.
+//
+// ⚠ AND THE ANCHOR FIXED THE THING THE CONVEX FORM COULD NOT. The stock used to
+// be a random walk driven by a convex reaction to a noisy gap, with nothing
+// pulling it back, so its defaults drift accumulated. Mean-reverting, the same
+// noise is transient: WC's drift went -0.0115 to +0.0073 points per member-year
+// and the six-year decision footprint's standard error fell from 0.014 to 0.006.
+// The level term is not a second way to wander. It is what stopped the first.
+//
+// ============================================================================
+// ⚠ THE BIGGEST THING IN THE GAP WAS THE MEMBER'S OWN EXPERIENCE RATING, AND IT
+// IS OUT. Measured on the convex form, WC's gap had SD 7.29pp of which about 5pp
+// was mod_t/mod_(t-1) — against 2.81 from the market benchmark and 3.69 from the
+// pool's own charged rate. A scoreboard whose largest movement is the member's
+// own modifier churning is not reporting on the player, and ownFault did not
+// catch it because ownFault damps the ratio's LEVEL while the noise was in its
+// CHANGE. See OWN_CHANGE_EXPLAINED. WC's gap SD is now 4.52pp.
 //
 // ============================================================================
 // ⚠ WHY CONVEX RATHER THAN A BIGGER W, WHICH WAS THE OBVIOUS NEXT STEP.
@@ -359,15 +386,113 @@ export const SATISFACTION = {
    * a member HAPPIER about a rate rise. The endpoint is the statement.
    */
   faultDiscount: 1.0,
+  /**
+   * How much of the member's OWN modifier change their own claims explain.
+   *
+   * ⚠ 1.0, AND THE REACTION THEREFORE READS THE POOL'S GAP ALONE. This is the
+   * largest correction in the convex rebuild's aftermath and it came out of the
+   * convex form's own drift measurement: WC's gap had SD 7.29pp of which about
+   * 5pp was mod_t/mod_(t-1), against 2.81 from the market benchmark and 3.69
+   * from the pool's charged rate. So the biggest thing a member's satisfaction
+   * moved on was THEIR OWN EXPERIENCE RATING CHURNING, and a scoreboard whose
+   * largest movement is that is not reporting on the player.
+   *
+   * WHY 1.0 IS THE ANSWER AND NOT A TUNED FRACTION. The modifier is rebased to
+   * the book's mean every year, and ownExperienceFrames deliberately divides
+   * BOTH legs by the SAME M — see its header — so mod_t/mod_(t-1) isolates the
+   * member's own clamped ratio moving and contains no move in the book around
+   * them. There is no pool decision inside it to leave in. Anything below 1
+   * charges the pool for a member's own claims.
+   *
+   * ⚠ AND IT NARROWS WHAT THE FIELD MEANS, WHICH IS WORTH SAYING. The original
+   * design read "the member's own bill year over year". It now reads "the
+   * pool's price against the market, damped by how much this member can blame
+   * themselves". The BILL is still computed and carried on every move row —
+   * billChangePct — so nothing is hidden; it is simply not what the member
+   * holds the pool responsible for.
+   *
+   * ⚠ WHAT IT COSTS: within a line-year every member now shares one gap, so the
+   * only per-member variation left in a single year is ownFault. Members still
+   * separate across years, across their line mix, and through the accumulated
+   * path — but two members of one line in one year can differ by at most the
+   * fault discount. member-satisfaction-check's interaction section is
+   * correspondingly weaker and says so.
+   */
+  ownChangeExplained: 1.0,
+  /**
+   * Satisfaction points per percentage point of LEVEL gap, at the anchor.
+   *
+   * ⚠ DERIVED FROM WHAT EACH TERM SHOULD BE WORTH OVER A GAME, WHICH IS THE
+   * QUESTION A SHARED WEIGHT GETS WRONG. A level gap applies every year and a
+   * change gap applies once, so on one weight the level dominates within two or
+   * three years and the change term stops mattering.
+   *
+   * THE ANCHOR: one stop on the funding slider should be worth the SAME through
+   * the level as it is through the change, over the six years the gate already
+   * traces (the decision year and the five after it). Bigger moves and longer
+   * holds then belong to the level, one-off rate blips to the change, and
+   * neither is set by taste.
+   *
+   * Measured, Expected -> the 0.65 stop on WC:
+   *
+   *   cushion             -8.66%  ->  -4.98%      (both on the cheaper side)
+   *   L(x) = x / 2.25     -3.85   ->  -2.21       delta 1.64pp of reaction
+   *   convergence in 6 years at a 3-year half-life  1 - 0.5^2 = 75%
+   *   settled level effect                        0.75 x 1.64 x levelWeight
+   *   the change term's own six-year footprint     0.037 points (24 games)
+   *
+   *   levelWeight = 0.037 / (0.75 x 1.64) = 0.030
+   *
+   * ⚠ WHAT THAT BUYS ACROSS THE WHOLE SLIDER, which is the number that matters
+   * more than the anchor: Expected -> the 0.95 stop moves the cushion -8.66% ->
+   * +9.88% on WC, so L goes -3.85 -> +9.88 and the anchor moves 0.41 points.
+   * On Property, whose load climbs fastest, -7.34% -> +23.18% moves it 0.79.
+   * A sustained pricing decision is therefore worth ten to twenty times a
+   * one-year rate blip, which is what "applies every year" should mean.
+   */
+  levelWeight: 0.030,
+  /**
+   * How long a member takes to come round to a new standing price.
+   *
+   * ⚠ 3 YEARS, AND IT IS EXPERIENCE_WINDOW_YEARS RATHER THAN A PICK. The model
+   * already has a statement about how far back a member looks — the experience
+   * window their own loss ratio is computed over, measured at 3 because
+   * reliability peaks there. Using the same span for how long an opinion takes
+   * to catch up with a price is one memory, not two.
+   *
+   * At a 3-year half-life a member is 75% of the way to a new anchor after six
+   * years and 90% after ten, so a decision taken in year 3 of a ten-year game
+   * has substantially landed by the end and one taken in year 9 has barely
+   * started — which is the right shape for a game where late decisions should
+   * not read as free.
+   */
+  levelHalfLifeYears: 3,
+  /**
+   * What a member thinks of a pool priced EXACTLY AT THE MARKET.
+   *
+   * ⚠ THIS IS WHY THE OPENING DISPOSITION IS NOT THE NEUTRAL POINT ANY MORE,
+   * AND THE OFFSET IS THE MECHANIC RATHER THAN A DRIFT. Members open at
+   * OPENING_SATISFACTION, which is this number; at all-default decisions the
+   * pool is 6-9% CHEAPER than the modelled market, so the anchor sits slightly
+   * above the opening and the stock settles a little happier than it started.
+   * That is the pool's reason to exist showing up on the scoreboard, and it is
+   * a fixed offset rather than an accumulating slide — the whole point of an
+   * anchor.
+   *
+   * member-satisfaction-check's drift assertion therefore measures the NET of
+   * the change term's negative and the anchor's positive pull, and both have to
+   * stay small. Two ways to wander, one bound.
+   */
+  anchorCentre: 7.20,
   /** The stock's bounds. Same [1, 10] the field has always carried. */
   floor: 1.0,
   ceiling: 10.0,
 };
 
 /**
- * The convex reaction: how many satisfaction points a gap of `excessPct` is
- * worth, before the fault discount. Positive OUT means unhappier, so the caller
- * negates.
+ * The CHANGE reaction: how many satisfaction points a one-year gap of
+ * `excessPct` is worth, before the fault discount. Positive OUT means
+ * unhappier, so the caller negates.
  *
  *     r(x) =  x^2          for x >= 0
  *     r(x) = -x^2 / LAMBDA for x <  0
@@ -378,6 +503,77 @@ export const SATISFACTION = {
 export function satisfactionReaction(excessPct: number): number {
   const x = excessPct;
   return x >= 0 ? x * x : -(x * x) / SATISFACTION.gratitudeLambda;
+}
+
+// ============================================================================
+// THE LEVEL REACTION — LINEAR EITHER SIDE OF A KINK AT ZERO, AND THE FORM IS
+// NOT THE CHANGE TERM'S.
+//
+//     L(x) =  x           for x >= 0   the pool costs MORE than the market
+//     L(x) =  x / LAMBDA  for x <  0   the pool is cheaper, and that is worth
+//                                      something, but less
+//
+// ⚠ NOT CONVEX, AND THE REASON IS NOT SYMMETRY WITH THE CHANGE TERM. Three
+// arguments, none of which is "the other one is squared":
+//
+//   1. THERE IS NO NOISE TO SUPPRESS. Convexity's job in the change term is
+//      separating a decision from a noisy year: the change gap's SD at defaults
+//      is 4.3-5.1pp per line. The LEVEL gap's own year-to-year SD is the pool's
+//      load moving, measured at 0.012-0.030 of load — about 1-2pp of cushion.
+//      A curve that exists to push noise below the signal has nothing to push.
+//
+//   2. A LEVEL APPLIES EVERY YEAR AND CONVEXITY WOULD COMPOUND IT. A standing
+//      gap held for a decade under a squared reaction is a standing squared
+//      pull, which would dominate the change term within two years — the exact
+//      failure the weighting question was asked about, arriving through the
+//      form instead of the weight.
+//
+//   3. THE JUDGEMENT IN A LEVEL IS A THRESHOLD, NOT A CURVATURE. "A 2pp increase
+//      is invisible and a 15pp one is a board conversation" is a statement about
+//      curvature. The level's equivalent statement is "being dearer than the
+//      alternative is different in kind from being cheaper", which is a KINK —
+//      and it sits at zero, where MARKET_TARGET_LOSS_RATIO puts it.
+//
+// ⚠ THE KINK IS WHERE THE UNMEASURED JUDGEMENT EARNS ITS KEEP. The target loss
+// ratio does not set how hard satisfaction reacts — that scale is absorbed by
+// levelWeight, so 60% and 70% give the same behaviour at a different weight.
+// What it sets is WHERE THE CUSHION CROSSES ZERO, and because the reaction is
+// kinked there, crossing it more than doubles the marginal reaction. A pool
+// funding past that point stops being the cheaper option and starts being the
+// dearer one, which is a different conversation with a member.
+// ============================================================================
+export function satisfactionLevelReaction(levelGapPct: number): number {
+  const x = levelGapPct;
+  return x >= 0 ? x : x / SATISFACTION.gratitudeLambda;
+}
+
+/**
+ * Where a member's satisfaction is heading, given what the pool costs against
+ * the market right now. The stock decays toward this rather than being pushed
+ * by it — see applySatisfaction.
+ *
+ * ⚠ AN ANCHOR AND NOT A FLOW, AND THAT IS THE WHOLE DIFFERENCE BETWEEN A LEVEL
+ * AND A CHANGE. A change gap happens once and a flow is the right shape for it.
+ * A level gap applies EVERY YEAR, and a level added as a flow into a stock is
+ * unbounded — after ten years of a standing 10% gap the only thing stopping it
+ * is the [1, 10] clamp, which would mean the clamp was the model. As an anchor
+ * it is bounded by construction: the stock walks to where the standing price
+ * comparison says and then stays there.
+ *
+ * ⚠ AND IT MAKES THE PROCESS MEAN-REVERTING, WHICH HELPS THE THING THE CHANGE
+ * TERM WAS FAILING. Before this the stock was a random walk driven by a convex
+ * reaction to a noisy gap, so its defaults drift accumulated without anything
+ * pulling back. With an anchor the same noise is transient.
+ */
+export function satisfactionAnchor(levelGapPct: number): number {
+  const { anchorCentre, levelWeight, floor, ceiling } = SATISFACTION;
+  return Math.max(floor, Math.min(ceiling,
+    anchorCentre - levelWeight * satisfactionLevelReaction(levelGapPct)));
+}
+
+/** Share of the distance to the anchor closed in one year. See levelHalfLifeYears. */
+export function satisfactionAnchorPull(): number {
+  return 1 - Math.pow(0.5, 1 / SATISFACTION.levelHalfLifeYears);
 }
 
 /**
@@ -398,6 +594,7 @@ export function satisfactionMoves(
   history: MemberLossHistory,
   poolRateChangePct: number | null | undefined,
   marketChangePct: number,
+  levelGapPct: number,
 ): SatisfactionMove[] {
   const { divisor: M, frames } = ownExperienceFrames(members, line, history);
   const { ratioCeiling } = EXPERIENCE_MOD;
@@ -405,19 +602,38 @@ export function satisfactionMoves(
   const known = poolRateChangePct !== null && poolRateChangePct !== undefined;
   const r = known ? poolRateChangePct : 0;
 
+  // The pool's own doing: its charged rate against the market. One number for
+  // the whole line-year, because a pricing decision is one decision.
+  const poolGapPct = known ? r - marketChangePct : 0;
+
   return members.map((m, i) => {
     const f = frames[i];
     const billChangePct = ((1 + r / 100) * (1 + f.ownChangePct / 100) - 1) * 100;
-    const excessPct = known ? billChangePct - marketChangePct : 0;
     const ownFault = f.rated && faultSpan > 0
       ? Math.max(0, Math.min(1, (f.clamped / M - 1) / faultSpan))
+      : 0;
+    // ⚠ THE MEMBER'S OWN MODIFIER CHANGE IS DISCOUNTED OUT — see
+    // OWN_CHANGE_EXPLAINED. At 1.0 the reaction reads the pool's gap alone and
+    // the member's own experience reaches satisfaction only through ownFault,
+    // which is what it was built to do.
+    const excessPct = known
+      ? poolGapPct + f.ownChangePct * (1 - SATISFACTION.ownChangeExplained)
       : 0;
     return {
       memberId: m.id,
       billChangePct,
       marketChangePct,
+      ownChangePct: f.ownChangePct,
+      poolGapPct,
       excessPct,
       ownFault,
+      levelGapPct,
+      // ⚠ THE FAULT DISCOUNT DOES NOT TOUCH THE ANCHOR, DELIBERATELY. ownFault
+      // answers "how much of this INCREASE did you cause", which is a question
+      // about a change. A member's own claims do not make the pool a cheaper or
+      // dearer place to buy insurance than a carrier, so there is nothing for
+      // them to be at fault for in a level.
+      anchor: satisfactionAnchor(levelGapPct),
       delta: -SATISFACTION.priceWeight * satisfactionReaction(excessPct)
         * (1 - SATISFACTION.faultDiscount * ownFault),
     };
@@ -452,9 +668,19 @@ export function applySatisfaction(
   moves: ReadonlyMap<string, SatisfactionMove>,
 ): Member[] {
   const { floor, ceiling } = SATISFACTION;
+  const pull = satisfactionAnchorPull();
   return members.map(m => {
-    const d = moves.get(m.id)?.delta ?? 0;
-    const next = Math.max(floor, Math.min(ceiling, parseFloat((m.satisfaction + d).toFixed(2))));
+    const mv = moves.get(m.id);
+    if (!mv) return m;
+    // THE CHANGE FIRST, THEN THE PULL. Order matters only at the second decimal
+    // and the choice is stated rather than incidental: this year's price shock
+    // lands, and then the member's opinion drifts toward what the standing price
+    // implies. Pulling first would let the anchor absorb part of a shock in the
+    // year it happened, which is exactly the visibility the convex change term
+    // exists to protect.
+    const afterChange = m.satisfaction + mv.delta;
+    const next = Math.max(floor, Math.min(ceiling,
+      parseFloat((afterChange + pull * (mv.anchor - afterChange)).toFixed(2))));
     return next === m.satisfaction ? m : { ...m, satisfaction: next };
   });
 }

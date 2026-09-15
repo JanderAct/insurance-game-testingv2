@@ -304,26 +304,33 @@ export const CANONICAL_ROSTER: ReadonlyArray<CanonicalRosterRow> = [
 // at rho 0.52 against risk quality's 0.34). That sort is gone.
 //
 // THE RULE: the full width is no wider than the SMALLEST SIGNAL IT MUST NOT
-// HIDE, which is one funding decision. Measured on the convex model, 24 games,
-// one stop on the funding slider costs a blameless member 0.058 points over the
-// decision year and the five that follow, with a standard error of 0.014 —
-// member-satisfaction-check section 6 traces it and ASSERTS the inequality, so
-// the two cannot drift apart. 0.03 sits two standard errors inside that: two
-// members who differ only in their enrolment luck can never differ by as much
-// as one decision is worth, and the margin survives the estimate's own noise.
+// HIDE, which is one funding decision. Measured with both satisfaction limbs in
+// force, 24 games, one stop on the funding slider costs a blameless member
+// 0.043 points over the decision year and the five that follow, with a standard
+// error of 0.006 — member-satisfaction-check section 6 traces it and ASSERTS
+// the inequality, so the two cannot drift apart. 0.02 sits three standard
+// errors inside that.
 //
-// ⚠ 0.10 WAS TRIED FIRST AND FAILED ITS OWN GATE, THEN 0.05 PASSED ON ONE
-// SAMPLE AND WOULD NOT HAVE SURVIVED ANOTHER. The first came from a footprint of
-// 0.15 read off a single member in a single game before the boundary re-pin
-// landed; measured across 16 games it was 0.072 and across 24 it is 0.058. The
-// RULE survived both corrections and the NUMBER it produced did not, which is
-// the argument for asserting a derivation in a gate rather than recording it in
-// a comment.
+// ⚠ THE FOOTPRINT GOT SMALLER AND FOUR TIMES LESS NOISY AT THE SAME TIME, WHICH
+// IS THE LEVEL TERM ARRIVING. It read 0.058 +/- 0.014 on the change term alone
+// and 0.043 +/- 0.006 with the anchor: the change term's own contribution shrank
+// when the member's modifier churn came out of the gap, and the anchor's
+// contribution is nearly noiseless because a standing price level barely moves
+// year to year. A smaller number measured four times more precisely is a better
+// number to derive against.
 //
-// ⚠ AND THE HONEST READING OF 0.03 IS THAT THE DRAW IS NOW NEARLY DECORATIVE.
-// One decision is worth six hundredths of a point, so anything that must sit
-// under it is small. That is not a flaw in the width — it is what the model says
-// a decision is worth, and the alternative was a draw that outweighed one.
+// ⚠ THE RULE HAS SURVIVED THREE CORRECTIONS AND THE NUMBER IT PRODUCED HAS NOT,
+// WHICH IS THE ARGUMENT FOR ASSERTING A DERIVATION IN A GATE RATHER THAN
+// RECORDING IT IN A COMMENT. 0.10 came from a footprint of 0.15 read off one
+// member in one game before the boundary re-pin, and FAILED its own gate. 0.05
+// came from 0.072 at 16 games and would not have survived 24. 0.03 came from
+// 0.058 and did not survive the level term. Each time the gate caught it on the
+// next run, and each time the rule was right and the arithmetic was stale.
+//
+// ⚠ AND THE HONEST READING OF 0.02 IS THAT THE DRAW IS NOW DECORATIVE. One
+// decision is worth four hundredths of a point, so anything that must sit under
+// it is small. That is not a flaw in the width — it is what the model says a
+// decision is worth, and the alternative was a draw that outweighed one.
 //
 // ⚠ IT IS NOT ZERO, AND THE REASON IS ONLY THAT IDENTICAL IS WRONG TOO. A
 // single constant would say the model has an opinion it does not have — that
@@ -335,7 +342,7 @@ export const CANONICAL_ROSTER: ReadonlyArray<CanonicalRosterRow> = [
 // member rather than of when they happened to join. The same 19-mod-23 walk the
 // 2.2-point version used, rescaled: it steps through 23 distinct values with no
 // short-period correlation against the roster's own ordering.
-export const OPENING_SATISFACTION = { min: 7.20, max: 7.23 } as const;
+export const OPENING_SATISFACTION = { min: 7.20, max: 7.22 } as const;
 
 export function openingSatisfaction(index: number): number {
   const span = OPENING_SATISFACTION.max - OPENING_SATISFACTION.min;

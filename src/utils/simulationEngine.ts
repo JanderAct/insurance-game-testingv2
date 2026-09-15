@@ -32,7 +32,7 @@ import {
 } from './developmentAllocation';
 import { isClaimClosed } from './claimClosure';
 import { allocateMemberPremium } from './memberPremium';
-import { marketRateChangePct } from './marketConditions';
+import { marketLevelGapPct, marketRateChangePct } from './marketConditions';
 import { applySatisfaction, satisfactionMoves, satisfactionMovesById } from './memberSatisfaction';
 import { applyRenewalDeclines, renewalDeclines } from './renewalUnderwriting';
 import { memberExperienceMods } from './memberExperienceMod';
@@ -1099,6 +1099,11 @@ export function processLineYear(
   const satisfaction = satisfactionMoves(
     currentActiveMembers, line, ctx.memberLossHistory, chargedRateChangePct,
     marketRateChangePct(line, yearNumber, { seed: instance.seed, gameId: instance.instanceId }),
+    // The LEVEL: where this year's charged rate sits against what a carrier
+    // would want for the same expected loss. Both per $100 of the same exposure
+    // and both over the GROSS pure premium, which is the basis that makes the
+    // pool's explicit admin and tower comparable with a carrier's implicit load.
+    marketLevelGapPct(totalMemberRatePer100, pricedPurePremiumPer100),
   );
   // ⚠ SCORED LATE AND SUBSTITUTED ONLY WHERE THE ROSTER IS PERSISTED. Everything
   // between the renewal screen and here reads `enrolledMembers` for exposure,

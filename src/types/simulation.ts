@@ -193,15 +193,37 @@ export interface MemberPremiumShare {
  */
 export interface SatisfactionMove {
   memberId: string;
-  /** Percentage points: (1 + r/100)(mod_t/mod_(t-1)) - 1, x100. */
+  /**
+   * What the member's bill actually did, in percentage points:
+   * (1 + r/100)(mod_t/mod_(t-1)) - 1, x100. REPORTED, NOT REACTED TO — see
+   * `excessPct` and memberSatisfaction.ts's split.
+   */
   billChangePct: number;
   /** Percentage points, from marketConditions. The same for every member. */
   marketChangePct: number;
-  /** billChangePct - marketChangePct. What the pool has to answer for. */
+  /**
+   * The member's own experience modifier's year-over-year change, in percentage
+   * points. The part of `billChangePct` that is theirs rather than the pool's.
+   */
+  ownChangePct: number;
+  /**
+   * The pool's charged rate against the market, in percentage points. Identical
+   * for every member of a line-year, because a pricing decision is.
+   */
+  poolGapPct: number;
+  /** What satisfaction actually reacts to. See OWN_CHANGE_EXPLAINED. */
   excessPct: number;
   /** [0, 1]. 0 for an unrated member and for anyone at or below the book mean. */
   ownFault: number;
-  /** Satisfaction points. Negative is unhappier. */
+  /**
+   * Where the pool's price SITS against the modelled market, in percentage
+   * points. NEGATIVE is cheaper. The same for every member of a line-year, and
+   * it is a LEVEL: it applies every year it persists, unlike excessPct.
+   */
+  levelGapPct: number;
+  /** The satisfaction level this year's price implies. See satisfactionAnchor. */
+  anchor: number;
+  /** The one-year CHANGE reaction, in satisfaction points. Negative is unhappier. */
   delta: number;
 }
 

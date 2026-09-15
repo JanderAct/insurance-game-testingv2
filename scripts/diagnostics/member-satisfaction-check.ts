@@ -41,16 +41,26 @@
 // SEVEN SECTIONS.
 //
 //   1. IT MOVES. Share of member-years that change, per line, against a null
-//      arm at weight 0 which must move only by the re-join draw.
+//      arm with BOTH weights at 0 which must move only by the re-join draw.
 //   2. IT FEEDS NOTHING. Static allow-list over src/.
-//   3. DRIFT AT DEFAULTS. All-defaults is the neutral point of this model, and
-//      a scoreboard that slides at defaults is a scoreboard measuring its own
-//      calibration error. This is also precondition 3 for ever promoting the
-//      field into departure — see memberSatisfaction.ts.
-//   4. THE REACTION IS CONVEX, at named points, against the linear form it
-//      replaces. The whole claim of the convex rebuild is that an ordinary year
-//      goes quiet while a decision bites, so the RATIO is asserted rather than
-//      the shape being taken on trust.
+//   3. DRIFT AT DEFAULTS, AND IT IS NOW THE NET OF TWO LIMBS. The convex change
+//      term pulls down on a noisy gap; the anchor pulls up, because at defaults
+//      the pool is 6-9% cheaper than the modelled market. Either can wander and
+//      the bound covers their sum, which is the only thing a player sees. This
+//      is also precondition 3 for ever promoting the field into departure.
+//
+//      ⚠ AND THE ANCHOR IS WHY THE DRIFT IS SMALL RATHER THAN A SECOND WAY TO
+//      WANDER. Before it the stock was a random walk driven by a convex reaction
+//      to a noisy gap, with nothing pulling back; with it the same noise is
+//      transient and the process mean-reverts. Measured, WC went -0.0115 to
+//      +0.0073 per member-year and the six-year decision footprint's standard
+//      error fell from 0.014 to 0.006.
+//   4. THE CHANGE REACTION IS CONVEX, at named points, against the linear form
+//      it replaces. The whole claim of the convex rebuild is that an ordinary
+//      year goes quiet while a decision bites, so the RATIO is asserted rather
+//      than the shape being taken on trust. The LEVEL limb's own shape is
+//      asserted in market-conditions-check section 7, next to the cushion it
+//      reads.
 //   5. THE INTERACTION IS REAL, CONTROLLED FOR THE GAP. The design's claim is
 //      that the loss term MODULATES the price term: among members facing the
 //      SAME increase, the blameless ones must be unhappier.
@@ -272,10 +282,19 @@ for (const line of LINES) {
   // The null arm. Weight 0 must freeze the field completely, which is also the
   // statement that every move above came from THIS mechanism and not from
   // members joining and drawing afresh.
-  const keep = SATISFACTION.priceWeight;
+  // ⚠ BOTH WEIGHTS, AND ZEROING ONLY THE CHANGE TERM WAS THE FIRST CUT'S BUG.
+  // The model has two limbs now — a convex reaction to this year's gap and a
+  // pull toward the anchor the standing price level implies — and a null that
+  // silenced one of them reported 85.7% of member-years still moving, which is
+  // the anchor doing exactly what it should. A null arm has to switch off the
+  // whole mechanism or the share it measures is not this mechanism's.
+  const keepPrice = SATISFACTION.priceWeight;
+  const keepLevel = SATISFACTION.levelWeight;
   SATISFACTION.priceWeight = 0;
+  SATISFACTION.levelWeight = 0;
   const nullRuns = Array.from({ length: Math.min(3, GAMES) }, (_, g) => play(g, false));
-  SATISFACTION.priceWeight = keep;
+  SATISFACTION.priceWeight = keepPrice;
+  SATISFACTION.levelWeight = keepLevel;
   let moved = 0, total = 0;
   for (const line of LINES) { const s = movedShare(nullRuns, line); moved += s.moved; total += s.total; }
   const share = moved / Math.max(total, 1);
