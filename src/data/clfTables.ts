@@ -430,6 +430,25 @@ export interface ClfTable {
 // every percentile. The membership rewrite removed those line-years from the
 // population, which is exactly the trigger this file's own re-derivation note
 // names.
+// ============================================================================
+// ⚠ THIS TABLE IS ON THE CALENDAR-YEAR BASIS AND STAYS THERE. RULED.
+//
+// clf-label-backtest-check now measures ACCIDENT-YEAR ultimate — did this year's
+// claims come in under this year's premium — because that is what the funding
+// slider's label promises. This curve is percentiles of netIncurredLoss /
+// poolPremium, a CALENDAR year, which blends every open accident year at a
+// different maturity. It is green on the basis it was built on and reads
+// -7.0 / -11.0 / -7.5 on the other one.
+//
+// RE-DERIVING WAS COSTED AND DECLINED. It would raise every off-Expected stop by
+// 3.2% to 6.0%, and only 16.4% of WC accident years written in a ten-year game
+// reach their own runoff horizon before the game ends — WC's horizon is drawn on
+// [5, 12]. So a WC curve on settled ultimate charges for cost the player never
+// sees land in their own P&L in five games out of six. GL 45.3% and Property
+// 71.0% do not have that problem to the same degree.
+//
+// ⚠ DO NOT READ THE GATE'S WC RED AS AN OUTSTANDING DEFECT. It is a measured,
+// costed choice, and its EXPECTED_RED entry in scripts/gates.ts says so.
 const WC_DERIVED: ClfTable = {
   source: 'derived',
   stops: [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 97.5, 99],
@@ -537,6 +556,23 @@ const WC_DERIVED: ClfTable = {
 // request in the engine is reserveMarginCLF at 0.90, so every reachable request
 // already falls inside 25-95. staticClf still clamps outside the range, but on
 // GL that clamp is unreachable from any UI control.
+// ============================================================================
+// ⚠ AND IT STAYS. THE CASE AGAINST IT WAS THE GATE'S OWN BASIS, NOT THIS CURVE.
+//
+// Two routes away from this table were proposed on a 21.9pp label error that
+// turned out to be an artefact — the gate scored this ACCIDENT-YEAR curve
+// against a CALENDAR-YEAR statistic. On the corrected basis:
+//
+//   GL_SUPPLIED   -0.5 to +1.7pp from the 70% stop up, -8.8pp pooled worst
+//   GL_DERIVED    -16.2pp pooled worst, and worst exactly in the margin-buying
+//                 half where this curve is near-exact
+//
+// Its accident-year ratio CV is 0.4168 against this curve's implied 0.3979 —
+// within 5%. The real-pool anchor describes this model's GL almost exactly, and
+// installing the derived curve would have replaced the more accurate of the two
+// with the less. The residual is confined to the deliberate-underfunding end
+// (-11.6pp at the 30% stop), where this curve carries a fatter low tail than the
+// model produces.
 const GL_SUPPLIED: ClfTable = {
   source: 'supplied',
   stops: [25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95],
@@ -657,6 +693,19 @@ export const GL_DERIVED: ClfTable = {
 // where it found every labelled stop within 0.9pp of what it delivers, +0.1pp at
 // the default. ⚠ THAT FIGURE IS NOT RE-MEASURED HERE and should not be read as
 // validating the curve below.
+// ============================================================================
+// ⚠ ALSO CALENDAR-YEAR BASIS, AND ALSO STAYING — for a simpler reason than WC's.
+//
+// On the accident-year basis clf-label-backtest-check now gates, this curve
+// reads +7.9 (thin, ungated) / -4.4 / -1.7, and its indicated accident-year
+// curve sits between -2.6% and +4.0% of what ships, inside a point at the stops
+// that carry weight. Property is close enough on BOTH bases that re-deriving
+// buys almost nothing, so the basis question that decided WC barely arises here.
+//
+// Property is also the line least exposed to the objection that sank a WC
+// re-derivation: 71.0% of its accident years written in a ten-year game reach
+// their own horizon before it ends, against WC's 16.4%. If the ruling on WC is
+// ever revisited, Property is the cheap half of it.
 const PROPERTY_DERIVED: ClfTable = {
   source: 'derived',
   stops: [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 97.5, 99],

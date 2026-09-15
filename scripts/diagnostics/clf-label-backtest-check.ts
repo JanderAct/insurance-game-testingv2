@@ -122,18 +122,74 @@
 // small one, because short horizons are not a random sample of accident years.
 //
 // ============================================================================
-// ⚠ WHAT THIS BASIS COSTS ON WC SPECIFICALLY, STATED RATHER THAN BURIED.
+// ⚠ WC AND PROPERTY KEEP THEIR CALENDAR-BASIS TABLES. RULED, NOT OUTSTANDING.
 //
-// A default game is ten years. A WC accident year written in it can outlive the
-// game: the share of WC accident years that reach their own horizon before a
-// ten-year game ends is reported below, measured rather than assumed. So a WC
-// table on this basis charges partly for cost the player will never see charged
-// to their own P&L.
+// This is a DECISION and not an unresolved red. A reader who finds WC at -11.0
+// below should not spend a day re-deriving it: that was costed and declined.
+//
+//   WC        -7.0 / -11.0 / -7.5 on this basis, and green on the calendar basis
+//             it was derived on. Re-deriving would raise every off-Expected stop
+//             by 3.2% to 6.0% — see the INDICATED CURVE section the run prints.
+//
+//   Property  +7.9 (thin, ungated) / -4.4 / -1.7. Close enough on both bases
+//             that re-deriving buys almost nothing; its indicated curve moves
+//             -2.6% to +4.0% and is inside a point at the stops that matter.
+//
+//   GL        stays on GL_SUPPLIED, and is the case that carried the basis
+//             change: -0.5 to +1.7pp from the 70% stop up, against -21.7pp on
+//             the calendar basis. Its accident-year ratio CV is 0.4168 against
+//             the supplied curve's implied 0.3979.
+//
+// ⚠ AND WC CARRIES AN OBJECTION THE OTHER TWO DO NOT, which is what decided it.
+// A default game is ten years and WC's runoff horizon is drawn on [5, 12], so a
+// WC accident year written in a game can outlive it. Measured: only 16.4% of WC
+// accident years written in a ten-year game reach their own horizon before it
+// ends, against GL 45.3% and Property 71.0%. A WC table derived on settled
+// ultimate would charge for cost the player never sees land in their own P&L in
+// FIVE GAMES OUT OF SIX.
 //
 // That does not make the basis wrong — funding IS a claim about ultimate cost,
 // and ultimate cost is unobservable at the moment of the decision in real
-// ratemaking too. It does mean WC's case for re-deriving on this basis is
-// weaker than GL's, and the decision is recorded as open rather than taken.
+// ratemaking too. It makes WC the line where the accident-year basis buys the
+// least and costs the most, and the ruling followed the measurement.
+//
+// ⚠ WHAT THE RULING ACCEPTS, NAMED SO IT IS NOT DISCOVERED LATER. The slider
+// carries the same words on all three lines while GL's curve now describes
+// accident years and WC's and Property's describe calendar years. So "75%
+// confidence" does not mean exactly the same thing per line. That is a real
+// user-facing inconsistency, it was chosen with the numbers above in view, and
+// closing it means re-deriving two tables and accepting a 3-6% WC premium rise
+// for cost most players never see.
+//
+// ============================================================================
+// ⚠ OPEN QUESTION: SHOULD WC AND PROPERTY BE GATED ON THIS BASIS AT ALL?
+//
+// They are, today. Every line is scored on accident-year ultimate and the worst
+// band on any line fails the run. The alternative raised when the ruling above
+// was taken: REPORT WC and Property, and assert only GL.
+//
+// WHAT THAT WOULD LOSE, and it is not nothing. The calendar-year panel below is
+// printed but not gated. So dropping WC and Property from the accident-year gate
+// would leave them asserted by NOTHING — a regression that moved WC's table, or
+// moved the loss model underneath it, would produce no red anywhere in this file.
+// The positive control would still fire, but proving the instrument works is not
+// the same as asserting the curve is right.
+//
+// THE VERSION THAT LOSES LESS: gate each line on the basis ITS OWN table was
+// built on — GL on accident-year, WC and Property on calendar-year — and report
+// both for all three. Every line stays under a live bar, and every red is then
+// actionable rather than definitional.
+//
+// ⚠ AND IT WOULD NOT PRODUCE A GREEN GATE EITHER, which is the honest part.
+// Measured at this commit, WC on its OWN calendar basis still reads -7.2pp on
+// the small band, and GL on accident-year reads -11.6pp at the 30% stop. Both
+// are real residuals, neither is a basis artefact, and neither would be silenced
+// by re-pointing the gate. So the choice is about what a red MEANS, not about
+// turning the gate green — and no version of it should be adopted on the grounds
+// that it reads better.
+//
+// Recorded rather than taken: changing what the gate asserts is a decision about
+// coverage, and it belongs to whoever owns the ruling above.
 //
 // ============================================================================
 // ⚠ REPORTED WITH A CI, GATED ON THE WORST STOP IN THE WORST BAND, AND CARRYING
@@ -456,7 +512,10 @@ if (Math.abs(worst.err) > MAX_LABEL_ERROR_PP) {
     + `${(worst.err >= 0 ? '+' : '') + worst.err.toFixed(1)}pp label error. The indicated curve above `
     + 'says what re-deriving on this basis would move. ⚠ CHECK THE CALENDAR-YEAR PANEL FIRST: a line '
     + 'that is green there and red here is not a broken table, it is a table derived on the other '
-    + 'basis, and re-deriving it is a decision about what the slider promises rather than a repair.');
+    + 'basis. ⚠ AND ON WC AND PROPERTY THAT HAS ALREADY BEEN RULED ON — both keep their '
+    + 'calendar-basis tables, costed and declined, see the ruling note at the head of this file and '
+    + 'the EXPECTED_RED entry in scripts/gates.ts. Do not re-derive either on the strength of this '
+    + 'line. GL is not part of that ruling.');
 }
 
 console.log('');
