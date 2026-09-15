@@ -96,9 +96,25 @@ const mean = (x: number[]) => x.reduce((a, b) => a + b, 0) / x.length;
 
 console.log('=== THE PRICING TRIANGLE — S1 ===');
 console.log(`PRICING_TRIANGLE.enabled = ${PRICING_TRIANGLE.enabled}; ${TRIANGLE_HISTORY_YEARS} accident years; ${GAMES} instances.\n`);
-if (PRICING_TRIANGLE.enabled) {
-  failed.push('PRICING_TRIANGLE.enabled is TRUE — S1 ships the triangle OFF and nothing reads it. '
-    + 'Flipping it is S3, and S3 also needs PER_CLAIM_REVISION on first.');
+// ⚠ THIS CLAUSE IS INVERTED FROM WHAT IT WAS, AND THE INVERSION IS THE POINT.
+// It used to fail when PRICING_TRIANGLE.enabled was TRUE, on the S1 contract
+// that "S1 ships the triangle OFF and nothing reads it". Both halves expired:
+// the flag ships ON, and memberPremium.ts reads it to derive a rate. The flag's
+// own note at defaultAssumptions.ts records that its retirement condition — the
+// one written on day one, as an EXPECTED_RED entry on experience-pricing-check —
+// is met and that entry is gone.
+//
+// So the clause was asserting a shipping decision that had already been reversed,
+// and it went red on every run for weeks while all six measured sections below
+// passed. A red that is always there is a red nobody reads. It now asserts the
+// CURRENT shipping decision instead, which makes it a live guard: if the flag is
+// ever turned back off without the triangle's consumers being revisited, this
+// fires.
+if (!PRICING_TRIANGLE.enabled) {
+  failed.push('PRICING_TRIANGLE.enabled is FALSE. The triangle SHIPS ON — its retirement condition '
+    + 'was met and recorded at the flag, and memberPremium.ts derives a rate from it. Turning it off '
+    + 'is a pricing change, not a configuration tweak: check what still reads the triangle before '
+    + 'assuming this is safe.');
 }
 
 // ---------------------------------------------------------------- 1. shape
