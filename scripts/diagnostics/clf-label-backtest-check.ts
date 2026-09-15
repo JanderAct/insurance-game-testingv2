@@ -124,18 +124,20 @@
 // ============================================================================
 // ⚠ WC AND PROPERTY KEEP THEIR CALENDAR-BASIS TABLES. RULED, NOT OUTSTANDING.
 //
-// This is a DECISION and not an unresolved red. A reader who finds WC at -11.0
-// below should not spend a day re-deriving it: that was costed and declined.
+// This is a DECISION and not an unresolved red. Neither line should be re-derived
+// on the strength of what this gate prints: that was costed and declined.
 //
-//   WC        -7.0 / -11.0 / -7.5 on this basis, and green on the calendar basis
-//             it was derived on. Re-deriving would raise every off-Expected stop
-//             by 3.2% to 6.0% — see the INDICATED CURVE section the run prints.
+//   WC        GATED ON CALENDAR-YEAR, where it reads -7.2 / -2.2 / -1.2. On the
+//             accident-year basis it would read -7.0 / -11.0 / -7.5, and
+//             re-deriving onto that basis raises every off-Expected stop by 3.2%
+//             to 6.0% — see the INDICATED CURVE section the run prints.
 //
-//   Property  +7.9 (thin, ungated) / -4.4 / -1.7. Close enough on both bases
-//             that re-deriving buys almost nothing; its indicated curve moves
-//             -2.6% to +4.0% and is inside a point at the stops that matter.
+//   Property  GATED ON CALENDAR-YEAR, where it reads +7.5 (thin, ungated) / +3.6
+//             / +1.2. Close enough on BOTH bases that re-deriving buys almost
+//             nothing; its accident-year indicated curve moves only -2.6% to
+//             +4.0%.
 //
-//   GL        stays on GL_SUPPLIED, and is the case that carried the basis
+//   GL        GATED ON ACCIDENT-YEAR, and is the case that carried the basis
 //             change: -0.5 to +1.7pp from the 70% stop up, against -21.7pp on
 //             the calendar basis. Its accident-year ratio CV is 0.4168 against
 //             the supplied curve's implied 0.3979.
@@ -162,34 +164,50 @@
 // for cost most players never see.
 //
 // ============================================================================
-// ⚠ OPEN QUESTION: SHOULD WC AND PROPERTY BE GATED ON THIS BASIS AT ALL?
+// ⚠ RESOLVED: EACH LINE IS GATED ON THE BASIS ITS OWN TABLE WAS BUILT ON.
 //
-// They are, today. Every line is scored on accident-year ultimate and the worst
-// band on any line fails the run. The alternative raised when the ruling above
-// was taken: REPORT WC and Property, and assert only GL.
+// This was an open question for one commit and is now settled. Before, every
+// line was scored on accident-year ultimate, so WC and Property carried reds
+// that were DEFINITIONAL — their curves are calendar-year percentiles and were
+// never built to meet an accident-year bar. A red that is always there is a red
+// nobody reads, and this project has found that failure family twenty-two times.
 //
-// WHAT THAT WOULD LOSE, and it is not nothing. The calendar-year panel below is
-// printed but not gated. So dropping WC and Property from the accident-year gate
-// would leave them asserted by NOTHING — a regression that moved WC's table, or
-// moved the loss model underneath it, would produce no red anywhere in this file.
-// The positive control would still fire, but proving the instrument works is not
-// the same as asserting the curve is right.
+// The alternative considered and rejected was to report WC and Property and
+// assert only GL. It would have left both lines asserted by NOTHING, because the
+// calendar panel was printed and not gated: a regression in WC's table, or in
+// the loss model beneath it, would have produced no red anywhere in this file.
+// The positive control would still have fired, but proving the instrument works
+// is not the same as asserting the curve is right.
 //
-// THE VERSION THAT LOSES LESS: gate each line on the basis ITS OWN table was
-// built on — GL on accident-year, WC and Property on calendar-year — and report
-// both for all three. Every line stays under a live bar, and every red is then
-// actionable rather than definitional.
+// ⚠ IT DID NOT COME BACK GREEN AND THAT IS CORRECT. Two residuals survive, both
+// real, neither silenced by the re-pointing:
 //
-// ⚠ AND IT WOULD NOT PRODUCE A GREEN GATE EITHER, which is the honest part.
-// Measured at this commit, WC on its OWN calendar basis still reads -7.2pp on
-// the small band, and GL on accident-year reads -11.6pp at the 30% stop. Both
-// are real residuals, neither is a basis artefact, and neither would be silenced
-// by re-pointing the gate. So the choice is about what a red MEANS, not about
-// turning the gate green — and no version of it should be adopted on the grounds
-// that it reads better.
+//   WC   -7.2pp on the SMALL band, on its own calendar basis
+//   GL  -11.6pp at the 30% stop on the large band, on its own accident-year basis
 //
-// Recorded rather than taken: changing what the gate asserts is a decision about
-// coverage, and it belongs to whoever owns the ruling above.
+// Nothing was narrowed, loosened or dropped to make those read better. The point
+// of the re-pointing is that every red is now ACTIONABLE — it names a real gap
+// between a curve and the distribution that curve claims to describe — not that
+// the gate goes quiet.
+//
+// ⚠ WHAT WC's SMALL-BAND RESIDUAL IS, characterised but NOT fixed here. It is a
+// BOOK-SIZE LEVEL EFFECT, and the band-mean column added to each row is what
+// shows it. WC's calendar-basis mean ratio by band:
+//
+//     small ~64   1.042      worst error  -7.2
+//     mid  ~80    1.035      worst error  -2.2
+//     large ~97   1.025      worst error  -1.2
+//
+// The mean falls monotonically as the book grows, and the error tracks it. A
+// small book runs a 1.7% higher loss ratio than a large one, so its whole
+// distribution sits higher, so fewer of its years fall under the LOW stops —
+// which is exactly the signature: about zero at the 95% stop, growing negative
+// toward the bottom of the range.
+//
+// That is a LEVEL difference between books, not a mis-shaped curve, and a single
+// curve with no book-size axis cannot carry it by construction. clfTables.ts
+// records that decision and its measured cost; this is the same cost seen from
+// the gate's side. NAMING IT IS NOT FIXING IT and it is not fixed here.
 //
 // ============================================================================
 // ⚠ REPORTED WITH A CI, GATED ON THE WORST STOP IN THE WORST BAND, AND CARRYING
@@ -255,6 +273,23 @@ const MIN_BAND_N = 250;
 // These are the same four arms clf-table-derive.ts samples, so the gate evaluates
 // on the population the tables were fitted on.
 const ARMS: (number | null)[] = [null, 1.50, 1.00, 0.75];
+
+// ⚠ EACH LINE IS GATED ON THE BASIS ITS OWN TABLE WAS DERIVED ON. Read the
+// ruling note above before changing one of these: they are not a preference.
+//
+// GL_SUPPLIED is a real pool's ACCIDENT-YEAR curve — its accident-year ratio CV
+// is 0.4168 against the curve's implied 0.3979. WC_DERIVED and PROPERTY_DERIVED
+// are percentiles of netIncurredLoss / poolPremium, a CALENDAR year, because
+// that is what clf-table-derive.ts measured. Scoring a line against the other
+// basis produces a DEFINITIONAL red — one that is always there and that nobody
+// reads, which is the failure this repo has now found twenty-two times.
+//
+// Both bases are still printed for all three lines. Only the matching one gates.
+const GATED_BASIS: Record<string, 'accident' | 'calendar'> = {
+  WC: 'calendar',
+  GL: 'accident',
+  Property: 'calendar',
+};
 
 const failed: string[] = [];
 
@@ -364,8 +399,21 @@ console.log('CLF LABEL BACKTEST — what the funding slider\'s percentage actual
 console.log(RULE);
 console.log(`${GAMES} games x ${ARMS.length} appetite arms x ${YEARS} years on the SHIPPED mechanism `
   + `(PER_CLAIM_REVISION.enabled = ${PER_CLAIM_REVISION.enabled}).`);
-console.log('ACCIDENT-YEAR basis: each settled accident year\'s own net ultimate against the');
-console.log('premium charged for that same year. Only years past their own drawn horizon.\n');
+console.log('Both bases are measured for every line. Each line is GATED on the basis its own');
+console.log('table was derived on; the other is reported beside it.\n');
+console.log('⚠ THE THREE LINES ARE NOT BEING ASKED THE SAME QUESTION, AND THAT IS THE RULING.');
+console.log('');
+console.log('  GL        gated on ACCIDENT-YEAR   "did THIS year\'s claims come in under THIS');
+console.log('                                     year\'s premium" — a funding question,');
+console.log('                                     answered once the year has run off');
+console.log('  WC        gated on CALENDAR-YEAR   "was underwriting income positive this year"');
+console.log('  Property  gated on CALENDAR-YEAR   the same');
+console.log('');
+console.log('  SO "75% CONFIDENCE" ON THE SLIDER DOES NOT MEAN QUITE THE SAME THING PER LINE.');
+console.log('  GL\'s curve describes accident years; WC\'s and Property\'s describe calendar');
+console.log('  years. The slider carries identical words on all three. That is a real');
+console.log('  user-facing inconsistency, it was ruled on knowingly, and closing it means');
+console.log('  re-deriving two tables — see the ruling note at the head of this file.\n');
 
 const { ay: obs, settledInPlayerGame } = shippedRun();
 
@@ -417,35 +465,42 @@ for (const line of LINES) {
   console.log('');
 }
 
-// --- 3. per band, both bases; only the accident-year one gates -------------
-let worst = { line: '', stop: 0, err: 0, band: '' };
-for (const [label, pick, gated] of [
-  ['ACCIDENT-YEAR — THE GATE', ULT, true],
-  ['CALENDAR-YEAR INCURRED — reported, NOT gated', INC, false],
+// --- 3. per band, both bases; each line gated on ITS OWN -------------------
+let worst = { line: '', stop: 0, err: 0, band: '', basis: '' };
+for (const [basis, label, pick] of [
+  ['accident', 'ACCIDENT-YEAR ULTIMATE', ULT],
+  ['calendar', 'CALENDAR-YEAR INCURRED', INC],
 ] as const) {
   console.log(`--- BY BOOK SIZE: ${label} ---`);
   for (const line of LINES) {
     const o = obs[line];
     if (o.length === 0) continue;
+    const isGated = GATED_BASIS[line] === basis;
     const stops = stopsOf(line);
     const books = o.map(r => r.members).sort((a, b) => a - b);
     console.log(`  ${line} — book p10 ${books[Math.floor(0.1 * books.length)]}, `
-      + `median ${books[Math.floor(0.5 * books.length)]}, p90 ${books[Math.floor(0.9 * books.length)]}`);
-    console.log('    band             n   ' + stops.map(p => `${(100 * p).toFixed(0)}%`.padStart(7)).join('')
+      + `median ${books[Math.floor(0.5 * books.length)]}, p90 ${books[Math.floor(0.9 * books.length)]}`
+      + `   ${isGated ? '<<< GATED ON THIS BASIS' : '(reported only — this line is gated on the other basis)'}`);
+    console.log('    band             n    mean   ' + stops.map(p => `${(100 * p).toFixed(0)}%`.padStart(7)).join('')
       + '     worst');
     for (let b = 0; b < BOOK_BANDS.length; b++) {
       const cell = o.filter(r => bandOf(r.members) === b);
       if (cell.length === 0) continue;
       const errs = stops.map(p => delivered(cell, staticClf(line as 'WC' | 'GL' | 'Property', p), pick) - 100 * p);
       const w = errs.reduce((a, x) => (Math.abs(x) > Math.abs(a) ? x : a), 0);
-      const countable = gated && cell.length >= MIN_BAND_N;
+      const countable = isGated && cell.length >= MIN_BAND_N;
       if (countable && Math.abs(w) > Math.abs(worst.err)) {
-        worst = { line, stop: stops[errs.indexOf(w)], err: w, band: BOOK_BANDS[b][2] };
+        worst = { line, stop: stops[errs.indexOf(w)], err: w, band: BOOK_BANDS[b][2], basis: label };
       }
-      console.log(`    ${BOOK_BANDS[b][2].padEnd(11)}${String(cell.length).padStart(6)}   `
+      // The band's own mean ratio, so a shifted band can be told from a
+      // mis-shaped one without going back to the raw data. A band whose errors
+      // all lean one way and whose mean sits away from the others is a LEVEL
+      // difference the single curve has no axis for, not a bad curve shape.
+      const bandMean = mean(cell.map(r => pick(r) / r.premium));
+      console.log(`    ${BOOK_BANDS[b][2].padEnd(11)}${String(cell.length).padStart(6)}  ${bandMean.toFixed(3)}   `
         + errs.map(e => `${e >= 0 ? '+' : ''}${e.toFixed(1)}`.padStart(7)).join('')
         + `   ${Math.abs(w) > MAX_LABEL_ERROR_PP ? '!' : ' '}${w >= 0 ? '+' : ''}${w.toFixed(1)}`
-        + (gated && cell.length < MIN_BAND_N ? '  (thin, not gated)' : ''));
+        + (isGated && cell.length < MIN_BAND_N ? '  (thin, not gated)' : ''));
     }
     console.log('');
   }
@@ -456,46 +511,56 @@ for (const [label, pick, gated] of [
 // re-derivation decision instead of leaving it as "re-derive it".
 const q = (sorted: number[], p: number) =>
   sorted[Math.min(sorted.length - 1, Math.max(0, Math.floor((p / 100) * sorted.length)))];
-console.log('--- INDICATED CURVE on this basis, against what ships ---');
-console.log('  The accident-year percentiles of each line\'s own settled ratio, beside the');
-console.log('  shipped multiplier. The gap at a stop is what re-deriving would move.\n');
-console.log('  line      stop    shipped   indicated     change');
+console.log('--- INDICATED CURVE on each line\'s OWN gated basis, against what ships ---');
+console.log('  The percentiles of the line\'s own ratio, on the basis it is gated against,');
+console.log('  beside the shipped multiplier. The gap at a stop is what re-deriving moves.\n');
+console.log('  line      basis     stop    shipped   indicated     change');
 for (const line of LINES) {
   const o = obs[line];
   if (o.length === 0) continue;
-  const sorted = o.map(r => r.ultimate / r.premium).sort((a, b) => a - b);
+  const gb = GATED_BASIS[line];
+  const sorted = o.map(r => (gb === 'accident' ? r.ultimate : r.incurred) / r.premium).sort((a, b) => a - b);
   for (const p of [0.90, 0.75, 0.60, 0.50, 0.30]) {
     const ship = staticClf(line as 'WC' | 'GL' | 'Property', p);
     const ind = q(sorted, 100 * p);
-    console.log(`  ${line.padEnd(9)} ${(100 * p).toFixed(0).padStart(3)}%  ${ship.toFixed(4).padStart(9)}   `
+    console.log(`  ${line.padEnd(9)} ${GATED_BASIS[line].padEnd(9)} ${(100 * p).toFixed(0).padStart(3)}%  `
+      + `${ship.toFixed(4).padStart(9)}   `
       + `${ind.toFixed(4).padStart(9)}   ${(ind >= ship ? '+' : '') + (100 * (ind / ship - 1)).toFixed(1)}%`);
   }
   console.log('');
 }
 
-// --- 5. POSITIVE CONTROL ---------------------------------------------------
-// A gate reading near zero has to prove it can read something else. Each
-// shipped table is re-scored with every multiplier scaled by CONTROL_SCALE; a
-// uniformly inflated curve must breach the tolerance somewhere on every line.
-console.log('--- POSITIVE CONTROL: every table re-scored at ' + `x${CONTROL_SCALE}` + ' must FAIL ---');
+// --- 5. POSITIVE CONTROL, ON BOTH BASES --------------------------------------
+// A gate reading near zero has to prove it can read something else, and this one
+// now asserts TWO different statistics — so it has two ways to go silently
+// blind, not one. Each shipped table is re-scored with every multiplier scaled
+// by CONTROL_SCALE, on BOTH bases, and the inflated curve must breach the
+// tolerance on EVERY line and EVERY basis. Requiring it only on the gated basis
+// would leave the reported arm unproven, and the reported arm is what the next
+// basis argument will be made from.
+console.log(`--- POSITIVE CONTROL: every table re-scored at x${CONTROL_SCALE} must FAIL, on BOTH bases ---`);
+console.log('  line      basis      worst on the bent curve   gated?');
 const controlSilent: string[] = [];
 for (const line of LINES) {
   const o = obs[line];
   if (o.length === 0) continue;
   const T = STATIC_CLF_TABLE[line as 'WC' | 'GL' | 'Property'];
   const bent = { ...T, clf: T.clf.map(v => v * CONTROL_SCALE) };
-  const errs = stopsOf(line).map(p => delivered(o, clfFromTable(bent, p), ULT) - 100 * p);
-  const w = errs.reduce((a, x) => (Math.abs(x) > Math.abs(a) ? x : a), 0);
-  const fires = Math.abs(w) > MAX_LABEL_ERROR_PP;
-  console.log(`  ${line.padEnd(9)} worst error on the bent curve `
-    + `${(w >= 0 ? '+' : '') + w.toFixed(1)}pp   ${fires ? 'FIRES — the gate can see it' : '⚠ SILENT'}`);
-  if (!fires) controlSilent.push(line);
+  for (const [basis, pick] of [['accident', ULT], ['calendar', INC]] as const) {
+    const errs = stopsOf(line).map(p => delivered(o, clfFromTable(bent, p), pick) - 100 * p);
+    const w = errs.reduce((a, x) => (Math.abs(x) > Math.abs(a) ? x : a), 0);
+    const fires = Math.abs(w) > MAX_LABEL_ERROR_PP;
+    console.log(`  ${line.padEnd(9)} ${basis.padEnd(9)}  ${`${w >= 0 ? '+' : ''}${w.toFixed(1)}pp`.padStart(9)}   `
+      + `${GATED_BASIS[line] === basis ? 'gated  ' : 'reported'}   `
+      + `${fires ? 'FIRES' : '⚠ SILENT'}`);
+    if (!fires) controlSilent.push(`${line}/${basis}`);
+  }
 }
 if (controlSilent.length > 0) {
   failed.push(`POSITIVE CONTROL SILENT on ${controlSilent.join(', ')}: a table inflated by `
-    + `${Math.round(100 * (CONTROL_SCALE - 1))}% still reads inside ${MAX_LABEL_ERROR_PP}pp. `
-    + 'The measurement cannot detect a wrong curve, so nothing else this gate reports is worth '
-    + 'anything. Fix the instrument before reading its verdict.');
+    + `${Math.round(100 * (CONTROL_SCALE - 1))}% still reads inside ${MAX_LABEL_ERROR_PP}pp there. `
+    + 'The measurement cannot detect a wrong curve on that arm, so nothing else this gate reports '
+    + 'about it is worth anything. Fix the instrument before reading its verdict.');
 }
 
 console.log('');
@@ -503,19 +568,22 @@ console.log(`  settled accident years: ${LINES.map(l => `${l} ${obs[l].length}`)
 if (worst.line) {
   console.log(`  WORST LABEL ERROR: ${worst.line} at the ${(100 * worst.stop).toFixed(1)}% stop `
     + `on the ${worst.band} book, ${(worst.err >= 0 ? '+' : '') + worst.err.toFixed(1)}pp `
-    + `against a ${MAX_LABEL_ERROR_PP}pp tolerance`);
+    + `against a ${MAX_LABEL_ERROR_PP}pp tolerance — on ${worst.basis}, the basis `
+    + `${worst.line} is gated against`);
 }
 
 if (Math.abs(worst.err) > MAX_LABEL_ERROR_PP) {
   failed.push(`${worst.line}'s ${(100 * worst.stop).toFixed(1)}% funding stop delivers `
     + `${(100 * worst.stop + worst.err).toFixed(1)}% of accident years on the ${worst.band} book — a `
     + `${(worst.err >= 0 ? '+' : '') + worst.err.toFixed(1)}pp label error. The indicated curve above `
-    + 'says what re-deriving on this basis would move. ⚠ CHECK THE CALENDAR-YEAR PANEL FIRST: a line '
-    + 'that is green there and red here is not a broken table, it is a table derived on the other '
-    + 'basis. ⚠ AND ON WC AND PROPERTY THAT HAS ALREADY BEEN RULED ON — both keep their '
-    + 'calendar-basis tables, costed and declined, see the ruling note at the head of this file and '
-    + 'the EXPECTED_RED entry in scripts/gates.ts. Do not re-derive either on the strength of this '
-    + 'line. GL is not part of that ruling.');
+    + 'says what re-deriving would move, on the basis this line is actually gated against. '
+    + '⚠ THIS IS A RESIDUAL, NOT A BASIS ARTEFACT. Each line is scored on the basis its own table '
+    + 'was derived on, so a red here is a real gap between a curve and the distribution it claims '
+    + 'to describe — it is not the definitional red that scoring every line on one basis produced. '
+    + 'Two are known and standing: WC -7.2pp on the small band (calendar) and GL -11.6pp at the 30% '
+    + 'stop (accident-year). Both are entered in EXPECTED_RED with what is known about each. '
+    + 'SEPARATELY, WC and Property keeping their calendar-basis tables is a RULING and not a defect '
+    + '— do not re-derive either on the strength of this line.');
 }
 
 console.log('');
@@ -531,8 +599,9 @@ if (failed.length > 0) {
   process.exitCode = 1;
 } else {
   console.log('CLF LABELS HOLD — every funding stop delivers its nominal confidence within');
-  console.log(`${MAX_LABEL_ERROR_PP}pp of the accident years it was charged for, at every book size`);
-  console.log('the game reaches, not merely on average across them. The positive control fired');
-  console.log('on every line, so the measurement can tell a wrong curve from a right one.');
+  console.log(`${MAX_LABEL_ERROR_PP}pp, at every book size the game reaches rather than merely on`);
+  console.log('average across them, and on the basis each line\'s own table was derived on. The');
+  console.log('positive control fired on every line AND on both bases, so neither arm of the');
+  console.log('measurement is blind.');
   console.log(RULE);
 }

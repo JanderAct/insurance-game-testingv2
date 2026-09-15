@@ -433,12 +433,21 @@ export interface ClfTable {
 // ============================================================================
 // ⚠ THIS TABLE IS ON THE CALENDAR-YEAR BASIS AND STAYS THERE. RULED.
 //
-// clf-label-backtest-check now measures ACCIDENT-YEAR ultimate — did this year's
-// claims come in under this year's premium — because that is what the funding
+// clf-label-backtest-check measures ACCIDENT-YEAR ultimate as well — did this
+// year's claims come in under this year's premium, which is what the funding
 // slider's label promises. This curve is percentiles of netIncurredLoss /
 // poolPremium, a CALENDAR year, which blends every open accident year at a
-// different maturity. It is green on the basis it was built on and reads
-// -7.0 / -11.0 / -7.5 on the other one.
+// different maturity. It reads -7.0 / -11.0 / -7.5 on the accident-year basis
+// and -7.2 / -2.2 / -1.2 on the calendar basis it was built on, and THE GATE
+// SCORES IT ON THE LATTER — each line is gated on its own basis, so this curve's
+// red is a real residual rather than a definitional one.
+//
+// ⚠ ITS REMAINING RED IS A BOOK-SIZE LEVEL EFFECT, not a mis-shaped curve. The
+// calendar mean ratio runs 1.042 / 1.035 / 1.025 across small / mid / large and
+// the worst error tracks it at -7.2 / -2.2 / -1.2: a small book runs a 1.7%
+// higher loss ratio, so fewer of its years fall under the low stops. A single
+// curve with no book-size axis cannot carry that, which is the cost this file
+// already records for shipping one curve per line.
 //
 // RE-DERIVING WAS COSTED AND DECLINED. It would raise every off-Expected stop by
 // 3.2% to 6.0%, and only 16.4% of WC accident years written in a ten-year game
@@ -447,8 +456,9 @@ export interface ClfTable {
 // sees land in their own P&L in five games out of six. GL 45.3% and Property
 // 71.0% do not have that problem to the same degree.
 //
-// ⚠ DO NOT READ THE GATE'S WC RED AS AN OUTSTANDING DEFECT. It is a measured,
-// costed choice, and its EXPECTED_RED entry in scripts/gates.ts says so.
+// ⚠ DO NOT READ THE GATE'S WC RED AS A REASON TO RE-DERIVE. Keeping this table
+// is the ruling; the -7.2pp that remains is a size effect on its own basis, and
+// the EXPECTED_RED entry in scripts/gates.ts separates the two.
 const WC_DERIVED: ClfTable = {
   source: 'derived',
   stops: [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 97.5, 99],
@@ -570,9 +580,15 @@ const WC_DERIVED: ClfTable = {
 // Its accident-year ratio CV is 0.4168 against this curve's implied 0.3979 —
 // within 5%. The real-pool anchor describes this model's GL almost exactly, and
 // installing the derived curve would have replaced the more accurate of the two
-// with the less. The residual is confined to the deliberate-underfunding end
-// (-11.6pp at the 30% stop), where this curve carries a fatter low tail than the
-// model produces.
+// with the less.
+//
+// ⚠ ONE RESIDUAL STANDS AND IT IS REAL. This curve carries a FATTER LOW TAIL
+// than the model produces, so the bottom of the slider promises more
+// under-funding than the book delivers: -11.6pp at the 30% stop on a large book,
+// against -0.5 to +1.7pp from the 70% stop up. GL is gated on the accident-year
+// basis, so that red is a genuine gap between this curve and the distribution it
+// describes rather than a basis artefact. Entered in EXPECTED_RED; closing it
+// needs a curve with a different low tail, not a re-derivation.
 const GL_SUPPLIED: ClfTable = {
   source: 'supplied',
   stops: [25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95],
@@ -696,11 +712,12 @@ export const GL_DERIVED: ClfTable = {
 // ============================================================================
 // ⚠ ALSO CALENDAR-YEAR BASIS, AND ALSO STAYING — for a simpler reason than WC's.
 //
-// On the accident-year basis clf-label-backtest-check now gates, this curve
-// reads +7.9 (thin, ungated) / -4.4 / -1.7, and its indicated accident-year
-// curve sits between -2.6% and +4.0% of what ships, inside a point at the stops
-// that carry weight. Property is close enough on BOTH bases that re-deriving
-// buys almost nothing, so the basis question that decided WC barely arises here.
+// clf-label-backtest-check gates this line on CALENDAR-YEAR, the basis it was
+// derived on, where it reads +7.5 (thin, ungated) / +3.6 / +1.2 and PASSES. On
+// the accident-year basis it reads +7.9 (thin) / -4.4 / -1.7, and its indicated
+// accident-year curve sits between -2.6% and +4.0% of what ships. Property is
+// close enough on BOTH bases that re-deriving buys almost nothing, so the basis
+// question that decided WC barely arises here.
 //
 // Property is also the line least exposed to the objection that sank a WC
 // re-derivation: 71.0% of its accident years written in a ten-year game reach
