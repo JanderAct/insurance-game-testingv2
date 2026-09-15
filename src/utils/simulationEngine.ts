@@ -33,6 +33,7 @@ import {
 import { isClaimClosed } from './claimClosure';
 import { allocateMemberPremium } from './memberPremium';
 import { marketRateChangePct } from './marketConditions';
+import { applySatisfaction, satisfactionMoves, satisfactionMovesById } from './memberSatisfaction';
 import { applyRenewalDeclines, renewalDeclines } from './renewalUnderwriting';
 import { memberExperienceMods } from './memberExperienceMod';
 import { claimRevisionUnit, normalQuantile, reviseDevelopingSet, settleClosingSet } from './claimRevision';
@@ -843,14 +844,6 @@ export function processLineYear(
     priorYearLossRatio,
     rateChangePct,
     rateLoad,
-    // What a carrier with no pool-specific news would have done with its rate
-    // this year. PURE — marketRateChangePct builds nothing and draws nothing;
-    // its pool-year component calls the same `poolYearFactor(seed, year)` this
-    // function already calls a few hundred lines down, so it returns the
-    // identical value and consumes nothing.
-    marketChangePct: marketRateChangePct(line, yearNumber, {
-      seed: instance.seed, gameId: instance.instanceId,
-    }),
     competitivePressure: instance.marketEnvironment.competitivePressure,
     memberSensitivity: instance.marketEnvironment.memberSensitivity,
     yearNumber,
@@ -1065,6 +1058,56 @@ export function processLineYear(
 
   const totalMemberCharge = poolPremiumAndAdminExpense + reinsuranceCost;
   const totalMemberRatePer100 = totalMemberCharge / Math.max(activeExposure * 10_000, 1);
+
+  // ============================================================================
+  // PER-MEMBER SATISFACTION — A SCOREBOARD, AND IT RUNS HERE BECAUSE THIS IS THE
+  // FIRST LINE AT WHICH THE MEMBER'S ACTUAL BILL EXISTS.
+  //
+  // It was computed inside simulateMemberMovement for one commit and moved out
+  // at the convex rebuild. Movement is fed the PRE-MOVEMENT QUOTE — correct for
+  // retention and departure, because a member decides whether to renew on what
+  // they were quoted — and satisfaction is about what they were CHARGED. The two
+  // are not the same series and the difference is systematic:
+  //
+  //   line       engine's quote signal   charged-rate series   difference
+  //   WC              -0.14%/yr               -1.04%/yr          +0.90
+  //   GL              +2.08%/yr               +0.98%/yr          +1.10
+  //   Property        +0.81%/yr               -0.02%/yr          +0.82
+  //
+  // ⚠ AND NEITHER IS WRONG — THEY ARE DIFFERENT BOOKS. quoted(t) is priced on
+  // the pre-movement book, which IS last year's post-movement book, so
+  // quoted(t)/charged(t-1) is a same-book comparison and is exactly why it suits
+  // a renewal decision. charged(t)/charged(t-1) spans two books, and that is
+  // exactly what a member's bill does: the pool grew, the occurrence tower's
+  // cost spread over more exposure, and their rate fell for it. A member is
+  // billed the second series, so satisfaction reads the second series.
+  //
+  // ⚠ THE CONVEX FORM IS WHAT FORCED THIS, AND UNDER THE LINEAR ONE IT DID NOT
+  // MATTER MUCH. A permanent +1pp offset is a small constant drift when the
+  // reaction is proportional. Squared, it moves the whole distribution into the
+  // amplified half and compounds — a standing grievance about the timing of a
+  // quote rather than about a decision.
+  //
+  // ⚠ PURE, NO DRAWS, AND DOWNSTREAM OF EVERY DECISION IN THIS FUNCTION. That is
+  // what keeps both export baselines bit-identical and what makes "feeds
+  // nothing" structural rather than asserted: nothing above this line can see
+  // it, because it does not exist yet.
+  // ============================================================================
+  const chargedRateChangePct = priorTotalMemberRatePer100 !== null
+    ? (totalMemberRatePer100 / priorTotalMemberRatePer100 - 1) * 100
+    : null;
+  const satisfaction = satisfactionMoves(
+    currentActiveMembers, line, ctx.memberLossHistory, chargedRateChangePct,
+    marketRateChangePct(line, yearNumber, { seed: instance.seed, gameId: instance.instanceId }),
+  );
+  // ⚠ SCORED LATE AND SUBSTITUTED ONLY WHERE THE ROSTER IS PERSISTED. Everything
+  // between the renewal screen and here reads `enrolledMembers` for exposure,
+  // class and losses, none of which this touches; re-pointing those at a second
+  // array would be a hazard for no gain. The two places that OUTLIVE the year —
+  // the result's memberList and the line state's roster — take the scored copy.
+  const enrolledMembersScored = applySatisfaction(
+    enrolledMembers, satisfactionMovesById(satisfaction),
+  );
 
   // Legacy names remain populated for compatibility with older screens and exports.
   const grossPremium = totalMemberCharge;
@@ -2024,8 +2067,11 @@ export function processLineYear(
     marketShare: parseFloat(marketShare.toFixed(4)),
     memberRetentionRate: parseFloat(memberResult.retentionRate.toFixed(3)),
     memberSatisfaction: memberResult.memberSatisfaction,
+    // In-memory only, stripped on save. The exact per-member reaction to this
+    // year's bill, on the signal movement was actually fed — see the field.
+    memberSatisfactionMoves: satisfaction,
     averageRiskQuality: memberResult.averageRiskQuality,
-    memberList: enrolledMembers,
+    memberList: enrolledMembersScored,
 
     rateLevel: parseFloat(newRateLevel.toFixed(2)),
     ratePer100: parseFloat(totalMemberRatePer100.toFixed(4)),
@@ -2191,7 +2237,9 @@ export function processLineYear(
       currentYearCohort,
       yearNumber,
     ),
-    members: enrolledMembers,
+    // THE SCORED COPY, so this year's satisfaction is what next year reads and
+    // adds to. Identical to `enrolledMembers` in every other field.
+    members: enrolledMembersScored,
 
     netUnpaidReserve: endingNetReserve,
     surplus: endingSurplus,

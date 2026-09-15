@@ -4,6 +4,7 @@ import type { ResultSet, Member, StartingFinancials, MemberLossHistory } from '.
 import { formatMillions, formatPct } from '../utils/formatters';
 import { getMemberExposure } from '../utils/lineHelpers';
 import { EXPERIENCE_MOD, displayedMod, medianRatedMod, memberExperienceMods } from '../utils/memberExperienceMod';
+import { OPENING_SATISFACTION } from '../data/memberCatalog';
 
 interface MembershipPageProps {
   lockedResults: ResultSet[];
@@ -175,7 +176,7 @@ export default function MembershipPage({ lockedResults, startingFinancials, init
                 <th className={thClass('yearJoined')} onClick={() => handleSort('yearJoined')}>Yr Joined {sortKey === 'yearJoined' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
                 <th className={thClass('ratio')} onClick={() => handleSort('ratio')} title={`Actual losses over expected, over the last ${EXPERIENCE_MOD.windowYears} years, limited per claim. What the member cost. This is what Renewal Underwriting acts on.`}>Loss Ratio {sortKey === 'ratio' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
                 <th className={thClass('mod')} onClick={() => handleSort('mod')} title="What the member is charged for that record, credibility-weighted against their class. 1.00 is the typical member. Much flatter than the ratio by design — most of a member's rate is their class, not their own claims.">Experience Mod {sortKey === 'mod' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
-                <th className={thClass('satisfaction')} onClick={() => handleSort('satisfaction')} title="What this member thinks of the pool, 1-10. It moves each year on their own bill measured against what the market's rate did, damped by how much their own claims explain the increase. It is a scoreboard: nothing in the model reads it.">Satisfaction {sortKey === 'satisfaction' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                <th className={thClass('satisfaction')} onClick={() => handleSort('satisfaction')} title="What this member thinks of the pool, 1-10. It moves each year on their own bill measured against what the market's rate did, and the reaction is CONVEX — an ordinary year barely registers and a real price move bites. Damped by how much their own claims explain the increase. It is a scoreboard: nothing in the model reads it.">Satisfaction {sortKey === 'satisfaction' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
               </tr>
             </thead>
@@ -204,7 +205,16 @@ function MemberRow({ member, displayYear, ratio, mod }: {
   // Banded on the measured quartiles instead.
   const ratioColor = ratio === null ? 'text-gray-400'
     : ratio <= 0.6 ? 'text-emerald-600' : ratio >= 1.4 ? 'text-red-600' : 'text-gray-700';
-  const satColor = member.satisfaction >= 7 ? 'text-emerald-600' : member.satisfaction >= 5 ? 'text-amber-600' : 'text-red-600';
+  // ⚠ BANDED ON WHERE MEMBERS START, NOT ON THE 1-10 SCALE'S MIDDLE. The old
+  // 7 / 5 thresholds were set when the opening draw spanned 6.0-8.5 and the
+  // field never moved. Every member now opens inside OPENING_SATISFACTION's
+  // three hundredths, so a fixed 5.0 boundary would never be crossed and the
+  // whole column would read one colour forever. These are relative to the
+  // opening, and the amber band is three funding decisions wide (3 x 0.058,
+  // the measured footprint of one) so red means a member has lost more than a
+  // few decisions' worth of goodwill rather than more than half a scale.
+  const satColor = member.satisfaction >= OPENING_SATISFACTION.min ? 'text-emerald-600'
+    : member.satisfaction >= OPENING_SATISFACTION.min - 0.18 ? 'text-amber-600' : 'text-red-600';
 
   return (
     <tr className="hover:bg-gray-50 transition-colors">

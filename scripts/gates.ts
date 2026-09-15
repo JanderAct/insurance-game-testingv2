@@ -91,8 +91,10 @@ const FAST: string[] = [
   'member-experience-mod-check',     //  11s   the mod is centred on the book it rates, cannot see the year it
                                      //         is pricing, and reaches neither the total, the rate nor the roster
   'member-loss-history-check',       //   2s
-  'member-satisfaction-check',       //   9s   the per-member stock MOVES (93-97% of member-years), feeds nothing
-                                     //         on a STATIC allow-list, and does not drift at defaults; carries a
+  'member-satisfaction-check',       //  33s   the per-member stock MOVES, feeds nothing on a STATIC allow-list,
+                                     //         does not drift at defaults, is CONVEX against the linear form it
+                                     //         replaces, and the loss term modulates the price term inside a
+                                     //         controlled gap band. Traces one member through one funding stop;
                                      //         null arm at weight 0 and a seed-matched priced-up control
   'market-conditions-check',         //   9s   the benchmark reproduces RATE_NEUTRAL_CHANGE_PCT exactly, every
                                      //         component is positive and mean 1, and it is QUIETER than the rate

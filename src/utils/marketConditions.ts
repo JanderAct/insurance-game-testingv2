@@ -31,14 +31,37 @@
 //                           another, and pointing departure at this is a
 //                           separate measurement because it moves who leaves.
 //
-// ⚠ IT IS A CHANGE, NOT A LEVEL, AND THAT IS A REAL LIMIT ON THE SECOND
-// CONSUMER. Every component below is mean 1 by construction, so the INDEX has
-// no absolute meaning — only its year-over-year ratio does. Satisfaction wants a
-// change and is served. Prospects compare LEVELS (see RATE_NEUTRAL_LOAD's
-// header: "a pool overpriced for five straight years shows NO rate change"), so
-// the join ladder needs a market LOAD as well, and that is a second derivation
-// this file does not attempt. Named here so it is built rather than assumed
-// present.
+// ⚠ IT IS A CHANGE, NOT A LEVEL, AND THAT IS THE BIGGEST THING MISSING FROM
+// THIS FILE — BIGGER THAN ANY UNBUILT COMPONENT BELOW.
+//
+// Every component is mean 1 by construction, so the INDEX has no absolute
+// meaning — only its year-over-year ratio does. Satisfaction compares two
+// CHANGES, which means A POOL THAT HAS BEEN 20% ABOVE THE MARKET FOREVER AND
+// HOLDS STEADY COSTS NOTHING. A member does not compare changes. They compare
+// their BILL to what they would pay elsewhere, and that is a level.
+//
+// AND THE LEVEL IS NOT A NEUTRAL ONE, WHICH IS THE PART WORTH BUILDING TOWARD.
+// A commercial carrier funds ABOVE its expected loss — risk load and profit —
+// and a pool does not. That difference IS the pool's reason to exist, and it
+// means the pool holds a COMPETITIVE CUSHION it can spend before members
+// object: some amount of funding above expected still leaves a member cheaper
+// than the alternative. Today the funding slider has no natural price at all,
+// because every level reads the same once the year-over-year change has passed.
+// A market CLF would give it one.
+//
+// ⚠ IT NEEDS A NUMBER NEITHER THE MODEL NOR THIS FILE HAS: what a carrier
+// charges over expected loss for these lines. FUNDING_CLF_TABLE and the three
+// derived tables in clfTables.ts describe what THIS BOOK's own losses do at a
+// confidence level — they are not a market price and must not be read as one.
+// RATE_NEUTRAL_LOAD (WC 1.472 / GL 1.457 / Property 1.521) is the POOL's own
+// load over pure premium at defaults, which is the pool's expense and
+// reinsurance stack, not a competitor's margin. Recorded here as the gap rather
+// than half-built, because a level derived from either of those would be this
+// pool measured against itself.
+//
+// The join ladder needs the same level for the same reason — RATE_NEUTRAL_LOAD's
+// own header says "a pool overpriced for five straight years shows NO rate
+// change" — so one derivation would serve both.
 //
 // ============================================================================
 // ⚠ PURE. NO DRAWS. THIS CANNOT MOVE A BASELINE AND THE PROPERTY IS STRUCTURAL.

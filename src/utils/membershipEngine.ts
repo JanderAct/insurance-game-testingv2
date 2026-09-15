@@ -6,8 +6,8 @@ import { SeededRandom } from './random';
 import { canReenroll } from './membershipHistory';
 import { appetiteEligible } from './newBusinessAppetite';
 import { getMemberExposure } from './lineHelpers';
+import { OPENING_SATISFACTION } from '../data/memberCatalog';
 import { departureRisks } from './memberDeparture';
-import { applySatisfaction, satisfactionMoves, satisfactionMovesById } from './memberSatisfaction';
 import {
   MEMBER_MOVEMENT_WEIGHTS,
   BASE_RETENTION,
@@ -41,18 +41,6 @@ export interface MemberMovementInputs {
   // This line's total member charge rate over its pure premium rate. Null when
   // the pure premium is not positive.
   rateLoad?: number | null;
-  // What the MARKET's rate did this year, in percentage points — see
-  // marketConditions.ts. Per-member satisfaction reads it and nothing else does
-  // yet; the recruitment ladder and departure's marketability are the other two
-  // consumers named there.
-  //
-  // ⚠ PASSED IN RATHER THAN DERIVED HERE, and the reason is the same one that
-  // keeps this module out of the instance: marketRateChangePct needs the game's
-  // seed and id, and handing this function a GameInstance would give the
-  // membership model reach over the loss environment, the investment
-  // environment and the shock schedule to get at two identifiers. The engine
-  // already holds both and passes a number.
-  marketChangePct: number;
   competitivePressure: number;
   /**
    * DIAGNOSTIC SEAM. Overrides APPLICATION_RATE for one call.
@@ -328,34 +316,25 @@ export function simulateMemberMovement(inputs: MemberMovementInputs): MemberMove
     .slice(0, cappedWithdrawalCount)
     .map(m => ({ ...m, status: 'withdrawn' as const, yearWithdrawn: yearNumber }));
   const withdrawnIds = new Set(withdrawnMembers.map(m => m.id));
-  // ============================================================================
-  // PER-MEMBER SATISFACTION — A SCOREBOARD, AND IT FEEDS NOTHING.
+  // ⚠ PER-MEMBER SATISFACTION IS NOT COMPUTED HERE AND THAT IS THE POINT.
+  // It lived in this function for one commit and moved out at the convex
+  // rebuild, to processLineYear, AFTER the charged rate exists. Two reasons,
+  // and the second is the one that forced it:
   //
-  // Computed over `currentMembers`, the book that was BILLED, so its rebase
-  // divisor is the same one departureRisks just used; applied by id to the book
-  // that remains. See memberSatisfaction.ts for the model, for the ruling that
-  // it feeds nothing, and for what would have to be true before departure reads
-  // it.
+  //   THE BASIS. This function is fed the PRE-MOVEMENT QUOTE, which is the
+  //     right signal for retention and departure — a member decides whether to
+  //     renew on what they were quoted. Satisfaction is about the bill they
+  //     actually PAID, and the two differ by a measured +0.9 to +1.1pp a year on
+  //     every line, because the book grows between the quote and the charge and
+  //     spreads the tower cost over more exposure.
   //
-  // ⚠ IT IS NOT THE SCALAR BELOW. `updateSatisfaction` maintains the POOL-LEVEL
-  // memberSatisfaction, which DOES feed retention through
-  // MEMBER_MOVEMENT_WEIGHTS.retention.satisfaction and reads the rate as a
-  // deviation from the line's static neutral. This one is per member, per line,
-  // reads the member's own bill against the MARKET, and is read by nothing but
-  // the members table. Two numbers, one name, and averaging one into the other
-  // would put a per-member price signal into retention.
+  //   A CONVEX REACTION CANNOT CARRY A SYSTEMATIC OFFSET. Under the linear form
+  //     a permanent +1pp read as a small constant drift. Squared, it shifts the
+  //     whole distribution into the amplified region and compounds.
   //
-  // ⚠ PURE — NO DRAWS, SO IT CANNOT RE-PHASE THIS STREAM. That is what keeps
-  // both export baselines bit-identical across the commit that built it, and it
-  // is the test of the "feeds nothing" claim rather than a hope: a baseline that
-  // moved would mean something reads Member.satisfaction.
-  // ============================================================================
-  const satisfactionByMember = satisfactionMovesById(satisfactionMoves(
-    currentMembers, line, inputs.memberLossHistory, inputs.rateChangePct, inputs.marketChangePct,
-  ));
-  const retainedMembers = applySatisfaction(
-    currentMembers.filter(m => !withdrawnIds.has(m.id)), satisfactionByMember,
-  );
+  // It also makes "feeds nothing" STRUCTURAL rather than asserted: movement
+  // cannot read a quantity that does not exist until after movement has run.
+  const retainedMembers = currentMembers.filter(m => !withdrawnIds.has(m.id));
 
   // ============================================================================
   // INTAKE IS SUPPLY, NOT DEMAND. There is no expected-new-members term left.
@@ -479,7 +458,18 @@ export function simulateMemberMovement(inputs: MemberMovementInputs): MemberMove
     status: 'active' as const,
     yearJoined: yearNumber,
     calendarYearJoined: calendarYear,
-    satisfaction: parseFloat(rng.range(6.0, 8.5).toFixed(1)),
+    // ⚠ SAME ONE DRAW, NARROWER RANGE — see OPENING_SATISFACTION. Changing the
+    // BOUNDS of an rng.range consumes exactly the same value from the stream
+    // and maps it differently, so the whole membership stream is untouched and
+    // both baselines hold. Removing the draw and using the catalog's
+    // deterministic disposition would have been tidier and would have re-phased
+    // every member draw after it.
+    //
+    // ⚠ AND TWO DECIMALS, MATCHING THE STOCK. The old one-decimal rounding here
+    // was fine for a frozen field; on a stock whose yearly moves are hundredths
+    // it would quantise a joiner's opening onto a coarser grid than the thing
+    // it feeds.
+    satisfaction: parseFloat(rng.range(OPENING_SATISFACTION.min, OPENING_SATISFACTION.max).toFixed(2)),
   }));
 
   const activeMembers: Member[] = [...retainedMembers, ...newMembers];

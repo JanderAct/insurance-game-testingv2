@@ -1,14 +1,38 @@
 // ============================================================================
 // MEMBER SATISFACTION — what one member thinks of the pool, and it MOVES.
 //
-//     delta_i = -W . excess_i . (1 - FAULT . ownFault_i)
+//     delta_i = -K . r(excess_i) . (1 - FAULT . ownFault_i)
 //
 //     excess_i   = the member's own bill change, in percentage points, MINUS
 //                  what the market's rate did this year
+//     r(x)       = x^2 for x >= 0, and -x^2/LAMBDA for x < 0 — CONVEX, so the
+//                  reaction grows faster than the gap, and ASYMMETRIC, so
+//                  grievance outruns gratitude
 //     ownFault_i = how much of their own increase their own claims explain,
 //                  on [0, 1]
 //
 // applied to the member's carried satisfaction and clamped to [1, 10].
+//
+// ============================================================================
+// ⚠ WHY CONVEX RATHER THAN A BIGGER W, WHICH WAS THE OBVIOUS NEXT STEP.
+//
+// The linear form's own measurement killed it: gap and noise both scale
+// linearly in the weight, so the separation ratio is CONSTANT and raising W
+// makes the scoreboard louder and no clearer. The problem was never the size of
+// the reaction — it was that a 1.5pp year and a 13pp decision were treated as
+// the same kind of thing. A convex reaction fixes that at source rather than
+// amplifying it.
+//
+// What it buys, measured: in a year carrying both a typical gap and one stop on
+// the funding slider, the DECISION'S SHARE of the member's move goes from 42%
+// under the linear form to 67% under this one. That share is a property of the
+// FORM and is the same at any coefficient, which is why it is the number worth
+// quoting rather than any absolute size.
+//
+// ⚠ AND IT IS A SHARE, NOT NOISE REMOVAL. The gap's SD at defaults is 5-7pp per
+// line while one funding stop is worth about +4pp, so a p90 ordinary year still
+// outweighs a decision under either form. Convexity moves the ordinary year out
+// of the way; it does not make the benchmark quiet.
 //
 // ============================================================================
 // ⚠ THIS IS A BUILD, NOT A REPAIR, AND WHAT IT REPLACES HAD NO MOVING PARTS.
@@ -194,67 +218,137 @@
 // ============================================================================
 
 import { EXPERIENCE_MOD, ownExperienceFrames } from './memberExperienceMod';
-import type { CoverageLine, Member, MemberLossHistory } from '../types/simulation';
+import type { CoverageLine, Member, MemberLossHistory, SatisfactionMove } from '../types/simulation';
+
+export type { SatisfactionMove };
 
 /**
- * The response scale, in satisfaction points per percentage point of
+ * THE CONVEX SCALE — satisfaction points per SQUARED percentage point of
  * market-adjusted bill change.
  *
- * ⚠ ADOPTED FROM THE POOL-LEVEL CONSTANT, THEN CHECKED FOR SEPARATION RATHER
- * THAN FOR FEEL. RATE_SATISFACTION_SENSITIVITY is 0.015 and its own header is
- * candid about where it came from: "there is no measurement in this model that
- * could pin a member's price elasticity, so it is a judgment, and it is
- * recorded as one." Nothing here changes that, so inventing a second judgment
- * would be worse than reusing the first.
+ * ============================================================================
+ * ⚠ THE FORM IS SQUARED AND NOT A THRESHOLD, AND THE THRESHOLD IS THE ONE THAT
+ * LOOKS BETTER ON THE FIRST MEASUREMENT.
  *
- * ⚠ AND A SWEEP CANNOT PICK IT, WHICH WAS WORTH FINDING OUT RATHER THAN
- * ASSUMING. The obvious criterion — "set W so a pool priced above market
- * separates from one priced at market by more than the noise" — is EMPTY,
- * because the gap and the noise both scale linearly in W and the ratio is
- * therefore constant. Measured, 16 seed-matched games x 10 years, mean WC
- * member satisfaction at year 10, defaults against an ascending-CLF arm
- * (fundingAtExpected off, confidence 0.60 climbing 3.5pp a year to 0.95):
+ * Both were considered. A threshold-and-slope, max(0, |x| - T), matches
+ * behaviour better on its face — people genuinely ignore small increases — and
+ * measured on the gap distribution it separates far harder: with T at the
+ * median |gap| the ordinary year contributes EXACTLY zero and the decision year
+ * keeps its whole excess, a ratio in the tens against squaring's four.
  *
- *   W        defaults   priced up     gap     unpaired gap/SD   paired t
- *   0.005      7.202      7.158      -0.043        0.4             4.2
- *   0.015      7.081      6.945      -0.136        1.0             8.1
- *   0.030      6.901      6.624      -0.277        1.1             8.8
- *   0.050      6.658      6.195      -0.463        1.2             8.8
- *   0.150      5.849      4.754      -1.095        1.0             8.1
+ * It is not taken, for one reason. T would have to be pinned to the gap's own
+ * dispersion at defaults, because that is the only statistic available — and
+ * the gap's dispersion at defaults is the MARKET BENCHMARK'S NOISE plus the
+ * pool's own rate noise, not a fact about how members feel. Fitting a
+ * behavioural bend to a measurement-error statistic is calibrating the
+ * mechanism to hide its own noise, and it would move every time the benchmark
+ * gained a component. Squaring has no bend to place: one scale, and the shape
+ * is fixed.
  *
- * The unpaired column is flat, as the scale argument says it must be. The
- * PAIRED column is not flat, and that is not the mechanism — it is the two
- * DISCRETISATIONS either side of the range: at 0.005 a year's move is small
- * enough that the two-decimal rounding eats part of it, and at 0.150 the [1, 10]
- * clamp starts binding. Between them the mechanism transmits cleanly and W is
- * a free choice.
+ * ⚠ AND THE THRESHOLD DOES NOT ACTUALLY SOLVE THE PROBLEM IT LOOKS LIKE IT
+ * SOLVES. It kills the MEDIAN ordinary year and leaves the tail: the gap's SD
+ * is 5-7pp per line while one stop on the funding slider is worth about +4pp,
+ * so a p90 ordinary year still outweighs the decision under either form. What
+ * convexity buys is the decision's SHARE of the year it lands in, and that is
+ * the honest claim — not that noise has been removed.
  *
- * SO 0.015 IS KEPT ON CONSISTENCY, NOT ON A MEASUREMENT. It is the shipped
- * scale for exactly this quantity elsewhere in the model, and adopting a
- * different one would be a SECOND judgement about member price elasticity with
- * no more evidence than the first. What it costs is legibility: a decade of the
- * ascending-CLF arm moves the mean by 0.14 against a join-draw spread of 2.5
- * points, so a player reading one member's number would struggle to tell a
- * decade of aggressive pricing from where that member started. The scoreboard
- * is SLOW, and saying so is better than quietly picking a louder number. 0.050
- * would make it plain at 0.46 and is the change to make if playtest says the
- * column looks frozen — the table is here so that is one line with evidence
- * behind it rather than a taste.
+ * ============================================================================
+ * THE COEFFICIENT, AND IT IS ANCHORED RATHER THAN CHOSEN.
  *
- * ⚠ AND THE DRIVER IS SMALLER THAN THE DECISION THAT PRODUCES IT, which is why
- * the gap is small. Mean market-adjusted bill change, percentage points a year,
- * same 16 games:
+ * A convex form cannot be pinned by a separation ratio — the previous commit
+ * measured that gap and noise both scale linearly in the weight, so any
+ * signal-to-noise criterion is empty. What CAN be pinned is where the convex
+ * reaction crosses the linear one it replaces:
  *
- *   arm              WC       GL       Property
- *   defaults       -0.31    -0.99      -0.74
- *   ascending CLF  +0.97    +1.27      +1.70
+ *     K x g^2 = W_lin x g   at   g = W_lin / K
  *
- * A pricing lever swung from break-even to the 95th percentile over a decade
- * moves a member's bill about 1.3 to 2.4 points a year past the market. That is
- * the quantity satisfaction reads, and it is the honest size of it.
+ * Set the crossover at THE GAP A TYPICAL YEAR CARRYING ONE FUNDING STOP
+ * PRODUCES, and the reaction at the decision is unchanged while everything
+ * smaller goes quiet and everything larger bites. Measured on the charged-rate
+ * basis, 8 games x 10 years:
+ *
+ *     pooled median |gap| at defaults                  3.93pp
+ *     one stop (Expected -> the 0.65 stop), own effect  +3.96pp
+ *     crossover = the two together                       7.89pp
+ *
+ *     K = W_lin / 7.89 = 0.015 / 7.89 = 0.0019
+ *
+ * so W_lin is inherited, the crossover is measured, and nothing is picked.
+ * What it does, against the linear form at the same anchor:
+ *
+ *     gap      convex     linear     ratio
+ *     1.5pp    0.0043     0.0225     0.19x     an ordinary year goes quiet
+ *     3pp      0.0171     0.0450     0.38x
+ *     5pp      0.0475     0.0750     0.63x
+ *     7.89pp   0.1183     0.1183     1.00x     the crossover, by construction
+ *     13pp     0.3211     0.1950     1.65x     a funding stop on a bad year bites
+ *     20pp     0.7600     0.3000     2.53x
+ *
+ * ⚠ THE CLAIM THIS SUPPORTS IS ABOUT SHARES, NOT ABOUT NOISE REMOVAL. In a year
+ * carrying both a typical gap and one funding stop, the decision's share of the
+ * member's move goes from 53% under the linear form to 78% under this one —
+ * (7.89^2 - 3.93^2)/7.89^2 against (7.89 - 3.93)/7.89. That ratio is a property
+ * of the FORM and is the same at any K, which is why it is the number worth
+ * quoting.
  */
 export const SATISFACTION = {
-  priceWeight: 0.015,
+  priceWeight: 0.0019,
+  /**
+   * The LINEAR weight this replaced, kept as the anchor the coefficient above
+   * was derived from and as the arm the gate compares against. It is
+   * RATE_SATISFACTION_SENSITIVITY, adopted at the previous commit.
+   *
+   * ⚠ AND ITS PROVENANCE IS THINNER THAN ITS REUSE IMPLIED, WHICH IS WORTH
+   * KNOWING BEFORE ANY OF ITS SIBLINGS IS REUSED AGAIN. `git log -S` puts all
+   * three rate sensitivities in ONE commit, bdc98ec "Reconnect the price channel
+   * to membership", 2026-08-19, and that commit derives exactly one of them and
+   * only as far as: "SCALE: 0.0030 of retention per point of rate rise above
+   * neutral — the requested starting scale, adopted as given. There is no
+   * measurement in this model that could pin a member's price elasticity; it is
+   * a judgment and is recorded as one."
+   *
+   * That sentence is about RATE_RETENTION_SENSITIVITY (0.02). The satisfaction
+   * figure (0.015) and the level figure (0.10) arrived in the same diff with NO
+   * derivation of their own at all — they are siblings of a judgement, not
+   * judgements that were each made. And the family has since thinned out:
+   * RATE_LEVEL_SENSITIVITY lost its only consumer when the recruitment ladder
+   * was retired with the membership target and is dormant; RATE_RETENTION_
+   * SENSITIVITY is still live in calcRetentionProbability.
+   *
+   * So the honest status of the anchor is: one unexamined request, adopted
+   * three times. It is still used here, because the alternative is a fourth
+   * unexamined number and consistency with the shipped one is worth more than
+   * novelty — but it is NOT evidence, and the next person to reach for one of
+   * these should know they are all the same number's cousins.
+   */
+  linearEquivalent: 0.015,
+  /**
+   * How much less a rate CUT is worth than an equal rate RISE costs.
+   *
+   * ⚠ A JUDGEMENT, RECORDED AS ONE, AND IT DOES NOT FALL OUT OF THE CONVEX FORM.
+   * Squaring is symmetric about zero on its own; the asymmetry is a separate
+   * decision and is made here rather than left implicit. Grievance outruns
+   * gratitude: a pool that prices 13pp under the market should not buy back what
+   * one 13pp over costs it.
+   *
+   * 2.25 is Tversky and Kahneman's measured loss-aversion coefficient (Advances
+   * in Prospect Theory, 1992) — the median ratio at which losses loom larger
+   * than equivalent gains. Used for the same reason Mahler's rule 3 and NCCI's
+   * credibility form are used elsewhere in this repo: a published figure from
+   * the literature that studies exactly this beats a number picked to feel
+   * right. It is NOT a measurement of this model and must not be quoted as one.
+   *
+   * ⚠ AND IT CONVERTS BENCHMARK NOISE INTO DRIFT, WHICH IS ITS REAL COST. At
+   * defaults the gap is roughly symmetric about zero, so damping only the
+   * favourable half leaves a negative expectation that scales with the gap's
+   * VARIANCE — that is, with how noisy the market benchmark is, which is not
+   * something a player did. RATE_SATISFACTION_SENSITIVITY's own header names the
+   * same failure mode as the reason the pool-level term is symmetric. It is
+   * tolerated here and not there because the convex form makes the ordinary
+   * year's contribution tiny; member-satisfaction-check's drift assertion is
+   * what holds it, and if that goes red this constant is the first suspect.
+   */
+  gratitudeLambda: 2.25,
   /**
    * How much of the grievance a maximally-at-fault member absorbs. 1.0 means
    * a member at the clamp's ceiling takes none of it.
@@ -270,18 +364,20 @@ export const SATISFACTION = {
   ceiling: 10.0,
 };
 
-export interface SatisfactionMove {
-  memberId: string;
-  /** Percentage points: (1 + r/100)(mod_t/mod_(t-1)) - 1, x100. */
-  billChangePct: number;
-  /** Percentage points, from marketConditions. The same for every member. */
-  marketChangePct: number;
-  /** billChangePct - marketChangePct. What the pool has to answer for. */
-  excessPct: number;
-  /** [0, 1]. 0 for an unrated member and for anyone at or below the book mean. */
-  ownFault: number;
-  /** Satisfaction points. Negative is unhappier. */
-  delta: number;
+/**
+ * The convex reaction: how many satisfaction points a gap of `excessPct` is
+ * worth, before the fault discount. Positive OUT means unhappier, so the caller
+ * negates.
+ *
+ *     r(x) =  x^2          for x >= 0
+ *     r(x) = -x^2 / LAMBDA for x <  0
+ *
+ * Exported so the gate can assert the shape at named points rather than
+ * re-deriving it, and so a reader can evaluate it without running a game.
+ */
+export function satisfactionReaction(excessPct: number): number {
+  const x = excessPct;
+  return x >= 0 ? x * x : -(x * x) / SATISFACTION.gratitudeLambda;
 }
 
 /**
@@ -322,7 +418,8 @@ export function satisfactionMoves(
       marketChangePct,
       excessPct,
       ownFault,
-      delta: -SATISFACTION.priceWeight * excessPct * (1 - SATISFACTION.faultDiscount * ownFault),
+      delta: -SATISFACTION.priceWeight * satisfactionReaction(excessPct)
+        * (1 - SATISFACTION.faultDiscount * ownFault),
     };
   });
 }

@@ -185,6 +185,26 @@ export interface MemberPremiumShare {
   experienceMod: number;
 }
 
+/**
+ * One member's reaction to one year's bill. See memberSatisfaction.ts for the
+ * model; this lives here rather than beside it because LineResultSet carries an
+ * array of them and a result type importing a util would invert the dependency.
+ * Same reason MemberPremiumShare is here.
+ */
+export interface SatisfactionMove {
+  memberId: string;
+  /** Percentage points: (1 + r/100)(mod_t/mod_(t-1)) - 1, x100. */
+  billChangePct: number;
+  /** Percentage points, from marketConditions. The same for every member. */
+  marketChangePct: number;
+  /** billChangePct - marketChangePct. What the pool has to answer for. */
+  excessPct: number;
+  /** [0, 1]. 0 for an unrated member and for anyone at or below the book mean. */
+  ownFault: number;
+  /** Satisfaction points. Negative is unhappier. */
+  delta: number;
+}
+
 // ---------------------------------------------------------------------------
 // Claim / Occurrence scaffolding for the loss-distribution work.
 //
@@ -1078,6 +1098,27 @@ export interface ResultSet {
   // the allocator, and any consumer that needs it for a locked year must call
   // the allocator rather than assume the field.
   memberPremiumShares?: MemberPremiumShare[];
+  /**
+   * What each member on this line's book made of this year's bill, and why.
+   * One row per member ENTERING the year — including those who then left, since
+   * the bill is part of what they left over.
+   *
+   * ⚠ IN-MEMORY AND STRIPPED, AND IT IS HERE FOR A REASON THE OTHER STRIPPED
+   * KEYS DO NOT HAVE: IT IS THE ONLY EXACT RECORD OF THE SIGNAL THE ENGINE USED.
+   * A gate can recompute `satisfactionMoves` from the ledger and the roster, and
+   * the first version of member-satisfaction-check did — but it cannot recompute
+   * the rate change, because movement is fed the PRE-MOVEMENT quote
+   * (estimatedTotalMemberRatePer100 against last year's rate) and nothing carries
+   * it. Re-derived off the final charged rate, WC's drift read -0.0153 against an
+   * observed -0.0049 and GL's came out with the sign reversed. Carrying the rows
+   * makes the gate exact instead of caveated.
+   *
+   * ⚠ AND IT FEEDS NOTHING, LIKE THE FIELD IT EXPLAINS. Nothing in src/ reads it.
+   * member-satisfaction-check's static allow-list scans for `satisfaction` on a
+   * Member, which would NOT catch a consumer of this key, so the allow-list names
+   * this one separately.
+   */
+  memberSatisfactionMoves?: SatisfactionMove[];
   // ALL 200 CANONICAL MEMBERS, enrolled and prospect alike — loss HISTORY only,
   // never pool accounting. Claims are generated marketplace-wide so that a
   // prospect arrives with a readable loss record instead of a blank one, which

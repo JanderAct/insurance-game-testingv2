@@ -38,23 +38,39 @@
 // surface-privacy-check, which holds risk quality off every render path.
 //
 // ============================================================================
-// FIVE SECTIONS.
+// SEVEN SECTIONS.
 //
 //   1. IT MOVES. Share of member-years that change, per line, against a null
-//      arm at weight 0 which must move NONE.
+//      arm at weight 0 which must move only by the re-join draw.
 //   2. IT FEEDS NOTHING. Static allow-list over src/.
 //   3. DRIFT AT DEFAULTS. All-defaults is the neutral point of this model, and
 //      a scoreboard that slides at defaults is a scoreboard measuring its own
 //      calibration error. This is also precondition 3 for ever promoting the
 //      field into departure — see memberSatisfaction.ts.
-//   4. THE INTERACTION IS REAL. The design's whole claim is that the loss term
-//      MODULATES the price term rather than adding to it: among members facing
-//      the same increase, the blameless ones must be unhappier than the ones
-//      whose own claims explain their bill. If that ordering does not hold, the
-//      model is two independent penalties wearing an interaction's name.
-//   5. POSITIVE CONTROL. A seed-matched pool priced above the market must end
+//   4. THE REACTION IS CONVEX, at named points, against the linear form it
+//      replaces. The whole claim of the convex rebuild is that an ordinary year
+//      goes quiet while a decision bites, so the RATIO is asserted rather than
+//      the shape being taken on trust.
+//   5. THE INTERACTION IS REAL, CONTROLLED FOR THE GAP. The design's claim is
+//      that the loss term MODULATES the price term: among members facing the
+//      SAME increase, the blameless ones must be unhappier.
+//   6. ONE MEMBER, ONE DECISION. The averages in the other sections hide what a
+//      player actually sees. This traces a blameless member through a game in
+//      which the funding slider moves one stop, seed-matched against the same
+//      member in the same game with it left alone.
+//   7. POSITIVE CONTROL. A seed-matched pool priced above the market must end
 //      unhappier. A satisfaction model that never responds to price is the
 //      frozen field again with more arithmetic in front of it.
+//
+// ⚠ SECTION 5 USED TO BE WRONG AND PASSED ANYWAY, WHICH IS WORTH RECORDING. It
+// compared blameless against at-fault members over one wide bucket — everyone
+// facing more than +2pp — and did not control for the size of the increase
+// inside it. At-fault members sit HIGHER in that bucket, because a member whose
+// mod has risen has both a larger bill change and a worse ratio, so the two
+// arms were not facing "the same increase" at all. Under a linear reaction the
+// fault damping still won and the test passed; under a convex one the gap term
+// won and it failed. The test was always measuring the wrong thing and the form
+// change is only what exposed it.
 // ============================================================================
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -63,13 +79,15 @@ import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { processYear } from '../../src/utils/simulationEngine';
-import { SATISFACTION, satisfactionMoves } from '../../src/utils/memberSatisfaction';
-import { marketRateChangePct } from '../../src/utils/marketConditions';
-import type { CoverageLine, DecisionSet, GameState, Member } from '../../src/types/simulation';
+import { SATISFACTION, satisfactionReaction } from '../../src/utils/memberSatisfaction';
+import { OPENING_SATISFACTION } from '../../src/data/memberCatalog';
+import type {
+  CoverageLine, DecisionSet, GameState, Member, SatisfactionMove,
+} from '../../src/types/simulation';
 
 const RULE = '='.repeat(78);
 const LINES: CoverageLine[] = ['WC', 'GL', 'Property'];
-const GAMES = Number(process.env.GAMES ?? 8);
+const GAMES = Number(process.env.GAMES ?? 24);
 const YEARS = Number(process.env.YEARS ?? 10);
 /** Share of member-years that must move for the field to count as alive. */
 const MIN_MOVED_SHARE = 0.50;
@@ -80,11 +98,22 @@ const MIN_MOVED_SHARE = 0.50;
  * replaces measured 0.4% and that residue was the whole of its movement.
  */
 const MAX_NULL_SHARE = 0.02;
-/** Satisfaction points per member-year. See section 3 for where it came from. */
+/**
+ * Satisfaction points per member-year.
+ *
+ * ⚠ AND IT NEEDS SAMPLE, WHICH IS WHY GAMES DEFAULTS TO 16. Under the convex
+ * form this mean is dominated by rare large-gap years, so the estimate is far
+ * noisier than the linear one was: WC read -0.0364 at 4 games and -0.0115 at 12
+ * on the same seed family. A gate run thin here reports a drift the model does
+ * not have.
+ */
 const MAX_DEFAULTS_DRIFT = 0.020;
 /** The priced-up arm: fundingAtExpected off, confidence climbing to the cap. */
 const RAMP_START = 0.60;
 const RAMP_STEP = 0.035;
+/** ONE STOP on the funding slider from where the game ships (Expected). */
+const ONE_STOP = 0.65;
+const DECISION_YEAR = 3;
 
 /**
  * ⚠ THE RULING, AS A LIST. Every file in src/ that may touch `.satisfaction` on
@@ -98,6 +127,9 @@ const ALLOWED: Record<string, string> = {
     + 'AND the retention weight below, which is a different quantity with the same name',
   'src/utils/memberDeparture.ts': 'PROSE ONLY — the header records why the old key was wrong',
   'src/pages/MembershipPage.tsx': 'the roster column and its sort',
+  'src/utils/priorHistoryEngine.ts': 'the boundary re-pin — the stock does not carry the pre-game in',
+  'src/utils/simulationEngine.ts': 'the post-charge satisfaction pass and the scored roster',
+  'src/utils/gameSave.ts': 'memberSatisfactionMoves on SAVE_STRIPPED_KEYS — it never reaches a save',
   // ⚠ FOUND BY THIS GATE, NOT KNOWN BEFORE IT. The spreadsheet page carries a
   // per-member Satisfaction column AND a CSV export of it, and neither export
   // baseline covers that path — solo-export-guard hashes buildResultsWorkbook,
@@ -122,10 +154,19 @@ const sd = (v: number[]) => {
 };
 
 interface LineYear {
-  line: string; year: number; members: Member[];
-  moves: ReturnType<typeof satisfactionMoves>;
+  line: string; year: number; members: Member[]; moves: SatisfactionMove[];
 }
 
+/**
+ * ⚠ THE MOVES ARE READ OFF THE RESULT, NOT RECOMPUTED, AND THE FIRST VERSION OF
+ * THIS GATE RECOMPUTED THEM. processLineYear now carries
+ * `memberSatisfactionMoves` — in-memory, stripped on save — precisely so this
+ * gate can assert the signal the engine used rather than one like it. The
+ * re-derivation read WC's drift at -0.0153 against an observed -0.0049 and
+ * reversed GL's sign, because the engine's satisfaction pass runs on the CHARGED
+ * rate and nothing else on the result carries the pre-movement quote. Two
+ * sections used to carry a caveat about that; neither does now.
+ */
 function play(g: number, ramp: boolean): LineYear[] {
   const id = `MS${g}`;
   const instance = generateGameInstance(id, 61_000_000 + g * 6779);
@@ -144,34 +185,45 @@ function play(g: number, ramp: boolean): LineYear[] {
         d.byLine[l].fundingConfidenceLevel = Math.min(0.95, RAMP_START + RAMP_STEP * (y - 1));
       }
     }
-    // The book and the ledger as they stand ENTERING the year, so the moves
-    // recomputed below are the ones the engine just made rather than a
-    // re-derivation against next year's state.
-    const entering: Record<string, Member[]> = {};
-    for (const l of LINES) entering[l] = gs.poolState.lines[l].members.filter(m => m.status === 'active');
-    // The ledger as it stands ENTERING the year. `?? {}` covers the first year
-    // of a state built without one; a member with no history is unrated, which
-    // is the same thing an empty ledger says.
-    const enteringLedger = gs.poolState.memberLossHistory ?? {};
-    const enteringRate: Record<string, number> = {};
-    for (const l of LINES) enteringRate[l] = gs.poolState.lines[l].ratePer100;
-
     const p = processYear(gs, d);
     gs = { ...gs, currentYearNumber: y + 1, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result] };
-
     for (const lr of p.lineResults) {
-      const line = lr.line as CoverageLine;
       const x = lr.result as never as Record<string, unknown>;
-      const charged = x.ratePer100 as number;
-      const priorRate = enteringRate[line];
-      const rateChangePct = priorRate > 0 ? (charged / priorRate - 1) * 100 : null;
       out.push({
-        line, year: y,
+        line: lr.line as string, year: y,
         members: x.memberList as Member[],
-        moves: satisfactionMoves(
-          entering[line], line, enteringLedger, rateChangePct,
-          marketRateChangePct(line, y, { seed: instance.seed, gameId: id }),
-        ),
+        moves: (x.memberSatisfactionMoves as SatisfactionMove[]) ?? [],
+      });
+    }
+  }
+  return out;
+}
+
+/** One stop on the funding slider, held from `from` on. The decision the
+ *  scoreboard exists to make visible. */
+function playDecision(g: number, from: number): LineYear[] {
+  const id = `MS${g}`;
+  const instance = generateGameInstance(id, 61_000_000 + g * 6779);
+  const setup = { poolName: 'S', gameLength: YEARS, startingYear: 2026, instanceId: id, activeLines: LINES };
+  const { poolState, priorHistory } = runPriorHistory(instance, setup as never);
+  let gs: GameState = {
+    setup: setup as never, instance, currentYearNumber: 1, isStarted: true, isComplete: false,
+    poolState, lockedResults: [], currentDecisions: defaultDecisionSet(1), priorHistory,
+  };
+  const out: LineYear[] = [];
+  for (let y = 1; y <= YEARS; y++) {
+    const d = defaultDecisionSet(y) as DecisionSet;
+    if (y >= from) {
+      for (const l of LINES) { d.byLine[l].fundingAtExpected = false; d.byLine[l].fundingConfidenceLevel = ONE_STOP; }
+    }
+    const p = processYear(gs, d);
+    gs = { ...gs, currentYearNumber: y + 1, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result] };
+    for (const lr of p.lineResults) {
+      const x = lr.result as never as Record<string, unknown>;
+      out.push({
+        line: lr.line as string, year: y,
+        members: x.memberList as Member[],
+        moves: (x.memberSatisfactionMoves as SatisfactionMove[]) ?? [],
       });
     }
   }
@@ -253,10 +305,17 @@ console.log('\n--- 2. nothing reads it (static) ---');
       if (statSync(p).isDirectory()) { walk(p); continue; }
       if (!/\.tsx?$/.test(entry)) continue;
       const body = readFileSync(p, 'utf8');
-      // `.satisfaction` on a value, or `satisfaction:` in an object literal or
-      // type. The lookbehind is on `satisfaction` itself and excludes
-      // `memberSatisfaction`, which is the POOL-LEVEL scalar and a different
-      // quantity — see memberSatisfaction.ts's seam note.
+      // Three things, because the ruling is about the MECHANISM and not only
+      // about the field name:
+      //   `.satisfaction` on a value, and `satisfaction:` in an object literal
+      //     or type. The lookbehind is on `satisfaction` itself and excludes
+      //     `memberSatisfaction`, which is the POOL-LEVEL scalar and a different
+      //     quantity — see memberSatisfaction.ts's seam note.
+      //   the model's own exports, so a file that calls satisfactionMoves or
+      //     applySatisfaction without touching the field is still caught.
+      //   `memberSatisfactionMoves`, the result key that carries the per-member
+      //     reaction. A consumer of THAT is a consumer of this mechanic and the
+      //     first two patterns would miss it entirely.
       //
       // ⚠ THE FIRST CUT PUT THE LOOKBEHIND BEFORE THE DOT, which tested the
       // character before `.` rather than before `satisfaction` — so
@@ -264,7 +323,9 @@ console.log('\n--- 2. nothing reads it (static) ---');
       // whole reason for existing, read as not touching it. A static allow-list
       // whose matcher misses the real consumers is worse than none: it reports
       // a clean surface it never looked at.
-      if (/(?<![A-Za-z])satisfaction\s*:/.test(body) || /\.satisfaction\b/.test(body)) {
+      if (/(?<![A-Za-z])satisfaction\s*:/.test(body)
+        || /\.satisfaction\b/.test(body)
+        || /\b(satisfactionMoves|applySatisfaction|satisfactionReaction|memberSatisfactionMoves)\b/.test(body)) {
         hits.push(p.replace(/\\/g, '/'));
       }
     }
@@ -288,12 +349,10 @@ console.log('\n--- 2. nothing reads it (static) ---');
 
 // --- 3. drift at defaults ---------------------------------------------------
 console.log('\n--- 3. drift at defaults ---');
-console.log('  MEASURED ON THE SHIPPED SERIES, NOT ON A RE-DERIVATION. Each member\'s year-over-year');
-console.log('  change in the stored field, on members present in both years — so it is the move the');
-console.log('  engine actually made. The re-derived `moves` used in section 4 cannot serve here: the');
-console.log('  engine feeds movement the PRE-MOVEMENT quote (estimatedTotalMemberRatePer100 against');
-console.log('  last year\'s rate), and a gate recomputing from the FINAL charged rate would report a');
-console.log('  drift the game does not have.');
+console.log('  MEASURED ON THE SHIPPED SERIES: each member\'s year-over-year change in the');
+console.log('  stored field, on members present in both years. The engine\'s own per-member');
+console.log('  moves are read off the result for the decomposition, so nothing here is');
+console.log('  re-derived and nothing carries a caveat.');
 for (const line of LINES) {
   const deltas: number[] = [];
   for (const run of baseline) {
@@ -315,62 +374,159 @@ for (const line of LINES) {
     failures.push(`${line}: satisfaction drifts ${m.toFixed(4)} points per member-year AT DEFAULTS, `
       + `past the ${MAX_DEFAULTS_DRIFT} bound. All-defaults is this model's neutral point; a scoreboard `
       + `that slides there is reporting its own calibration error as a player's result, and it is `
-      + `precondition 3 against ever promoting this field into departure.`);
+      + `precondition 3 against ever promoting this field into departure. Check the sample first — `
+      + `this mean is tail-dominated under a convex reaction and is noisy below about 12 games.`);
   }
 }
-// WHERE THE RESIDUAL DRIFT COMES FROM. Printed, not asserted — the assertion is
-// the drift above. A member's bill is the pool's rate change TIMES their own
-// modifier change, so the gap against the market has two sources and they are
-// worth separating: a pool pricing above the market is a decision, and a book
-// whose modifiers are drifting is not.
-//
-// ⚠ AND THE BILL AND EXCESS COLUMNS ARE INDICATIVE, NOT THE ENGINE'S. They are
-// re-derived on the FINAL charged rate; the engine signals movement with the
-// PRE-MOVEMENT quote, and the difference is large enough to flip a sign — GL
-// reads excess -0.73pp here while its observed drift is negative, which the
-// re-derivation cannot produce. `market` and `own fault` ARE exact: the first is
-// a pure function and the second does not read a rate at all. Do not quote the
-// middle two columns as a measurement of the game; quote the drift above.
-console.log('  decomposition:');
+console.log('  the gap the drift is built from, exact:');
 for (const line of LINES) {
   const rows = baseline.flatMap(r => r.filter(x => x.line === line).flatMap(x => x.moves));
-  console.log(`    ${line.padEnd(9)} market ${mean(rows.map(m => m.marketChangePct)).toFixed(2)}pp (exact)   `
-    + `mean own fault ${mean(rows.map(m => m.ownFault)).toFixed(3)} (exact)   `
-    + `[indicative: bill ${mean(rows.map(m => m.billChangePct)).toFixed(2)}pp, `
-    + `excess ${mean(rows.map(m => m.excessPct)).toFixed(2)}pp]`);
+  const gaps = rows.map(m => m.excessPct);
+  const abs = gaps.map(Math.abs).sort((a, b) => a - b);
+  console.log(`    ${line.padEnd(9)} gap mean ${mean(gaps).toFixed(2)}pp  median ${abs[Math.floor(0.5 * abs.length)].toFixed(2)}|pp|  `
+    + `p90 ${abs[Math.floor(0.9 * abs.length)].toFixed(2)}|pp|  SD ${sd(gaps).toFixed(2)}pp   `
+    + `mean own fault ${mean(rows.map(m => m.ownFault)).toFixed(3)}`);
 }
 
-// --- 4. the interaction is real ---------------------------------------------
-console.log('\n--- 4. the interaction: among members facing the same increase, who is unhappier ---');
-console.log('  ⚠ RE-DERIVED, on the final charged rate rather than the engine\'s pre-movement quote,');
-console.log('  because the per-member moves are not carried on a result. That is sound HERE and not');
-console.log('  in section 3: the rate change is one number shared by every member of a line-year, so');
-console.log('  it shifts both arms equally and cannot reorder them. It would bias a LEVEL, which is');
-console.log('  exactly what section 3 measures and why section 3 does not use these rows.');
+// --- 4. the reaction is convex ----------------------------------------------
+console.log('\n--- 4. the reaction is convex, against the linear form it replaces ---');
 {
-  const rows = baseline.flatMap(r => r.flatMap(x => x.moves))
-    .filter(m => m.excessPct > 2 && Number.isFinite(m.delta));
-  const blameless = rows.filter(m => m.ownFault <= 0.05).map(m => m.delta);
-  const atFault = rows.filter(m => m.ownFault >= 0.20).map(m => m.delta);
-  console.log(`  members facing an increase over +2pp past the market: ${rows.length}`);
-  console.log(`    blameless (fault <= 0.05)  n ${String(blameless.length).padStart(6)}   mean delta ${mean(blameless).toFixed(4)}`);
-  console.log(`    at fault  (fault >= 0.20)  n ${String(atFault.length).padStart(6)}   mean delta ${mean(atFault).toFixed(4)}`);
-  if (blameless.length < 50 || atFault.length < 50) {
-    failures.push(`too few members in one arm of the interaction test (${blameless.length} blameless, `
-      + `${atFault.length} at fault). The ordering cannot be read, so the design's central claim is untested.`);
-  } else {
-    const ok = mean(blameless) < mean(atFault);
-    console.log(`    blameless fall further: ${ok ? 'OK' : 'FAIL'}`);
-    if (!ok) {
-      failures.push(`members at fault took at least as much satisfaction damage as blameless ones facing `
-        + `the same increase. The loss term is supposed to MODULATE the price term — if this ordering `
-        + `does not hold the model is two independent penalties wearing an interaction's name.`);
-    }
+  // The linear form's scale, so the two are compared at the same anchor rather
+  // than at two arbitrary levels. W_lin is set so both agree at the crossover,
+  // which is where the convex coefficient was derived: K x g^2 = W_lin x g at
+  // g = W_lin / K.
+  const crossover = SATISFACTION.linearEquivalent / SATISFACTION.priceWeight;
+  console.log(`  crossover (where convex = linear) ${crossover.toFixed(2)}pp  `
+    + `— the gap a typical year carrying one funding stop produces`);
+  console.log('    gap      convex     linear    ratio');
+  let monotone = true, prevRatio = -Infinity;
+  for (const g of [1.5, 3, 5, crossover, 13, 20]) {
+    const c = SATISFACTION.priceWeight * satisfactionReaction(g);
+    const l = SATISFACTION.linearEquivalent * g;
+    const ratio = c / l;
+    if (ratio < prevRatio - 1e-12) monotone = false;
+    prevRatio = ratio;
+    console.log(`    ${g.toFixed(2).padStart(6)}pp  ${c.toFixed(4).padStart(8)}  ${l.toFixed(4).padStart(9)}   ${ratio.toFixed(2).padStart(6)}x`);
+  }
+  if (!monotone) {
+    failures.push('the convex/linear ratio is not monotone in the gap. A convex reaction must grow '
+      + 'faster than the gap everywhere, or "ordinary years go quiet, decisions bite" is not what it does.');
+  }
+  // The asymmetry, at the same magnitude either way.
+  const up = satisfactionReaction(10), down = satisfactionReaction(-10);
+  const lam = up / -down;
+  const lamOk = Math.abs(lam - SATISFACTION.gratitudeLambda) < 1e-9;
+  console.log(`  asymmetry: +10pp reacts ${up.toFixed(2)}, -10pp reacts ${down.toFixed(2)}, ratio ${lam.toFixed(3)} `
+    + `against gratitudeLambda ${SATISFACTION.gratitudeLambda}  ${lamOk ? 'OK' : 'FAIL'}`);
+  if (!lamOk) failures.push(`the reaction's up/down ratio is ${lam.toFixed(3)}, not gratitudeLambda.`);
+  // And the thing the rebuild is FOR: the decision's SHARE of the year it lands
+  // in. Form-determined, not weight-determined — the same at any K, which is why
+  // it is the number worth printing.
+  const ordinary = mean(baseline.flatMap(r => r.flatMap(x => x.moves.map(m => Math.abs(m.excessPct)))));
+  const convexShare = (satisfactionReaction(crossover) - satisfactionReaction(ordinary))
+    / satisfactionReaction(crossover);
+  const linearShare = (crossover - ordinary) / crossover;
+  console.log(`  a year carrying a typical gap (${ordinary.toFixed(2)}pp) AND one funding stop: the decision is`);
+  console.log(`    ${(100 * linearShare).toFixed(0)}% of the member's move under the linear form, `
+    + `${(100 * convexShare).toFixed(0)}% under this one`);
+  if (!(convexShare > linearShare)) {
+    failures.push('the decision\'s share of a decision year is no larger under the convex form than '
+      + 'under the linear one. That share is the whole purpose of the rebuild.');
   }
 }
 
-// --- 5. positive control ----------------------------------------------------
-console.log('\n--- 5. positive control: seed-matched, priced above the market ---');
+// --- 5. the interaction, CONTROLLED for the gap -----------------------------
+console.log('\n--- 5. the interaction: among members facing the SAME increase, who is unhappier ---');
+{
+  const all = baseline.flatMap(r => r.flatMap(x => x.moves));
+  let tested = 0;
+  for (const [lo, hi] of [[4, 8], [8, 14], [14, 25]] as Array<[number, number]>) {
+    const band = all.filter(m => m.excessPct >= lo && m.excessPct < hi);
+    const bl = band.filter(m => m.ownFault <= 0.05);
+    const af = band.filter(m => m.ownFault >= 0.20);
+    if (bl.length < 50 || af.length < 50) {
+      console.log(`  gap [${lo}, ${hi})pp   too few members to read (blameless ${bl.length}, at fault ${af.length})`);
+      continue;
+    }
+    tested++;
+    const ok = mean(bl.map(m => m.delta)) < mean(af.map(m => m.delta));
+    console.log(`  gap [${lo}, ${hi})pp  n ${String(band.length).padStart(5)}   `
+      + `mean gap ${mean(bl.map(m => m.excessPct)).toFixed(2)} vs ${mean(af.map(m => m.excessPct)).toFixed(2)}   `
+      + `delta blameless ${mean(bl.map(m => m.delta)).toFixed(4)} (n ${bl.length})   `
+      + `at fault ${mean(af.map(m => m.delta)).toFixed(4)} (n ${af.length})   ${ok ? 'OK' : 'FAIL'}`);
+    if (!ok) {
+      failures.push(`in the [${lo}, ${hi})pp band, members at fault took at least as much damage as `
+        + `blameless ones facing the same increase. The loss term is supposed to MODULATE the price `
+        + `term — if this ordering does not hold the model is two independent penalties wearing an `
+        + `interaction's name.`);
+    }
+  }
+  if (tested === 0) {
+    failures.push('no gap band had enough members in both arms, so the interaction went untested. '
+      + 'Raise GAMES rather than widening the bands — a wider band stops controlling for the gap, '
+      + 'which is the defect this section was rebuilt to fix.');
+  }
+}
+
+// --- 6. one member, one decision --------------------------------------------
+console.log(`\n--- 6. one blameless member, one stop on the funding slider in year ${DECISION_YEAR} ---`);
+{
+  const decided = Array.from({ length: GAMES }, (_, g) => playDecision(g, DECISION_YEAR));
+  const through = DECISION_YEAR + 5;
+  const footprints: number[] = [];
+  let printed = 0;
+  for (let g = 0; g < GAMES; g++) {
+    const b = baseline[g].filter(x => x.line === 'WC').slice(0, through);
+    const d = decided[g].filter(x => x.line === 'WC').slice(0, through);
+    if (b.length < through || d.length < through) continue;
+    const present = (rows: LineYear[], id: string) => rows.every(r => r.members.some(m => m.id === id));
+    const blameless = (rows: LineYear[], id: string) => rows
+      .slice(DECISION_YEAR - 1)
+      .every(r => (r.moves.find(m => m.memberId === id)?.ownFault ?? 0) <= 0.02);
+    const cand = b[through - 1].members.map(m => m.id)
+      .filter(id => present(b, id) && present(d, id) && blameless(b, id));
+    if (cand.length === 0) continue;
+    const id = cand[0];
+    const satOf = (rows: LineYear[]) => rows.map(r => ({
+      y: r.year,
+      sat: rows === b || rows === d ? r.members.find(x => x.id === id)!.satisfaction : 0,
+      gap: r.moves.find(x => x.memberId === id)?.excessPct ?? 0,
+      delta: r.moves.find(x => x.memberId === id)?.delta ?? 0,
+    }));
+    const B = satOf(b), D = satOf(d);
+    footprints.push(D[through - 1].sat - B[through - 1].sat);
+    if (printed === 0) {
+      console.log(`  game ${g}, member ${id} — WC, present and blameless throughout`);
+      console.log('    yr |  left alone: gap    delta     sat |  one stop: gap    delta     sat |  difference');
+      for (let i = 0; i < B.length; i++) {
+        console.log(`    ${String(B[i].y).padStart(2)} | ${B[i].gap.toFixed(2).padStart(17)} ${B[i].delta.toFixed(4).padStart(8)} ${B[i].sat.toFixed(2).padStart(7)} |`
+          + ` ${D[i].gap.toFixed(2).padStart(14)} ${D[i].delta.toFixed(4).padStart(8)} ${D[i].sat.toFixed(2).padStart(7)} |`
+          + ` ${(D[i].sat - B[i].sat).toFixed(2).padStart(11)}`);
+      }
+      printed++;
+    }
+  }
+  const fp = mean(footprints);
+  console.log(`  FOOTPRINT over the decision year and the five after it, ${footprints.length} games: `
+    + `${fp.toFixed(3)} points (SD across games ${sd(footprints).toFixed(3)})`);
+  console.log(`  ENROLMENT LUCK, for scale: the opening draw spans `
+    + `${(OPENING_SATISFACTION.max - OPENING_SATISFACTION.min).toFixed(2)} points end to end.`);
+  const wide = Math.abs(fp) > (OPENING_SATISFACTION.max - OPENING_SATISFACTION.min);
+  console.log(`  one decision outweighs enrolment luck: ${wide ? 'OK' : 'FAIL'}`);
+  if (footprints.length < 3) {
+    failures.push(`only ${footprints.length} games produced a blameless member present in both arms `
+      + `for ${through} years, so section 6 has almost no sample. Raise GAMES.`);
+  } else if (!wide) {
+    failures.push(`one stop on the funding slider moves a blameless member ${fp.toFixed(3)} points over six `
+      + `years, against an enrolment draw spanning `
+      + `${(OPENING_SATISFACTION.max - OPENING_SATISFACTION.min).toFixed(2)}. The draw is the one part of this `
+      + `model a player cannot influence, and it must not be able to hide a decision — that is the rule `
+      + `OPENING_SATISFACTION's width is derived from, so either the width or the weight is wrong.`);
+  }
+}
+
+// --- 7. positive control ----------------------------------------------------
+console.log('\n--- 7. positive control: seed-matched, priced above the market ---');
 {
   const diffs: number[] = [];
   for (let g = 0; g < GAMES; g++) {

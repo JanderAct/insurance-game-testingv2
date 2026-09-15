@@ -208,6 +208,20 @@ export const SAVE_KEY = 'riskpool_gamestate_v10';
  * stripper matches by key name at any depth, so one name could not have kept
  * the ledger entry and dropped the result row.
  *
+ * ⚠ `memberSatisfactionMoves` IS HERE ON SIZE AND ON DERIVABILITY, AND IT IS
+ * THE ONE ENTRY WHOSE REBUILD IS NOT MERELY DEGRADED BUT IMPOSSIBLE. Six numbers
+ * per enrolled member per line-year, so it is the same order as
+ * memberPremiumShares and excluded on the same Ruling 8 grounds — except that a
+ * caller CANNOT reconstruct it. `satisfactionMoves` is pure and re-runnable, but
+ * one of its inputs is the PRE-MOVEMENT rate quote, which nothing persists and
+ * nothing else on the result carries; re-derived from the final charged rate it
+ * came out with WC's drift three times too large and GL's sign reversed. So the
+ * rule for this key is stricter than for the others: it is present for the
+ * current session and ABSENT, not stale, after a reload — and there is no
+ * allocator to call. Nothing in src/ reads it, which is what makes that
+ * acceptable. Anything that starts to must handle its absence and must not
+ * re-derive it.
+ *
  * ⚠ THE EXPERIENCE MODIFIER ADDED A FOURTH INPUT AND IT IS NOT FULLY
  * RECOVERABLE, SO THE PARAGRAPH ABOVE IS NARROWER THAN IT READS. A share row
  * now carries `experienceMod`, which is a function of memberLossHistory AS IT
@@ -233,7 +247,7 @@ export const SAVE_KEY = 'riskpool_gamestate_v10';
  */
 export const SAVE_STRIPPED_KEYS: readonly string[] = [
   'claims', 'occurrences', 'marketMemberLossResults', 'pricingTriangle',
-  'memberPremiumShares', 'primaryLoss',
+  'memberPremiumShares', 'primaryLoss', 'memberSatisfactionMoves',
 ];
 
 /** Measured against a real Chromium — see the header. Not a spec figure. */

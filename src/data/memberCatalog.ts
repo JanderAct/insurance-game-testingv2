@@ -288,6 +288,60 @@ export const CANONICAL_ROSTER: ReadonlyArray<CanonicalRosterRow> = [
   R('member-200', 'Oakdale Fire District 200', 'Fire District', 'Medium', 'North', 6.117, 5.1, 201.908, 2, 0.415),
 ];
 
+// ============================================================================
+// THE OPENING DISPOSITION — how satisfied a member is before the pool has done
+// anything to them.
+//
+// ⚠ NARROWED FROM A 2.2-POINT SPREAD TO A TENTH OF A POINT, AND THE WIDTH IS
+// DERIVED FROM THE SIGNAL IT HAS TO LET THROUGH.
+//
+// It was 6.2-8.4 here and U(6.0, 8.5) at enrolment — a spread of 2.5 against a
+// decade of policy worth 0.14 under the linear satisfaction model. On those
+// numbers the members table was a sort by WHO GOT A LUCKY NUMBER AT ENROLMENT,
+// with policy as a rounding error on top. The wide spread had a purpose once:
+// the retired departure key sorted on "satisfaction + 0.3 x riskQuality", so
+// the draw's RANGE was half the ranking weight (memberDeparture.ts measured it
+// at rho 0.52 against risk quality's 0.34). That sort is gone.
+//
+// THE RULE: the full width is no wider than the SMALLEST SIGNAL IT MUST NOT
+// HIDE, which is one funding decision. Measured on the convex model, 24 games,
+// one stop on the funding slider costs a blameless member 0.058 points over the
+// decision year and the five that follow, with a standard error of 0.014 —
+// member-satisfaction-check section 6 traces it and ASSERTS the inequality, so
+// the two cannot drift apart. 0.03 sits two standard errors inside that: two
+// members who differ only in their enrolment luck can never differ by as much
+// as one decision is worth, and the margin survives the estimate's own noise.
+//
+// ⚠ 0.10 WAS TRIED FIRST AND FAILED ITS OWN GATE, THEN 0.05 PASSED ON ONE
+// SAMPLE AND WOULD NOT HAVE SURVIVED ANOTHER. The first came from a footprint of
+// 0.15 read off a single member in a single game before the boundary re-pin
+// landed; measured across 16 games it was 0.072 and across 24 it is 0.058. The
+// RULE survived both corrections and the NUMBER it produced did not, which is
+// the argument for asserting a derivation in a gate rather than recording it in
+// a comment.
+//
+// ⚠ AND THE HONEST READING OF 0.03 IS THAT THE DRAW IS NOW NEARLY DECORATIVE.
+// One decision is worth six hundredths of a point, so anything that must sit
+// under it is small. That is not a flaw in the width — it is what the model says
+// a decision is worth, and the alternative was a draw that outweighed one.
+//
+// ⚠ IT IS NOT ZERO, AND THE REASON IS ONLY THAT IDENTICAL IS WRONG TOO. A
+// single constant would say the model has an opinion it does not have — that
+// every public entity arrives feeling exactly the same about a pool it has not
+// been billed by yet. A tenth of a point is the smallest spread that still
+// reads as a spread at the two decimals the column shows.
+//
+// DETERMINISTIC AND PER MEMBER, so a member's disposition is a property of the
+// member rather than of when they happened to join. The same 19-mod-23 walk the
+// 2.2-point version used, rescaled: it steps through 23 distinct values with no
+// short-period correlation against the roster's own ordering.
+export const OPENING_SATISFACTION = { min: 7.20, max: 7.23 } as const;
+
+export function openingSatisfaction(index: number): number {
+  const span = OPENING_SATISFACTION.max - OPENING_SATISFACTION.min;
+  return Number((OPENING_SATISFACTION.min + ((index * 19) % 23) * (span / 22)).toFixed(2));
+}
+
 export const PREDEFINED_MARKET_MEMBERS: ReadonlyArray<Member> = CANONICAL_ROSTER.map(
   (row, index) => ({
     id: row.id,
@@ -305,9 +359,9 @@ export const PREDEFINED_MARKET_MEMBERS: ReadonlyArray<Member> = CANONICAL_ROSTER
     yearJoined: 0,
     calendarYearJoined: 0,
     riskQuality: row.riskQuality,
-    // Baseline satisfaction keeps the old catalog's deterministic spread
-    // (6.2-8.4); the roster CSV carries no satisfaction column.
-    satisfaction: Number((6.2 + ((index * 19) % 23) / 10).toFixed(1)),
+    // The roster CSV carries no satisfaction column; this is a derived
+    // attribute like the size bucket and the WC rating group.
+    satisfaction: openingSatisfaction(index),
     status: 'prospect',
     wcRatingGroup: wcRatingGroupFor(row.type, row.name),
   })

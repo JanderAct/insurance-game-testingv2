@@ -391,10 +391,43 @@ export function runPriorHistory(
   // consistent (each solo line's balance sheet ties, and summing preserves
   // that), so the live-year contribution-share split reproduces each line's
   // stored surplus and Year 1 ties out.
+  // ============================================================================
+  // ⚠ SATISFACTION IS RE-PINNED AT THE BOUNDARY, EXACTLY AS SURPLUS IS, AND FOR
+  // THE SAME REASON: WHAT CARRIES FORWARD IS THE BOOK, NOT THE HISTORY THAT
+  // BUILT IT.
+  //
+  // Per-member satisfaction is a STOCK, so ten pre-game years of it accumulate.
+  // Measured before this re-pin, a member entered Year 1 at 4.24 against an
+  // opening disposition of 7.25 — three points of grievance about a bootstrap.
+  // The pre-game's rate series is not a policy record: the book is grown from
+  // nothing through the maturation years, so its year-over-year rate moves are
+  // large and are nobody's decision. A player opening the game holding someone
+  // else's complaint cannot read their own.
+  //
+  // ⚠ NO DRAW, WHICH IS WHAT MAKES IT SAFE TO DO HERE. The pre-game is where
+  // STARTING_CAPITAL_TO_PREMIUM is solved and where the opening band accepts or
+  // rejects a candidate; a draw added anywhere in it would re-phase every stream
+  // and move the pin, both baselines, and every calibration standing on them.
+  // This is a pure assignment of a deterministic per-member value.
+  //
+  // It also makes the opening REPRODUCIBLE FROM THE ROSTER ALONE — a member's
+  // Year 1 satisfaction no longer depends on which pre-game attempt was
+  // accepted, which is one less thing the opening position carries.
+  const openingByMember = new Map(
+    getPredefinedMarketMembers().map(m => [m.id, m.satisfaction]),
+  );
   const lines = {} as Record<CoverageLine, LinePoolState>;
   for (const line of (['WC', 'GL', 'Property'] as CoverageLine[])) {
     const pg = perLine.find(p => p.line === line);
-    lines[line] = pg ? pg.lineState : emptyLinePoolState();
+    if (!pg) { lines[line] = emptyLinePoolState(); continue; }
+    lines[line] = {
+      ...pg.lineState,
+      members: pg.lineState.members.map(m => {
+        const opening = openingByMember.get(m.id);
+        return opening === undefined || opening === m.satisfaction
+          ? m : { ...m, satisfaction: opening };
+      }),
+    };
   }
 
   // Shared market roster: the FULL canonical marketplace, with a member
