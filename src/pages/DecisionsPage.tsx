@@ -16,8 +16,8 @@ import { hasStaticClf, staticClf } from '../data/clfTables';
 import type { FundingConsequence } from '../utils/fundingConsequence';
 import { RENEWAL_THRESHOLDS, renewalDeclines } from '../utils/renewalUnderwriting';
 import { EXPERIENCE_MOD } from '../utils/memberExperienceMod';
-import { NEW_BUSINESS_TIERS, appetiteEligible } from '../utils/newBusinessAppetite';
-import { APPLICATION_RATE } from '../data/defaultAssumptions';
+import { NEW_BUSINESS_TIERS, NO_NEW_BUSINESS, appetiteEligible } from '../utils/newBusinessAppetite';
+import { APPLICATION_RATE, MAX_NEW_MEMBER_SHARE } from '../data/defaultAssumptions';
 import { canReenroll } from '../utils/membershipHistory';
 
 export interface LineLoanInfo {
@@ -549,6 +549,19 @@ function PreviewBox({ title, description, selected, active = false }: { title: s
   );
 }
 
+/**
+ * The New Business subtitle: how many members would JOIN, after the cap.
+ *
+ * ⚠ JUST THE NUMBER, AND NO TILDE. It read "~3 of ~7" — a ratio hedged twice.
+ * The threshold is already the tile's title, so the subtitle's job is the cost
+ * of the choice, and the cost is a count. The tilde came off because one term
+ * of the three is a draw and the other two are exact; hedging the whole figure
+ * read as doubt about the control rather than sampling noise on who applies.
+ */
+function joinLabel(n: number): string {
+  return `${n} join${n === 1 ? 's' : ''}`;
+}
+
 // ⚠ PROPERTY HAS NOTHING TO RATE ON, AND THE CONTROLS SAY SO RATHER THAN
 // DISAPPEARING. Hiding the line would leave a player wondering whether
 // Property has admission controls at all; showing them greyed with no reason
@@ -667,14 +680,6 @@ function RenewalUnderwriting({
               than its yearly count.
             </span>
           </p>
-          <p className="flex items-start gap-1 text-[11px] text-gray-400 leading-relaxed">
-            <Info size={12} className="mt-0.5 flex-shrink-0" />
-            <span>
-              Ratios are capped at {EXPERIENCE_MOD.ratioCeiling.toFixed(2)}x for this decision, so a member
-              at {EXPERIENCE_MOD.ratioCeiling.toFixed(2)}x and one at 5x are declined together — the column
-              separates them, the threshold does not.
-            </span>
-          </p>
         </>
       ) : (
         <PropertyNoSignalNote />
@@ -688,16 +693,32 @@ function RenewalUnderwriting({
 // in the same card because both are one decision about pool membership:
 // existing members versus applicants.
 //
-// FOUR TIERS ON THE APPLICANT'S OWN LOSS RATIO. Measured shares accepted:
-// 0.75 takes the best ~39%, 1.00 the better-than-expected ~56%, 1.50 all but
-// the worst ~19%, and Accept All everyone. Well spaced, and each states
-// something a player can mean.
+// FIVE TIERS ON THE APPLICANT'S OWN LOSS RATIO, READ MOST OPEN TO MOST CLOSED —
+// Accept All, then the three bars loosest first, then No New Business. That is
+// the same direction Renewal Underwriting above it reads (Renew All, then
+// Decline above), so the two controls in one card do not run opposite ways.
 //
-// ⚠ THE COUNT SHOWN IS THE ELIGIBLE POOL, NOT THE EXPECTED INTAKE, and the
-// difference is the point. Intake measures 2.6 a year against an eligible pool
-// in the dozens, so the tier is not rationing applicants — it is choosing WHICH
-// applicants the draw can reach. Showing "eligible" rather than "you will get
-// N" avoids promising a number the recruitment model does not deliver.
+// ⚠ THE TIERS USED TO RENDER 0.75 / 1.00 / 1.50 AFTER Accept All, which was
+// open, then MOST closed, then loosening again. Nobody chose that; it was
+// NEW_BUSINESS_TIERS in its own ascending order, which is the right order for a
+// threshold list and the wrong one for a row of tiles.
+//
+// ⚠ THE SUBTITLE IS HOW MANY MEMBERS WOULD JOIN, AFTER THE CAP, AND IT USED TO
+// BE NEITHER. It read "~3 of ~7" — a ratio, tilded, and computed before the
+// intake cap. The threshold is already in the tile's title; the subtitle is what
+// the choice costs.
+//
+// ⚠ AND IT IS POST-CAP NOW, WHICH IT WAS NOT. intakeRoom = floor(book x
+// MAX_NEW_MEMBER_SHARE) is the only intake limit left, and it BINDS — the share
+// cap fires whenever applications exceed a tenth of the book, which the
+// arithmetic in MAX_NEW_MEMBER_SHARE puts at any book below about 75 members.
+// A tile reading 7 while the pool had room for 5 was telling the player about a
+// pool of applicants, not about a decision.
+//
+// ⚠ THE BRIEF NAMED MAX_NEW_MEMBERS_PER_YEAR = 4 AS THE CAP AND THAT CONSTANT IS
+// DELETED. defaultAssumptions.ts records why: it "capped a demand term that no
+// longer exists". The live limit is the SHARE cap, which is why the number on
+// the tile moves with the book instead of sitting at 4.
 //
 // ⚠ NEXT STEP, DELIBERATELY NOT THIS COMMIT: per-applicant accept/decline.
 // That turns a policy into a queue of decisions every year and is its own UI
@@ -720,14 +741,22 @@ function NewBusinessAppetite({
   // The applicant pool as the engine will build it: marketplace minus enrolled,
   // minus anyone inside their two-year cooldown. Same source as
   // simulateMemberMovement so the counts cannot drift from the draw.
-  // ⚠ WHAT IS SHOWN IS AN EXPECTATION, NOT THE DRAW, AND THE LABELS SAY SO.
-  // Only APPLICATION_RATE of the unenrolled pool applies in a given year and
-  // WHICH of them apply is drawn at movement time, so the exact number clearing
-  // a bar is not knowable here. What is knowable is the SHARE of the pool that
-  // clears each bar, which is exact, times the application count, which is
-  // deterministic. That product is the expected eligible count and it is what a
-  // player needs to judge whether a bar will leave them short.
-  const eligible = React.useMemo(() => {
+  // ⚠ ONE COMPONENT OF THIS IS AN EXPECTATION AND THE REST IS EXACT, AND THE
+  // DISTINCTION IS WORTH HAVING STRAIGHT BECAUSE THE TILDES CAME OFF.
+  //
+  //   EXACT: the available pool, the application COUNT (deterministic —
+  //     round(pool x APPLICATION_RATE), see membershipEngine's own note that the
+  //     count carries no draw), the share of the pool clearing each bar, and
+  //     intakeRoom.
+  //   DRAWN: WHICH members apply. The engine shuffles the available pool at
+  //     movement time and takes a prefix, so the number of APPLICANTS clearing a
+  //     bar is a hypergeometric draw about a known mean rather than a fact.
+  //
+  // So `share x applications` is the expected eligible count, not this year's
+  // actual, and membershipEngine puts its standard deviation near 1.4. The tile
+  // shows it without a tilde because a tilde on every tier reads as doubt about
+  // the whole control rather than as sampling noise on one term.
+  const joins = React.useMemo(() => {
     const enrolled = new Set(members.map(m => m.id));
     const available = allMarketMembers.filter(
       m => !enrolled.has(m.id) && canReenroll(membershipHistory, m.id, line, yearNumber),
@@ -735,14 +764,19 @@ function NewBusinessAppetite({
     const applications = Math.min(
       available.length, Math.round(available.length * APPLICATION_RATE),
     );
+    // THE CAP, and it is the engine's own line: intakeRoom = floor(book x share).
+    const intakeRoom = Math.floor(members.length * MAX_NEW_MEMBER_SHARE);
+    const capped = (n: number) => Math.min(intakeRoom, n);
     return {
       pool: available.length,
       applications,
+      intakeRoom,
+      acceptAll: capped(applications),
       byTier: NEW_BUSINESS_TIERS.map(t => {
         if (available.length === 0) return 0;
         const share = appetiteEligible(available, line, history, yearNumber, t).length
           / available.length;
-        return Math.round(applications * share);
+        return capped(Math.round(applications * share));
       }),
     };
   }, [members, allMarketMembers, membershipHistory, history, line, yearNumber]);
@@ -754,45 +788,54 @@ function NewBusinessAppetite({
       <span className="text-sm font-semibold text-gray-700">New Business Appetite</span>
       {rated ? (
         <>
-          <div className="grid grid-cols-4 gap-1">
+          {/* MOST OPEN TO MOST CLOSED, matching Renewal Underwriting above. The
+              tiers are reversed here rather than in NEW_BUSINESS_TIERS, which is
+              a threshold list and is correctly ascending for every other reader
+              of it. */}
+          <div className="grid grid-cols-5 gap-1">
             <div onClick={() => !disabled && onChange(null)}>
               <PreviewBox
                 title="Accept All"
-                description={`~${eligible.applications} apply`}
+                description={joinLabel(joins.acceptAll)}
                 selected={value === null}
                 active={!disabled}
               />
             </div>
-            {NEW_BUSINESS_TIERS.map((t, i) => (
+            {[...NEW_BUSINESS_TIERS].map((t, i) => ({ t, i })).reverse().map(({ t, i }) => (
               <div key={t} onClick={() => !disabled && onChange(t)}>
                 <PreviewBox
                   title={`Below ${t.toFixed(2)}x`}
-                  description={`~${eligible.byTier[i]} of ~${eligible.applications}`}
+                  description={joinLabel(joins.byTier[i])}
                   selected={value === t}
                   active={!disabled}
                 />
               </div>
             ))}
+            <div onClick={() => !disabled && onChange(NO_NEW_BUSINESS)}>
+              <PreviewBox
+                title="No New Business"
+                description={joinLabel(0)}
+                selected={value === NO_NEW_BUSINESS}
+                active={!disabled}
+              />
+            </div>
           </div>
           <p className="flex items-start gap-1 text-[11px] text-gray-500 leading-relaxed">
             <Info size={12} className="mt-0.5 flex-shrink-0" />
             <span>
-              About {(100 * APPLICATION_RATE).toFixed(0)}% of the {eligible.pool} entities not currently in
+              About {(100 * APPLICATION_RATE).toFixed(0)}% of the {joins.pool} entities not currently in
               this line apply each year, and each hands over {EXPERIENCE_MOD.windowYears} years of its own
               claims. This sets the standard that loss run has to clear. Those who clear it are written in
               the order they come, not best first — the pool underwrites against a standard, it does not
-              rank the queue.{' '}
-              <strong>A strict bar can leave the pool short of the members it had room for</strong>, which
-              is the cost of being picky rather than a fault.
+              rank the queue. There is room for {joins.intakeRoom} this year.{' '}
+              <strong>A strict bar can leave the pool short of the members it had room for.</strong>
             </span>
           </p>
           <p className="flex items-start gap-1 text-[11px] text-gray-400 leading-relaxed">
             <Info size={12} className="mt-0.5 flex-shrink-0" />
             <span>
-              An applicant&rsquo;s ratio is not on quite the same footing as a member&rsquo;s: it carries no
-              pool risk-control credit and none of the pool&rsquo;s own loss-mix correction, because they
-              have had neither. An applicant with under {EXPERIENCE_MOD.windowYears} years of record has no
-              loss run to judge and is accepted.
+              An applicant&rsquo;s ratio carries no risk-control credit and no loss-mix correction. One
+              with under {EXPERIENCE_MOD.windowYears} years of record is accepted.
             </span>
           </p>
         </>

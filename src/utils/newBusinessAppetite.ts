@@ -76,10 +76,11 @@ import type { CoverageLine, Member, MemberLossHistory } from '../types/simulatio
  * applicants each tier ACCEPTS:
  *
  *   tier    WC      GL
+ *   none      0%      0%    NO_NEW_BUSINESS — the pool writes nobody
  *   0.75    36.9%   40.7%
  *   1.00    55.8%   57.1%
  *   1.50    82.4%   80.3%
- *   (none)  100%    100%
+ *   (all)   100%    100%
  *
  * Well spaced, and each means something a player can state: the best ~40%, the
  * better-than-expected half, everyone but the worst fifth, and everyone.
@@ -111,13 +112,42 @@ import type { CoverageLine, Member, MemberLossHistory } from '../types/simulatio
  * permissive bar still costs almost nothing, which is correct: 1.50 excludes
  * only the worst fifth of applicants and the pool rarely wanted four of them in
  * the same year anyway.
+ *
+ * ⚠ THE joins/yr COLUMN ABOVE IS STALE AGAINST THE LIVE ENGINE AND IS LEFT
+ * STANDING RATHER THAN SILENTLY PATCHED. Measured now, 8 games x 12 years, the
+ * engine's own newMembers count reads 6.30 / 5.37 / 3.72 / 2.59 per year on WC
+ * across Accept All / 1.50 / 1.00 / 0.75, against the 2.61 / 2.54 / 2.53 / 2.15
+ * recorded here. The shape of the finding survives — a strict bar costs members
+ * — but the LEVEL does not, and the table's own SHORT and final-book columns
+ * were measured on the same run. Re-running new-business-appetite-derive is what
+ * refreshes it; that is a measurement commit, not a comment edit, and the figures
+ * are not quoted anywhere that acts on them.
  * ============================================================================
  * ============================================================================
  */
 export const NEW_BUSINESS_TIERS = [0.75, 1.00, 1.50] as const;
 
-/** null = accept every applicant. Otherwise the raw-ratio threshold at or above
- *  which an applicant is not written. */
+/**
+ * WRITE NOBODY THIS YEAR. The fifth tier, and it is not a threshold.
+ *
+ * ⚠ ENCODED AS 0 RATHER THAN AS A NEW TYPE, AND THE REASON IS THE SAVE. The
+ * decision is persisted as `number | null` on LineDecisionSet and goes through
+ * JSON like everything else; widening it to a string union would change the
+ * shape of every saved game and every export for one extra state. A bar of zero
+ * reads naturally — nobody clears it — and the type is untouched.
+ *
+ * ⚠ AND IT MUST BE TESTED BEFORE THE `appetite > 0` GUARD BELOW, WHICH USED TO
+ * SWALLOW IT. That guard reads "null, or not a positive threshold, means do not
+ * filter", so 0 previously meant ACCEPT ALL — the exact opposite of what it now
+ * means. Nothing could produce a 0 (the UI offered null or one of the three
+ * tiers, and decisionDefaults ships null), so no saved game carries one; but a
+ * hand-edited save would flip meaning, and that is why the check is first and
+ * explicit rather than folded into the guard.
+ */
+export const NO_NEW_BUSINESS = 0;
+
+/** null = accept every applicant. NO_NEW_BUSINESS = write nobody. Otherwise the
+ *  raw-ratio threshold at or above which an applicant is not written. */
 export type NewBusinessAppetite = number | null;
 
 /**
@@ -147,6 +177,10 @@ export function appetiteEligible(
   yearNumber: number,
   appetite: NewBusinessAppetite,
 ): Member[] {
+  // ⚠ FIRST, AND BEFORE THE GUARD BELOW. See NO_NEW_BUSINESS: that guard treats
+  // any non-positive threshold as "do not filter", so this state would otherwise
+  // be read as accept-all.
+  if (appetite === NO_NEW_BUSINESS) return [];
   if (appetite === null || !(appetite > 0)) return [...candidates];
   const mods = memberExperienceMods(candidates, line, history, yearNumber);
   const ratio = new Map<string, number | null>();
