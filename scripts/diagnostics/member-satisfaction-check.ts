@@ -147,6 +147,14 @@ const ALLOWED: Record<string, string> = {
   'src/utils/membershipEngine.ts': 'the enrolment draw, the one call that advances the stock — '
     + 'AND the retention weight below, which is a different quantity with the same name',
   'src/utils/memberDeparture.ts': 'PROSE ONLY — the header records why the old key was wrong',
+  // ⚠ ADDED BECAUSE THIS GATE CAUGHT IT, AND THE RULING IS THAT IT IS NOT A
+  // CONSUMER. memberValue.ts names Member.satisfaction only to CONTRAST the two
+  // "feeds nothing" rulings: satisfaction's is "not yet, and here are the three
+  // preconditions", while value's is permanent for anything acting on a member,
+  // because the value ratio's measured test-retest correlation is zero. No value
+  // function reads or writes the field. If that ever changes this entry is the
+  // wrong one and the three preconditions apply.
+  'src/utils/memberValue.ts': 'PROSE ONLY — its header contrasts the two feeds-nothing rulings',
   'src/pages/MembershipPage.tsx': 'the roster column and its sort',
   'src/utils/priorHistoryEngine.ts': 'the boundary re-pin — the stock does not carry the pre-game in',
   'src/utils/simulationEngine.ts': 'the post-charge satisfaction pass and the scored roster',
