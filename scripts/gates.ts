@@ -97,6 +97,12 @@ const FAST: string[] = [
                                      //         the price term inside a controlled gap band. Traces one member
                                      //         through one funding stop; null arm with BOTH weights at 0 and a
                                      //         seed-matched priced-up control
+  'member-value-check',              //  16s   the three pots are LAYERS and exhaustive, the member rows rebase to
+                                     //         1 on the book, the tower is DISCLOSED and not RATED, and the
+                                     //         REJECTED lower boundary is re-measured every run rather than
+                                     //         recorded in a comment. Carries the retainedAboveTower trap as an
+                                     //         assertion — the field reads 0 while GL keeps real dollars above
+                                     //         its tower — plus a priced-up control on value against the market
   'market-conditions-check',         //  15s   the CHANGE benchmark reproduces RATE_NEUTRAL_CHANGE_PCT exactly,
                                      //         every component is positive and mean 1, and it is QUIETER than the
                                      //         rate it judges — the assertion that disqualified the calendar

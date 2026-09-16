@@ -117,7 +117,29 @@ for (let g = 0; g < GAMES; g++) {
     for (const l of LINES) {
       const lr = r.byLine[l];
       if (!lr) continue;
-      const above = lr.retainedAboveTower ?? 0;
+      // ⚠ FROM THE CLAIMS, NOT FROM lr.retainedAboveTower, AND THIS SECTION READ
+      // ZERO ON ALL THREE LINES FOR AS LONG AS IT READ THE FIELD.
+      //
+      // retainedAboveTower is set ONCE, at inception, from the BOOKED occurrence
+      // — FORWARD_BOOKING contracts the occurrence through initialEstimate before
+      // the tower ever sees it, and the contraction on a large claim is severe
+      // (measured mean booked/drawn of 0.246 on WC's above-top occurrences and
+      // 0.169 on GL's). Nothing at inception therefore pierces a $25M or $50M
+      // top, the field reads 0, and cedeDevelopment — which is where the excess
+      // actually accrues as the claim develops — returns no retainedAboveTower to
+      // update it with. The band is real and lands in undifferentiated `retained`.
+      //
+      // So this section used to print "0 ( 0.00%)" for WC, GL AND Property over
+      // 1,600 line-years and advise "widen GAMES before concluding anything from
+      // that". Widening GAMES could never have helped: the quantity was
+      // structurally zero, not rare. GL keeps a measured 6.7% of its gross loss
+      // above its tower and this report said the band had never fired.
+      //
+      // member-value-check section 7 asserts the field still reads 0 against real
+      // drawn dollars, so if the engine ever starts populating it this comment
+      // goes red rather than going stale.
+      const above = (lr.claims ?? []).reduce(
+        (s, c) => s + Math.max(0, c.grossUltimate - TOWER_TOP[l as keyof typeof TOWER_TOP]), 0);
       const row = rows[l];
       row.years++;
       row.total += above;

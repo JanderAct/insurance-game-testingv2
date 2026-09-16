@@ -248,6 +248,9 @@ export const SAVE_KEY = 'riskpool_gamestate_v10';
 export const SAVE_STRIPPED_KEYS: readonly string[] = [
   'claims', 'occurrences', 'marketMemberLossResults', 'pricingTriangle',
   'memberPremiumShares', 'primaryLoss', 'memberSatisfactionMoves',
+  // The value scoreboard. Rebuilt from the year's claims, which are themselves
+  // stripped — see memberValue.ts on why no persistent window is bought.
+  'memberValueRows', 'poolValue',
 ];
 
 /** Measured against a real Chromium — see the header. Not a spec figure. */

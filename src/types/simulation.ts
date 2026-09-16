@@ -186,6 +186,73 @@ export interface MemberPremiumShare {
 }
 
 /**
+ * One year's loss split across the three funding layers. See memberValue.ts.
+ *
+ * ⚠ LAYERS, NOT CLAIM-SIZE BANDS. A $3M WC claim puts $1M in `retained` and $2M
+ * in `tower`; it is not "a tower claim". The three always sum to `gross`.
+ */
+export interface PotTotals {
+  /** min(x, retention) summed — what poolPremium funds. */
+  retained: number;
+  /** min(x, towerTop) - min(x, retention) summed — what reinsuranceCost funds. */
+  tower: number;
+  /** max(x - towerTop, 0) summed — what surplus alone funds. */
+  aboveTower: number;
+  /** The three, summed. */
+  gross: number;
+}
+
+/**
+ * What one member got back this year — see memberValue.ts for the rulings,
+ * particularly why the tower is DISCLOSED and not RATED.
+ */
+export interface MemberValueRow {
+  memberId: string;
+  /** Their share of poolPremium: the retained pot's funding. */
+  premium: number;
+  /** min(x, retention) over their own claims. */
+  retainedLoss: number;
+  /**
+   * (loss_i/premium_i) / (loss_pool/premium_pool) on the retained pot. The
+   * premium-weighted book reads 1 by construction.
+   *
+   * ⚠ NOT A PROPERTY OF THE MEMBER. Measured test-retest against the same
+   * member's preceding non-overlapping window is 0.007 / -0.016 / 0.024 by line.
+   * Anything acting ON a member reads the experience modifier, which is capped
+   * and credibility-weighted precisely because this number is not stable.
+   */
+  retainedValue: number;
+  /** DISCLOSED, NOT RATED. Dollars the tower paid on their behalf. */
+  towerRecovered: number;
+  /** Whether they reached the ceded layer at all this year. */
+  reachedTower: boolean;
+  /** DISCLOSED, NOT RATED. Dollars retained above the tower on their behalf. */
+  aboveTowerLoss: number;
+}
+
+/** One line-year's value from the pool's side. See memberValue.ts. */
+export interface PoolValueRow {
+  line: CoverageLine;
+  pots: PotTotals;
+  /** poolPremium + adminExpense + reinsuranceCost. */
+  totalMemberCharge: number;
+  /** grossLoss / totalMemberCharge — what came back per dollar billed. */
+  returnedPerDollar: number;
+  /** MARKET_TARGET_LOSS_RATIO. */
+  marketBenchmark: number;
+  /** returnedPerDollar / marketBenchmark. Above 1: better than a carrier. */
+  valueAgainstMarket: number;
+  /** tower loss / reinsuranceCost. */
+  towerReturnedPerDollar: number;
+  /** expectedCeded / reinsuranceCost — the reinsurer's own implied loss ratio. */
+  reinsurerBenchmark: number;
+  /** towerReturnedPerDollar / reinsurerBenchmark. */
+  valueAgainstReinsurer: number;
+  /** Dollars kept above the tower. NO RATIO — surplus is not a denominator. */
+  aboveTowerDollars: number;
+}
+
+/**
  * One member's reaction to one year's bill. See memberSatisfaction.ts for the
  * model; this lives here rather than beside it because LineResultSet carries an
  * array of them and a result type importing a util would invert the dependency.
@@ -1142,6 +1209,23 @@ export interface ResultSet {
    * this one separately.
    */
   memberSatisfactionMoves?: SatisfactionMove[];
+  /**
+   * WHAT THE MONEY BOUGHT, per member — see memberValue.ts.
+   *
+   * ⚠ IN-MEMORY ONLY, in SAVE_STRIPPED_KEYS, and that is a decision with a
+   * measured reason rather than a size saving. Persisting a multi-year value
+   * window needs a per-member per-pot field on MemberLossYear, whose own header
+   * has costed the remaining room at one number; and the three-year window's
+   * measured test-retest correlation is zero on every pot, so the slot would buy
+   * nothing. The rows are rebuilt every year from that year's claims.
+   */
+  memberValueRows?: MemberValueRow[];
+  /**
+   * The same year's value from the POOL's side — what came back per dollar
+   * billed, against a carrier, and what the tower returned against the
+   * reinsurer's own implied loss ratio. In-memory only for the same reason.
+   */
+  poolValue?: PoolValueRow;
   // ALL 200 CANONICAL MEMBERS, enrolled and prospect alike — loss HISTORY only,
   // never pool accounting. Claims are generated marketplace-wide so that a
   // prospect arrives with a readable loss record instead of a blank one, which

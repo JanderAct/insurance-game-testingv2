@@ -34,6 +34,7 @@ import { isClaimClosed } from './claimClosure';
 import { allocateMemberPremium } from './memberPremium';
 import { marketLevelGapPct, marketRateChangePct } from './marketConditions';
 import { applySatisfaction, satisfactionMoves, satisfactionMovesById } from './memberSatisfaction';
+import { memberValueRows, poolValueRow } from './memberValue';
 import { applyRenewalDeclines, renewalDeclines } from './renewalUnderwriting';
 import { memberExperienceMods } from './memberExperienceMod';
 import { claimRevisionUnit, normalQuantile, reviseDevelopingSet, settleClosingSet } from './claimRevision';
@@ -2037,6 +2038,37 @@ export function processLineYear(
   const lossRatio = actualLossRatio;
   const expenseRatio = actualExpenseRatio;
 
+  // ============================================================================
+  // VALUE — WHAT THE MONEY BOUGHT. A SECOND SCOREBOARD, AND IT RUNS LAST.
+  //
+  // It needs the year's CLAIMS, which the satisfaction pass above does not have —
+  // they are not generated until several hundred lines below it. So the two
+  // scoreboards cannot share a site, and this is the first point at which the
+  // claims, the premium split and the tower quote all exist at once.
+  //
+  // ⚠ PURE, NO DRAWS, AND DOWNSTREAM OF EVERYTHING, which is what keeps both
+  // export baselines bit-identical for the same reason satisfaction's placement
+  // does: nothing above this line can see it, because it does not exist yet.
+  //
+  // ⚠ THE EXPECTED CEDED IS THE TOWER QUOTE'S OWN, IN DOLLARS. `expectedCededPer100`
+  // on the result is the same quantity divided by exposure, and re-deriving it
+  // from that would round-trip through a per-$100 figure for no reason.
+  // ============================================================================
+  const valuePots = poolValueRow({
+    line,
+    claims: generatedClaims ?? [],
+    poolPremium,
+    adminExpense,
+    reinsuranceCost,
+    expectedCeded: expectedCededDollars,
+    // ⚠ THE PLACEMENT, so a declined layer's loss lands in the pot that actually
+    // funds it. Invisible at defaults, where everything is placed.
+    layersPlaced: lineDecisions.layersPlaced,
+  });
+  const valueRows = memberValueRows(
+    memberPremiumShares, generatedClaims ?? [], line, lineDecisions.layersPlaced,
+  );
+
   const result: LineResultSet = {
     yearNumber,
     calendarYear,
@@ -2075,6 +2107,10 @@ export function processLineYear(
     // In-memory only, stripped on save. The exact per-member reaction to this
     // year's bill, on the signal movement was actually fed — see the field.
     memberSatisfactionMoves: satisfaction,
+    // In-memory only, stripped on save — see memberValue.ts on why no multi-year
+    // window is persisted and what it would cost.
+    memberValueRows: valueRows,
+    poolValue: valuePots,
     averageRiskQuality: memberResult.averageRiskQuality,
     memberList: enrolledMembersScored,
 
