@@ -38,10 +38,21 @@
 // surface-privacy-check, which holds risk quality off every render path.
 //
 // ============================================================================
-// SEVEN SECTIONS.
+// EIGHT SECTIONS, AND FOUR LIMBS.
+//
+// ⚠ THE MODEL HAS FOUR LIMBS NOW AND THREE OF THEM FEED THE ANCHOR. The change
+// limb reacts to the pool's price against the market, amplified per member; the
+// anchor carries the market LEVEL, the member's own loss standing, and the
+// pool's surplus band. Sections 5, 6 and 8 each had to change for that, and
+// section 5's old assertion is now FALSE BY DESIGN — see its header.
 //
 //   1. IT MOVES. Share of member-years that change, per line, against a null
-//      arm with BOTH weights at 0 which must move only by the re-join draw.
+//      arm with ALL FOUR weights at 0 which must move only by the re-join draw.
+//
+//      ⚠ THAT NULL ONLY ZEROED TWO OF THEM UNTIL THE DAY THE THIRD AND FOURTH
+//      LIMBS SHIPPED, AND IT WENT RED SAYING 88% OF MEMBER-YEARS MOVED "WITH THE
+//      WEIGHT AT 0". A null arm that leaves half the model running measures the
+//      half it left running. Every weight is listed at the arm.
 //   2. IT FEEDS NOTHING. Static allow-list over src/.
 //   3. DRIFT AT DEFAULTS, AND IT IS NOW THE NET OF TWO LIMBS. The convex change
 //      term pulls down on a noisy gap; the anchor pulls up, because at defaults
@@ -74,6 +85,13 @@
 //   7. POSITIVE CONTROL. A seed-matched pool priced above the market must end
 //      unhappier. A satisfaction model that never responds to price is the
 //      frozen field again with more arithmetic in front of it.
+//   8. THE TWO NEW LIMBS CARRY THEIR OWN DERIVATIONS. lossLevelWeight's rule is
+//      that term 3's cross-member spread is worth one funding stop through the
+//      market level — it shipped at 0.45 producing 0.069 against a 0.116 target
+//      and this is what caught it. The uncapped ratio must stay heavy-tailed
+//      (the saturation exists for that) while the reaction stays bounded. And the
+//      surplus band must not saturate on WC and GL, which is why the shipped
+//      capitalAdequacyStatus ladder was read but its top boundary was not reused.
 //
 // ⚠ SECTION 5 HAS NOW BEEN THREE DIFFERENT TESTS AND THE HISTORY IS THE POINT.
 //
@@ -180,6 +198,10 @@ const sd = (v: number[]) => {
   if (v.length < 2) return NaN;
   const m = mean(v);
   return Math.sqrt(v.reduce((a, b) => a + (b - m) ** 2, 0) / (v.length - 1));
+};
+const q = (v: number[], p: number) => {
+  const t = [...v].sort((a, b) => a - b);
+  return t.length ? t[Math.min(t.length - 1, Math.max(0, Math.floor(p * t.length)))] : NaN;
 };
 
 interface LineYear {
@@ -307,13 +329,27 @@ for (const line of LINES) {
   // silenced one of them reported 85.7% of member-years still moving, which is
   // the anchor doing exactly what it should. A null arm has to switch off the
   // whole mechanism or the share it measures is not this mechanism's.
+  // ⚠ ALL FOUR WEIGHTS, AND THIS GATE WENT RED THE DAY THE THIRD AND FOURTH
+  // LIMBS SHIPPED BECAUSE IT ONLY ZEROED TWO. A null arm that leaves half the
+  // model running measures the half it left running, and reported 88% of
+  // member-years moving "with the weight at 0". Every weight this mechanism has
+  // must be listed here; if a fifth limb lands, it goes in this list first.
   const keepPrice = SATISFACTION.priceWeight;
   const keepLevel = SATISFACTION.levelWeight;
+  const keepLoss = SATISFACTION.lossLevelWeight;
+  const keepSurplus = SATISFACTION.surplusWeight;
+  const keepAmp = SATISFACTION.lossAmplifierSlope;
   SATISFACTION.priceWeight = 0;
   SATISFACTION.levelWeight = 0;
+  SATISFACTION.lossLevelWeight = 0;
+  SATISFACTION.surplusWeight = 0;
+  SATISFACTION.lossAmplifierSlope = 0;
   const nullRuns = Array.from({ length: Math.min(3, GAMES) }, (_, g) => play(g, false));
   SATISFACTION.priceWeight = keepPrice;
   SATISFACTION.levelWeight = keepLevel;
+  SATISFACTION.lossLevelWeight = keepLoss;
+  SATISFACTION.surplusWeight = keepSurplus;
+  SATISFACTION.lossAmplifierSlope = keepAmp;
   let moved = 0, total = 0;
   for (const line of LINES) { const s = movedShare(nullRuns, line); moved += s.moved; total += s.total; }
   const share = moved / Math.max(total, 1);
@@ -475,19 +511,24 @@ console.log('\n--- 4. the reaction is convex, against the linear form it replace
 }
 
 // --- 5. the member's own experience cannot move their satisfaction ----------
-console.log('\n--- 5. a member\'s own experience rating cannot move their satisfaction ---');
-console.log('  THE RULING, ASSERTED DIRECTLY. Satisfaction reads the bill at the member\'s');
-console.log('  PREVIOUS modifier, which is the pool\'s rate change and nothing else — so');
-console.log('  inside one line-year every member must take an IDENTICAL delta however');
-console.log('  differently their own modifiers moved. This replaced an interaction test that');
-console.log('  measured how hard the old fault term damped the reaction; there is no fault');
-console.log('  term now, and a damping test with nothing to damp would assert nothing.');
+console.log('\n--- 5. the own-MODIFIER price channel stays out, and the ruling narrowed ---');
+console.log('  ⚠ THIS SECTION ASSERTED SOMETHING STRONGER UNTIL THE LOSS-RATIO LIMB SHIPPED, AND');
+console.log('  THE OLD ASSERTION IS NOW FALSE BY DESIGN. It required every member of a line-year');
+console.log('  to take an IDENTICAL delta. The price amplifier deliberately breaks that: a member');
+console.log('  with a good loss ratio minds a rise above market MORE, a heavy-claims member LESS.');
+console.log('');
+console.log('  WHAT SURVIVES IS THE HALF THAT WAS ALWAYS THE REAL RULE, and the two are different');
+console.log('  channels however correlated they look. The member\'s own MODIFIER must not change');
+console.log('  what they are COMPARED AGAINST — excessPct is the pool\'s rate against the market,');
+console.log('  one number for the whole line-year, and it stays that way. Their own LOSS RATIO may');
+console.log('  change how hard they REACT to it. A bill that rose because of your own rating is');
+console.log('  still not the pool\'s doing; how much you mind the pool\'s doing is your own.');
 {
   let groups = 0, worstDelta = 0, worstModSpread = 0, thinGroups = 0;
   for (const run of baseline) {
     for (const ly of run) {
       if (ly.moves.length < 2) continue;
-      const deltas = ly.moves.map(m => m.delta);
+      const deltas = ly.moves.map(m => m.excessPct);
       const mods = ly.moves.map(m => m.ownChangePct);
       const dSpread = Math.max(...deltas) - Math.min(...deltas);
       const mSpread = Math.max(...mods) - Math.min(...mods);
@@ -502,17 +543,61 @@ console.log('  term now, and a damping test with nothing to damp would assert no
   }
   console.log(`  ${groups} line-years with a modifier spread over 1pp (${thinGroups} too flat to test)`);
   console.log(`  widest own-modifier spread inside a line-year: ${worstModSpread.toFixed(2)}pp`);
-  console.log(`  widest DELTA spread inside a line-year:        ${worstDelta.toExponential(2)} points`);
+  console.log(`  widest GAP (excessPct) spread inside a line-year: ${worstDelta.toExponential(2)} pp`);
   const ok = groups >= 100 && worstDelta <= 1e-12;
-  console.log(`  identical delta regardless of own experience: ${ok ? 'OK' : 'FAIL'}`);
+  console.log(`  the gap is identical regardless of own experience: ${ok ? 'OK' : 'FAIL'}`);
   if (groups < 100) {
     failures.push(`only ${groups} line-years had members whose own modifiers moved differently by more `
       + `than 1pp, so section 5 barely tested anything. Raise GAMES.`);
   } else if (worstDelta > 1e-12) {
-    failures.push(`inside one line-year, members took deltas differing by ${worstDelta.toExponential(2)} `
-      + `points while their own modifier changes spread ${worstModSpread.toFixed(2)}pp. The ruling is that `
-      + `a member's own experience rating cannot move their satisfaction AT ALL — it is their claims, not `
-      + `the pool's pricing. Something is letting the modifier back into the reaction.`);
+    failures.push(`inside one line-year, members were judged against gaps differing by `
+      + `${worstDelta.toExponential(2)}pp while their own modifier changes spread `
+      + `${worstModSpread.toFixed(2)}pp. The gap is the POOL's rate against the market — one decision, one `
+      + `number for the line-year. The own-modifier price channel is ruled out and something is letting `
+      + `it back into what the member is compared against.`);
+  }
+
+  // ⚠ AND THE OTHER HALF, BECAUSE A CONSTANCY TEST PASSES TRIVIALLY IF THE THING
+  // IT GROUPS ON IS CONSTANT FOR AN UNRELATED REASON. The amplifier must MOVE,
+  // it must be centred on 1 across the book, and it must be driven by the loss
+  // ratio rather than by the modifier.
+  {
+    let ampSpread = 0, worstMean = 0, n = 0;
+    const amps: number[] = [], us: number[] = [], modChanges: number[] = [];
+    for (const run of baseline) {
+      for (const ly of run) {
+        if (ly.moves.length < 2) continue;
+        const a = ly.moves.map(m => m.priceAmplifier);
+        ampSpread = Math.max(ampSpread, Math.max(...a) - Math.min(...a));
+        worstMean = Math.max(worstMean, Math.abs(mean(a) - 1));
+        n++;
+        for (const m of ly.moves) { amps.push(m.priceAmplifier); us.push(m.lossStanding); modChanges.push(m.ownChangePct); }
+      }
+    }
+    const corr = (x: number[], y: number[]) => {
+      const mx = mean(x), my = mean(y);
+      let p = 0, dx = 0, dy = 0;
+      for (let i = 0; i < x.length; i++) { p += (x[i] - mx) * (y[i] - my); dx += (x[i] - mx) ** 2; dy += (y[i] - my) ** 2; }
+      return dx > 0 && dy > 0 ? p / Math.sqrt(dx * dy) : 0;
+    };
+    console.log(`  AMPLIFIER: widest spread inside a line-year ${ampSpread.toFixed(3)}, worst |book mean - 1| `
+      + `${worstMean.toExponential(2)} over ${n} line-years`);
+    console.log(`  corr(amplifier, loss standing) ${corr(amps, us).toFixed(3)}   `
+      + `corr(amplifier, own modifier change) ${corr(amps, modChanges).toFixed(3)}`);
+    if (!(ampSpread > 0.05)) {
+      failures.push(`the price amplifier spreads only ${ampSpread.toFixed(3)} inside a line-year. Term 3 is `
+        + `the only per-member channel satisfaction has; if it does not move, the gap assertion above `
+        + `passes on a flat sample and the term is not there.`);
+    }
+    if (!(worstMean < 1e-9)) {
+      failures.push(`the amplifier's book mean differs from 1 by ${worstMean.toExponential(2)}. It is rebased `
+        + `so the LINE's mean reaction is unchanged — an unrebased amplifier silently retunes the change `
+        + `limb for everyone and would show up as drift nobody chose.`);
+    }
+    if (!(corr(amps, us) > 0.9)) {
+      failures.push(`the amplifier correlates ${corr(amps, us).toFixed(3)} with the loss standing it is `
+        + `defined from. It must be that standing and nothing else.`);
+    }
   }
 }
 {
@@ -616,6 +701,39 @@ console.log(`\n--- 6. one blameless member, one stop on the funding slider in ye
         + `SATISFACTION.levelWeight, whose derivation this replaced after it went stale.`);
     }
   }
+  // ⚠ THE CANCELLATION BOUND, ASSERTED. surplusWeight's own derivation is a
+  // BOUND rather than a match — this term may not cancel more than a quarter of
+  // the funding decision it responds to — and that constant was wrong twice by
+  // arithmetic before it was solved from this measurement. So the measurement is
+  // the gate, not the arithmetic.
+  {
+    const keep = SATISFACTION.surplusWeight;
+    SATISFACTION.surplusWeight = 0;
+    const noSurplus = Array.from({ length: GAMES }, (_, g) => playDecision(g, DECISION_YEAR));
+    const noBase = Array.from({ length: GAMES }, (_, g) => play(g, false));
+    SATISFACTION.surplusWeight = keep;
+    const fps0: number[] = [];
+    for (let g = 0; g < GAMES; g++) {
+      const b = noBase[g].filter(x => x.line === 'WC').slice(0, through);
+      const d = noSurplus[g].filter(x => x.line === 'WC').slice(0, through);
+      if (b.length < through || d.length < through) continue;
+      fps0.push(mean(d[through - 1].members.map(m => m.satisfaction))
+        - mean(b[through - 1].members.map(m => m.satisfaction)));
+    }
+    const fp0 = mean(fps0);
+    const cancelled = fp0 !== 0 ? 1 - Math.abs(fp) / Math.abs(fp0) : 0;
+    console.log(`  CANCELLATION: the same decision with surplusWeight at 0 reads ${fp0.toFixed(4)}, against `
+      + `${fp.toFixed(4)} shipped — the surplus limb cancels ${(100 * cancelled).toFixed(0)}% of it`);
+    const okCancel = cancelled <= 0.25 + 1e-9;
+    console.log(`  the surplus limb cancels at most a quarter of the funding decision: ${okCancel ? 'OK' : 'FAIL'}`);
+    if (!okCancel) {
+      failures.push(`the surplus limb cancels ${(100 * cancelled).toFixed(0)}% of the funding decision's `
+        + `footprint, past the quarter SATISFACTION.surplusWeight is derived from. Funding is what BUILDS `
+        + `surplus, so these two limbs pull against each other on the player's main lever by construction: `
+        + `every point of weight this term carries comes straight out of that lever. Re-solve the weight `
+        + `from this measurement rather than relaxing the bound.`);
+    }
+  }
   console.log(`  ENROLMENT LUCK, for scale: the opening draw spans `
     + `${(OPENING_SATISFACTION.max - OPENING_SATISFACTION.min).toFixed(2)} points end to end.`);
   const wide = Math.abs(fp) > (OPENING_SATISFACTION.max - OPENING_SATISFACTION.min);
@@ -656,6 +774,86 @@ console.log('\n--- 7. positive control: seed-matched, priced above the market --
       + `A satisfaction model that does not respond to price is the frozen field again with more `
       + `arithmetic in front of it.`);
   }
+}
+
+// --- 8. the two new limbs carry their own derivations -----------------------
+console.log('\n--- 8. term 3\'s spread and term 4\'s bands, against their own derivations ---');
+{
+  // (a) THE lossLevelWeight DERIVATION, ASSERTED. The rule is that the spread
+  // this term creates across a book is worth about what ONE STOP on the funding
+  // slider is worth through the market level: 0.030 x 3.85pp = 0.116 points.
+  // The constant shipped WRONG on the day it was written — 0.45 produced 0.069
+  // against that target — and this is what caught it.
+  const TARGET = SATISFACTION.levelWeight * 3.85;
+  console.log(`  (a) TERM 3's SPREAD. Target = one funding stop through the market level = `
+    + `${TARGET.toFixed(4)} points.`);
+  console.log('  line      within-line-year anchor SD   ratio to target   amplifier SD');
+  let worstOff = 0;
+  for (const line of LINES) {
+    const rows = baseline.flatMap(r => r.filter(x => x.line === line)).filter(r => r.moves.length > 1);
+    const aSD = mean(rows.map(r => sd(r.moves.map(m => m.anchor))));
+    const ampSD = mean(rows.map(r => sd(r.moves.map(m => m.priceAmplifier))));
+    worstOff = Math.max(worstOff, Math.abs(aSD / TARGET - 1));
+    console.log(`  ${line.padEnd(9)} ${aSD.toFixed(4).padStart(26)}   ${(aSD / TARGET).toFixed(2).padStart(15)}   ${ampSD.toFixed(4).padStart(12)}`);
+  }
+  const okSpread = worstOff <= 0.35;
+  console.log(`  the realised spread matches the derivation within 35%: ${okSpread ? 'OK' : 'FAIL'}`);
+  if (!okSpread) {
+    failures.push(`term 3's within-line-year anchor SD is ${(100 * worstOff).toFixed(0)}% away from the `
+      + `${TARGET.toFixed(4)} its weight is derived against. SATISFACTION.lossLevelWeight states that rule; `
+      + `either the weight or the rule is now wrong, and the weight was already wrong once this way.`);
+  }
+
+  // (b) THE UNCAPPED RATIO IS UNCAPPED, AND THE REACTION IS BOUNDED ANYWAY.
+  // Both halves matter: if the ratio stops being heavy-tailed the saturation is
+  // solving a problem that went away, and if the reaction stops being bounded
+  // one claim moves a small member's whole opinion.
+  console.log('  (b) THE UNCAPPED RATIO, and the bounded reaction taken from it.');
+  console.log('  line      ratio p50   ratio MAX    u min     u max     level SD');
+  let worstU = 0, thinnest = Infinity;
+  for (const line of LINES) {
+    const mv = baseline.flatMap(r => r.filter(x => x.line === line)).flatMap(r => r.moves);
+    const rr = mv.map(m => m.lossRatio), uu = mv.map(m => m.lossStanding);
+    worstU = Math.max(worstU, Math.max(...uu.map(Math.abs)));
+    thinnest = Math.min(thinnest, Math.max(...rr));
+    console.log(`  ${line.padEnd(9)} ${q(rr, 0.5).toFixed(3).padStart(9)}   ${Math.max(...rr).toFixed(1).padStart(9)}   `
+      + `${Math.min(...uu).toFixed(3).padStart(7)}   ${Math.max(...uu).toFixed(3).padStart(7)}   `
+      + `${sd(mv.map(m => m.lossLevel)).toFixed(4).padStart(8)}`);
+  }
+  if (!(worstU <= 1)) {
+    failures.push(`the loss standing reached ${worstU.toFixed(3)}, outside [-1, 1]. tanh cannot do that; `
+      + `the reaction is no longer bounded and one claim can move a small member's whole opinion.`);
+  }
+  if (!(thinnest > 20)) {
+    failures.push(`the heaviest loss ratio in the sample is only ${thinnest.toFixed(1)}x the book. The `
+      + `saturation scale exists because this quantity is heavy-tailed — measured to 159x, 158x and 203x `
+      + `by line — and if it no longer is, lossSaturation is solving a problem that went away.`);
+  }
+
+  // (c) TERM 4'S BANDS, AND PROPERTY'S SATURATION NAMED RATHER THAN DISCOVERED.
+  console.log('  (c) TERM 4\'s BANDS at defaults, share of member-years:');
+  const BANDS = ['Deficient', 'Thin', 'Adequate', 'Strong', 'Unknown'] as const;
+  let moved = 0;
+  for (const line of LINES) {
+    const mv = baseline.flatMap(r => r.filter(x => x.line === line)).flatMap(r => r.moves);
+    const sh = (b: string) => mv.filter(m => m.surplusBand === b).length / mv.length;
+    console.log(`  ${line.padEnd(9)} ` + BANDS.map(b => `${b} ${(100 * sh(b)).toFixed(1)}%`).join('   '));
+    if (line !== 'Property') moved = Math.max(moved, 1 - Math.max(...BANDS.map(sh)));
+  }
+  const okBands = moved >= 0.30;
+  console.log(`  on WC and GL the band is not saturated (>=30% outside its commonest band): ${okBands ? 'OK' : 'FAIL'}`);
+  if (!okBands) {
+    failures.push(`the surplus band sits in one bucket for more than 70% of member-years on WC and GL. `
+      + `That is why the shipped capitalAdequacyStatus ladder was NOT reused as-is — its 0.25 boundary put `
+      + `89.6% / 75.8% / 96.7% of line-years in "Strong" — and SATISFACTION.surplusComfortable was derived `
+      + `at the median of default play to avoid exactly this. A band that holds nine member-years in ten `
+      + `reports nothing about the player.`);
+  }
+  console.log('  ⚠ PROPERTY IS EXPECTED TO SATURATE AND IS EXCLUDED FROM THAT ASSERTION ON PURPOSE.');
+  console.log('    reserveRiskMarginNeeded is a RESERVE risk margin; Property is short-tail so its reserves');
+  console.log('    are small, its ratio runs a median 4.96, and its real exposure is a $75M catastrophe this');
+  console.log('    denominator does not measure. The term is near-constant there, and that is a property of');
+  console.log('    the measure rather than of the pool.');
 }
 
 console.log('\n' + RULE);

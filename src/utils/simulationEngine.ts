@@ -1105,6 +1105,10 @@ export function processLineYear(
     // and both over the GROSS pure premium, which is the basis that makes the
     // pool's explicit admin and tower comparable with a carrier's implicit load.
     marketLevelGapPct(totalMemberRatePer100, pricedPurePremiumPer100),
+    // TERM 4's input. LAST year's capital position — the balance sheet a member
+    // can actually see when this year's bill arrives, and the only one that
+    // exists at this point in the function anyway. See memberSatisfaction.ts.
+    ctx.priorResult?.excessCapitalRatio ?? null,
   );
   // ⚠ SCORED LATE AND SUBSTITUTED ONLY WHERE THE ROSTER IS PERSISTED. Everything
   // between the renewal screen and here reads `enrolledMembers` for exposure,

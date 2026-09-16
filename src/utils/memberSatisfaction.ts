@@ -1,7 +1,32 @@
 // ============================================================================
 // MEMBER SATISFACTION — what one member thinks of the pool, and it MOVES.
 //
-// TWO LIMBS, BECAUSE A PRICE HAS TWO THINGS TO SAY:
+// FOUR LIMBS. ONE CHANGE, THREE LEVELS:
+//
+//   sat_t = sat_(t-1) + delta_i + PULL . (anchor_i - (sat_(t-1) + delta_i))
+//
+//   delta_i  = -K . r(excess) . amp_i          the CHANGE, amplified per member
+//   anchor_i = CENTRE - A . L(levelGap)        the MARKET's level
+//                    + B . lossLevel_i         the MEMBER's own losses  (term 3)
+//                    + surplusContribution     the POOL's surplus       (term 4)
+//
+// ⚠ TERM 3 IS THE ONLY PER-MEMBER CHANNEL, AND BEFORE IT THERE WAS NONE. The
+// price gap is line-level — one pricing decision, identical for every member of
+// a line-year — so until this limb shipped two members side by side, one with no
+// claims and one with four, read the same number. Measured, the whole
+// cross-member spread of the displayed value was 0.034 points at year 1, and
+// every bit of it came from enrolment history rather than from anything a member
+// had done or had happen to them.
+//
+// ⚠ AND TERMS 1 AND 4 PULL AGAINST EACH OTHER ON THE PLAYER'S MAIN LEVER, WHICH
+// IS THE CENTRAL FACT ABOUT THIS MODEL NOW. Funding is what BUILDS surplus: one
+// stop up raises the price, which costs satisfaction through the market level,
+// and accumulates surplus, which pays it back through term 4. The first two
+// weights tried for surplusWeight cancelled 56% and 67% of the funding decision
+// and the gate went red on a ruling it has held since the level term shipped.
+// See surplusWeight for how the bound replaced the match.
+//
+// THE FIRST TWO LIMBS, BECAUSE A PRICE HAS TWO THINGS TO SAY:
 //
 //   THE CHANGE — what happened to the bill this year, once.
 //
@@ -249,6 +274,7 @@
 // ============================================================================
 
 import { ownExperienceFrames } from './memberExperienceMod';
+import { experienceWindow, EXPERIENCE_WINDOW_YEARS } from './memberLossHistory';
 import type { CoverageLine, Member, MemberLossHistory, SatisfactionMove } from '../types/simulation';
 
 export type { SatisfactionMove };
@@ -506,6 +532,207 @@ export const SATISFACTION = {
    * stay small. Two ways to wander, one bound.
    */
   anchorCentre: 7.20,
+
+  // ==========================================================================
+  // TERM 3 — THE MEMBER'S OWN LOSS RATIO AGAINST THE BOOK'S.
+  //
+  // ⚠ THE ONLY PER-MEMBER CHANNEL SATISFACTION HAS, AND THAT IS WHY IT EXISTS.
+  // The price gap is a LINE-LEVEL quantity: one pricing decision, identical for
+  // every member of a line-year. Measured before this term shipped, the whole
+  // cross-member spread of the displayed value was 0.034 points at year 1 and
+  // 0.070 at year 10, and every bit of it came from enrolment history — when a
+  // member joined and which lines they carry. Two members side by side in the
+  // same book, one with no claims and one with four, read the same number.
+  // ==========================================================================
+  /**
+   * ⚠ MEASURED, AND IT IS A REACTION SCALE RATHER THAN A CAP ON LOSSES.
+   *
+   * THE RATIO IS UNCAPPED — MemberLossYear.actual is the drawn gross ultimate,
+   * every layer, because this asks what the member GOT BACK. Measured over
+   * EXPERIENCE_WINDOW_YEARS, 12 games x 10 years, rebased so the book reads 1:
+   *
+   *   line       mean    SD     p10    p50    p75    p99      MAX
+   *   WC        0.990  2.638   0.05   0.45   1.02   9.20    159.9
+   *   GL        1.069  4.443   0.01   0.25   0.79  13.96    158.6
+   *   Property  0.986  4.741   0.00   0.10   0.56  14.33    203.1
+   *
+   * THE BRIEF ASKED FOR THAT SPREAD AND SAID TO REPORT IT RATHER THAN REACH FOR
+   * A CAP IF IT WAS UNUSABLE. IT IS UNUSABLE RAW, and these are the numbers:
+   * the top 1% of member-years carries 18-34% of the total ratio mass; the
+   * MEDIAN member reads 0.45 / 0.25 / 0.10 while the mean is 1, so "average" in
+   * this quantity describes almost nobody; 38.7% of Property member-years read
+   * EXACTLY zero. And it is a SMALL-MEMBER artefact, which is the tell: the
+   * smallest exposure quartile has SD 4.2 / 7.1 / 8.1 against the largest
+   * quartile's 1.1 / 1.4 / 1.8, and a maximum of 159.9 against 15.5.
+   *
+   * ⚠ SO THE LOSSES ARE NOT CAPPED AND THE REACTION IS BOUNDED, WHICH IS A
+   * DIFFERENT THING AND IS ALREADY THE HOUSE FORM. Every dollar still counts in
+   * the ratio; what saturates is how far satisfaction will move for it. The
+   * change limb does the same through r(x) and the market level through L(x) —
+   * neither caps its input either.
+   *
+   *     u = tanh((1 - ratio) / lossSaturation)
+   *
+   * 1.70 is 2 x the pooled median |1 - ratio| of 0.852, on the rule that the
+   * TYPICAL absolute deviation should map to half scale (tanh(0.5) = 0.462) so
+   * that ordinary members sit on the responsive part of the curve rather than
+   * on its shoulder. Per line the median reads 0.721 / 0.848 / 0.983, so one
+   * pooled scale puts WC slightly more responsive than Property.
+   *
+   * ⚠ AND THE MAP IS NATURALLY ASYMMETRIC, WHICH IS NOT A DESIGN CHOICE. A
+   * ratio cannot go below 0, so 1 - ratio <= 1 and u <= tanh(1/1.70) = +0.528;
+   * a bad ratio is unbounded above, so u reaches -1. A member with NO claims at
+   * all can be 0.53 good, a member with enough claims is 1.00 bad. That falls
+   * out of the quantity rather than being put there.
+   */
+  lossSaturation: 1.70,
+  /**
+   * Anchor points per unit of loss standing.
+   *
+   * DERIVED THE SAME WAY THE LEVEL WEIGHT WAS: the spread this term creates
+   * across a book should be worth about what ONE STOP on the funding slider is
+   * worth through the market level, so that "who you are" and "what the pool
+   * did" are the same size on the screen. One stop moves the market gap 3.64 /
+   * 2.83 / 5.08 pp by line, so through levelWeight it is worth 0.030 x 3.85 =
+   * 0.116 anchor points at the three-line mean.
+   *
+   * ⚠ AND THE FIRST VALUE SHIPPED HERE DID NOT SATISFY ITS OWN RULE. 0.45 was
+   * the arithmetic estimate; measured on the built term the realised
+   * within-line-year anchor SD came out 0.069 against the 0.116 target, so the
+   * estimate of the standing's own spread was 1.7x out. 0.75 is 0.45 x
+   * 0.116/0.069 and is the value the rule actually implies.
+   *
+   * member-satisfaction-check asserts the realised cross-member SD against that
+   * target rather than trusting this arithmetic — the level weight's own
+   * derivation went stale behind a comment and was only caught when the gate was
+   * made to assert it, and this constant was wrong on the same day it was
+   * written for exactly that reason.
+   */
+  lossLevelWeight: 0.75,
+  /**
+   * ⚠ JUDGEMENT, AND IT IS THE ONE CONSTANT THAT DECIDES THE SHAPE OF THE TERM.
+   *
+   * The brief says a good-ratio member is POSITIVE — they get the benefit of
+   * pooling and are not punished for being productive — and that a bad-ratio
+   * member "can also gain, from value received". Taken literally both ends are
+   * positive and the term is a U with its minimum at the book average, which is
+   * what ships.
+   *
+   * THAT IS A STRANGE SHAPE AND IT IS FLAGGED RATHER THAN SMOOTHED OVER: it
+   * makes the exactly-average member the least satisfied of the three, on the
+   * reasoning that they neither subsidised anyone nor were subsidised, so they
+   * feel neither the productive member's recognition nor the claimant's payout.
+   *
+   * SETTING THIS TO 0 GIVES THE MONOTONE READING — good ratio positive, bad
+   * ratio neutral — and that is a one-constant change, which is why the choice
+   * is isolated here instead of being welded into the form. 0.35 says value
+   * received is worth about a third of being productive.
+   */
+  lossValueShare: 0.35,
+  /**
+   * How much harder a good-ratio member takes a price rise above the market.
+   *
+   *     amp_i = 1 + lossAmplifierSlope x (u_i - book mean u)
+   *
+   * ⚠ THIS IS ownFault INVERTED IN MEANING, AND THE INVERSION IS A RULING THAT
+   * OVERTURNS THIS FILE'S OWN PREVIOUS ONE. ownFault damped a member's reaction
+   * by how much their own losses explained their increase; it was retired two
+   * commits ago on the reasoning that "a member's claims record gives them no
+   * less standing to mind a pool-wide rate rise". That reading is overruled: a
+   * member who has taken nothing out and is asked for more minds MORE, and a
+   * member the pool has just paid out for minds LESS. The old note is kept
+   * below rather than deleted, because it argued the opposite and was wrong.
+   *
+   * ⚠ MEASURED AGAINST THE TERM IT INVERTS, so the change is in DIRECTION and
+   * not in size. ownFault's own recorded book means were 0.116 on WC and 0.124
+   * on GL — it damped the average member's reaction by about 12%. The mean
+   * |u - u_book| measures 0.33, so a slope of 0.36 makes the average member's
+   * amplifier differ from 1 by the same 12%. The pool is not being made more or
+   * less reactive overall; the reaction is being pointed the other way.
+   *
+   * ⚠ AND IT IS REBASED SO THE BOOK'S MEAN AMPLIFIER IS EXACTLY 1. Without that
+   * the term would silently rescale the whole line's price reaction — u has a
+   * positive book mean (+0.145 / +0.216 / +0.270 by line, because the median
+   * member sits well below the mean ratio), so an unrebased amplifier would
+   * make every line react 5-10% harder to price and would show up as a change
+   * in the change limb's own drift.
+   */
+  lossAmplifierSlope: 0.36,
+
+  // ==========================================================================
+  // TERM 4 — SURPLUS ADEQUACY. A LEVEL, BANDED.
+  // ==========================================================================
+  /**
+   * Anchor points per BAND STEP of surplus adequacy.
+   *
+   * ⚠ THE FIRST DERIVATION WAS CIRCULAR AND IT IS RECORDED RATHER THAN REPLACED
+   * QUIETLY, BECAUSE THE ERROR IS INSTRUCTIVE AND THE NEXT PERSON WILL REACH FOR
+   * THE SAME RULE.
+   *
+   * It read: one band step is worth one stop on the funding slider through the
+   * market level, 0.116 points — the same rule lossLevelWeight uses. THAT RULE
+   * CANNOT BE USED HERE. Funding is what BUILDS surplus: one stop up raises the
+   * price, which costs satisfaction through the market level, and accumulates
+   * surplus, which pays it back through this term. Calibrating this term against
+   * the very decision that drives it guarantees the two cancel.
+   *
+   * MEASURED, AT 0.115: one stop moved the surplus band +0.50 steps, worth
+   * +0.058 anchor points, against the market level's -0.102 — so 56% of the
+   * funding decision was cancelled, the six-year footprint of one stop fell from
+   * -0.045 to +0.006, and member-satisfaction-check's section 6 went red on the
+   * ruling it has asserted since the level term shipped: a decision must
+   * outweigh the enrolment draw. A scoreboard whose two channels cancel reports
+   * nothing, and the gate caught it.
+   *
+   * THE RULE THAT REPLACES IT IS A BOUND RATHER THAN A MATCH: this term may not
+   * cancel more than a QUARTER of the funding decision it responds to.
+   *
+   * ⚠ AND THE BOUND HAD TO BE SOLVED FROM THE MEASUREMENT RATHER THAN ESTIMATED,
+   * WHICH IS THE SECOND TIME THIS CONSTANT WAS WRONG BY ARITHMETIC. The estimate
+   * — one stop moves the band half a step, so 0.25 x 0.116 / 0.50 = 0.058 —
+   * still left 67% cancelled, because surplus COMPOUNDS over the six years the
+   * footprint is measured across while the estimate treated one stop as one
+   * step. Measured on section 6's own arm, the six-year footprint runs
+   *
+   *     w = 0.115  ->  +0.006      w = 0.058  ->  -0.015
+   *
+   * so d(footprint)/dw = +0.368 and the un-cancelled footprint is -0.036. A
+   * quarter of that is -0.027, which needs w = 0.024.
+   *
+   * WHAT THAT LEAVES: the ladder spans Deficient -2 steps to Strong +1, so end to
+   * end it is worth 0.072 points against the funding slider's own 0.41. That is
+   * 18% of the funding mechanic — smaller than the first two attempts wanted,
+   * and it is what the requirement permits: this term responds to the same
+   * decision the market level responds to, in the opposite direction, so every
+   * point of weight it carries is taken straight out of the player's main lever.
+   * member-satisfaction-check asserts BOTH halves — the decision stays visible,
+   * and the cancellation stays inside the quarter.
+   */
+  surplusWeight: 0.024,
+  /**
+   * Where "comfortably above the requirement" sits, in units of
+   * excessCapitalRatio = (availableSurplus - reserveRiskMarginNeeded) /
+   * reserveRiskMarginNeeded.
+   *
+   * ⚠ MEASURED, AS THE MEDIAN OF DEFAULT PLAY ON THE TWO LINES WHERE THE
+   * QUANTITY DISCRIMINATES. 24 games x 10 years at all-default decisions the
+   * ratio reads median 1.279 on WC and 0.969 on GL, so a boundary at 1.15 puts
+   * a default-playing pool at the edge of the positive band about half the time.
+   * That is the same rule anchorCentre follows — the neutral point sits where
+   * DEFAULT play sits, so the term reports what the PLAYER did rather than what
+   * the game does on its own.
+   *
+   * ⚠ PROPERTY DOES NOT DISCRIMINATE AND IS EXCLUDED FROM THE DERIVATION RATHER
+   * THAN AVERAGED INTO IT. Its median ratio is 4.963 and 93% of its line-years
+   * would sit in the positive band at any boundary in this range. The reason is
+   * structural and is a real limitation of reading this quantity:
+   * reserveRiskMarginNeeded is a RESERVE risk margin, Property is short-tail so
+   * its reserves are small, and its actual exposure is a $75M catastrophe that
+   * this denominator does not measure at all. The term is therefore close to
+   * constant on Property, and that is a property of the measure rather than of
+   * the pool.
+   */
+  surplusComfortable: 1.15,
   /** The stock's bounds. Same [1, 10] the field has always carried. */
   floor: 1.0,
   ceiling: 10.0,
@@ -587,15 +814,179 @@ export function satisfactionLevelReaction(levelGapPct: number): number {
  * reaction to a noisy gap, so its defaults drift accumulated without anything
  * pulling back. With an anchor the same noise is transient.
  */
-export function satisfactionAnchor(levelGapPct: number): number {
-  const { anchorCentre, levelWeight, floor, ceiling } = SATISFACTION;
+export function satisfactionAnchor(
+  levelGapPct: number,
+  lossLevel: number = 0,
+  surplusBand: SurplusBand = 'Unknown',
+): number {
+  const { anchorCentre, levelWeight, lossLevelWeight, floor, ceiling } = SATISFACTION;
   return Math.max(floor, Math.min(ceiling,
-    anchorCentre - levelWeight * satisfactionLevelReaction(levelGapPct)));
+    anchorCentre
+    - levelWeight * satisfactionLevelReaction(levelGapPct)
+    + lossLevelWeight * lossLevel
+    + surplusContribution(surplusBand)));
 }
 
 /** Share of the distance to the anchor closed in one year. See levelHalfLifeYears. */
 export function satisfactionAnchorPull(): number {
   return 1 - Math.pow(0.5, 1 / SATISFACTION.levelHalfLifeYears);
+}
+
+// ============================================================================
+// TERM 3 — WHERE A MEMBER STANDS AGAINST THE BOOK ON LOSSES.
+//
+//   ratio_i = (A_i / E_i) / (A_book / E_book)      UNCAPPED, gross, all layers
+//   u_i     = tanh((1 - ratio_i) / lossSaturation)  bounded REACTION, not a cap
+//
+// and u drives two things at once:
+//
+//   A LEVEL, which is a U. level_i = max(0, u_i) + lossValueShare . max(0, -u_i)
+//     A good-ratio member is positive because they get the benefit of pooling
+//     and are not punished for being productive. A bad-ratio member is also
+//     positive, smaller, because they received value. The average member is the
+//     minimum. See lossValueShare, which is the one constant that decides this.
+//
+//   AN AMPLIFIER ON PRICE. amp_i = 1 + lossAmplifierSlope . (u_i - mean u).
+//     A good-ratio member facing a rise above market minds MORE; a
+//     heavy-claims member minds LESS. ownFault inverted in meaning.
+//
+// ⚠ BOTH ARE REBASED TO THE BOOK, AND FOR DIFFERENT REASONS. The amplifier is
+// rebased so the line's mean reaction is unchanged — otherwise this term would
+// silently retune the change limb for everyone. The LEVEL is rebased so the
+// line's mean anchor is unchanged — otherwise a U whose book mean is positive
+// would lift every member's anchor and show up as a level shift at defaults,
+// which is exactly the drift the check-first confirmed is already there for a
+// different reason. Rebased, term 3 is PURELY REDISTRIBUTIVE: it adds
+// per-member texture and moves the book's average by nothing.
+//
+// ⚠ THE WINDOW IS THE LEDGER'S, AND IT CANNOT SEE THE YEAR IT IS SCORING. The
+// satisfaction pass runs before this year's claims are generated, so the window
+// is EXPERIENCE_WINDOW_YEARS of COMPLETED years — the same read the experience
+// modifier gets, and the right one: a member forms a view of the pool from the
+// losses they have actually had, not from ones the engine has not drawn yet.
+//
+// ⚠ AND THE DENOMINATOR IS expectedAtManual, THE NEUTRAL-RISK-QUALITY LEG. Using
+// expectedAtOwnRq would divide out the member's own risk quality, which is the
+// very thing that makes one member's ratio differ from another's — the same
+// argument MemberLossResult.expectedLossAtManual makes for the modifier.
+// ============================================================================
+
+export interface LossStanding {
+  memberId: string;
+  /** Uncapped, rebased so the book reads 1. Heavy-tailed — see lossSaturation. */
+  ratio: number;
+  /** The bounded reaction, tanh((1 - ratio)/s), in (-1, +0.528]. */
+  u: number;
+  /** The U-shaped level contribution, rebased so the book mean is 0. */
+  level: number;
+  /** Multiplier on the price reaction, rebased so the book mean is 1. */
+  amplifier: number;
+  /** False when the member has no usable window; level 0 and amplifier 1. */
+  known: boolean;
+}
+
+export function memberLossStanding(
+  members: readonly Member[],
+  line: CoverageLine,
+  history: MemberLossHistory,
+): LossStanding[] {
+  const { lossSaturation, lossValueShare, lossAmplifierSlope } = SATISFACTION;
+  const raw = members.map(m => {
+    const w = experienceWindow(history, m.id, line, EXPERIENCE_WINDOW_YEARS);
+    let a = 0, e = 0;
+    for (const y of w) { a += y.actual; e += y.expectedAtManual; }
+    return { id: m.id, a, e };
+  });
+  const bookA = raw.reduce((t, x) => t + x.a, 0);
+  const bookE = raw.reduce((t, x) => t + x.e, 0);
+  const bookRate = bookE > 0 ? bookA / bookE : 0;
+
+  const pre = raw.map(x => {
+    const known = x.e > 0 && bookRate > 0;
+    const ratio = known ? (x.a / x.e) / bookRate : 1;
+    const u = known ? Math.tanh((1 - ratio) / lossSaturation) : 0;
+    const level = Math.max(0, u) + lossValueShare * Math.max(0, -u);
+    return { id: x.id, known, ratio, u, level };
+  });
+  // The two rebases. Over the members with a usable window only — an unrated
+  // member must not drag the book's mean toward its own neutral 0.
+  const usable = pre.filter(x => x.known);
+  const meanU = usable.length ? usable.reduce((t, x) => t + x.u, 0) / usable.length : 0;
+  const meanLevel = usable.length ? usable.reduce((t, x) => t + x.level, 0) / usable.length : 0;
+
+  return pre.map(x => ({
+    memberId: x.id,
+    ratio: x.ratio,
+    u: x.u,
+    level: x.known ? x.level - meanLevel : 0,
+    amplifier: x.known ? 1 + lossAmplifierSlope * (x.u - meanU) : 1,
+    known: x.known,
+  }));
+}
+
+// ============================================================================
+// TERM 4 — SURPLUS ADEQUACY. A LEVEL, BANDED, AND IT READS WHAT ALREADY SHIPS.
+//
+// ⚠ NOTHING IS DERIVED HERE THAT THE ENGINE HAD NOT ALREADY COMPUTED. The brief
+// asked whether capitalFundingGap and reserveRiskMarginNeeded answer this before
+// deriving anything. THEY DO, and better than that: processLineYear already
+// normalises them into excessCapitalRatio = (availableSurplus -
+// reserveRiskMarginNeeded) / reserveRiskMarginNeeded, and already BANDS it into
+// capitalAdequacyStatus at 0.25 / 0 / -0.10. So the quantity and the ladder both
+// existed; this reads them.
+//
+// ⚠ WHAT IS NOT REUSED IS THE TOP BOUNDARY, AND THE REASON IS MEASURED. The
+// shipped 0.25 was drawn for a solvency LABEL, and as a satisfaction band it is
+// saturated: 24 games x 10 years at defaults puts 89.6% of WC line-years, 75.8%
+// of GL's and 96.7% of Property's in "Strong". A band that contains nine
+// line-years in ten cannot report anything about the player. surplusComfortable
+// replaces only that edge, at the median of default play; the two boundaries
+// that carry an absolute meaning — at the requirement, and below it — are the
+// shipped ones untouched, because 0 needs no derivation.
+//
+// ⚠ THE RATIO IS LAST YEAR'S, NOT THIS YEAR'S, AND THAT IS DELIBERATE TWICE
+// OVER. The satisfaction pass runs several hundred lines before the capital
+// block, so this year's ratio does not exist yet — and it should not be used
+// even if it did: the balance sheet a member can see when their bill arrives is
+// the one that closed last year.
+//
+// ⚠ FLICKER IS REAL AND THE ANCHOR IS WHAT ABSORBS IT. Measured band-change
+// rates per consecutive year pair at defaults: 13.0% WC, 18.5% GL, 6.9%
+// Property at a 0.50 boundary, and 17.1 / 21.8 / 13.0 at 1.00. A three-year
+// trailing mean of the ratio would cut those to 11.6 / 15.7 / 3.7 and is NOT
+// taken, because it needs three prior results plumbed through and the anchor
+// already damps what is left: a band flip that reverses next year moves the
+// stock by one year of pull, 20.6% of the step, and then pulls back. A banded
+// level feeding an ANCHOR is inherently flicker-tolerant in a way that the same
+// band feeding a FLOW would not be.
+// ============================================================================
+
+export type SurplusBand = 'Deficient' | 'Thin' | 'Adequate' | 'Strong' | 'Unknown';
+
+/**
+ * Band steps, in units of surplusWeight. Adequate is 0 — the NEUTRAL band, at
+ * and just above the requirement. Strong is open-ended: no ceiling.
+ */
+export const SURPLUS_BAND_STEPS: Record<SurplusBand, number> = {
+  Deficient: -2,
+  Thin: -1,
+  Adequate: 0,
+  Strong: +1,
+  Unknown: 0,
+};
+
+export function surplusBandOf(excessCapitalRatio: number | null | undefined): SurplusBand {
+  if (excessCapitalRatio === null || excessCapitalRatio === undefined
+    || !Number.isFinite(excessCapitalRatio)) return 'Unknown';
+  if (excessCapitalRatio >= SATISFACTION.surplusComfortable) return 'Strong';
+  if (excessCapitalRatio >= 0) return 'Adequate';
+  if (excessCapitalRatio >= -0.10) return 'Thin';
+  return 'Deficient';
+}
+
+/** Anchor points this band contributes. Positive is happier. */
+export function surplusContribution(band: SurplusBand): number {
+  return SATISFACTION.surplusWeight * SURPLUS_BAND_STEPS[band];
 }
 
 /**
@@ -617,8 +1008,12 @@ export function satisfactionMoves(
   poolRateChangePct: number | null | undefined,
   marketChangePct: number,
   levelGapPct: number,
+  /** LAST year's excessCapitalRatio — see the term 4 header on why last year's. */
+  priorExcessCapitalRatio?: number | null,
 ): SatisfactionMove[] {
   const { frames } = ownExperienceFrames(members, line, history);
+  const standing = memberLossStanding(members, line, history);
+  const surplusBand = surplusBandOf(priorExcessCapitalRatio);
   const known = poolRateChangePct !== null && poolRateChangePct !== undefined;
   const r = known ? poolRateChangePct : 0;
 
@@ -645,11 +1040,12 @@ export function satisfactionMoves(
   // ============================================================================
   const billAtPriorModPct = known ? r : 0;
   const excessPct = known ? billAtPriorModPct - marketChangePct : 0;
-  const anchor = satisfactionAnchor(levelGapPct);
-  const delta = -SATISFACTION.priceWeight * satisfactionReaction(excessPct);
+  // The line-level part of the reaction, before the per-member amplifier.
+  const baseDelta = -SATISFACTION.priceWeight * satisfactionReaction(excessPct);
 
   return members.map((m, i) => {
     const f = frames[i];
+    const st = standing[i];
     return {
       memberId: m.id,
       // REPORTED, NOT REACTED TO. What the member was actually billed, mod and
@@ -661,8 +1057,20 @@ export function satisfactionMoves(
       marketChangePct,
       excessPct,
       levelGapPct,
-      anchor,
-      delta,
+      // TERM 3, both halves. The ratio is reported so a reader can see the
+      // uncapped quantity the bounded reaction was taken from.
+      lossRatio: st.ratio,
+      lossStanding: st.u,
+      lossLevel: st.level,
+      priceAmplifier: st.amplifier,
+      // TERM 4.
+      surplusBand,
+      surplusRatio: priorExcessCapitalRatio ?? null,
+      // FOUR LIMBS. The anchor carries three levels — the market's, the
+      // member's own losses, and the pool's surplus — and the change limb
+      // carries the fourth, amplified per member.
+      anchor: satisfactionAnchor(levelGapPct, st.level, surplusBand),
+      delta: baseDelta * st.amplifier,
     };
   });
 }

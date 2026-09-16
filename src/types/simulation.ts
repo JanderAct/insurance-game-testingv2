@@ -289,6 +289,23 @@ export interface SatisfactionMove {
    * it is a LEVEL: it applies every year it persists, unlike excessPct.
    */
   levelGapPct: number;
+  /**
+   * TERM 3 — the member's UNCAPPED loss ratio over the experience window,
+   * rebased so the book reads 1. Heavy-tailed on purpose: reported so a reader
+   * can see the quantity the bounded reaction was taken from. See
+   * memberSatisfaction.ts's lossSaturation for the measured spread.
+   */
+  lossRatio: number;
+  /** tanh((1 - lossRatio)/s) — the bounded reaction, in (-1, +0.528]. */
+  lossStanding: number;
+  /** The U-shaped level contribution, rebased so the book mean is 0. */
+  lossLevel: number;
+  /** Multiplier on the price reaction. Book mean is exactly 1. */
+  priceAmplifier: number;
+  /** TERM 4 — the band LAST year's surplus put the line in. */
+  surplusBand: 'Deficient' | 'Thin' | 'Adequate' | 'Strong' | 'Unknown';
+  /** Last year's excessCapitalRatio, or null when there is no prior year. */
+  surplusRatio: number | null;
   /** The satisfaction level this year's price implies. See satisfactionAnchor. */
   anchor: number;
   /** The one-year CHANGE reaction, in satisfaction points. Negative is unhappier. */
