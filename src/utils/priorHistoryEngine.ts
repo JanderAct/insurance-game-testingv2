@@ -468,10 +468,21 @@ export function runPriorHistory(
   // reason: each solo pre-game ran with one line active, so recordMemberLossYear
   // only ever wrote that line's key. A disjoint per-line union.
   //
-  // This is what gives members THREE YEARS OF HISTORY AT YEAR 1 instead of a
-  // blank record on turn one — including prospects, since stage 2 generates
-  // marketplace-wide in the pre-game years too (they run through the same
-  // processYear).
+  // ⚠ THIS IS WHAT MAKES EVERY EXPERIENCE MECHANIC LIVE ON TURN ONE, and it is
+  // the answer to a question that gets asked again roughly every time someone
+  // reads a game's first year: renewal underwriting, new business appetite, the
+  // experience modifier and satisfaction's loss limb all need a three-year
+  // record, and they have one before the player has made a single decision.
+  //
+  // FIVE YEARS, NOT THREE. The note here used to say three. The pre-game plays
+  // PRE_GAME_DEPTH = MATURATION_YEARS + PRE_GAME_YEARS = 10 accident years and
+  // recordMemberLossYear prunes to LOSS_HISTORY_CAP_YEARS, so what survives into
+  // year 1 is yearNumbers -4 through 0 — MEASURED, 8 games: every member of the
+  // WC roster carries exactly 5 entries and 100% of them are `rated`.
+  //
+  // Prospects are included, since stage 2 generates marketplace-wide in the
+  // pre-game years too (they run through the same processYear) — measured, 100%
+  // of the WC and GL applicant pool is rated at year 1.
   //
   // Only the ACCEPTED attempt's record survives. runLinePreGame re-simulates
   // rejected candidates, but each attempt builds its own poolState from

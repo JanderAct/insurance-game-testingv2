@@ -75,54 +75,48 @@ import type { CoverageLine, Member, MemberLossHistory } from '../types/simulatio
  * From new-business-appetite-derive, 8 games x 14 years, share of rated
  * applicants each tier ACCEPTS:
  *
- *   tier    WC      GL
+ *   tier      WC      GL
  *   none      0%      0%    NO_NEW_BUSINESS — the pool writes nobody
- *   0.75    36.9%   40.7%
- *   1.00    55.8%   57.1%
- *   1.50    82.4%   80.3%
+ *   0.75    36.0%   40.2%
+ *   1.00    55.8%   56.3%
+ *   1.50    83.6%   80.4%
  *   (all)   100%    100%
  *
- * Well spaced, and each means something a player can state: the best ~40%, the
+ * Well spaced, and each means something a player can state: the best ~38%, the
  * better-than-expected half, everyone but the worst fifth, and everyone.
  *
  * ============================================================================
- * ⚠ WHAT THE TIER CHANGES — REBUILT, AND THE OLD ANSWER IS NOW WRONG.
+ * WHAT THE TIER CHANGES — RE-MEASURED, AND THE PREVIOUS TABLE WAS BADLY STALE.
  *
- * Before the intake rebuild this block recorded that the tier changed
- * composition and not count: the book read 58.8 / 58.2 / 58.4 / 58.1 across the
- * four arms and the strictest bar cost 0.16 members a year. The cause was that
- * every unenrolled member was treated as an applicant, so ~140 of them competed
- * for 4 slots and the bar could only ever choose WHICH ones the draw reached.
+ * ⚠ IT HAS NOW BEEN WRONG TWICE IN THE SAME PLACE, WHICH IS WHY THE PROVENANCE
+ * IS WRITTEN OUT RATHER THAN JUST THE NUMBERS. The first version recorded that
+ * the tier changed composition and not count — book 58.8 / 58.2 / 58.4 / 58.1
+ * across the arms, the strictest bar costing 0.16 members a year. That was true
+ * when every unenrolled member was an applicant, ~140 of them for 4 slots. The
+ * intake rebuild fixed the cause and the table was updated; it then went stale
+ * AGAIN, recording joins/yr of 2.61 / 2.54 / 2.53 / 2.15 against a live engine
+ * running more than twice that. Both stale versions understated the control.
  *
- * With applications a 6% share of the unenrolled pool (APPLICATION_RATE),
- * measured over 8 games x 14 years:
+ * MEASURED NOW, 8 games x 14 years at the shipped 6% application rate:
  *
- *   tier         applicants/yr   eligible/yr   SHORT   joins/yr   final book
- *   Accept All        8.3            8.25        0%       2.61      59.9 / 57.9
- *   below 1.50        8.3            6.7         0%       2.54      58.1 / 59.1
- *   below 1.00        8.3            4.5        10%       2.53      58.0 / 58.8
- *   below 0.75        8.4            3.0        34%       2.15      52.9 / 54.6
+ *   tier         joins/yr   departs/yr   book yr1 -> yr14   capacity guard binds
+ *   Accept All     6.29        4.49         72.0 -> 95.1           18%
+ *   below 1.50     5.41        4.21         71.3 -> 86.7           11%
+ *   below 1.00     4.09        3.76         70.0 -> 74.4            7%
+ *   below 0.75     2.88        3.42         68.8 -> 62.3            1%
  *
- * SHORT is a line-year where fewer applicants cleared the bar than the pool had
- * room for — the state that makes this a decision. It runs at zero for Accept
- * All and the permissive bar, one year in ten at the middle bar, and one in
- * three at the strict one, where the book ends 5-7 members below Accept All.
+ * ⚠ AND THE FINDING IS MUCH STRONGER THAN EITHER STALE VERSION SAID. Accept All
+ * now GROWS a book from 72 to 95 while the strict bar SHRINKS it to 62 — a
+ * 33-member gap where the previous table recorded 7 and the one before it
+ * recorded none at all. Being picky costs a third of the book over fourteen
+ * years. That is the trade the control is for, and it was invisible in the
+ * numbers this file carried.
  *
- * So being picky now costs members, which is the trade the control is for. The
- * permissive bar still costs almost nothing, which is correct: 1.50 excludes
- * only the worst fifth of applicants and the pool rarely wanted four of them in
- * the same year anyway.
+ * ⚠ THE CAPACITY GUARD IS WHAT LIMITS THE OPEN END, NOT THE APPLICANT SUPPLY.
+ * MAX_NEW_MEMBER_SHARE binds in 18% of Accept All line-years against 1% at the
+ * strict bar, and 45% of Accept All's first five years — it shapes the early
+ * growth path and then stops, exactly as its own header predicted.
  *
- * ⚠ THE joins/yr COLUMN ABOVE IS STALE AGAINST THE LIVE ENGINE AND IS LEFT
- * STANDING RATHER THAN SILENTLY PATCHED. Measured now, 8 games x 12 years, the
- * engine's own newMembers count reads 6.30 / 5.37 / 3.72 / 2.59 per year on WC
- * across Accept All / 1.50 / 1.00 / 0.75, against the 2.61 / 2.54 / 2.53 / 2.15
- * recorded here. The shape of the finding survives — a strict bar costs members
- * — but the LEVEL does not, and the table's own SHORT and final-book columns
- * were measured on the same run. Re-running new-business-appetite-derive is what
- * refreshes it; that is a measurement commit, not a comment edit, and the figures
- * are not quoted anywhere that acts on them.
- * ============================================================================
  * ============================================================================
  */
 export const NEW_BUSINESS_TIERS = [0.75, 1.00, 1.50] as const;

@@ -539,6 +539,80 @@ console.log('\n--- 6. THE SPLIT IS EXHAUSTIVE, AND THE DRAW MATCHES THE ANALYTIC
   }
 }
 
+// --- 7. THE MECHANIC IS LIVE ON TURN ONE --------------------------------------
+console.log('\n--- 7. EVERY EXPERIENCE MECHANIC IS LIVE IN YEAR 1 ---');
+// ============================================================================
+// ⚠ THIS SECTION EXISTS BECAUSE THE OPPOSITE WAS BELIEVED, TWICE, AND ACTED ON.
+//
+// The reading is natural and wrong: the modifier needs EXPERIENCE_MOD.minYears
+// of record, a played game starts at year 1, so nothing can be rated until year
+// 4 and renewal underwriting, new business appetite, the modifier and
+// satisfaction's loss limb are all inert for a third of a ten-year game.
+//
+// They are not. The PRE-GAME plays PRE_GAME_DEPTH accident years generating
+// claims marketplace-wide, and priorHistoryEngine merges its per-line loss
+// records into the year-1 poolState — so the ledger arrives full. Measured, the
+// surviving window is yearNumbers -4 through 0, five entries, and every member
+// and every applicant is rated before the player has made a decision.
+//
+// ⚠ AND IT IS ASSERTED HERE RATHER THAN WRITTEN IN A COMMENT BECAUSE A COMMENT
+// IS WHAT FAILED. priorHistoryEngine's merge site already said the ledger was
+// seeded — it said THREE years where the answer is five — and the claim was
+// still re-derived from first principles and believed over the code. A gate
+// that fails is the only form of this statement anyone has to trust.
+// ============================================================================
+{
+  let ratedMembers = 0, totalMembers = 0, ratedApplicants = 0, totalApplicants = 0;
+  const y1mods: number[] = [];
+  for (let g = 0; g < GAMES; g++) {
+    // Same seed family runGame uses, so this reads the same pre-games the rest
+    // of the file does rather than a second set that might differ.
+    const id = `XM${g}`;
+    const instance = generateGameInstance(id, 84_000_000 + g * 6329);
+    const setup = { poolName: 'X', gameLength: YEARS, startingYear: 2026, instanceId: id, activeLines: LINES };
+    const { poolState } = runPriorHistory(instance, setup as never);
+    const hist = poolState.memberLossHistory ?? {};
+    for (const line of LINES) {
+      if ((CREDIBILITY_Z[line] ?? 0) <= 0) continue;   // Property is unrated by measurement
+      const members = poolState.lines[line]?.members ?? [];
+      const mods = memberExperienceMods(members, line, hist, 1);
+      totalMembers += mods.length;
+      ratedMembers += mods.filter(m => m.rated).length;
+      if (line === 'WC') y1mods.push(...mods.map(m => m.mod));
+      const enrolled = new Set(members.map(m => m.id));
+      const applicants = (poolState.allMarketMembers ?? []).filter(m => !enrolled.has(m.id));
+      const am = memberExperienceMods(applicants, line, hist, 1);
+      totalApplicants += am.length;
+      ratedApplicants += am.filter(m => m.rated).length;
+    }
+  }
+  const memberShare = ratedMembers / Math.max(1, totalMembers);
+  const applicantShare = ratedApplicants / Math.max(1, totalApplicants);
+  const spread = Math.max(...y1mods) - Math.min(...y1mods);
+  console.log(`  rated MEMBERS at year 1, rated lines:    ${ratedMembers}/${totalMembers} `
+    + `(${(100 * memberShare).toFixed(1)}%)`);
+  console.log(`  rated APPLICANTS at year 1, rated lines: ${ratedApplicants}/${totalApplicants} `
+    + `(${(100 * applicantShare).toFixed(1)}%)`);
+  console.log(`  WC year-1 mod spread: ${spread.toFixed(4)} over ${y1mods.length} members `
+    + `(a point mass at 1.000 would read 0)`);
+  if (!(memberShare > 0.95)) {
+    failures.push(`only ${(100 * memberShare).toFixed(1)}% of members are rated in YEAR 1. The pre-game is `
+      + `meant to arrive with the ledger full — priorHistoryEngine merges its per-line loss records into the `
+      + `year-1 poolState. If this has fallen through, renewal underwriting, new business appetite, the `
+      + `modifier and satisfaction's loss limb are ALL inert for the first three years of every game and a `
+      + `player's first decisions do nothing.`);
+  }
+  if (!(applicantShare > 0.95)) {
+    failures.push(`only ${(100 * applicantShare).toFixed(1)}% of APPLICANTS are rated in year 1. An unrated `
+      + `applicant is accepted by every tier, so New Business Appetite cannot discriminate and every tier `
+      + `writes the same book.`);
+  }
+  if (!(spread > 0.05)) {
+    failures.push(`the WC year-1 mod spans only ${spread.toFixed(4)}. It must not be a point mass at 1.000 `
+      + `on turn one — that is the shape the whole mechanic has when the ledger is empty.`);
+  }
+}
+
 console.log('');
 console.log(RULE);
 if (failures.length > 0) {

@@ -62,6 +62,37 @@
 // and lambda, so it is recomputed per rating group per year in
 // memberExperienceMod.ts instead.
 //
+// ⚠ EVERY PERCENTAGE ABOVE IS AGAINST A BUDGET THAT NO LONGER EXISTS, AND THE
+// CONCLUSION SURVIVES ANYWAY. They were measured on the RAW save against a
+// 4,000,000-char budget. The save is now DEFLATE+base64 compressed and the
+// budget was re-derived to SAVE_BUDGET_CHARS = 1,500,000 on the COMPRESSED
+// payload, against a MEASURED_QUOTA_CHARS of 5,242,613.
+//
+// RE-MEASURED at save-size-check's own worst case, 3 games x 10 years x 3 lines:
+//
+//   raw (stripped)   4,824,480 chars
+//   STORED (packed)  1,266,992 chars   84% of budget, 24% of the measured quota
+//   worst            1,327,584 chars   89% of budget, 25% of quota
+//   growth            85,206 chars/game-year = 2.0 further game-years of budget
+//
+// ⚠ SO WHICH NUMBER BINDS DEPENDS ON WHICH LIMIT YOU MEAN, and reading only the
+// quota gets this backwards. Against the browser's real quota there is 4x
+// headroom and a sixth number is affordable. Against the gate's budget the save
+// sits at 89% with two game-years of room — TIGHTER than the 98.2% projection
+// that closed this list, because that projection was of a quantity the codec
+// has since shrunk and the budget has since been redrawn around. The budget is
+// deliberately conservative: its own header says it is "1.37x the reachable
+// worst case, chosen so the gate keeps firing on growth rather than reading 27%
+// and going quiet."
+//
+// ⚠ AND NO SIXTH NUMBER IS NEEDED, WHICH IS WHY THIS IS A CORRECTION AND NOT A
+// RELAXATION. The pre-game already seeds this ledger — priorHistoryEngine merges
+// its per-line records into the year-1 poolState, and measured, every member
+// carries five stored years and 100% are rated on turn one. The mechanics that
+// read it are live before the player decides anything. Anyone arriving here to
+// buy a sixth number for year-1 history should check whether they have the
+// problem first.
+//
 // ---------------------------------------------------------------------------
 // WHAT THIS LEDGER ACTUALLY READS AS A MODIFIER. Measured 8 games x 16 years
 // on the WHOLE-LOSS basis (actual / expectedAtManual), accumulated uncapped
