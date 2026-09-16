@@ -5,6 +5,7 @@ import { formatMillions, formatPct } from '../utils/formatters';
 import { getMemberExposure } from '../utils/lineHelpers';
 import { EXPERIENCE_MOD, displayedMod, medianRatedMod, memberExperienceMods } from '../utils/memberExperienceMod';
 import { OPENING_SATISFACTION } from '../data/memberCatalog';
+import { experienceWindow } from '../utils/memberLossHistory';
 
 interface MembershipPageProps {
   lockedResults: ResultSet[];
@@ -34,7 +35,7 @@ export default function MembershipPage({ lockedResults, startingFinancials, init
   // sort by; leaving the key would let a future column reintroduce the
   // attribute with a one-word change. surface-privacy-check asserts the
   // absence across every page and export.
-  const [sortKey, setSortKey] = useState<'name' | 'exposure' | 'satisfaction' | 'ratio' | 'mod' | 'yearJoined'>('exposure');
+  const [sortKey, setSortKey] = useState<'name' | 'exposure' | 'satisfaction' | 'ratio' | 'lossCost' | 'mod' | 'yearJoined'>('exposure');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
   const last = lockedResults[lockedResults.length - 1];
@@ -119,11 +120,71 @@ export default function MembershipPage({ lockedResults, startingFinancials, init
     ? activeMembers.reduce((s, m) => s + satisfactionOf(m), 0) / activeMembers.length
     : satisfaction;
 
+  // ============================================================================
+  // ⚠ THIS PAGE IS A WC VIEW, WHICH IS WHAT MAKES ONE EXPOSURE BASE HONEST.
+  //
+  // The exposure base is NOT the same across lines — WC and GL are per $100 of
+  // PAYROLL and Property is per $100 of TIV (PROPERTY_HELD_PURE_PREMIUM_PER_100,
+  // "per $100 of TIV"; WC's own loss cost is stated "per $100 of payroll"). One
+  // column header reading "per $100" over two denominators would be wrong.
+  //
+  // It does not arise here because every experience column on this page is
+  // already WC: memberExperienceMods is called with 'WC' below, and the Exposure
+  // cell renders getMemberExposure(member, 'WC', ...). So there is exactly one
+  // denominator on this table and the header can name it.
+  //
+  // ⚠ IF THIS PAGE EVER GAINS A LINE SELECTOR, THE HEADER HAS TO MOVE WITH IT.
+  // That is the moment the single label becomes a lie, and it will not announce
+  // itself — the numbers stay plausible, they just stop meaning payroll.
+  //
+  // ============================================================================
+  // THE BASIS, AND IT IS THE RATIO'S BASIS EXACTLY — same window, same cap.
+  //
+  //   loss cost = SUM(primaryActual over the window) / SUM(exposure) / 100
+  //
+  // ⚠ CAPPED PER CLAIM AT EXPERIENCE_SPLIT_POINT, SO IT IS NOT THE MEMBER'S
+  // TOTAL COST AND THE HEADER SAYS "limited per claim". The Loss Ratio column
+  // reads the capped primary layer; putting an UNCAPPED loss cost beside it
+  // would be two columns a reader would divide into each other and get a number
+  // that means nothing. On this basis the two are exactly one factor apart —
+  // loss cost = ratio x the member's own expected loss cost — which is the
+  // comparison the pair is for. The cost of that choice is real and is stated:
+  // WC's primary layer is about 17% of ground-up loss, so a member with a $2M
+  // claim shows $25k of it here.
+  //
+  // ⚠ EXPOSURE IS SUMMED OVER THE SAME YEARS, NOT TAKEN AT TODAY'S LEVEL. The
+  // ledger does not store exposure, but getMemberExposure is a pure function of
+  // the member and the year (exposureByLine x wageFactor), so the window's own
+  // exposure is reconstructible exactly rather than approximated by
+  // this-year's-times-three.
+  //
+  // ⚠ AND THE LOSSES ARE AS DRAWN. MemberLossYear.actual is written once, in the
+  // accident year, from the generator's result and is never revisited —
+  // MEASURED: 6,895 member-years observed at two or more later valuations, ZERO
+  // revised, widest drift $0.00, and every row equal to that year's drawn claim
+  // total. IBNER development moves the pool's reserves and its triangle; it does
+  // not reach this ledger. So both columns, and the renewal threshold that reads
+  // one of them, are on inception values. Nobody had stated this.
+  // ============================================================================
   const expByMember = React.useMemo(() => {
     const mods = memberExperienceMods(activeMembers, 'WC', memberLossHistory, displayYear);
     const median = medianRatedMod(mods);
-    const out = new Map<string, { ratio: number | null; mod: number | null }>();
-    for (const m of mods) out.set(m.memberId, { ratio: m.rawRatio, mod: displayedMod(m, median) });
+    const byId = new Map(activeMembers.map(m => [m.id, m]));
+    const out = new Map<string, { ratio: number | null; lossCost: number | null; mod: number | null }>();
+    for (const m of mods) {
+      const member = byId.get(m.memberId);
+      let lossCost: number | null = null;
+      // Gated on `rated` so the two columns are blank together. A loss cost
+      // needs no credibility to compute, but showing one where the ratio reads
+      // "—" would invite ranking on a record the page has just declined to rate.
+      if (member && m.rated) {
+        const w = experienceWindow(memberLossHistory, m.memberId, 'WC', EXPERIENCE_MOD.windowYears);
+        const ap = w.reduce((t, e) => t + e.primaryActual, 0);
+        const expo = w.reduce((t, e) => t + getMemberExposure(member, 'WC', e.yearNumber), 0);
+        if (expo > 0) lossCost = ap / (expo * 10_000);
+      }
+      out.set(m.memberId, { ratio: m.rawRatio, lossCost, mod: displayedMod(m, median) });
+    }
     return out;
   }, [activeMembers, memberLossHistory, displayYear]);
 
@@ -137,6 +198,12 @@ export default function MembershipPage({ lockedResults, startingFinancials, init
       // Unrated members sort as if typical rather than as 0, so a book with
       // few rated members does not stack every newcomer at one end.
       valA = expByMember.get(a.id)?.mod ?? 1; valB = expByMember.get(b.id)?.mod ?? 1;
+    }
+    else if (sortKey === 'lossCost') {
+      // Unrated members sort as 0 rather than as 1 — a blank cell is "no record
+      // to cost", not "an average cost", and the ratio's own comparator makes
+      // the matching choice for its own scale on the line below.
+      valA = expByMember.get(a.id)?.lossCost ?? 0; valB = expByMember.get(b.id)?.lossCost ?? 0;
     }
     else if (sortKey === 'ratio') {
       // Same convention as the mod column above, and 1 is the right filler on
@@ -203,24 +270,40 @@ export default function MembershipPage({ lockedResults, startingFinancials, init
                 <th className={thClass('exposure')} onClick={() => handleSort('exposure')}>Payroll ($M) {sortKey === 'exposure' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
                 <th className={thClass('yearJoined')} onClick={() => handleSort('yearJoined')}>Yr Joined {sortKey === 'yearJoined' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
                 <th className={thClass('ratio')} onClick={() => handleSort('ratio')} title={`Actual losses over expected, over the last ${EXPERIENCE_MOD.windowYears} years, limited per claim. What the member cost. This is what Renewal Underwriting acts on.`}>Loss Ratio {sortKey === 'ratio' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
+                <th className={thClass('lossCost')} onClick={() => handleSort('lossCost')} title={`The member's own losses per $100 of payroll, over the last ${EXPERIENCE_MOD.windowYears} years, limited per claim — the same window and the same cap as Loss Ratio, and the same losses as drawn. What the member costs, rather than how they did against their class.`}>Loss Cost /$100 {sortKey === 'lossCost' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
                 <th className={thClass('mod')} onClick={() => handleSort('mod')} title="What the member is charged for that record, credibility-weighted against their class. 1.00 is the typical member. Much flatter than the ratio by design — most of a member's rate is their class, not their own claims.">Experience Mod {sortKey === 'mod' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
                 <th className={thClass('satisfaction')} onClick={() => handleSort('satisfaction')} title="What this member thinks of the pool, 1-10, averaged over the lines they are enrolled in. Two things move it: what the pool's price DID this year against the market, where an ordinary year barely registers and a real move bites; and where the pool's price SITS against what a carrier would charge, which pulls their opinion year after year for as long as it lasts. It is a scoreboard: nothing in the model reads it.">Satisfaction {sortKey === 'satisfaction' ? (sortDir === 'asc' ? '↑' : '↓') : ''}</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {sortedMembers.map(member => (<MemberRow key={member.id} member={member} displayYear={displayYear} satisfaction={satisfactionOf(member)} ratio={expByMember.get(member.id)?.ratio ?? null} mod={expByMember.get(member.id)?.mod ?? null} />))}
+              {sortedMembers.map(member => (<MemberRow key={member.id} member={member} displayYear={displayYear} satisfaction={satisfactionOf(member)} ratio={expByMember.get(member.id)?.ratio ?? null} lossCost={expByMember.get(member.id)?.lossCost ?? null} mod={expByMember.get(member.id)?.mod ?? null} />))}
             </tbody>
           </table>
         </div>
+        {/* ⚠ ONE LINE. The pair needs exactly one thing said about it on screen —
+            which of the two the threshold acts on — and the rest belongs in the
+            header tooltips and in the block above expByMember. The class-rate
+            reasoning that makes the two orderings differ is deliberately NOT
+            here: a player does not need the derivation to use the columns.
+
+            ⚠ AND "rank members differently" IS TRUE BUT SMALLER THAN IT SOUNDS.
+            Measured on WC, 6 games x 10 years, Spearman between the two columns
+            is 0.955 — they mostly agree, and the 4.5% they do not is the class
+            effect. The sentence says "can rank" rather than "rank" for that
+            reason. */}
+        <p className="px-5 py-2.5 text-[11px] text-gray-500 border-t border-gray-100">
+          Loss Ratio and Loss Cost can rank members differently. Renewal Underwriting acts on the ratio.
+        </p>
       </div>
       <p className="text-xs text-gray-400 text-center">All member names are fictional. No real public entity names are used.</p>
     </div>
   );
 }
 
-function MemberRow({ member, displayYear, satisfaction, ratio, mod }: {
-  member: Member; displayYear: number; satisfaction: number; ratio: number | null; mod: number | null;
+function MemberRow({ member, displayYear, satisfaction, ratio, lossCost, mod }: {
+  member: Member; displayYear: number; satisfaction: number;
+  ratio: number | null; lossCost: number | null; mod: number | null;
 }) {
   // Below 1 is a credit and reads green; above 1 is a debit. Deliberately the
   // SAME direction as the loss ratio elsewhere on this app — lower is better —
@@ -233,6 +316,12 @@ function MemberRow({ member, displayYear, satisfaction, ratio, mod }: {
   // Banded on the measured quartiles instead.
   const ratioColor = ratio === null ? 'text-gray-400'
     : ratio <= 0.6 ? 'text-emerald-600' : ratio >= 1.4 ? 'text-red-600' : 'text-gray-700';
+  // ⚠ THE COST'S BANDS ARE ITS OWN AGAIN, AND THEY ARE ABSOLUTE DOLLARS RATHER
+  // THAN A RATIO, so neither of the two sets above transfers. Banded on the
+  // measured quartiles of the shipped column, 6 games x 10 years on WC: p25
+  // $0.31, p50 $0.49, p75 $0.70, max $5.77.
+  const costColor = lossCost === null ? 'text-gray-400'
+    : lossCost <= 0.31 ? 'text-emerald-600' : lossCost >= 0.70 ? 'text-red-600' : 'text-gray-700';
   // ⚠ BANDED ON WHERE MEMBERS START, NOT ON THE 1-10 SCALE'S MIDDLE. The old
   // 7 / 5 thresholds were set when the opening draw spanned 6.0-8.5 and the
   // field never moved. Every member now opens inside OPENING_SATISFACTION's
@@ -253,6 +342,9 @@ function MemberRow({ member, displayYear, satisfaction, ratio, mod }: {
       <td className="px-4 py-3 text-gray-600">{member.calendarYearJoined > 0 ? member.calendarYearJoined : '—'}</td>
       <td className={`px-4 py-3 font-semibold ${ratioColor}`} title={ratio === null ? `Fewer than ${EXPERIENCE_MOD.windowYears} years of claims with the pool` : undefined}>
         {ratio === null ? '—' : `${ratio.toFixed(2)}x`}
+      </td>
+      <td className={`px-4 py-3 font-semibold ${costColor}`} title={lossCost === null ? `Fewer than ${EXPERIENCE_MOD.windowYears} years of claims with the pool` : undefined}>
+        {lossCost === null ? '—' : `$${lossCost.toFixed(2)}`}
       </td>
       <td className={`px-4 py-3 font-semibold ${modColor}`} title={mod === null ? `Fewer than ${EXPERIENCE_MOD.windowYears} years of claims with the pool` : undefined}>
         {mod === null ? '—' : mod.toFixed(2)}
