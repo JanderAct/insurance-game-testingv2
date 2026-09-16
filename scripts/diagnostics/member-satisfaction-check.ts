@@ -61,26 +61,37 @@
 //      than the shape being taken on trust. The LEVEL limb's own shape is
 //      asserted in market-conditions-check section 7, next to the cushion it
 //      reads.
-//   5. THE INTERACTION IS REAL, CONTROLLED FOR THE GAP. The design's claim is
-//      that the loss term MODULATES the price term: among members facing the
-//      SAME increase, the blameless ones must be unhappier.
+//   5. A MEMBER'S OWN EXPERIENCE CANNOT MOVE THEIR SATISFACTION. The ruling,
+//      asserted directly: inside one line-year every member must take an
+//      IDENTICAL delta however differently their own modifiers moved. It counts
+//      the line-years where the modifiers actually DO differ, so the test cannot
+//      pass on a flat sample, and it carries its own control — the same test with
+//      the modifier added back into the gap must fail.
 //   6. ONE MEMBER, ONE DECISION. The averages in the other sections hide what a
-//      player actually sees. This traces a blameless member through a game in
-//      which the funding slider moves one stop, seed-matched against the same
-//      member in the same game with it left alone.
+//      player actually sees. This traces one member through a game in which the
+//      funding slider moves one stop, seed-matched against the same member in
+//      the same game with it left alone.
 //   7. POSITIVE CONTROL. A seed-matched pool priced above the market must end
 //      unhappier. A satisfaction model that never responds to price is the
 //      frozen field again with more arithmetic in front of it.
 //
-// ⚠ SECTION 5 USED TO BE WRONG AND PASSED ANYWAY, WHICH IS WORTH RECORDING. It
-// compared blameless against at-fault members over one wide bucket — everyone
-// facing more than +2pp — and did not control for the size of the increase
-// inside it. At-fault members sit HIGHER in that bucket, because a member whose
-// mod has risen has both a larger bill change and a worse ratio, so the two
-// arms were not facing "the same increase" at all. Under a linear reaction the
-// fault damping still won and the test passed; under a convex one the gap term
-// won and it failed. The test was always measuring the wrong thing and the form
-// change is only what exposed it.
+// ⚠ SECTION 5 HAS NOW BEEN THREE DIFFERENT TESTS AND THE HISTORY IS THE POINT.
+//
+// It began as "among members facing an increase over +2pp, the blameless ones
+// are unhappier" — one wide bucket, NOT controlled for the size of the increase
+// inside it. At-fault members sit higher in that bucket (a member whose mod has
+// risen has both a bigger bill change and a worse ratio), so the two arms were
+// never facing "the same increase". Under a linear reaction the fault damping
+// still won and it passed; under a convex one the gap term won and it failed.
+// It was measuring the wrong thing throughout and the form change only exposed
+// it.
+//
+// It then became the same comparison inside controlled gap bands, which was
+// correct and is now moot: the fault term is retired, so there is no damping to
+// measure. What replaced it asserts the RULING instead of a consequence of it —
+// a member's own experience rating cannot move their satisfaction at all — and
+// that is a stronger test than either, because it fails on any leak rather than
+// on a ranking.
 // ============================================================================
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -243,9 +254,9 @@ function playDecision(g: number, from: number): LineYear[] {
 console.log(RULE);
 console.log('PER-MEMBER SATISFACTION — a scoreboard, and it has to move and feed nothing');
 console.log(RULE);
-console.log(`${GAMES} games x ${YEARS} years. Weight ${SATISFACTION.priceWeight} points per pp, `
-  + `fault discount ${SATISFACTION.faultDiscount}, stock clamped to `
-  + `[${SATISFACTION.floor}, ${SATISFACTION.ceiling}].\n`);
+console.log(`${GAMES} games x ${YEARS} years. Change weight ${SATISFACTION.priceWeight} per squared pp, `
+  + `level weight ${SATISFACTION.levelWeight} per pp at a ${SATISFACTION.levelHalfLifeYears}-year half-life, `
+  + `stock clamped to [${SATISFACTION.floor}, ${SATISFACTION.ceiling}].\n`);
 
 const baseline = Array.from({ length: GAMES }, (_, g) => play(g, false));
 
@@ -404,7 +415,8 @@ for (const line of LINES) {
   const abs = gaps.map(Math.abs).sort((a, b) => a - b);
   console.log(`    ${line.padEnd(9)} gap mean ${mean(gaps).toFixed(2)}pp  median ${abs[Math.floor(0.5 * abs.length)].toFixed(2)}|pp|  `
     + `p90 ${abs[Math.floor(0.9 * abs.length)].toFixed(2)}|pp|  SD ${sd(gaps).toFixed(2)}pp   `
-    + `mean own fault ${mean(rows.map(m => m.ownFault)).toFixed(3)}`);
+    + `own-modifier change mean ${mean(rows.map(m => m.ownChangePct)).toFixed(2)}pp `
+    + `SD ${sd(rows.map(m => m.ownChangePct)).toFixed(2)}pp (IN THE BILL, NOT IN THE GAP)`);
 }
 
 // --- 4. the reaction is convex ----------------------------------------------
@@ -454,36 +466,70 @@ console.log('\n--- 4. the reaction is convex, against the linear form it replace
   }
 }
 
-// --- 5. the interaction, CONTROLLED for the gap -----------------------------
-console.log('\n--- 5. the interaction: among members facing the SAME increase, who is unhappier ---');
+// --- 5. the member's own experience cannot move their satisfaction ----------
+console.log('\n--- 5. a member\'s own experience rating cannot move their satisfaction ---');
+console.log('  THE RULING, ASSERTED DIRECTLY. Satisfaction reads the bill at the member\'s');
+console.log('  PREVIOUS modifier, which is the pool\'s rate change and nothing else — so');
+console.log('  inside one line-year every member must take an IDENTICAL delta however');
+console.log('  differently their own modifiers moved. This replaced an interaction test that');
+console.log('  measured how hard the old fault term damped the reaction; there is no fault');
+console.log('  term now, and a damping test with nothing to damp would assert nothing.');
 {
-  const all = baseline.flatMap(r => r.flatMap(x => x.moves));
-  let tested = 0;
-  for (const [lo, hi] of [[4, 8], [8, 14], [14, 25]] as Array<[number, number]>) {
-    const band = all.filter(m => m.excessPct >= lo && m.excessPct < hi);
-    const bl = band.filter(m => m.ownFault <= 0.05);
-    const af = band.filter(m => m.ownFault >= 0.20);
-    if (bl.length < 50 || af.length < 50) {
-      console.log(`  gap [${lo}, ${hi})pp   too few members to read (blameless ${bl.length}, at fault ${af.length})`);
-      continue;
-    }
-    tested++;
-    const ok = mean(bl.map(m => m.delta)) < mean(af.map(m => m.delta));
-    console.log(`  gap [${lo}, ${hi})pp  n ${String(band.length).padStart(5)}   `
-      + `mean gap ${mean(bl.map(m => m.excessPct)).toFixed(2)} vs ${mean(af.map(m => m.excessPct)).toFixed(2)}   `
-      + `delta blameless ${mean(bl.map(m => m.delta)).toFixed(4)} (n ${bl.length})   `
-      + `at fault ${mean(af.map(m => m.delta)).toFixed(4)} (n ${af.length})   ${ok ? 'OK' : 'FAIL'}`);
-    if (!ok) {
-      failures.push(`in the [${lo}, ${hi})pp band, members at fault took at least as much damage as `
-        + `blameless ones facing the same increase. The loss term is supposed to MODULATE the price `
-        + `term — if this ordering does not hold the model is two independent penalties wearing an `
-        + `interaction's name.`);
+  let groups = 0, worstDelta = 0, worstModSpread = 0, thinGroups = 0;
+  for (const run of baseline) {
+    for (const ly of run) {
+      if (ly.moves.length < 2) continue;
+      const deltas = ly.moves.map(m => m.delta);
+      const mods = ly.moves.map(m => m.ownChangePct);
+      const dSpread = Math.max(...deltas) - Math.min(...deltas);
+      const mSpread = Math.max(...mods) - Math.min(...mods);
+      // ⚠ THE TEST HAS TEETH ONLY WHERE THE MODIFIERS ACTUALLY DIFFER. A
+      // line-year in which every member's modifier moved identically would pass
+      // whatever the model did with it, so those are counted and excluded.
+      if (mSpread < 1) { thinGroups++; continue; }
+      groups++;
+      worstDelta = Math.max(worstDelta, dSpread);
+      worstModSpread = Math.max(worstModSpread, mSpread);
     }
   }
-  if (tested === 0) {
-    failures.push('no gap band had enough members in both arms, so the interaction went untested. '
-      + 'Raise GAMES rather than widening the bands — a wider band stops controlling for the gap, '
-      + 'which is the defect this section was rebuilt to fix.');
+  console.log(`  ${groups} line-years with a modifier spread over 1pp (${thinGroups} too flat to test)`);
+  console.log(`  widest own-modifier spread inside a line-year: ${worstModSpread.toFixed(2)}pp`);
+  console.log(`  widest DELTA spread inside a line-year:        ${worstDelta.toExponential(2)} points`);
+  const ok = groups >= 100 && worstDelta <= 1e-12;
+  console.log(`  identical delta regardless of own experience: ${ok ? 'OK' : 'FAIL'}`);
+  if (groups < 100) {
+    failures.push(`only ${groups} line-years had members whose own modifiers moved differently by more `
+      + `than 1pp, so section 5 barely tested anything. Raise GAMES.`);
+  } else if (worstDelta > 1e-12) {
+    failures.push(`inside one line-year, members took deltas differing by ${worstDelta.toExponential(2)} `
+      + `points while their own modifier changes spread ${worstModSpread.toFixed(2)}pp. The ruling is that `
+      + `a member's own experience rating cannot move their satisfaction AT ALL — it is their claims, not `
+      + `the pool's pricing. Something is letting the modifier back into the reaction.`);
+  }
+}
+{
+  // ⚠ POSITIVE CONTROL, AND SECTION 5 NEEDS ONE MORE THAN MOST. A constancy test
+  // passes trivially if the quantity it groups on is constant for an unrelated
+  // reason, so the control puts the member's own modifier change BACK into the
+  // gap and requires the test to fail.
+  let worst = 0, groups = 0;
+  for (const run of baseline) {
+    for (const ly of run) {
+      if (ly.moves.length < 2) continue;
+      const mods = ly.moves.map(m => m.ownChangePct);
+      if (Math.max(...mods) - Math.min(...mods) < 1) continue;
+      groups++;
+      const contaminated = ly.moves.map(m => -SATISFACTION.priceWeight
+        * satisfactionReaction(m.excessPct + m.ownChangePct));
+      worst = Math.max(worst, Math.max(...contaminated) - Math.min(...contaminated));
+    }
+  }
+  const fired = worst > 1e-12;
+  console.log(`  control: the same test with the modifier put BACK into the gap spreads `
+    + `${worst.toFixed(4)} points over ${groups} line-years  ${fired ? 'RED (correct)' : 'still flat'}`);
+  if (!fired) {
+    failures.push('the control could not make section 5 fail even with the member\'s own modifier '
+      + 'change added straight back into the gap. A constancy test that cannot be broken is not a test.');
   }
 }
 
@@ -499,9 +545,14 @@ console.log(`\n--- 6. one blameless member, one stop on the funding slider in ye
     const d = decided[g].filter(x => x.line === 'WC').slice(0, through);
     if (b.length < through || d.length < through) continue;
     const present = (rows: LineYear[], id: string) => rows.every(r => r.members.some(m => m.id === id));
+    // ⚠ "BLAMELESS" NO LONGER MEANS ANYTHING TO THE MODEL AND THE FILTER STAYS
+    // ANYWAY. With the fault term retired every member of a line-year takes the
+    // same delta, so any member would trace the same path. Holding the member's
+    // own modifier close to flat keeps the BILL column in the trace readable —
+    // it is a display choice now, not a selection the mechanism cares about.
     const blameless = (rows: LineYear[], id: string) => rows
       .slice(DECISION_YEAR - 1)
-      .every(r => (r.moves.find(m => m.memberId === id)?.ownFault ?? 0) <= 0.02);
+      .every(r => Math.abs(r.moves.find(m => m.memberId === id)?.ownChangePct ?? 0) <= 3);
     const cand = b[through - 1].members.map(m => m.id)
       .filter(id => present(b, id) && present(d, id) && blameless(b, id));
     if (cand.length === 0) continue;
@@ -528,6 +579,35 @@ console.log(`\n--- 6. one blameless member, one stop on the funding slider in ye
   const fp = mean(footprints);
   console.log(`  FOOTPRINT over the decision year and the five after it, ${footprints.length} games: `
     + `${fp.toFixed(3)} points (SD across games ${sd(footprints).toFixed(3)})`);
+  // ⚠ SPLIT INTO ITS TWO LIMBS, AND ASSERTED, BECAUSE THE RATIO WENT STALE ONCE
+  // ALREADY. levelWeight was derived against a change-limb figure measured
+  // BEFORE the anchor existed — see the constant — and nothing checked the split
+  // afterwards. The level limb's contribution is computable exactly from the
+  // rows: the two arms' anchors differ by a known amount and the stock closes
+  // 1 - 0.5^(years/halfLife) of that distance. The change limb is the residual.
+  {
+    const conv = 1 - Math.pow(0.5, (through - DECISION_YEAR + 1) / SATISFACTION.levelHalfLifeYears);
+    const anchorGaps: number[] = [];
+    for (let g = 0; g < GAMES; g++) {
+      const b = baseline[g].filter(x => x.line === 'WC').slice(DECISION_YEAR - 1, through);
+      const d = decided[g].filter(x => x.line === 'WC').slice(DECISION_YEAR - 1, through);
+      if (!b.length || !d.length) continue;
+      anchorGaps.push(mean(d.map(r => r.moves[0]?.anchor ?? 0)) - mean(b.map(r => r.moves[0]?.anchor ?? 0)));
+    }
+    const levelLimb = mean(anchorGaps) * conv;
+    const changeLimb = fp - levelLimb;
+    console.log(`  SPLIT: level limb ${levelLimb.toFixed(4)} (anchor gap ${mean(anchorGaps).toFixed(4)} x `
+      + `${(100 * conv).toFixed(0)}% convergence), change limb ${changeLimb.toFixed(4)} — `
+      + `ratio ${Math.abs(levelLimb / (changeLimb || 1e-9)).toFixed(1)}:1`);
+    const ok = Math.abs(levelLimb) > Math.abs(changeLimb);
+    console.log(`  the level limb is the larger of the two: ${ok ? 'OK' : 'FAIL'}`);
+    if (!ok) {
+      failures.push(`the level limb contributes ${levelLimb.toFixed(4)} against the change limb's `
+        + `${changeLimb.toFixed(4)} for a SUSTAINED decision. A gap that applies every year must outweigh `
+        + `one that applies once — that is the whole reason the two limbs carry separate weights. See `
+        + `SATISFACTION.levelWeight, whose derivation this replaced after it went stale.`);
+    }
+  }
   console.log(`  ENROLMENT LUCK, for scale: the opening draw spans `
     + `${(OPENING_SATISFACTION.max - OPENING_SATISFACTION.min).toFixed(2)} points end to end.`);
   const wide = Math.abs(fp) > (OPENING_SATISFACTION.max - OPENING_SATISFACTION.min);

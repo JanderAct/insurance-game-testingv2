@@ -207,14 +207,15 @@ export interface SatisfactionMove {
    */
   ownChangePct: number;
   /**
-   * The pool's charged rate against the market, in percentage points. Identical
-   * for every member of a line-year, because a pricing decision is.
+   * What the bill WOULD have done at the member's PREVIOUS modifier — which is
+   * the pool's rate change exactly, since the class relativity is static and the
+   * held modifier cancels. This is the counterfactual the member is judged
+   * against, and it is identical for every member of a line-year because a
+   * pricing decision is one decision.
    */
-  poolGapPct: number;
-  /** What satisfaction actually reacts to. See OWN_CHANGE_EXPLAINED. */
+  billAtPriorModPct: number;
+  /** billAtPriorModPct - marketChangePct. What satisfaction reacts to. */
   excessPct: number;
-  /** [0, 1]. 0 for an unrated member and for anyone at or below the book mean. */
-  ownFault: number;
   /**
    * Where the pool's price SITS against the modelled market, in percentage
    * points. NEGATIVE is cheaper. The same for every member of a line-year, and

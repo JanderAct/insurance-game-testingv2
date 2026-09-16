@@ -5,8 +5,10 @@
 //
 //   THE CHANGE — what happened to the bill this year, once.
 //
-//     delta_i = -K . r(excess_i) . (1 - FAULT . ownFault_i)
+//     delta_i = -K . r(excess_i)
 //     r(x)    = x^2 for x >= 0, -x^2/LAMBDA for x < 0     CONVEX and ASYMMETRIC
+//     excess  = the pool's rate change against the market — the member's own
+//               modifier is removed AT SOURCE, not damped. See satisfactionMoves.
 //
 //   THE LEVEL — where the pool's price SITS against the market, every year it
 //   persists. It is an ANCHOR the stock decays toward, not a second flow.
@@ -32,13 +34,22 @@
 // The level term is not a second way to wander. It is what stopped the first.
 //
 // ============================================================================
-// ⚠ THE BIGGEST THING IN THE GAP WAS THE MEMBER'S OWN EXPERIENCE RATING, AND IT
-// IS OUT. Measured on the convex form, WC's gap had SD 7.29pp of which about 5pp
-// was mod_t/mod_(t-1) — against 2.81 from the market benchmark and 3.69 from the
+// ⚠ THE MEMBER'S OWN EXPERIENCE RATING IS NOT IN THE GAP AT ALL, AND IT TOOK
+// TWO COMMITS TO GET THERE BECAUSE THE FIRST ONE DAMPED IT INSTEAD.
+//
+// Measured on the convex form, WC's gap had SD 7.29pp of which about 5pp was
+// mod_t/mod_(t-1) — against 2.81 from the market benchmark and 3.69 from the
 // pool's own charged rate. A scoreboard whose largest movement is the member's
-// own modifier churning is not reporting on the player, and ownFault did not
-// catch it because ownFault damps the ratio's LEVEL while the noise was in its
-// CHANGE. See OWN_CHANGE_EXPLAINED. WC's gap SD is now 4.52pp.
+// own modifier churning is not reporting on the player. The first attempt
+// discounted it out with a weight; this one removes it by comparing the
+// member's bill to WHAT IT WOULD HAVE BEEN AT THEIR PREVIOUS MODIFIER, which is
+// the pool's rate change and nothing else.
+//
+// WC's gap SD is 4.52pp against sqrt(2.81^2 + 3.69^2) = 4.64 for the two
+// components that should be left — slightly under, because the benchmark and
+// the charged rate are not independent (both carry the trend, and both respond
+// to the same loss experience through the pool's own triangle). Nothing else is
+// in there.
 //
 // ============================================================================
 // ⚠ WHY CONVEX RATHER THAN A BIGGER W, WHICH WAS THE OBVIOUS NEXT STEP.
@@ -152,16 +163,13 @@
 //      checkable rather than argued.
 //
 // ============================================================================
-// THE THREE DRIVERS, AND THE THIRD IS WHY THIS COMMIT NEEDED A MARKET MODULE.
+// WHAT DRIVES IT — TWO THINGS, AND IT WAS THREE.
 //
-//   PRICE — the member's OWN bill, year over year. Member price is
-//     pool rate x class relativity x mod (see memberPremium.ts), the class
-//     relativity is static, so the change is exactly
-//
-//         (1 + r/100) . (mod_t / mod_(t-1))
-//
-//     and needs no new storage. Both halves already exist: r is the engine's
-//     `rateChangePct` and the mod ratio is ownExperienceFrames' ownChangePct.
+//   THE POOL'S PRICE, against the market. The member's bill is
+//   pool rate x class relativity x mod; holding the modifier at LAST YEAR'S
+//   value makes the class relativity and the mod both cancel, so the
+//   counterfactual bill change is the pool's rate change exactly. That is what
+//   the change limb reads, and where the level limb's gap comes from.
 //
 //     ⚠ THE RAW RATE CHANGE, NOT THE DEVIATION FROM NEUTRAL. Retention and the
 //     pool-level satisfaction scalar both read
@@ -172,56 +180,52 @@
 //     differ by the market's year. Subtracting both would net the trend out
 //     twice.
 //
-//   THEIR OWN LOSSES — the three-year clamped ratio, already built, already
-//     displayed on the members table as "Loss Ratio".
+//   THE MARKET — marketConditions.ts, in both limbs. The CHANGE benchmark is
+//     derived from the components every carrier feels; the LEVEL is modelled
+//     from a target loss ratio. A pool that raises its rate in a year the whole
+//     market moved costs less satisfaction than one that raises it alone, and a
+//     pool that sits permanently under a carrier's price is forgiven things a
+//     dearer one would not be.
 //
-//   THE MARKET — marketConditions.ts. Derived from the components every carrier
-//     feels rather than invented as an index. A pool that raises its rate in a
-//     year the whole market moved costs less satisfaction than one that raises
-//     it alone, and that distinction is the reason the market term is derived
-//     rather than picked.
+//   THEIR OWN LOSSES — RETIRED AS A DRIVER, and this was the third. See the
+//     block below. The member's loss ratio is still built and still displayed on
+//     the members table; it no longer touches satisfaction, because a member's
+//     claims are not the pool's pricing.
 //
 // ============================================================================
-// ⚠ THE LOSS TERM IS AN INTERACTION, NOT A SECOND PENALTY, AND THAT IS THE
-// WHOLE DESIGN.
+// ⚠ THE LOSS TERM IS RETIRED, AND IT WAS THE DESIGN'S CENTREPIECE FOR TWO
+// COMMITS. RECORDED IN FULL, BECAUSE THE REASONING THAT BUILT IT WAS SOUND AND
+// THE THING IT WAS BUILT FOR MOVED.
 //
-// Two independent penalties — one for a big increase, one for a bad loss year —
-// would say that a member with a GOOD record facing a BIG increase is only
-// half-unhappy, because only one of the two terms fires. That is backwards:
-// they are the member with the strongest grievance in the book, because nothing
-// they did explains their bill.
-//
-// So the loss term MODULATES the price term:
+// It read
 //
 //     ownFault_i = clamp01( (c_i/M - 1) / (ceiling/M - 1) )
 //
-// 0 at or below the book's mean experience, 1 at the worst the clamp permits.
-// A blameless member takes the full grievance; a member whose own claims ran at
-// the clamp's ceiling takes none, because their bill is their own record coming
-// back to them.
+// — 0 at or below the book's mean experience, 1 at the worst the clamp permits,
+// marketabilityOf's statistic run the other way — and it MODULATED the price
+// reaction rather than adding a second penalty. The argument was that two
+// independent penalties would make a member with a GOOD record facing a BIG
+// increase only half-unhappy, when they are the member with the strongest
+// grievance in the book.
 //
-// ⚠ IT IS marketabilityOf's STATISTIC RUN THE OTHER WAY, DELIBERATELY. That
-// function normalises the member's shortfall BELOW the book mean by the best
-// the clamp allows, (1 - c/M)/(1 - floor/M); this normalises their excess ABOVE
-// it by the worst, (c/M - 1)/(ceiling/M - 1). Same c, same M, same clamp, two
-// opposite tails — which is the same one-statistic-two-pressures structure
-// memberDeparture describes, and it is why neither number needed a scale
-// invented for it.
+// THAT ARGUMENT IS STILL RIGHT AND NO LONGER APPLIES. It was about an increase
+// that CONTAINED the member's own modifier, so part of the increase really was
+// theirs and the fault term said how much. The gap now contains only the pool's
+// rate against the market — one decision, identical for every member of a
+// line-year — and a member's claims record gives them no less standing to mind a
+// pool-wide rate rise. Damping it would attribute part of the pool's decision to
+// the member: the same conflation, moved one term to the right.
 //
-// ⚠ AND THE DAMPING IS SYMMETRIC: a high-fault member reacts less to a CUT too.
-// Not an oversight and not an asymmetry worth a branch. The reading is that a
-// member whose own claims explain their bill attributes the movement to
-// THEMSELVES rather than to the pool, in either direction, and it is the pool
-// they are scoring.
+// ⚠ AND IT CARRIED A CROSS-LINE ARTEFACT NOBODY CHOSE. Property has no rated
+// members, so every Property member sat at fault 0 and took the full reaction
+// while WC and GL averaged 0.116 and 0.124 and were systematically damped.
+// Three lines reacting differently to one pricing decision, because of a
+// credibility measurement about something else.
 //
-// ⚠ PROPERTY MEMBERS ARE ALL AT FAULT 0, AND THAT IS THE SAME MEASUREMENT THAT
-// WITHDREW PROPERTY'S EXPERIENCE RATING. CREDIBILITY_Z.Property is 0 because
-// its measured split-half reliability is 0.000 at every split point tried, so
-// no Property member is rated and none carries a clamped ratio. They therefore
-// take the FULL grievance on every price move — which is right, not degenerate:
-// a Property member has no experience rating to explain their bill, so a rate
-// rise is entirely the pool's. The line is not excluded from the mechanic; it
-// is the case where the interaction term is empty.
+// ⚠ PROPERTY'S OLD NOTE HERE — that its members "take the FULL grievance on
+// every price move, which is right, not degenerate" — was true and is now true
+// of every member on every line, which is the tell that the term had stopped
+// describing anything.
 //
 // ============================================================================
 // ⚠ SATISFACTION IS PER MEMBER PER LINE, AND Member.satisfaction IS ONE FIELD.
@@ -244,7 +248,7 @@
 // of everything.
 // ============================================================================
 
-import { EXPERIENCE_MOD, ownExperienceFrames } from './memberExperienceMod';
+import { ownExperienceFrames } from './memberExperienceMod';
 import type { CoverageLine, Member, MemberLossHistory, SatisfactionMove } from '../types/simulation';
 
 export type { SatisfactionMove };
@@ -377,78 +381,96 @@ export const SATISFACTION = {
    */
   gratitudeLambda: 2.25,
   /**
-   * How much of the grievance a maximally-at-fault member absorbs. 1.0 means
-   * a member at the clamp's ceiling takes none of it.
+   * ⚠ faultDiscount AND ownChangeExplained ARE BOTH GONE, AND THEY WENT FOR ONE
+   * REASON BETWEEN THEM: THE MEMBER'S OWN EXPERIENCE IS REMOVED AT SOURCE NOW
+   * RATHER THAN WEIGHTED ANYWHERE.
    *
-   * ⚠ NOT A FREE PARAMETER IN PRACTICE, AND 1.0 IS THE ONLY DEFENSIBLE END OF
-   * ITS RANGE. Below 1 a member whose bill is entirely their own record still
-   * blames the pool for part of it; above 1 the sign flips and a bad year makes
-   * a member HAPPIER about a rate rise. The endpoint is the statement.
+   * ownChangeExplained was a discount whose only defensible value was 1.0, which
+   * is a deletion wearing a dial. satisfactionMoves states the counterfactual
+   * instead — the bill at LAST YEAR'S modifier, which is the pool's rate change
+   * exactly — so there is nothing left to weight.
+   *
+   * faultDiscount followed it, and this is the part worth arguing rather than
+   * asserting. It damped a member's reaction by how much their own loss ratio
+   * explained their increase. That was the right shape when the increase
+   * CONTAINED their own modifier: a member whose bill rose because their claims
+   * rose had themselves to answer to. It is the wrong shape now. What is left in
+   * the gap is the POOL'S rate against the market — one decision, identical for
+   * every member of a line-year — and a member's claims record gives them no
+   * less standing to mind a pool-wide rate rise. Keeping the damping would have
+   * attributed part of the pool's decision to the member, which is the same
+   * conflation moved one term to the right.
+   *
+   * ⚠ AND IT HAD A CROSS-LINE ARTEFACT NOBODY CHOSE. Property carries no rated
+   * members — CREDIBILITY_Z.Property is 0 — so every Property member sat at
+   * fault 0 and took the full reaction, while WC and GL members averaged 0.116
+   * and 0.124 and were systematically damped. Three lines reacting differently to
+   * the same pricing decision, because of a credibility measurement about
+   * something else.
+   *
+   * ⚠ WHAT IT COSTS IS ALL THE WITHIN-YEAR TEXTURE, AND THAT IS THE CORRECT
+   * CONSEQUENCE RATHER THAN A REGRESSION. Every member of a line-year now takes
+   * an identical delta and an identical anchor. Per-member spread survives only
+   * through enrolment history — when they joined, what they opened at, which
+   * lines they carry — so Member.satisfaction is closer to a per-LINE quantity
+   * carried per member than the name suggests.
+   *
+   * That follows from the ruling: satisfaction reports on the POOL, and the pool
+   * does exactly one per-member thing — the experience modifier — which is
+   * precisely what has been ruled out of it. Genuine per-member variation would
+   * need a per-member thing the pool DOES that is not the modifier: how a claim
+   * was handled, a dividend felt differently by size, a service a member used.
+   * None of those exist in the model. Until one does, a flat line-year is the
+   * honest answer and member-satisfaction-check asserts it rather than letting it
+   * be discovered.
    */
-  faultDiscount: 1.0,
-  /**
-   * How much of the member's OWN modifier change their own claims explain.
-   *
-   * ⚠ 1.0, AND THE REACTION THEREFORE READS THE POOL'S GAP ALONE. This is the
-   * largest correction in the convex rebuild's aftermath and it came out of the
-   * convex form's own drift measurement: WC's gap had SD 7.29pp of which about
-   * 5pp was mod_t/mod_(t-1), against 2.81 from the market benchmark and 3.69
-   * from the pool's charged rate. So the biggest thing a member's satisfaction
-   * moved on was THEIR OWN EXPERIENCE RATING CHURNING, and a scoreboard whose
-   * largest movement is that is not reporting on the player.
-   *
-   * WHY 1.0 IS THE ANSWER AND NOT A TUNED FRACTION. The modifier is rebased to
-   * the book's mean every year, and ownExperienceFrames deliberately divides
-   * BOTH legs by the SAME M — see its header — so mod_t/mod_(t-1) isolates the
-   * member's own clamped ratio moving and contains no move in the book around
-   * them. There is no pool decision inside it to leave in. Anything below 1
-   * charges the pool for a member's own claims.
-   *
-   * ⚠ AND IT NARROWS WHAT THE FIELD MEANS, WHICH IS WORTH SAYING. The original
-   * design read "the member's own bill year over year". It now reads "the
-   * pool's price against the market, damped by how much this member can blame
-   * themselves". The BILL is still computed and carried on every move row —
-   * billChangePct — so nothing is hidden; it is simply not what the member
-   * holds the pool responsible for.
-   *
-   * ⚠ WHAT IT COSTS: within a line-year every member now shares one gap, so the
-   * only per-member variation left in a single year is ownFault. Members still
-   * separate across years, across their line mix, and through the accumulated
-   * path — but two members of one line in one year can differ by at most the
-   * fault discount. member-satisfaction-check's interaction section is
-   * correspondingly weaker and says so.
-   */
-  ownChangeExplained: 1.0,
   /**
    * Satisfaction points per percentage point of LEVEL gap, at the anchor.
    *
-   * ⚠ DERIVED FROM WHAT EACH TERM SHOULD BE WORTH OVER A GAME, WHICH IS THE
-   * QUESTION A SHARED WEIGHT GETS WRONG. A level gap applies every year and a
-   * change gap applies once, so on one weight the level dominates within two or
-   * three years and the change term stops mattering.
+   * ⚠ THE RULE THIS WAS DERIVED FROM DOES NOT HOLD, AND THE NUMBER IS KEPT
+   * ANYWAY. Recorded in full, because the arithmetic looked sound and the input
+   * was measured in the wrong model.
    *
-   * THE ANCHOR: one stop on the funding slider should be worth the SAME through
-   * the level as it is through the change, over the six years the gate already
-   * traces (the decision year and the five after it). Bigger moves and longer
-   * holds then belong to the level, one-off rate blips to the change, and
-   * neither is set by taste.
+   * THE RULE WAS: one stop on the funding slider should be worth the SAME
+   * through the level as through the change, over the six years the gate traces.
+   * The change-limb input used was 0.037 points — the six-year footprint
+   * measured BEFORE the anchor existed. In the shipped model the anchor PULLS
+   * every year at 20.6% of the remaining distance, and that pull damps the
+   * change limb's accumulated difference as well as carrying the level's. So
+   * 0.037 is not the quantity the rule names.
    *
-   * Measured, Expected -> the 0.65 stop on WC:
+   * MEASURED IN THE SHIPPED MODEL, one stop over six years splits:
    *
-   *   cushion             -8.66%  ->  -4.98%      (both on the cheaper side)
-   *   L(x) = x / 2.25     -3.85   ->  -2.21       delta 1.64pp of reaction
-   *   convergence in 6 years at a 3-year half-life  1 - 0.5^2 = 75%
-   *   settled level effect                        0.75 x 1.64 x levelWeight
-   *   the change term's own six-year footprint     0.037 points (24 games)
+   *   level limb   0.037 points   anchor difference x (1 - 0.5^(6/3))
+   *   change limb  0.009 points   what survives the pull
+   *   total        0.045 points   which is the footprint the gate measures
    *
-   *   levelWeight = 0.037 / (0.75 x 1.64) = 0.030
+   * — about FOUR TO ONE, not one to one. Satisfying the rule as written would
+   * need levelWeight = 0.030 x (0.009 / 0.037) = 0.0073.
    *
-   * ⚠ WHAT THAT BUYS ACROSS THE WHOLE SLIDER, which is the number that matters
-   * more than the anchor: Expected -> the 0.95 stop moves the cushion -8.66% ->
-   * +9.88% on WC, so L goes -3.85 -> +9.88 and the anchor moves 0.41 points.
-   * On Property, whose load climbs fastest, -7.34% -> +23.18% moves it 0.79.
-   * A sustained pricing decision is therefore worth ten to twenty times a
-   * one-year rate blip, which is what "applies every year" should mean.
+   * ⚠ 0.0073 IS NOT TAKEN, AND THE REASON IS THE ORIGINAL REQUIREMENT RATHER
+   * THAN CONVENIENCE. The whole point of a level limb is that a gap applying
+   * EVERY YEAR should outweigh one applying ONCE; forcing them equal over six
+   * years contradicts that, and it would leave the full slider worth 0.10 points
+   * end to end — below where the enrolment draw sat two commits ago, and back to
+   * a scoreboard nobody can read. Four to one over six years, growing with how
+   * long the decision is held, is what "applies every year" should mean.
+   *
+   * SO THE HONEST STATUS IS: a continuity choice, not a derivation. 0.030 makes
+   * a sustained one-stop decision's SETTLED effect 0.049 points, which is close
+   * to what the change term alone was worth before the anchor existed, so the
+   * mechanic kept its scale across the structural change. That is a reason, and
+   * it is a weaker one than the rule it replaces.
+   *
+   * ⚠ AND THE SPLIT IS NOW ASSERTED RATHER THAN RECORDED. member-satisfaction-
+   * check section 6 decomposes its own footprint into the two limbs from the
+   * anchor differences on the move rows and requires the level limb to be the
+   * larger. The ratio cannot go stale behind this comment again.
+   *
+   * WHAT IT BUYS ACROSS THE WHOLE SLIDER, which matters more than the anchor:
+   * Expected -> the 0.95 stop moves the cushion -8.66% -> +9.88% on WC, so L
+   * goes -3.85 -> +9.88 and the anchor moves 0.41 points. On Property, whose
+   * load climbs fastest, -7.34% -> +23.18% moves it 0.79.
    */
   levelWeight: 0.030,
   /**
@@ -596,46 +618,51 @@ export function satisfactionMoves(
   marketChangePct: number,
   levelGapPct: number,
 ): SatisfactionMove[] {
-  const { divisor: M, frames } = ownExperienceFrames(members, line, history);
-  const { ratioCeiling } = EXPERIENCE_MOD;
-  const faultSpan = ratioCeiling / M - 1;
+  const { frames } = ownExperienceFrames(members, line, history);
   const known = poolRateChangePct !== null && poolRateChangePct !== undefined;
   const r = known ? poolRateChangePct : 0;
 
-  // The pool's own doing: its charged rate against the market. One number for
-  // the whole line-year, because a pricing decision is one decision.
-  const poolGapPct = known ? r - marketChangePct : 0;
+  // ============================================================================
+  // THE COUNTERFACTUAL BILL, AND IT IS ONE LINE OF ALGEBRA.
+  //
+  // A member's bill is  rate x class relativity x mod.  Their class relativity
+  // is static, so holding the modifier at LAST YEAR'S value and asking what the
+  // bill would have done gives
+  //
+  //     (rate_t . class . mod_(t-1)) / (rate_(t-1) . class . mod_(t-1)) - 1
+  //       =  rate_t / rate_(t-1) - 1
+  //
+  // — the pool's rate change, exactly, with the member's own experience gone
+  // rather than weighted. Against the market that is one number for the whole
+  // line-year, because a pricing decision is one decision.
+  //
+  // ⚠ IT IS ARITHMETICALLY WHAT THE PREVIOUS COMMIT'S OWN_CHANGE_EXPLAINED = 1.0
+  // ALREADY PRODUCED, AND THE KNOB IS GONE ANYWAY. A discount whose only
+  // defensible value is 1 is not a parameter, it is a deletion wearing a dial —
+  // and a dial invites exactly one person to set it to 0.8 without an argument.
+  // Stating the counterfactual says what the model does; stating a weight of 1
+  // says what it happens to be set to.
+  // ============================================================================
+  const billAtPriorModPct = known ? r : 0;
+  const excessPct = known ? billAtPriorModPct - marketChangePct : 0;
+  const anchor = satisfactionAnchor(levelGapPct);
+  const delta = -SATISFACTION.priceWeight * satisfactionReaction(excessPct);
 
   return members.map((m, i) => {
     const f = frames[i];
-    const billChangePct = ((1 + r / 100) * (1 + f.ownChangePct / 100) - 1) * 100;
-    const ownFault = f.rated && faultSpan > 0
-      ? Math.max(0, Math.min(1, (f.clamped / M - 1) / faultSpan))
-      : 0;
-    // ⚠ THE MEMBER'S OWN MODIFIER CHANGE IS DISCOUNTED OUT — see
-    // OWN_CHANGE_EXPLAINED. At 1.0 the reaction reads the pool's gap alone and
-    // the member's own experience reaches satisfaction only through ownFault,
-    // which is what it was built to do.
-    const excessPct = known
-      ? poolGapPct + f.ownChangePct * (1 - SATISFACTION.ownChangeExplained)
-      : 0;
     return {
       memberId: m.id,
-      billChangePct,
-      marketChangePct,
+      // REPORTED, NOT REACTED TO. What the member was actually billed, mod and
+      // all, so the row shows both the bill and the counterfactual it is judged
+      // against rather than hiding the difference.
+      billChangePct: ((1 + r / 100) * (1 + f.ownChangePct / 100) - 1) * 100,
       ownChangePct: f.ownChangePct,
-      poolGapPct,
+      billAtPriorModPct,
+      marketChangePct,
       excessPct,
-      ownFault,
       levelGapPct,
-      // ⚠ THE FAULT DISCOUNT DOES NOT TOUCH THE ANCHOR, DELIBERATELY. ownFault
-      // answers "how much of this INCREASE did you cause", which is a question
-      // about a change. A member's own claims do not make the pool a cheaper or
-      // dearer place to buy insurance than a carrier, so there is nothing for
-      // them to be at fault for in a level.
-      anchor: satisfactionAnchor(levelGapPct),
-      delta: -SATISFACTION.priceWeight * satisfactionReaction(excessPct)
-        * (1 - SATISFACTION.faultDiscount * ownFault),
+      anchor,
+      delta,
     };
   });
 }
@@ -685,7 +712,6 @@ export function applySatisfaction(
   });
 }
 
-/** Convenience for the one caller and for the gate: moves keyed by member id. */
 export function satisfactionMovesById(
   moves: readonly SatisfactionMove[],
 ): Map<string, SatisfactionMove> {
