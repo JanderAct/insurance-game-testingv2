@@ -633,6 +633,38 @@ function PropertyNoSignalNote() {
 // count suggests. Measured over 12 years at the 1.10 level, WC settles around
 // 35 enrolled against 57 with renewal off. The note below says so, because
 // the control cannot show it.
+//
+// ⚠ IT IS THIS YEAR'S ACTUAL COUNT AND IT SWINGS, WHICH READS AS A BUG AND IS
+// NOT ONE. renewalDeclines is handed the CURRENT book, the CURRENT ledger and
+// the CURRENT yearNumber and returns the actual list — no average, no forecast,
+// the same call the engine makes when the year is processed. So the tile reading
+// 7 one year and 0 the next is two true statements about two different years,
+// not an unstable estimate of one quantity. A decline needs a member whose
+// CLAMPED ratio exceeds 2.50, and the clamp ceiling is 3.00, so the qualifying
+// band is narrow and how many members sit in it is a property of the loss draw.
+//
+// MEASURED, 10 games x 12 years at the shipped threshold — this is the tile's own
+// distribution, taken from the same call it renders:
+//
+//   line       mean   min   max   reads 0   reads 5+
+//   WC         2.56     0     8     5.8%      5.0%
+//   GL         3.15     0    10     5.0%     25.8%
+//   Property   0.00     0     0    100.0%      0.0%
+//
+// So BOTH SCREENSHOTS ARE ORDINARY. A reading of 0 happens in about one line-year
+// in eighteen and a reading of 7 in about one in forty; the mode is 3.
+//
+// ⚠ AND PROPERTY IS ALWAYS EXACTLY 0, which is not a swing at all — it has no
+// rated members, so nothing can clear a threshold. It never shows this tile
+// (PropertyNoSignalNote renders instead), so a 0 seen on screen came from WC or
+// GL and is a real year rather than the degenerate line.
+//
+// ⚠ PER-APPLICANT OVERRIDE APPLIES HERE TOO, AND IS DEFERRED FOR THE SAME TWO
+// REASONS. The threshold would FLAG who it means to decline and the player would
+// confirm or spare each. See the block above NewBusinessAppetite for the shape
+// and for the costs — table time, and the loss of the forecast the counts rest
+// on. Recorded in one place rather than two so the two controls cannot acquire
+// different answers to the same question.
 // ============================================================================
 function RenewalUnderwriting({
   line, members, history, yearNumber, value, onChange, disabled,
@@ -737,10 +769,39 @@ function RenewalUnderwriting({
 // longer exists". The live limit is the SHARE cap, which is why the number on
 // the tile moves with the book instead of sitting at 4.
 //
-// ⚠ NEXT STEP, DELIBERATELY NOT THIS COMMIT: per-applicant accept/decline.
-// That turns a policy into a queue of decisions every year and is its own UI
-// question — a list, a per-row action, and a rule for what happens to the ones
-// the player never looks at. Noted at the control so it is not rediscovered.
+// ============================================================================
+// ⚠ PER-APPLICANT ACCEPT/DECLINE IS DEFERRED, NOT PENDING, AND THE DIFFERENCE IS
+// THE POINT OF THIS BLOCK. The tiered control is the shipped answer. What
+// follows is recorded so the alternative is not redesigned from scratch by
+// someone who assumes it was simply never got to.
+//
+// THE INTENDED SHAPE, IF IT IS EVER BUILT. The tier sets a DEFAULT and the
+// player overrides individuals — it does not replace the tier. Set Selective,
+// see this year's applicants with the ones it would take already selected, and
+// change your mind on any of them. Renewals work the same way: the threshold
+// FLAGS who it would decline and the player confirms or spares each one. The
+// policy stays the thing you set; the overrides are the exceptions to it.
+//
+// WHAT IT COSTS, WHICH IS WHY IT IS DEFERRED AND NOT SCHEDULED:
+//
+//   THE TABLE TIME. A dozen per-applicant decisions a year, across ten years and
+//   five teams, is the whole session. This game is played in a facilitated room
+//   against a clock, and a control that consumes the room is not a better
+//   control however much more expressive it is. That is a fact about the
+//   SETTING rather than about the UI, which is why no amount of interface work
+//   retires it.
+//
+//   THE FORECAST GOES. The join-count tiles work because a tier is a POLICY —
+//   the share of applicants clearing a bar is computable before the draw, so
+//   the tile can say what the choice costs. Per-applicant has nothing to
+//   forecast: the answer depends on choices the player has not made yet. So the
+//   display would have to change too, from "N join" to a list with no summary,
+//   and the thing that makes this control readable would be the thing removed.
+//
+// ⚠ SO THE TRADE IS EXPRESSIVENESS AGAINST LEGIBILITY AND TIME, and it was
+// decided rather than postponed. Reopening it means arguing those two costs
+// down, not building the list.
+// ============================================================================
 // ============================================================================
 function NewBusinessAppetite({
   line, members, allMarketMembers, membershipHistory, history, yearNumber, value, onChange, disabled,
@@ -835,8 +896,7 @@ function NewBusinessAppetite({
               this line apply each year, and each hands over {EXPERIENCE_MOD.windowYears} years of its own
               claims. This sets the standard that loss run has to clear. Those who clear it are written in
               the order they come, not best first — the pool underwrites against a standard, it does not
-              rank the queue. There is room for {joins.intakeRoom} this year.{' '}
-              <strong>A strict bar can leave the pool short of the members it had room for.</strong>
+              rank the queue. There is room for {joins.intakeRoom} this year.
             </span>
           </p>
           <p className="flex items-start gap-1 text-[11px] text-gray-400 leading-relaxed">
