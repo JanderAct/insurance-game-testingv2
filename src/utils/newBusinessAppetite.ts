@@ -151,6 +151,44 @@ export const NO_NEW_BUSINESS = 0;
 export type NewBusinessAppetite = number | null;
 
 /**
+ * THE LADDER AS THE PLAYER SEES IT — NAMES, IN ORDER, MOST OPEN TO MOST CLOSED.
+ *
+ * ⚠ THE NAME-TO-THRESHOLD MAPPING IS STATED HERE SO NOBODY HAS TO INFER IT FROM
+ * THE ORDER OF A TILE ROW. That is the whole reason this list exists as data
+ * rather than as five literals in the page: an ordering read off a screen is a
+ * guess, and the guess was wrong once already — the tiles shipped Accept All,
+ * 0.75, 1.00, 1.50, which is open, then MOST closed, then loosening again.
+ *
+ *     Open              accept every applicant        (null — do not filter)
+ *     Broad             below 1.50x                   accepts ~81% of applicants
+ *     Selective         below 1.00x                   accepts ~56%
+ *     Strict            below 0.75x                   accepts ~39%
+ *     No New Business   write nobody                  (NO_NEW_BUSINESS)
+ *
+ * ⚠ THE THRESHOLDS ARE READ FROM NEW_BUSINESS_TIERS BY INDEX RATHER THAN
+ * RESTATED, so moving a tier value moves the name with it and the two cannot
+ * drift. NEW_BUSINESS_TIERS stays ASCENDING because that is the right order for
+ * a threshold list and two diagnostics iterate it that way; this list is the
+ * display order and is deliberately the reverse.
+ *
+ * ⚠ AND THE NAMES CARRY NO NUMBER, WHICH IS THE POINT OF HAVING THEM. A tile
+ * reading "Below 1.00x" asks a player to hold a loss-ratio distribution in their
+ * head to know whether that is strict; "Selective" says it. The ratio behind it
+ * is still exact, still in the code, and still what the engine filters on — it
+ * is just not what the player is asked to reason about while choosing.
+ */
+export const NEW_BUSINESS_APPETITE_TIERS: ReadonlyArray<{
+  name: string;
+  appetite: NewBusinessAppetite;
+}> = [
+  { name: 'Open', appetite: null },
+  { name: 'Broad', appetite: NEW_BUSINESS_TIERS[2] },          // 1.50
+  { name: 'Selective', appetite: NEW_BUSINESS_TIERS[1] },      // 1.00
+  { name: 'Strict', appetite: NEW_BUSINESS_TIERS[0] },         // 0.75
+  { name: 'No New Business', appetite: NO_NEW_BUSINESS },
+];
+
+/**
  * Applicants this appetite would accept, from a candidate pool.
  *
  * PURE, and shared by the engine and the UI — the DecisionsPage renders its

@@ -16,7 +16,7 @@ import { hasStaticClf, staticClf } from '../data/clfTables';
 import type { FundingConsequence } from '../utils/fundingConsequence';
 import { RENEWAL_THRESHOLDS, renewalDeclines } from '../utils/renewalUnderwriting';
 import { EXPERIENCE_MOD } from '../utils/memberExperienceMod';
-import { NEW_BUSINESS_TIERS, NO_NEW_BUSINESS, appetiteEligible } from '../utils/newBusinessAppetite';
+import { NEW_BUSINESS_APPETITE_TIERS, NO_NEW_BUSINESS, appetiteEligible } from '../utils/newBusinessAppetite';
 import { APPLICATION_RATE, MAX_NEW_MEMBER_SHARE } from '../data/defaultAssumptions';
 import { canReenroll } from '../utils/membershipHistory';
 
@@ -553,13 +553,18 @@ function PreviewBox({ title, description, selected, active = false }: { title: s
  * The New Business subtitle: how many members would JOIN, after the cap.
  *
  * ⚠ JUST THE NUMBER, AND NO TILDE. It read "~3 of ~7" — a ratio hedged twice.
- * The threshold is already the tile's title, so the subtitle's job is the cost
- * of the choice, and the cost is a count. The tilde came off because one term
+ * The tile's title is a NAME, so the subtitle carries the whole of what the
+ * choice costs, and the cost is a count.
+ *
+ * ⚠ "N join" AND NOT "N joins", AT EVERY COUNT INCLUDING 1. It reads as a verb —
+ * seven join, one join — so the singular is the correct form and the plural
+ * agreement the first version carried was solving a problem the phrasing does
+ * not have. The tilde came off because one term
  * of the three is a draw and the other two are exact; hedging the whole figure
  * read as doubt about the control rather than sampling noise on who applies.
  */
 function joinLabel(n: number): string {
-  return `${n} join${n === 1 ? 's' : ''}`;
+  return `${n} join`;
 }
 
 // ⚠ PROPERTY HAS NOTHING TO RATE ON, AND THE CONTROLS SAY SO RATHER THAN
@@ -693,13 +698,25 @@ function RenewalUnderwriting({
 // in the same card because both are one decision about pool membership:
 // existing members versus applicants.
 //
-// FIVE TIERS ON THE APPLICANT'S OWN LOSS RATIO, READ MOST OPEN TO MOST CLOSED —
-// Accept All, then the three bars loosest first, then No New Business. That is
-// the same direction Renewal Underwriting above it reads (Renew All, then
-// Decline above), so the two controls in one card do not run opposite ways.
+// FIVE NAMED TIERS, READ MOST OPEN TO MOST CLOSED — Open, Broad, Selective,
+// Strict, No New Business. That is the same direction Renewal Underwriting above
+// it reads (Renew All, then Decline above), so the two controls in one card do
+// not run opposite ways.
 //
-// ⚠ THE TIERS USED TO RENDER 0.75 / 1.00 / 1.50 AFTER Accept All, which was
-// open, then MOST closed, then loosening again. Nobody chose that; it was
+// ⚠ NAMES RATHER THAN THRESHOLDS, AND THE TILE CARRIES NO RATIO AT ALL. "Below
+// 1.00x" asks a player to hold a loss-ratio distribution in their head to know
+// whether that is strict; "Selective" says it. The threshold is still exact and
+// still what the engine filters on — it is just not what the player is asked to
+// reason about while choosing, and it is not on the tile.
+//
+// ⚠ THE ORDER AND THE NAME-TO-VALUE MAPPING BOTH LIVE AT
+// NEW_BUSINESS_APPETITE_TIERS, not here. This row is one map over that list.
+// The version before it held the order in the page and the values in the module
+// and rendered an ascending array in reverse — correct, and one transposition
+// away from pairing every count with the wrong name.
+//
+// ⚠ THE TIERS ONCE RENDERED 0.75 / 1.00 / 1.50 AFTER Accept All, which was open,
+// then MOST closed, then loosening again. Nobody chose that; it was
 // NEW_BUSINESS_TIERS in its own ascending order, which is the right order for a
 // threshold list and the wrong one for a row of tiles.
 //
@@ -771,10 +788,16 @@ function NewBusinessAppetite({
       pool: available.length,
       applications,
       intakeRoom,
-      acceptAll: capped(applications),
-      byTier: NEW_BUSINESS_TIERS.map(t => {
+      // ONE COUNT PER NAMED TIER, in the ladder's own display order, so the tile
+      // row is a single map and a count can never be paired with the wrong name.
+      // The previous shape carried `acceptAll` separately and indexed the rest
+      // into an ascending array while rendering it reversed — correct, and one
+      // transposition away from silently mislabelling every bar.
+      byTier: NEW_BUSINESS_APPETITE_TIERS.map(({ appetite }) => {
+        if (appetite === NO_NEW_BUSINESS) return 0;
+        if (appetite === null) return capped(applications);
         if (available.length === 0) return 0;
-        const share = appetiteEligible(available, line, history, yearNumber, t).length
+        const share = appetiteEligible(available, line, history, yearNumber, appetite).length
           / available.length;
         return capped(Math.round(applications * share));
       }),
@@ -788,37 +811,22 @@ function NewBusinessAppetite({
       <span className="text-sm font-semibold text-gray-700">New Business Appetite</span>
       {rated ? (
         <>
-          {/* MOST OPEN TO MOST CLOSED, matching Renewal Underwriting above. The
-              tiers are reversed here rather than in NEW_BUSINESS_TIERS, which is
-              a threshold list and is correctly ascending for every other reader
-              of it. */}
+          {/* NAMES, NOT THRESHOLDS, AND THE ORDER AND THE MAPPING BOTH LIVE AT
+              NEW_BUSINESS_APPETITE_TIERS. Rendering straight off that list is
+              what keeps the screen and the constant from disagreeing — the
+              previous version held the order in the page and the values in the
+              module, which is two places to get one thing right. */}
           <div className="grid grid-cols-5 gap-1">
-            <div onClick={() => !disabled && onChange(null)}>
-              <PreviewBox
-                title="Accept All"
-                description={joinLabel(joins.acceptAll)}
-                selected={value === null}
-                active={!disabled}
-              />
-            </div>
-            {[...NEW_BUSINESS_TIERS].map((t, i) => ({ t, i })).reverse().map(({ t, i }) => (
-              <div key={t} onClick={() => !disabled && onChange(t)}>
+            {NEW_BUSINESS_APPETITE_TIERS.map(({ name, appetite }, i) => (
+              <div key={name} onClick={() => !disabled && onChange(appetite)}>
                 <PreviewBox
-                  title={`Below ${t.toFixed(2)}x`}
+                  title={name}
                   description={joinLabel(joins.byTier[i])}
-                  selected={value === t}
+                  selected={value === appetite}
                   active={!disabled}
                 />
               </div>
             ))}
-            <div onClick={() => !disabled && onChange(NO_NEW_BUSINESS)}>
-              <PreviewBox
-                title="No New Business"
-                description={joinLabel(0)}
-                selected={value === NO_NEW_BUSINESS}
-                active={!disabled}
-              />
-            </div>
           </div>
           <p className="flex items-start gap-1 text-[11px] text-gray-500 leading-relaxed">
             <Info size={12} className="mt-0.5 flex-shrink-0" />
