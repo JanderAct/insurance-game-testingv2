@@ -257,6 +257,37 @@ for (let g = 0; g < GAMES; g++) {
   // redraw to differ from the original. If any of these still matches, the
   // comparison above cannot detect a changed input and everything it "proved"
   // is a JSON tautology. Three inputs, three separate perturbations.
+  //
+  // ============================================================================
+  // ⚠ TWO OF THE THREE PERTURBATIONS WERE LUCK-DEPENDENT AND THE LUCK RAN OUT.
+  // They went red when the pre-game roster was frozen, which took GL's year-1
+  // book from ~72 members to ~59 — and NEITHER FAILURE WAS A REGRESSION.
+  // Measured at this gate's own seed (RT0, 3,300,000), 59 members and 287
+  // claims:
+  //
+  //   ROSTER. The control removed memberList[0] unconditionally. At this seed
+  //   that is member-003, which drew ZERO GL claims. Removing a member who
+  //   generated nothing cannot change the register, so the control was asking
+  //   the engine to prove something untrue. 10 of the 59 members are claimless;
+  //   whether index 0 was one of them was always a coin toss, and a bigger book
+  //   had simply been winning it.
+  //
+  //   k. The control scaled kLineApplied by 1.01. k multiplies a Poisson mean,
+  //   so a 1% change moves the EXPECTATION by ~0.05 claims across the book and
+  //   frequently flips no integer count at all. Swept at this seed: x1.001 no,
+  //   x1.010 no, x1.020 YES, and every larger factor YES. The input is read —
+  //   the perturbation was inside the rounding.
+  //
+  // BOTH ARE NOW DETERMINISTIC RATHER THAN LARGER-AND-HOPING. The roster control
+  // removes a member the STORED REGISTER SHOWS HAS CLAIMS, and fails loudly if
+  // no such member exists. The k control SEARCHES UPWARD for the smallest factor
+  // that moves the register and fails only if none does inside a bounded range —
+  // which both proves the input is read and RECORDS how sensitively, instead of
+  // hiding that behind one hard-coded number that may or may not bite.
+  //
+  // ⚠ DO NOT "FIX" A FUTURE RED HERE BY ENLARGING THE PERTURBATION. If the
+  // search below runs out of range, the input has genuinely stopped being read.
+  // ============================================================================
   if (g === 0) {
     const r = c.lockedResults[0];
     const orig = originals.get(r.yearNumber)!;
@@ -268,9 +299,41 @@ for (let g = 0; g < GAMES; g++) {
       return !same;
     };
     const c1 = control('rcEffectivenessApplied (+0.01)', lr => ({ ...lr, rcEffectivenessApplied: (lr.rcEffectivenessApplied ?? 0) + 0.01 }));
-    const c2 = control('kLineApplied (x1.01)', lr => ({ ...lr, kLineApplied: (lr.kLineApplied ?? 1) * 1.01 }));
-    const c3 = control('roster (first member removed)', lr => ({ ...lr, memberList: lr.memberList.slice(1) }));
-    console.log(`  positive controls: rc ${c1 ? 'DIFFERS' : 'same!'}, k ${c2 ? 'DIFFERS' : 'same!'}, roster ${c3 ? 'DIFFERS' : 'same!'}`);
+
+    // k: the SMALLEST factor that moves the register, searched rather than
+    // assumed. Reported so the sensitivity is a number in the output instead of
+    // a hard-coded constant nobody re-checks.
+    const K_FACTORS = [1.001, 1.002, 1.005, 1.01, 1.02, 1.05, 1.10, 1.25, 1.50, 2.00];
+    let kFired: number | null = null;
+    for (const f of K_FACTORS) {
+      const pr = { ...r, byLine: { ...r.byLine, GL: { ...r.byLine.GL, kLineApplied: (r.byLine.GL.kLineApplied ?? 1) * f } } } as typeof r;
+      const regen = regenerateLineYearClaims(c.instance, pr, 'GL');
+      if (canon(sortById(regen.claims)) !== canon(sortById(orig.byLine.GL.claims ?? []))) { kFired = f; break; }
+    }
+    if (kFired === null) {
+      regenFail.push('POSITIVE CONTROL FAILED: NO kLineApplied factor up to x2.00 changed the regenerated '
+        + 'GL register. k is not being read by the redraw — this is not a perturbation that is too small, '
+        + 'it is the input being ignored. Do not enlarge the range; check claimRegeneration reads '
+        + 'kLineApplied off the stored result.');
+    }
+
+    // roster: drop a member the STORED REGISTER SHOWS HAS CLAIMS. Dropping a
+    // claimless member proves nothing and is what made this control fail.
+    const claimed = new Set((orig.byLine.GL.claims ?? []).map(cl => (cl as { memberId: string }).memberId));
+    const dropIdx = r.byLine.GL.memberList.findIndex(m => claimed.has(m.id));
+    let c3 = false;
+    if (dropIdx < 0) {
+      regenFail.push(`POSITIVE CONTROL FAILED: no member of GL's year-${r.yearNumber} roster appears in its own `
+        + 'stored claim register, so there is no roster perturbation that could change the redraw. Either '
+        + 'the register is empty or memberList and the claims disagree about member ids.');
+    } else {
+      c3 = control(`roster (member ${r.byLine.GL.memberList[dropIdx].id}, which has claims, removed)`,
+        lr => ({ ...lr, memberList: lr.memberList.filter((_, i) => i !== dropIdx) }));
+    }
+    console.log(`  positive controls: rc ${c1 ? 'DIFFERS' : 'same!'}, `
+      + `k fires at x${kFired === null ? 'NEVER' : kFired.toFixed(3)}, `
+      + `roster ${dropIdx < 0 ? 'NO CLAIMED MEMBER!' : (c3 ? 'DIFFERS' : 'same!')} `
+      + `(${claimed.size} of ${r.byLine.GL.memberList.length} GL members carry claims)`);
     // And the loud path: a result with no k must THROW, not redraw at k = 1.
     try {
       regenerateLineYearClaims(c.instance, { ...r, byLine: { ...r.byLine, GL: { ...r.byLine.GL, kLineApplied: undefined } } } as typeof r, 'GL');
