@@ -114,7 +114,31 @@ import type {
 const RULE = '='.repeat(76);
 const LINES: CoverageLine[] = ['WC', 'GL', 'Property'];
 const GAMES = Number(process.env.GAMES ?? 6);
-const YEARS = Number(process.env.YEARS ?? 10);
+/**
+ * ⚠ 16 AND NOT 10, AND THE REASON IS THE SAMPLE RATHER THAN THE SCOPE.
+ *
+ * The pooled drawn-vs-analytic primary share is gated at 1pp, and at 10 years it
+ * read 1.13pp once the book was frozen at ~64 members — the estimate stopped
+ * resolving the bound, not the invariant stopped holding. Measured at this
+ * commit:
+ *
+ *     GAMES=6  YEARS=10   gap 1.13pp   FAIL      (the old default)
+ *     GAMES=6  YEARS=16   gap 0.34pp   pass  29s
+ *     GAMES=6  YEARS=20   gap 0.36pp   pass  32s
+ *     GAMES=10 YEARS=10   gap 0.61pp   pass  38s
+ *
+ * ⚠ AND MORE YEARS IS THE CHEAP LEVER WHILE MORE GAMES IS THE DEAR ONE. Each
+ * game pays for a ten-year pre-game before a single played year exists, so years
+ * amortise that cost and games repeat it: 16 years at 6 games is FASTER than the
+ * 10-year default was (29s against 33s) and resolves three times better than 10
+ * games at 10 years.
+ *
+ * ⚠ RAISE THE SAMPLE, NEVER THE BOUND. 1pp is an invariant statement — the
+ * drawn primary share must equal the analytic one because both limit at
+ * EXPERIENCE_SPLIT_POINT. Widening it to admit 1.13pp would trade a statement
+ * about the engine for a statement about the sample.
+ */
+const YEARS = Number(process.env.YEARS ?? 16);
 
 // The rebase is a division by an exposure-weighted mean, so the residual is
 // float noise over ~60 members rather than zero.
