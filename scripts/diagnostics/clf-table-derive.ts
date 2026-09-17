@@ -74,6 +74,7 @@
 // crossing sits where the density is highest and small shifts in the ratio
 // distribution move it further.
 
+import { NO_NEW_BUSINESS } from '../../src/utils/newBusinessAppetite';
 import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
@@ -292,7 +293,19 @@ interface BandRow { ratio: number; members: number; year: number; arm: string; g
 const POOLED = process.env.POOLED === '1';
 
 function collectAcrossArms(line: CoverageLine): BandRow[] {
-  const arms: (number | null)[] = [null, 1.50, 1.00, 0.75];
+
+// ⚠ FIVE ARMS NOW, AND THE FIFTH IS THE SHIPPED DEFAULT. NO_NEW_BUSINESS was
+// added when WC was re-derived at the small band: the default appetite writes
+// nobody, so the book is FROZEN at its opening ~62 for the whole game, and none
+// of the other four arms produces that. Without it the derivation sampled four
+// populations a player has to opt into and none that a player who touches
+// nothing actually plays.
+//
+// ⚠ IT IS ADDED TO clf-table-derive AND clf-label-backtest-check TOGETHER, AND
+// THAT COUPLING IS LOAD-BEARING. The backtest judges each table against the
+// population it was fitted on; adding an arm to one file alone would score a
+// table on a book it never saw. Change one, change both.
+  const arms: (number | null)[] = [null, 1.50, 1.00, 0.75, NO_NEW_BUSINESS];
   const active: CoverageLine[] = POOLED ? ['WC', 'GL', 'Property'] : [line];
   const out: BandRow[] = [];
   for (const appetite of arms) {
