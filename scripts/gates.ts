@@ -880,7 +880,19 @@ const EXPECTED_RED: Record<string, { code: number; why: string }> = {
   // corrected in the same commit as this entry.
   'clf-label-backtest-check': {
     code: 1,
-    why: 'TWO REAL RESIDUALS, ON THE BASIS EACH LINE IS ACTUALLY GATED AGAINST. This entry used to '
+    why: '⚠ THE RESIDUAL THIS ENTRY DESCRIBED HAS MOVED, AND THE ENTRY IS CORRECTED RATHER THAN LEFT. '
+      + 'It named WC -7.2pp on the SMALL band; after the membership work (departures off, pre-game roster '
+      + 'frozen, No New Business default) WC reads -4.0pp there and the live failure is +13.0pp at the '
+      + '55% stop on the LARGE band. Same mechanism, opposite end: WC\'s single curve has a book-size '
+      + 'LEVEL effect and the book moved, so the error moved with it. Worst per band, each line on its '
+      + 'own gated basis — WC (calendar) -4.0 / +7.6 / +13.0, GL (accident) -12.4 / -10.1 / -8.0, '
+      + 'Property (calendar) +20.7 (thin, ungated) / -3.1 / +3.8. ⚠ DO NOT RE-DERIVE ON THE STRENGTH OF '
+      + 'THIS: the default book (~62) and an Open-appetite book (~113) now BRACKET the derivation band, '
+      + 'so every available re-derivation trades one player\'s accuracy for another\'s. clfTables.ts '
+      + 'carries the measurement and the declined re-derivation. GL\'s 30%-stop residual stands '
+      + 'unchanged. WHAT RETIRES THIS ENTRY: a book-size axis, or a ruling that one trajectory is the '
+      + 'one to serve. ORIGINAL ENTRY FOLLOWS. '
+      + 'TWO REAL RESIDUALS, ON THE BASIS EACH LINE IS ACTUALLY GATED AGAINST. This entry used to '
       + 'describe reds that were DEFINITIONAL — every line was scored on accident-year ultimate while '
       + 'two of the three tables are calendar-year percentiles, so WC and Property could not pass and '
       + 'nobody read their reds. The gate now gates each line on the basis its own table was derived '

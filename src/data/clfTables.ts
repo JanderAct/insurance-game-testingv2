@@ -149,6 +149,61 @@
 // engine's loss or pricing path invalidates it.
 //
 // ============================================================================
+// ⚠ THAT TRIGGER FIRED, AND THE RE-DERIVATION WAS MEASURED AND DECLINED. READ
+// THIS BEFORE RUNNING clf-table-derive ON THE STRENGTH OF THE RULE ABOVE.
+//
+// Three commits moved the membership trajectory hard: voluntary departures off,
+// the pre-game roster frozen, and No New Business as the default appetite. The
+// median book was ~140 at the worst of it and the rule said to re-derive.
+//
+// ⚠ BUT THE RULE NO LONGER SELECTS A UNIQUE BAND, WHICH IS THE ACTUAL FINDING.
+// "The band containing its own median book" assumed ONE trajectory. There are
+// now two, and they BRACKET the band these tables are derived at:
+//
+//     arm                        WC median   GL median   Property median   band
+//     defaults (frozen book)        61.5        65.0          66.0        SMALL
+//     Open appetite                110.0       112.0         113.0        LARGE
+//
+// A player who touches nothing sits in SMALL for the whole game; a player who
+// opens the bar runs to LARGE. No single curve per line can be derived at "the"
+// median because there is no longer one median.
+//
+// ⚠ AND THE SHIPPED TABLES ARE ALREADY AT OR NEAR THE BEST COMPROMISE, WHICH IS
+// WHY NOTHING IS RE-DERIVED. Worst label error per band, each line on the basis
+// it is actually gated against (clf-label-backtest-check, 40 games x 4 arms x
+// 22 years):
+//
+//     line (basis)            small ~64    mid ~80    large ~97    derived at
+//     WC (calendar)              -4.0        +7.6       +13.0         mid
+//     GL (accident-year)        -12.4       -10.1        -8.0         mid
+//     Property (calendar)       +20.7 *      -3.1        +3.8         large
+//                                             * 223 observations, thin, not gated
+//
+// ⚠ WC READS BEST AT THE NEW DEFAULT BOOK, NOT WORST, AND THAT INVERTS THE
+// OBVIOUS EXPECTATION. Its worst error at the small band is -4.0pp against
+// +13.0pp at large. Re-deriving WC onto the default trajectory would improve a
+// figure that is already the best of the three and WORSEN the arm that is
+// currently failing. Deriving it onto the LARGE band — where the live residual
+// is — would hurt the player who touches nothing, who is now the modal player.
+//
+// GL is monotone the other way (best at large) and its own standing residual is
+// at the 30% stop, not at a band. Property is best at mid and large and worst at
+// small, but its small band is 223 observations and explicitly not gated.
+//
+// SO EVERY AVAILABLE RE-DERIVATION TRADES ONE PLAYER'S ACCURACY FOR ANOTHER'S,
+// and the file's own measured cost of a single curve — recorded above as
+// "derived at small / mid / large" — is exactly this trade seen from the other
+// side. The honest answer is that a single curve per line cannot serve a
+// trajectory that now spans 62 to 113 members, and the fix is the BOOK-SIZE AXIS
+// this file considered and rejected, not a different single curve.
+//
+// ⚠ WHAT WOULD CHANGE THIS RULING: a decision that one trajectory is the one to
+// serve. If the frozen default is what the game is for, derive all three at
+// SMALL and accept the active player's error. That is a design call, not a
+// measurement, and it is not taken here.
+// ============================================================================
+//
+// ============================================================================
 // ⚠ WC'S TABLE WAS RE-DERIVED WHEN THE REPORT LAG AND IBNR WERE REMOVED, and
 // the move went the OPPOSITE way to what was expected. The prediction was that
 // removing IBNR would close the 4.6pp incurred-vs-ultimate gap and lift WC's
