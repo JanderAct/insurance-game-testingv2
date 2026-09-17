@@ -443,6 +443,40 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // basis. The mechanism's own correctness is held by cohort-ledger-check (three
 // identities, both arms), martingale-equivalence-check (term by term) and
 // terminal-severity-check (phi on its anchor), all green at this commit.
+// v43: NO NEW BUSINESS AS THE DEFAULT APPETITE. One capture for a sequence of
+// four commits, and it MIXES EXACTLY ONE ENGINE CHANGE WITH THREE THAT MOVE
+// NOTHING — which is why the capture is taken once at the end rather than after
+// each.
+//
+//   dab4d62  save-round-trip-check's positive controls made deterministic
+//            DIAGNOSTIC ONLY. No engine file. Cannot move a value.
+//   81e68da  newBusinessAppetite defaults to NO_NEW_BUSINESS
+//            THE ONLY COMMIT IN THIS CAPTURE THAT MOVES A NUMBER.
+//   9c5e18d  the CLF re-derivation measured and declined
+//            TWO RECORDS — clfTables.ts and gates.ts. No table moved, so no
+//            value could.
+//   this one recapture
+//
+// 0 added, 0 removed, 21,481 of 31,200 moved across 80 fields. activeMembers
+// 71 -> 65 and newMembers 6 -> 0 in the first instance: intake stopped.
+//
+// ⚠ AND THE OPENING BOOK DID NOT MOVE, WHICH IS THE POINT OF THE CAPTURE RATHER
+// THAN AN ASIDE. The pre-game runs at these same defaults, so before the roster
+// was frozen structurally at v42 this would have changed the opening and
+// therefore the pin. Measured against the parent on the same seeds: WC 63.9,
+// GL 62.4, Property 64.4, member ids identical, and opening-centring-check
+// unchanged at -0.6 / -0.7 / +0.1 SE. Every moved field below is a PLAYED year.
+//
+// ⚠ A CORRECTION TO v42'S OWN RECORD. That note states the opening book as
+// 60.3 / 56.8 / 67.8. Those were measured BEFORE the pin was re-solved inside
+// that same commit and were never re-taken; the shipped figures have always been
+// 63.9 / 62.4 / 64.4. The error was reporting a mid-commit measurement as if it
+// described the commit. Corrected here rather than edited there, so the mistake
+// stays visible.
+//
+// THE LEAK CHECK: 0 added, 0 removed, every absolute identity bit-exact, no
+// suspected partial identity.
+//
 // v42: THE PRE-GAME ROSTER IS FROZEN, AND THE PIN WAS RE-SOLVED ON ALL THREE
 // LINES BEHIND IT. The pre-game no longer moves membership: no joins, no
 // departures, no declines, so the year-1 book IS the starting enrolment
@@ -637,7 +671,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // capture is sufficient alone here: the hash guard cannot tell "different
 // members enrolled" from "the arithmetic broke", and this one says the
 // changed set is exactly the set a roster change explains.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v42.json');
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v43.json');
 
 function seedOf(id: string) {
   let h = 5381;

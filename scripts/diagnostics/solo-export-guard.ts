@@ -357,6 +357,23 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // reports the same thing in both cases. value-identity v37 is what separates
 // them, and its note records the confinement check: every changed field is
 // downstream of the roster, nothing roster-independent moved, no NaN.
+// v43: ALL 24 MOVED. NO NEW BUSINESS AS THE DEFAULT APPETITE — intake stops on
+// every line in every configuration, so no solo game can be exempt.
+//
+// ONE CAPTURE FOR FOUR COMMITS, AND ONLY ONE OF THEM MOVES A NUMBER:
+//   dab4d62  save-round-trip-check's controls made deterministic  (diagnostic only)
+//   81e68da  newBusinessAppetite defaults to NO_NEW_BUSINESS      (the engine change)
+//   9c5e18d  the CLF re-derivation measured and declined          (two records only)
+//   this one recapture
+//
+// ⚠ AND THE OPENING POSITION IS UNCHANGED, WHICH IS WHAT SEPARATES THIS CAPTURE
+// FROM v42's. That one moved every export through the OPENING — a frozen roster
+// and a re-solved pin on all three lines. This one moves them through the PLAYED
+// YEARS only: the pre-game is frozen structurally, so the appetite default
+// cannot reach it, and the year-1 book is identical member for member. A
+// reader diffing two exports across this pair should expect year 1 to agree and
+// the divergence to open from year 2.
+//
 // v42: ALL 24 MOVED, AND AGAIN THERE IS NO CONTROL — for the same reason as
 // v41 and one more. The pre-game roster is frozen (no joins, departures or
 // declines in the ten pre-game years), so the opening book every export is
@@ -433,7 +450,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 //
 // So this capture carries its own negative control: a table change that reaches
 // two lines and provably does not reach the third.
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v42.json');
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v43.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');
