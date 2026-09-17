@@ -442,9 +442,28 @@ interface LineYearContext {
   instance: GameInstance;
   yearNumber: number;
   calendarYear: number;
-  /** DIAGNOSTIC SEAM — see processYear's `derivation` parameter. Undefined in
+  /** DIAGNOSTIC SEAM — see processYear's `overrides` parameter. Undefined in
    *  every shipped path. */
   applicationRateOverride?: number;
+  /**
+   * ⚠ THE PRE-GAME DOES NOT MOVE MEMBERSHIP. STRUCTURAL, NOT A DECISION.
+   *
+   * True for every pre-game year and false for every played year. The pre-game's
+   * job is to build a loss history and a reserve position so the pool opens
+   * mature; evolving the ROSTER for ten years was a side effect of reusing
+   * processYear rather than anything designed, and it made the opening book a
+   * function of whatever the decision defaults happened to be.
+   *
+   * ⚠ IT IS A FLAG RATHER THAN A DECISION SETTING, AND THAT IS THE WHOLE POINT.
+   * Setting the pre-game's appetite to NO_NEW_BUSINESS would freeze the roster
+   * today and would leave the opening book hostage to defaultDecisionSet — the
+   * exact coupling this removes. A future default that re-opened intake would
+   * silently move every opening again.
+   *
+   * See simulateMemberMovement for what it gates and what it deliberately does
+   * NOT gate (every draw still runs).
+   */
+  freezeMembership: boolean;
   allMarketMembers: Member[];
   // The authoritative per-line enrollment ledger (as of this year's entry,
   // plus earlier-processed lines' same-year updates — irrelevant to this
@@ -830,6 +849,7 @@ export function processLineYear(
 
   const memberResult = simulateMemberMovement({
     applicationRateOverride: ctx.applicationRateOverride,
+    freezeMembership: ctx.freezeMembership,
     currentMembers: currentActiveMembers,
     allMarketMembers: ctx.allMarketMembers,
     membershipHistory: ctx.membershipHistory,
@@ -870,9 +890,18 @@ export function processLineYear(
   // Each decline writes closeInterval, so the two-year cooldown applies and
   // the member cannot simply be recruited back next year.
   // ============================================================================
+  //
+  // ⚠ AND IT IS OFF IN THE PRE-GAME, STRUCTURALLY RATHER THAN BY DEFAULT. The
+  // pre-game runs at defaultDecisionSet, whose renewalThreshold is null, so
+  // nothing is declined there today — but that is a property of the defaults
+  // and not of the pre-game. The threshold is forced to null here so a future
+  // default cannot reopen it. renewalDeclines is PURE and takes no draw, so
+  // skipping the call cannot re-phase anything; the guard is on the threshold
+  // rather than on the call for that reason — it reads as the decision the
+  // pre-game makes, which is "renew everyone".
   const renewalDecisions = renewalDeclines(
     memberResult.activeMembers, line, ctx.memberLossHistory, yearNumber,
-    lineDecisions.renewalThreshold ?? null,
+    ctx.freezeMembership ? null : (lineDecisions.renewalThreshold ?? null),
   );
   const renewal = applyRenewalDeclines(
     memberResult.activeMembers, line, yearNumber, renewalDecisions, ctx.membershipHistory,
@@ -2371,14 +2400,20 @@ export function processYear(
   gameState: GameState,
   rawDecisions: DecisionSet,
   /**
-   * DIAGNOSTIC SEAM, threaded straight to simulateMemberMovement. See
+   * TWO OVERRIDES OF DIFFERENT KINDS, AND THE DIFFERENCE MATTERS.
+   *
+   * `applicationRate` is a DIAGNOSTIC SEAM. See
    * MemberMovementInputs.applicationRateOverride for why it exists and why the
    * shipped engine never sets it: APPLICATION_RATE is a single scalar with no
    * other input, so re-deriving it needs whole played games at several values,
-   * and the book responds to the rate. Optional and absent everywhere except
+   * and the book responds to the rate. Absent everywhere except
    * new-business-appetite-derive.
+   *
+   * `freezeMembership` is STRUCTURAL and the pre-game sets it on every call. It
+   * is not a diagnostic and not a default — see its own note below, and
+   * runPriorHistory, which is its only caller.
    */
-  derivation?: { applicationRate?: number },
+  overrides?: { applicationRate?: number; freezeMembership?: boolean },
 ): ProcessYearResult {
   // Pool-wide decisions (investment allocation, risk-control intensity) are
   // projected into every line's decision slice here — single source of truth
@@ -2532,7 +2567,8 @@ export function processYear(
       instance,
       yearNumber,
       calendarYear,
-      applicationRateOverride: derivation?.applicationRate,
+      applicationRateOverride: overrides?.applicationRate,
+      freezeMembership: overrides?.freezeMembership === true,
       allMarketMembers: currentAllMarketMembers,
       membershipHistory,
       // Ends at yearNumber - 1 — see the field's note on LineYearContext.

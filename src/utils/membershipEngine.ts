@@ -56,6 +56,13 @@ export interface MemberMovementInputs {
    * createSaveScheduler.
    */
   applicationRateOverride?: number;
+  /**
+   * ⚠ THE PRE-GAME DOES NOT MOVE MEMBERSHIP. True for every pre-game year,
+   * false for every played year. See LineYearContext.freezeMembership for why
+   * it is a flag and not a decision setting, and the two sites below for what
+   * it gates.
+   */
+  freezeMembership?: boolean;
   memberSensitivity: number;
   yearNumber: number;
   calendarYear: number;
@@ -388,7 +395,8 @@ export function simulateMemberMovement(inputs: MemberMovementInputs): MemberMove
   // BEEN THE TIDIER-LOOKING PLACE AND WOULD HAVE BEEN WRONG. That function owns
   // the per-member draw; an early return in it would delete N draws a year
   // instead of one and re-phase everything after.
-  const withdrawalCount = VOLUNTARY_DEPARTURES_ENABLED ? cappedWithdrawalCount : 0;
+  const withdrawalCount = (VOLUNTARY_DEPARTURES_ENABLED && !inputs.freezeMembership)
+    ? cappedWithdrawalCount : 0;
 
   const withdrawnMembers: Member[] = membersSortedByLeaveRisk
     .slice(0, withdrawalCount)
@@ -531,7 +539,20 @@ export function simulateMemberMovement(inputs: MemberMovementInputs): MemberMove
     inputs.decisions.newBusinessAppetite ?? null,
   );
 
-  const newMembers: Member[] = candidatePool.slice(0, Math.min(intakeRoom, candidatePool.length)).map(m => ({
+  // ⚠ BUILT IN FULL AND THEN DISCARDED WHEN THE ROSTER IS FROZEN, BECAUSE THE
+  // SATISFACTION DRAW IS INSIDE THIS MAP — one per member WRITTEN. Returning []
+  // before it would delete those draws; taking them and dropping the result
+  // keeps the site live. See the withdrawal slice above for the same pattern.
+  //
+  // ⚠ AND THIS DOES NOT MAKE THE PRE-GAME STREAM IDENTICAL, WHICH IS WORTH
+  // SAYING PLAINLY BECAUSE THE COMMENT PATTERN ELSEWHERE IN THIS FILE PROMISES
+  // EXACTLY THAT. The draw COUNTS here are functions of the roster:
+  // availableMembers is the marketplace minus the enrolled, the shuffle runs
+  // over it, applicationCount is a share of it, and this map runs once per
+  // joiner. Freeze the roster and all four change. Keeping the sites live
+  // avoids a SECOND, gratuitous divergence; it cannot avoid the first, and the
+  // first is the change itself.
+  const wouldJoin: Member[] = candidatePool.slice(0, Math.min(intakeRoom, candidatePool.length)).map(m => ({
     ...m,
     status: 'active' as const,
     yearJoined: yearNumber,
@@ -549,6 +570,8 @@ export function simulateMemberMovement(inputs: MemberMovementInputs): MemberMove
     // it feeds.
     satisfaction: parseFloat(rng.range(OPENING_SATISFACTION.min, OPENING_SATISFACTION.max).toFixed(2)),
   }));
+
+  const newMembers: Member[] = inputs.freezeMembership ? [] : wouldJoin;
 
   const activeMembers: Member[] = [...retainedMembers, ...newMembers];
   const activeExposure = activeMembers.reduce((s, m) => s + getMemberExposure(m, line, yearNumber), 0);

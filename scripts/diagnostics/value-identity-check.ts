@@ -443,6 +443,35 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // basis. The mechanism's own correctness is held by cohort-ledger-check (three
 // identities, both arms), martingale-equivalence-check (term by term) and
 // terminal-severity-check (phi on its anchor), all green at this commit.
+// v42: THE PRE-GAME ROSTER IS FROZEN, AND THE PIN WAS RE-SOLVED ON ALL THREE
+// LINES BEHIND IT. The pre-game no longer moves membership: no joins, no
+// departures, no declines, so the year-1 book IS the starting enrolment
+// generateStartingPoolState drew — verified member for member, 8 games x 3
+// lines, every id identical.
+//
+// 0 added, 0 removed, 22,559 of 31,200 moved across 80 fields. activeMembers
+// 131 -> 71 in the first instance: v41's ten pre-game years of intake with no
+// outflow are gone.
+//
+// ⚠ THIS CAPTURE CARRIES TWO CHANGES AND THEY ARE NOT SEPARABLE, WHICH IS
+// STATED RATHER THAN GLOSSED. Freezing the roster moves the opening book, which
+// moves the reserve and the premium the opening surplus is measured against,
+// which puts STARTING_CAPITAL_TO_PREMIUM out of centre on all three lines —
+// opening-centring-check read -6.1 / -6.3 / +4.0 SE. The pin HAD to be
+// re-solved in the same commit or the gate could not pass, so no arm isolates
+// the freeze from the re-solve. The freeze is the cause and the re-solve is its
+// consequence; a reader wanting them apart would have to re-run with the old
+// pins, and the numbers to do that are in the constant's own record.
+//
+// ⚠ AND THIS COMMIT TURNS THREE OF v41's FIVE UNEXPECTED REDS GREEN, WHICH IS
+// THE REASON THE TWO SIT TOGETHER. v41's sweep read 58/68: save-size-check
+// (a doubled book doubles the save), market-conditions-check,
+// marketplace-generation-check, opening-centring-check and pin-vs-band-check.
+// The first three are fixed by the freeze alone; the last two needed the pin.
+//
+// THE LEAK CHECK: 0 added, 0 removed, every absolute identity bit-exact, no
+// suspected partial identity — on a change that moved 72% of the fields.
+//
 // v41: VOLUNTARY DEPARTURES SWITCHED OFF. VOLUNTARY_DEPARTURES_ENABLED = false,
 // so the only way out of the pool is a renewal decline. The count that was
 // suspended was book x (1 - retentionProb), and retentionProb is BASE_RETENTION
@@ -608,7 +637,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // capture is sufficient alone here: the hash guard cannot tell "different
 // members enrolled" from "the arithmetic broke", and this one says the
 // changed set is exactly the set a roster change explains.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v41.json');
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v42.json');
 
 function seedOf(id: string) {
   let h = 5381;

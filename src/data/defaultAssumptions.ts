@@ -1474,9 +1474,65 @@ export const STARTING_CAPITAL_TO_PREMIUM: Record<string, number> = {
   // The mechanism is the denominator. WC and GL are RESERVE-anchored, and both
   // membership commits changed which members are enrolled through the pre-game
   // and therefore the reserve the opening surplus is measured against.
-  WC: 0.2503,
-  GL: 0.1418,
-  Property: 0.6231,
+  //
+  // ==========================================================================
+  // ⚠ RE-SOLVED A FOURTH TIME, AND ALL THREE LINES MOVED — INCLUDING PROPERTY,
+  // WHICH HAS BEEN UNTOUCHED THROUGH EVERY PREVIOUS DRIFT.
+  //
+  //   WC  0.2503 -> 0.3254  (+30.0%)   GL  0.1418 -> 0.2027  (+43.0%)
+  //   Property  0.6231 -> 0.5452  (-12.5%)
+  //
+  // ⚠ AND THE DIRECTION REVERSED ON WC AND GL, WHICH IS THE TELL THAT THIS IS A
+  // DIFFERENT CAUSE FROM THE THIRD DRIFT RATHER THAN MORE OF IT. Every previous
+  // re-solve pushed the pin DOWN (0.3250 -> 0.2503 on WC) because the pre-game
+  // kept growing the book and the reserve with it. Freezing the pre-game roster
+  // removes that growth: the opening book is now the STARTING ENROLMENT, ~60
+  // members on WC against the ~120 the departure change had produced, so the
+  // reserve the surplus is measured against is far smaller and the pin has to
+  // rise to reach the same ratio.
+  //
+  // PROPERTY MOVES FOR THE OPPOSITE REASON AND THAT IS WHY IT MOVED AT ALL.
+  // Its band is on PREMIUM, not reserve. A smaller book is less premium, so the
+  // same pin over-delivers the ratio — it read +4.0 SE high — and the pin comes
+  // DOWN. Two lines up and one down, from one change, because the two anchors
+  // respond to book size in opposite directions. That is worth having written
+  // down: a future reader seeing three lines move in two directions will
+  // otherwise look for two causes.
+  //
+  // Solved by scripts/diagnostics/opening-pin-solve.ts as before — bisection,
+  // 600 seeds per evaluation, through the gate's own estimator on seeds the gate
+  // never sees. WC took three passes, Property two.
+  //
+  // ⚠ AND GL NEEDED THE POOLED SOLVE AGAIN — THE SAME TWO-SEED-BASE DISAGREEMENT
+  // RECORDED ABOVE FOR WC, WITH THE LINES SWAPPED. At the solver's own 600-seed
+  // answer of 0.1843 its base read 0.4925 (inside) while the gate's read 0.450,
+  // and opening-centring-check FAILED it at -2.2 SE. Re-solved at 1,200 seeds on
+  // each base independently:
+  //
+  //     gate base (OCC_)   GL -> 0.2119
+  //     solver base (PIN_) GL -> 0.1935
+  //
+  // The two bases sit about 0.018 apart in K, which is the same order as the
+  // disagreement WC showed last time. GL is therefore set on the POOLED 2,400
+  // instances at 0.2027 — which both runs evaluated directly, reading 0.4855 on
+  // the gate's base and 0.5216 on the solver's, pooled 0.5036 against a 0.5020
+  // midpoint. Neither sample was wrong; both were small.
+  //
+  // WC and Property are NOT pooled, because they did not need to be: at their
+  // single-base answers the gate reads -0.6 SE and +0.1 SE, comfortably inside
+  // its own tolerance. Pooling a line whose bases already agree buys nothing and
+  // costs an hour of solve.
+  //
+  // ⚠ AND THE FREEZE IS WHAT MAKES THIS THE LAST DRIFT FROM THIS CAUSE. The
+  // previous three were all membership moving the denominator through the
+  // pre-game. The pre-game no longer moves membership at all, so the opening is
+  // now independent of every decision default and of both membership flags.
+  // A future drift here means something else moved — the reserve model, the
+  // payout patterns, or the starting-enrolment draw itself — and should not be
+  // attributed to membership without measuring it.
+  WC: 0.3254,
+  GL: 0.2027,
+  Property: 0.5452,
 };
 
 // Pre-game acceptance band: the line's Year-1 opening surplus must land within

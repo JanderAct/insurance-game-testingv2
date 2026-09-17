@@ -357,6 +357,23 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // reports the same thing in both cases. value-identity v37 is what separates
 // them, and its note records the confinement check: every changed field is
 // downstream of the roster, nothing roster-independent moved, no NaN.
+// v42: ALL 24 MOVED, AND AGAIN THERE IS NO CONTROL — for the same reason as
+// v41 and one more. The pre-game roster is frozen (no joins, departures or
+// declines in the ten pre-game years), so the opening book every export is
+// built from is now the starting enrolment rather than ten years of accumulated
+// intake. That reaches every line in every configuration by construction.
+//
+// AND STARTING_CAPITAL_TO_PREMIUM was re-solved on ALL THREE LINES behind it —
+// WC 0.2503 -> 0.3254, GL 0.1418 -> 0.2027, Property 0.6231 -> 0.5452 — which
+// on its own moves every opening position. Property has never moved in a
+// previous pin re-solve and it moves here, so it cannot serve as the control it
+// served as at v40.
+//
+// ⚠ THE TWO CANNOT BE SEPARATED IN THIS CAPTURE AND THAT IS NOT AN OVERSIGHT.
+// Freezing the roster is what put the pin out of centre (-6.1 / -6.3 / +4.0 SE
+// on opening-centring-check), so shipping the freeze without the re-solve would
+// ship a red gate. See value-identity-check's matching v42 note.
+//
 // v41: ALL 24 MOVED, AND THERE IS NO CONTROL THIS TIME. Voluntary departures
 // were switched off (VOLUNTARY_DEPARTURES_ENABLED = false), so the only way out
 // of the pool is a renewal decline.
@@ -416,7 +433,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 //
 // So this capture carries its own negative control: a table change that reaches
 // two lines and provably does not reach the third.
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v41.json');
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v42.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

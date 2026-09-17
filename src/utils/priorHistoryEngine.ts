@@ -263,7 +263,22 @@ export function simulateLineCandidate(
         },
       };
     }
-    const processed = processYear(gs, defaultDecisionSet(y));
+    // ⚠ THE PRE-GAME DOES NOT MOVE MEMBERSHIP. The roster that enters year 1 is
+    // the STARTING ENROLMENT generateStartingPoolState drew, unchanged.
+    //
+    // Building a loss history and a reserve position is what these years are
+    // for; evolving the ROSTER across them was a side effect of reusing
+    // processYear, and it made the opening book a function of the decision
+    // defaults — measured, switching voluntary departures off moved it from ~72
+    // to ~120 without anyone changing the opening. Freezing it makes the opening
+    // independent of what those defaults happen to be, which is the property
+    // worth having.
+    //
+    // ⚠ EVERYTHING ELSE THESE YEARS DO STAYS. Claims are still generated for all
+    // 200 marketplace members every year — the member loss ledger depends on it
+    // and the appetite bar reads it — and the loss history, the reserve build,
+    // the maturation years and the surplus re-pin above are untouched.
+    const processed = processYear(gs, defaultDecisionSet(y), { freezeMembership: true });
     gs = {
       ...gs,
       currentYearNumber: y + 1,
