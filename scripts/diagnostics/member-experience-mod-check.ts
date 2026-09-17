@@ -89,6 +89,11 @@ import {
   CREDIBILITY_Z, EXPERIENCE_MOD, memberExperienceMods, modBounds, primaryShare,
 } from '../../src/utils/memberExperienceMod';
 import { DEPARTURE } from '../../src/utils/memberDeparture';
+// Section 8 asserts the two controls' shipped levels sit where the raw and
+// clamped readings cannot disagree. Read from the shipped constants so the
+// assertion cannot drift from what either control offers.
+import { RENEWAL_THRESHOLDS } from '../../src/utils/renewalUnderwriting';
+import { NEW_BUSINESS_TIERS } from '../../src/utils/newBusinessAppetite';
 import { ratingGroupOf } from '../../src/utils/wcClaimEngine';
 import { EXPERIENCE_SPLIT_POINT } from '../../src/utils/memberLossHistory';
 import type {
@@ -610,6 +615,89 @@ console.log('\n--- 7. EVERY EXPERIENCE MECHANIC IS LIVE IN YEAR 1 ---');
   if (!(spread > 0.05)) {
     failures.push(`the WC year-1 mod spans only ${spread.toFixed(4)}. It must not be a point mass at 1.000 `
       + `on turn one — that is the shape the whole mechanic has when the ledger is empty.`);
+  }
+}
+
+// --- 8. ONE BASIS ACROSS BOTH CONTROLS ----------------------------------------
+console.log('\n--- 8. RAW AND CLAMPED DECIDE IDENTICALLY AT EVERY SHIPPED THRESHOLD ---');
+// ============================================================================
+// ⚠ THIS IS WHAT MAKES "ONE BASIS" SAFE, AND IT IS A PROPERTY OF THE LEVELS
+// RATHER THAN OF THE CONTROLS.
+//
+// Renewal Underwriting and New Business Appetite both compare the RAW ratio
+// now; renewal compared the CLAMPED one until the basis was unified. That
+// change was safe because the clamp is MONOTONE: for any threshold strictly
+// inside (ratioFloor, ratioCeiling), `clamped > t` and `raw > t` are the same
+// statement about the same member. Measured at the time, over 7,330 WC and
+// 7,075 GL rated member-years, the two readings disagreed on ZERO decisions at
+// 0.75, 1.00, 1.50, 2.00, 2.50 and 2.75.
+//
+// ⚠ THAT PROPERTY DIES THE MOMENT A LEVEL IS PLACED OUTSIDE THE CLAMP BAND,
+// AND IT DIES SILENTLY. A threshold at or above 3.0 declines nobody on the
+// clamped reading and a real number of members on the raw one; below 0.5 the
+// accept direction inverts the same way. Nothing in either control announces
+// that, which is why it is asserted here rather than left in a header — the
+// headers in both control files already said it and a header is not a test.
+//
+// So this fails if someone adds a tier outside the band, and it tells them the
+// consequence rather than the rule.
+// ============================================================================
+{
+  const shipped = [...new Set<number>([...RENEWAL_THRESHOLDS, ...NEW_BUSINESS_TIERS])].sort((a, b) => a - b);
+  const { ratioFloor, ratioCeiling } = EXPERIENCE_MOD;
+  const outside = shipped.filter(t => !(t > ratioFloor && t < ratioCeiling));
+
+  // Every rated member-year the file has already played, both readings taken
+  // from one call so this cannot be comparing two populations.
+  const obs: Array<{ raw: number; clamped: number }> = [];
+  for (const game of base) {
+    for (const [key, s] of game) {
+      const line = key.split('|')[0] as CoverageLine;
+      const y = Number(key.split('|')[1]);
+      for (const d of memberExperienceMods(s.members, line, s.historyBefore, y)) {
+        if (!d.rated || d.rawRatio === null) continue;
+        obs.push({ raw: d.rawRatio, clamped: d.clampedRatio });
+      }
+    }
+  }
+
+  let worst = 0;
+  console.log(`  ${obs.length} rated member-years; clamp band (${ratioFloor}, ${ratioCeiling})`);
+  console.log('    threshold   in band   decline disagreements   accept disagreements');
+  for (const t of shipped) {
+    const dec = obs.filter(o => (o.raw > t) !== (o.clamped > t)).length;
+    const acc = obs.filter(o => (o.raw < t) !== (o.clamped < t)).length;
+    worst = Math.max(worst, dec, acc);
+    console.log(`    ${t.toFixed(2).padStart(9)}${(t > ratioFloor && t < ratioCeiling ? 'yes' : 'NO').padStart(10)}`
+      + `${String(dec).padStart(24)}${String(acc).padStart(23)}`);
+  }
+  console.log(`  worst disagreement at any shipped level: ${worst}  (must be 0)   ${worst === 0 ? 'PASS' : 'FAIL'}`);
+
+  // ⚠ THE POSITIVE CONTROL, AND WITHOUT IT THE ROW ABOVE IS UNFALSIFIABLE. If
+  // the two readings never disagreed anywhere, a table of zeros would mean the
+  // clamp does nothing rather than that the levels are well placed. The ceiling
+  // is where it must disagree, because that is the boundary the shipped levels
+  // are inside of.
+  const ctrl = obs.filter(o => (o.raw > ratioCeiling) !== (o.clamped > ratioCeiling)).length;
+  console.log(`  positive control — disagreements AT the ceiling ${ratioCeiling.toFixed(2)}: ${ctrl}  `
+    + `(must be > 0)   ${ctrl > 0 ? 'PASS' : 'FAIL'}`);
+
+  if (outside.length > 0) {
+    failures.push(`${outside.map(t => t.toFixed(2)).join(', ')} sits outside the clamp band `
+      + `(${ratioFloor}, ${ratioCeiling}). Both controls compare the RAW ratio, so that level still works — `
+      + 'but it no longer means the same thing as the clamped reading the modifier is built on, and a '
+      + 'reader reconciling a decline against a bill will find two different numbers. Place levels inside '
+      + 'the band, or rule explicitly that the two quantities have parted company.');
+  }
+  if (worst > 0) {
+    failures.push(`raw and clamped decide differently on ${worst} member-years at a SHIPPED threshold. The `
+      + 'basis unification assumed they could not: the clamp is monotone, so inside the band the two '
+      + 'readings are one statement. If this fires, either a level moved outside the band or the clamp is '
+      + 'no longer monotone — check EXPERIENCE_MOD and clampedRatioFor before touching either control.');
+  }
+  if (ctrl === 0) {
+    failures.push('raw and clamped did not disagree even at the ceiling, so the zero-disagreement result '
+      + 'above is measuring an inert clamp rather than well-placed thresholds and proves nothing.');
   }
 }
 

@@ -28,10 +28,20 @@
 // ⚠ AND THE BASIS IS NOT THE SAME AS A MEMBER'S. Prospects generate at
 // kLine/kGl = 1 with riskControlEffectiveness = 0, because k is the ENROLLED
 // book's risk-quality-mix correction and risk control is a service members buy.
-// So an applicant's ratio carries neither, and a member's carries both. The two
-// numbers are close — measured medians 0.918 (prospects) against 0.958
-// (members) on WC — but they are not the same measurement and the column says
-// so rather than papering over it.
+// So an applicant's ratio carries neither, and a member's carries both.
+//
+// ⚠ THE MEDIANS THIS BLOCK USED TO QUOTE — 0.918 (prospects) against 0.958
+// (members) on WC — ARE A CROSS-SECTION AND THEY POINT THE WRONG WAY. They
+// compare two different sets of people in the same year, so they measure who
+// those people are and not what the basis does. Paired WITHIN member — the same
+// member's window drawn entirely before they joined against one drawn entirely
+// after — the sign reverses: a member reads 0.1388 LOWER on WC (t -4.65) and
+// 0.1540 lower on GL (t -4.44), about 0.92x, and a placebo running the same
+// estimator on never-enrolled members reads null. The cross-section is a true
+// statement about composition and it is not the basis gap. renewalUnderwriting
+// .ts's header carries the full measurement and what it means for the two
+// ladders, which is that a renewal bar of 2.50 is roughly a 2.72 bar on the
+// applicant scale and the factor moves with the book.
 //
 // ============================================================================
 // RANDOM AMONG ELIGIBLE, NOT BEST-FIRST, AND THAT IS THE LOAD-BEARING CHOICE.
@@ -60,16 +70,21 @@ import type { CoverageLine, Member, MemberLossHistory } from '../types/simulatio
 /**
  * The thresholds, on the applicant's RAW experience ratio.
  *
- * ⚠ RAW, NOT CLAMPED, AND THAT IS THE OPPOSITE OF RENEWAL'S CHOICE. Renewal
- * thresholds on the clamped ratio because a threshold wants stability and
- * because the member is already in the book — the clamp keeps a single
- * catastrophic year from making a renewal decision for you. An applicant is not
- * in the book, there is nothing to stabilise, and the clamp would make every
- * applicant above 3.0 identical at exactly the moment the pool is deciding
- * whether to take them at all. All three shipped tiers sit below the clamp
- * floor-to-ceiling range anyway, so on these values the two bases agree; the
- * distinction bites only if a tier above 3.0 is ever added, and it should not
- * be, because that tier would admit everyone.
+ * ⚠ RAW, AND RENEWAL NOW AGREES — IT USED TO BE THE OPPOSITE OF RENEWAL'S
+ * CHOICE. This block used to argue that a renewal threshold wants the clamp's
+ * stability while an applicant has nothing to stabilise. Measured, that
+ * argument decided nothing: the clamp is monotone, so for any threshold
+ * strictly inside [0.5, 3.0] the two readings are the same statement about the
+ * same member, and across 7,330 (WC) and 7,075 (GL) rated member-years they
+ * disagreed on exactly ZERO decisions at 0.75, 1.00, 1.50, 2.00, 2.50 and
+ * 2.75. The clause below — "on these values the two bases agree" — was the
+ * right instinct and was left as an aside; it is the whole finding. Renewal
+ * moved to raw, and renewalUnderwriting.ts's own header carries the table.
+ *
+ * What raw buys, which is why it is the survivor: it is the number the
+ * Membership page shows, and it has no dead zone. Every value at or above 3.0
+ * accepted everyone under a clamped reading, which is the mirror of the
+ * ceiling hazard renewal used to carry.
  *
  * ⚠ PLACED AGAINST THE MEASURED APPLICANT DISTRIBUTION, not the member one.
  * From new-business-appetite-derive, 8 games x 14 years, share of rated

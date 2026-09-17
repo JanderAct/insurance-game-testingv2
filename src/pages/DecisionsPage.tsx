@@ -16,7 +16,9 @@ import { hasStaticClf, staticClf } from '../data/clfTables';
 import type { FundingConsequence } from '../utils/fundingConsequence';
 import { RENEWAL_THRESHOLDS, renewalDeclines } from '../utils/renewalUnderwriting';
 import { EXPERIENCE_MOD } from '../utils/memberExperienceMod';
-import { NEW_BUSINESS_APPETITE_TIERS, NO_NEW_BUSINESS, appetiteEligible } from '../utils/newBusinessAppetite';
+import {
+  NEW_BUSINESS_APPETITE_TIERS, NEW_BUSINESS_TIERS, NO_NEW_BUSINESS, appetiteEligible,
+} from '../utils/newBusinessAppetite';
 import { APPLICATION_RATE, MAX_NEW_MEMBER_SHARE } from '../data/defaultAssumptions';
 import { canReenroll } from '../utils/membershipHistory';
 
@@ -630,29 +632,33 @@ function PropertyNoSignalNote() {
 // ⚠ AND THE COUNT IS ONE YEAR'S, WHILE THE EFFECT COMPOUNDS. A declined
 // member enters the two-year cooldown and cannot be recruited back, so a
 // level held for several years shrinks the book by much more than its annual
-// count suggests. Measured over 12 years at the 1.10 level, WC settles around
-// 35 enrolled against 57 with renewal off. The note below says so, because
-// the control cannot show it.
+// count suggests. Measured over 14 years with the level APPLIED, mean enrolled
+// against renewal off: 2.50 takes WC from 90.6 to 81.4 and 2.00 takes it to
+// 67.5. The note below says so, because the control cannot show it.
 //
 // ⚠ IT IS THIS YEAR'S ACTUAL COUNT AND IT SWINGS, WHICH READS AS A BUG AND IS
 // NOT ONE. renewalDeclines is handed the CURRENT book, the CURRENT ledger and
 // the CURRENT yearNumber and returns the actual list — no average, no forecast,
 // the same call the engine makes when the year is processed. So the tile reading
 // 7 one year and 0 the next is two true statements about two different years,
-// not an unstable estimate of one quantity. A decline needs a member whose
-// CLAMPED ratio exceeds 2.50, and the clamp ceiling is 3.00, so the qualifying
-// band is narrow and how many members sit in it is a property of the loss draw.
+// not an unstable estimate of one quantity. A decline needs a member running
+// more than the bar times their own expected cost, and few members do, so how
+// many sit above it in a given year is a property of the loss draw.
 //
-// MEASURED, 10 games x 12 years at the shipped threshold — this is the tile's own
-// distribution, taken from the same call it renders:
+// MEASURED, 8 games x 14 years on a Renew All history — this is the tile's own
+// distribution, taken from the same call it renders, per line-year:
 //
-//   line       mean   min   max   reads 0   reads 5+
-//   WC         2.56     0     8     5.8%      5.0%
-//   GL         3.15     0    10     5.0%     25.8%
-//   Property   0.00     0     0    100.0%      0.0%
+//   bar     line       mean   max   reads 0
+//   2.50    WC         2.95     7     8.8%
+//   2.50    GL         3.46     8     3.8%
+//   2.00    WC         7.05    12     0.0%
+//   2.00    GL         7.21    17     1.3%
+//   any     Property   0.00     0    100.0%
 //
-// So BOTH SCREENSHOTS ARE ORDINARY. A reading of 0 happens in about one line-year
-// in eighteen and a reading of 7 in about one in forty; the mode is 3.
+// So BOTH SCREENSHOTS ARE ORDINARY at the mild bar: a 0 turns up in about one
+// line-year in fifteen and a 7 is the top of the range. THE STRICT BAR BARELY
+// READS 0 AT ALL, which is the clearest thing the second tile adds — it is not
+// a finer setting of the same control, it is a different decision.
 //
 // ⚠ AND PROPERTY IS ALWAYS EXACTLY 0, which is not a swing at all — it has no
 // rated members, so nothing can clear a threshold. It never shows this tile
@@ -679,8 +685,18 @@ function RenewalUnderwriting({
 }) {
   // The count comes from the SAME function the engine calls, so the number
   // shown is the number the player gets rather than a second estimate of it.
-  const declines = React.useMemo(
-    () => RENEWAL_THRESHOLDS.map(t => renewalDeclines(members, line, history, yearNumber, t)),
+  // ⚠ DISPLAY ORDER, MOST LENIENT TO MOST STRICT, REVERSED AT THE RENDER SITE.
+  // RENEWAL_THRESHOLDS is ascending because that is right for a threshold list
+  // and because renewal-stability-check reads Math.min off it; a row of tiles
+  // wants the opposite. Reversed HERE rather than in the constant, and paired
+  // with its count in one object so a count can never be shown against the
+  // wrong bar — the transposition NEW_BUSINESS_APPETITE_TIERS was restructured
+  // to make impossible.
+  const tiles = React.useMemo(
+    () => [...RENEWAL_THRESHOLDS].reverse().map(t => ({
+      threshold: t,
+      declines: renewalDeclines(members, line, history, yearNumber, t).length,
+    })),
     [members, line, history, yearNumber],
   );
   const rated = line !== 'Property';
@@ -690,19 +706,21 @@ function RenewalUnderwriting({
       <span className="text-sm font-semibold text-gray-700">Renewal Underwriting</span>
       {rated ? (
         <>
-          {/* TWO BOXES. See RENEWAL_THRESHOLDS for why one level and not three:
-              the middle settings were not decisions, they were book-reshaping
-              policies wearing a decision's clothes. */}
-          <div className="grid grid-cols-2 gap-1.5">
+          {/* THREE BOXES, OPEN TO CLOSED — the same direction New Business
+              Appetite below reads. See RENEWAL_THRESHOLDS for why two levels
+              and not one: 2.50 and 2.00 are a renewal decision and a roster
+              decision, and the book effect tells them apart by two and a half
+              times. */}
+          <div className="grid grid-cols-3 gap-1.5">
             <div onClick={() => !disabled && onChange(null)}>
               <PreviewBox title="Renew All" description="Renew every member" selected={value === null} active={!disabled} />
             </div>
-            {RENEWAL_THRESHOLDS.map((t, i) => (
-              <div key={t} onClick={() => !disabled && onChange(t)}>
+            {tiles.map(({ threshold, declines }) => (
+              <div key={threshold} onClick={() => !disabled && onChange(threshold)}>
                 <PreviewBox
-                  title={`Decline above ${t.toFixed(2)}x`}
-                  description={`${declines[i].length} member${declines[i].length === 1 ? '' : 's'} this year`}
-                  selected={value === t}
+                  title={`Decline above ${threshold.toFixed(2)}x`}
+                  description={`${declines} member${declines === 1 ? '' : 's'} this year`}
+                  selected={value === threshold}
                   active={!disabled}
                 />
               </div>
@@ -711,10 +729,17 @@ function RenewalUnderwriting({
           <p className="flex items-start gap-1 text-[11px] text-gray-500 leading-relaxed">
             <Info size={12} className="mt-0.5 flex-shrink-0" />
             <span>
-              Declines members whose losses have run more than {RENEWAL_THRESHOLDS[0].toFixed(2)}x their
-              own expected cost over the last {EXPERIENCE_MOD.windowYears} years — the Loss Ratio column on
-              Membership. A declined member cannot rejoin for two years, so holding the level costs more
-              than its yearly count.
+              Declines members whose losses have run more than the bar times their own expected cost over
+              the last {EXPERIENCE_MOD.windowYears} years — the Loss Ratio column on Membership. A declined
+              member cannot rejoin for two years, so holding a level costs more than its yearly count.
+            </span>
+          </p>
+          <p className="flex items-start gap-1 text-[11px] text-gray-400 leading-relaxed">
+            <Info size={12} className="mt-0.5 flex-shrink-0" />
+            <span>
+              Renewal judges existing members more leniently than appetite judges applicants —{' '}
+              {Math.max(...RENEWAL_THRESHOLDS).toFixed(2)}x against{' '}
+              {Math.max(...NEW_BUSINESS_TIERS).toFixed(2)}x.
             </span>
           </p>
         </>

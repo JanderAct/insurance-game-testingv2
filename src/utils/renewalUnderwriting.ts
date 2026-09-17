@@ -27,6 +27,94 @@
 // HIGH-mod ones. Both read the same number off the same ledger.
 //
 // ============================================================================
+// THE BASIS: RAW, AND IT IS NOW THE SAME ONE NEW BUSINESS APPETITE USES.
+//
+// The two controls read one ledger and used to read it two ways — this file
+// compared `clampedRatio` (Mahler's rule 3, [0.5, 3.0]) and
+// newBusinessAppetite.ts compared `rawRatio`. Measured before choosing, 8 games
+// x 14 years, warm years only, every rated member-year, BOTH readings taken
+// from the same call on the same member:
+//
+//   the two readings differ as NUMBERS on 20.4% of WC member-years and 23.4%
+//   of GL's — 19.0% / 21.4% below the floor, 1.4% / 2.0% above the ceiling.
+//
+//   they differ as DECISIONS, at every level either control offers, on ZERO.
+//
+//     threshold   0.75  1.00  1.50  2.00  2.50  2.75  |  3.00
+//     disagree       0     0     0     0     0     0  |   101 (WC), 142 (GL)
+//
+// ⚠ SO THE BASIS WAS NEVER THE DIFFERENCE IT LOOKED LIKE. The clamp is
+// monotone, so for any threshold strictly inside (0.5, 3.0) `clamped > t` and
+// `raw > t` are the same statement about the same member — not usually, not to
+// a tolerance, identically. The choice therefore costs nothing at any shipped
+// level and is decided entirely on what happens at the edges.
+//
+// RAW WINS ON TWO COUNTS, ONE OF WHICH IS THE PLAYER'S:
+//
+//   IT IS THE NUMBER ON THE SCREEN. The Membership page's Loss Ratio column is
+//   the raw ratio and the control's own note points at it. A threshold
+//   comparing something else needed a paragraph explaining that it did; it no
+//   longer does.
+//
+//   THE CEILING DEAD ZONE GOES. On the clamped basis every value at or above
+//   3.00 declined nobody on any book, ever — measured, 80 of 80 line-years at
+//   exactly 0 — while raw declines 1.26 (WC) and 1.77 (GL) per line-year there.
+//   A control that is silently inert at a settable value is a hazard; this file
+//   carried a warning about it instead of not having it.
+//
+// ⚠ WHAT THE CLAMPED BASIS LOSES, NAMED RATHER THAN WAVED AT. Two things, and
+// the first is real:
+//
+//   THE UNREACHABLE BOUND STOPS BEING STRUCTURAL. `clampedRatio` could not
+//   exceed 3.0 by construction, so "a threshold that declines nobody" had a
+//   proof. Ap/Ep is unbounded above, so the same statement is now an EMPIRICAL
+//   bound — the observed maximum is 6.96 (WC) and 5.40 (GL). renewal-stability
+//   -check's null arm is re-derived on that basis and says so at the constant.
+//
+//   MAHLER'S RULE 3 NO LONGER APPLIES TO THE COMPARISON. It still governs the
+//   MODIFIER, which is where it belongs — a rebased billing weight is exactly
+//   the quantity stability protects. What is given up here is the guarantee,
+//   not a behaviour: measured, the clamp changes no decision at any level.
+//
+// ============================================================================
+// ⚠ AND THE GAP THAT SURVIVES IS NOT THIS ONE. It is bigger, and choosing a
+// reading cannot close it.
+//
+// An applicant's claims are drawn at kLine = 1 with riskControlEffectiveness =
+// 0; an enrolled member's carry the book's own k and whatever risk control the
+// pool has bought. Both legs of the ratio see k, so the MODIFIER is k-invariant
+// — every member of a line-year shares one k and the rebase divisor absorbs it.
+// A THRESHOLD IS NOT REBASED, so k does not cancel there.
+//
+// Measured on the same member observed both ways — a window drawn entirely
+// before they joined against one drawn entirely after, paired within member:
+//
+//   line   paired mean diff (member - prospect)   aggregate ratio   placebo
+//   WC        -0.1388   (t -4.65)                    0.916          +0.042 (t 1.59)
+//   GL        -0.1540   (t -4.44)                    0.929          -0.023 (t -0.72)
+//
+// The placebo runs the identical estimator on members who were NEVER enrolled,
+// early windows against late, so it carries the time gap and not the basis
+// change. It reads null on both lines, so the -0.14 is the basis.
+//
+// ⚠ THE SAME MEMBER READS ABOUT 0.92x ENROLLED WHAT THEY READ AS AN APPLICANT.
+// So a renewal bar of 2.50 is roughly a 2.72 bar on the applicant scale, and
+// the factor MOVES with the book because k does. Nothing here is wrong — an
+// applicant's loss run is their own and must not carry the pool's mix
+// correction — but the two ladders are not on one scale and cannot be made so
+// by picking a reading. Closing it means dividing the member's ratio by k_line,
+// which changes every renewal decision, and that is a design ruling rather than
+// a basis choice.
+//
+// ⚠ AND THE CROSS-SECTIONAL FIGURE GETS THE SIGN WRONG. Comparing enrolled
+// members against available applicants in the same year reads members HIGHER —
+// 0.981 against 0.912 on WC — which is the composition of the two groups, not
+// the basis, and it points the opposite way to the paired estimate above.
+// newBusinessAppetite.ts records that cross-section (0.918 against 0.958); it
+// is a true statement about who those people are and it is not a measurement of
+// the basis gap. Marked at that constant.
+//
+// ============================================================================
 // WHERE IT SITS, AND WHY BESIDE simulateMemberMovement RATHER THAN INSIDE IT.
 //
 // Movement decides how many members LEAVE (calcRetentionProbability) and
@@ -90,86 +178,96 @@ import type {
 } from '../types/simulation';
 
 /**
- * The threshold, on the CLAMPED experience ratio. ONE LEVEL, plus Renew All.
+ * The thresholds, on the RAW experience ratio. TWO LEVELS, plus Renew All.
  *
- * ⚠ ONE LEVEL RATHER THAN THREE, AND THE REASON IS THAT THE OTHER TWO WERE
- * NOT DECISIONS. Renewal underwriting is a single question — decline the
- * members who cost far more than they were expected to, or do not — and three
- * levels invited the player to tune a dial whose middle settings reshape the
- * book rather than manage it. Two boxes state the question.
+ * ASCENDING, and the UI renders them REVERSED — Renew All, 2.50, 2.00, which
+ * is most lenient to most strict and is the direction New Business Appetite
+ * reads. Ascending is right for a threshold list and wrong for a row of tiles;
+ * the same split NEW_BUSINESS_TIERS makes, for the same reason.
  *
- * ⚠ PICKED OFF THE MEASURED DISTRIBUTION, NOT CHOSEN FOR ITS ROUNDNESS. From
- * renewal-threshold-derive.ts, 6 games x 14 years, warm years only, per
- * line-year on a mean book of 58:
+ * ⚠ TWO LEVELS RATHER THAN ONE, AND THE SECOND IS A DIFFERENT DECISION RATHER
+ * THAN A FINER DIAL. This block used to argue for a single level on the
+ * grounds that "renewal underwriting is a single question" and middle settings
+ * reshape the book rather than manage it. The measurement below is what
+ * overturns it: 2.50 and 2.00 are not two points on one dial, they are a
+ * renewal decision and a roster decision, and the book effect tells them apart
+ * by a factor of two and a half. Offering only the mild one hid the strict one
+ * rather than protecting the player from it.
  *
- *   threshold   WC declines/yr   GL declines/yr   line-years where it fires
- *      2.00        4.47              4.75              60/60, 59/60
- *      2.25        2.58              2.85              53/60, 56/60
- *      2.50        1.77              1.92              47/60, 48/60
- *      2.75        1.10              1.40              42/60, 43/60
- *      3.00        0.00              0.00               0/60  (see below)
+ * ⚠ PICKED OFF THE MEASURED DISTRIBUTION, NOT CHOSEN FOR ROUNDNESS, AND THE
+ * TABLE THIS REPLACES WAS BADLY STALE. Every absolute figure in the previous
+ * version came off a mean book of 58; the live engine runs a mean book of 92
+ * (WC) and 88 (GL) since the intake rebuild, so every count roughly doubled
+ * while the shape survived. That is the second table in this control pair to
+ * go stale the same way — see newBusinessAppetite.ts, which records the same
+ * failure twice — so the BOOK SIZE is now stated beside the counts rather than
+ * left implicit, because it is the term that moved.
  *
- * 2.50 is the level that declines a couple of members in a typical year — a
- * renewal decision. 2.00 runs at one member in twelve of the rated book, which
- * with the two-year cooldown becomes a policy that reshapes the roster. 2.75
- * does nothing at all in three years out of ten, and a control that is inert a
- * third of the time reads as broken rather than as strict.
+ * MEASURED NOW, 8 games x 14 years, warm years only, default decisions, per
+ * line-year on a Renew All history (mean book: WC 91.6, GL 88.4):
  *
- * In plain terms the shipped level declines a member who has run more than
- * 2.5x their own expected primary loss over the window.
+ *   threshold   WC declines/yr   GL declines/yr   line-years reading 0   max
+ *      1.50        18.06            18.50            0% / 0%            28 / 34
+ *      2.00         7.05             7.21            0% / 1%            12 / 17
+ *      2.50         2.95             3.46            9% / 4%             7 /  8
+ *      2.75         1.91             2.45           16% / 10%            5 /  7
+ *      3.00         1.26             1.77             —                  —
+ *
+ * 2.50 declines about three members in a typical year — a renewal decision.
+ * 2.00 declines about seven, which with the two-year cooldown is a policy that
+ * reshapes the roster. Both are offered because both are things a player might
+ * actually mean. 1.50 is not: eighteen a year out of ninety is not underwriting.
  *
  * ⚠ THE COUNT PER YEAR IS NOT THE COST, AND THE BOOK EFFECT IS THE NUMBER TO
- * JUDGE THIS BY. A decline carries a two-year cooldown, so holding the level
+ * JUDGE THESE BY. A decline carries a two-year cooldown, so holding a level
  * costs more than its yearly count. Measured with the threshold APPLIED for a
- * whole game (renewal-stability-check, 6 games x 14 years, mean enrolled,
- * renewal off -> on):
+ * whole game (renewal-threshold-derive section 4, 6 games x 14 years, mean
+ * enrolled, renewal off -> on):
  *
- *   WC   53.9 -> 48.9   (-9.3%)     at 0.71-0.90 declines per year
- *   GL   60.3 -> 51.3   (-15.0%)    at 0.83-1.25 declines per year
+ *   level   WC book            GL book            declines/yr (WC / GL)
+ *   2.50    90.6 -> 81.4  (-10.2%)   93.2 -> 80.4  (-13.7%)    1.10 / 1.58
+ *   2.00    90.6 -> 67.5  (-25.5%)   93.2 -> 67.9  (-27.1%)    2.38 / 2.57
  *
- * For scale, the retired mod-scale 1.10 took WC from 55.5 to 35.3 — a 36% cut,
- * which is a different pool rather than a renewal decision. This is under a
- * third of that.
+ * So the strict level costs a QUARTER of the book and the mild one a tenth.
+ * That is the trade the two tiles exist to put in front of the player, and one
+ * tile could not show it.
  *
- * ⚠ AND GL RUNS HOTTER THAN WC FOR THE SAME THRESHOLD, WHICH IS NOT A RENEWAL
- * PROPERTY. GL loses 15% of its book against WC's 9% on a very similar decline
- * rate, so the difference is in how fast each line's recruitment refills rather
- * than in how many members each declines. Recorded here because a reader
- * comparing the two lines will otherwise look for the cause in this file, and
- * it is not in this file.
+ * ⚠ AND GL RUNS HOTTER THAN WC AT BOTH LEVELS, WHICH IS NOT A RENEWAL
+ * PROPERTY. GL loses more book on a very similar decline rate, so the
+ * difference is in how fast each line's recruitment refills rather than in how
+ * many members each declines. Recorded here because a reader comparing the two
+ * lines will otherwise look for the cause in this file, and it is not in this
+ * file.
  *
  * ⚠ THE DECLINE COUNT SHOWN ON THE SCREEN IS HIGHER THAN THE COUNT A HELD
  * LEVEL PRODUCES, AND BOTH ARE RIGHT. The screen counts against the CURRENT
- * book, which on a Renew All history is 1.77 (WC) and 1.92 (GL) per year. Once
- * the level has been held for a few years the worst members are gone and the
- * rate settles near 0.85. The screen is not over-promising; the book is
- * improving, which is the mechanism working.
- *
- * ⚠ AND EVERY VALUE AT OR ABOVE THE CEILING IS UNREACHABLE. The comparison is
- * strictly-greater against `clampedRatio`, which cannot exceed
- * EXPERIENCE_MOD.ratioCeiling (3.0). So a threshold of 3.00 or above declines
- * nobody on any book, ever — not "rarely", never. That is why the table above
- * stops where it does, and it is the reason the shipped level has to sit below
- * the ceiling rather than near it.
+ * book, which on a Renew All history is 2.95 (WC) and 3.46 (GL) per year at
+ * 2.50. Once the level has been held for a few years the worst members are
+ * gone and the rate settles near 1.10 / 1.58. The screen is not
+ * over-promising; the book is improving, which is the mechanism working.
  *
  * ⚠ NO PERCENTAGE IN THE LABEL. The share at a threshold moves with the book,
- * so a static "declines ~3%" would go stale the first time the roster
- * shifted. The UI renders the LIVE count instead, which cannot.
+ * so a static "declines ~3%" would go stale the first time the roster shifted
+ * — which is exactly what happened to the table above. The UI renders the LIVE
+ * count instead, which cannot.
  *
- * Kept as an array so a second level is a data change rather than a UI change,
+ * Kept as an array so a third level is a data change rather than a UI change,
  * and so the stability gate can keep reading the tightest shipped value.
  */
-export const RENEWAL_THRESHOLDS = [2.50] as const;
+export const RENEWAL_THRESHOLDS = [2.00, 2.50] as const;
 
-/** null = renew all. Otherwise the CLAMPED-RATIO threshold above which a
- *  member is declined. */
+/** null = renew all. Otherwise the RAW-RATIO threshold above which a member is
+ *  declined. */
 export type RenewalThreshold = number | null;
 
 export interface RenewalDecision {
   memberId: string;
-  /** What the member actually cost, Ap/Ep, UNCLAMPED. For display only. */
+  /** What the member actually cost, Ap/Ep, UNCLAMPED — and what the threshold
+   *  was compared against. See THE BASIS in the header. */
   rawRatio: number;
-  /** What the threshold was compared against. */
+  /** The same quantity under Mahler's rule 3. RECORDED, NOT RATED: it is what
+   *  the member's BILL is computed from, so a reader reconciling a decline
+   *  against a premium needs both. Nothing compares it. */
   clampedRatio: number;
 }
 
@@ -181,23 +279,21 @@ export interface RenewalDecision {
  * number they get rather than a second estimate of it.
  *
  * ⚠ UNRATED MEMBERS ARE NEVER DECLINED, AND THE GUARD IS `rated` RATHER THAN
- * THE RATIO. `clampedRatio` is 1 on an unrated member — a filler, not a
- * measurement — and 1 sits below every shipped threshold today, so comparing
- * it would give the right answer for the wrong reason and would start
- * declining unrated members the moment a threshold below 1.0 was offered. A
- * member with fewer than EXPERIENCE_MOD.minYears of history has no experience
- * to decline them on, and Property — whose credibility measured 0.000 — has no
+ * THE RATIO. This mattered more when the comparison was on `clampedRatio`,
+ * which is 1 on an unrated member — a filler, not a measurement, and one that
+ * sits below every shipped threshold, so comparing it gave the right answer
+ * for the wrong reason and would have started declining unrated members the
+ * moment a threshold below 1.0 was offered. On the raw ratio the filler is
+ * `null` and the guard is load-bearing rather than merely correct. A member
+ * with fewer than EXPERIENCE_MOD.minYears of history has no experience to
+ * decline them on, and Property — whose credibility measured 0.000 — has no
  * rated members at all, so no Property member can ever be declined.
  *
- * ⚠ IT COMPARES THE CLAMPED RATIO WHILE THE SCREEN SHOWS THE RAW ONE, AND THE
- * DIVERGENCE IS DELIBERATE. The raw figure is what the member cost and a
- * reader has to be able to tell 3.2 from 11.0. The clamp is Mahler's rule 3
- * and exists to keep the quantity stable, which is exactly what a threshold
- * needs. The consequence, which the screen states rather than hides: a member
- * showing 5.48 and one showing 3.2 both clamp to 3.00 and are declined or
- * renewed together. Those are measured extremes rather than illustrations: the
- * raw ratio's observed maximum is 5.48 on WC and 6.12 on GL, and 1.4% of WC
- * rated member-years sit on the ceiling.
+ * ⚠ IT COMPARES THE RAW RATIO — THE SAME NUMBER THE SCREEN SHOWS, AND THE SAME
+ * NUMBER NEW BUSINESS APPETITE COMPARES. It used to compare `clampedRatio`
+ * while New Business Appetite compared `rawRatio`, so one pool had two views of
+ * the same quantity. See THE BASIS in the header for the measurement that
+ * settled it, and for the larger gap that a reading cannot close.
  */
 export function renewalDeclines(
   members: readonly Member[],
@@ -211,7 +307,7 @@ export function renewalDeclines(
   const out: RenewalDecision[] = [];
   for (const m of mods) {
     if (!m.rated || m.rawRatio === null) continue;
-    if (m.clampedRatio > threshold) {
+    if (m.rawRatio > threshold) {
       out.push({ memberId: m.memberId, rawRatio: m.rawRatio, clampedRatio: m.clampedRatio });
     }
   }

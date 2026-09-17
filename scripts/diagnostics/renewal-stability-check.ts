@@ -24,23 +24,28 @@
 // year. Tighter than the loop being watched for, and through a different
 // term entirely.
 //
-// ⚠ AND THERE IS A DAMPER THE DESIGN DID NOT PUT THERE ON PURPOSE. The
-// threshold is on the DISPLAYED modifier, which is divided by the median of
-// the rated book — so the median is exactly 1.000 every year by
-// construction. Declining the upper tail re-centres the scale rather than
-// pushing everyone up it, and it also COMPRESSES the upper tail, which
-// leaves fewer members above a fixed threshold next year. That is negative
-// feedback. Whether it dominates the rebase effect is the measurement, and
-// this gate does not assume it does.
+// ⚠ AND THE DAMPER THIS BLOCK USED TO DESCRIBE IS GONE, WHICH MAKES THE
+// MEASUREMENT MATTER MORE RATHER THAN LESS. It argued that the threshold sat
+// on the DISPLAYED modifier, which is divided by the median of the rated book
+// and is therefore re-centred to 1.000 every year — so declining the upper
+// tail moved the scale instead of pushing everyone up it. The threshold is not
+// on the displayed modifier any more; it is on the member's own RAW ratio,
+// which has no rebase and no re-centring in it at all.
+//
+// So the negative feedback that argument relied on does not apply, and neither
+// does the rebase loop above: BOTH ran through M, and the raw ratio does not
+// see M. What is left is whatever the loss draw and the two-year cooldown do
+// between them, which is exactly what this gate measures rather than assumes.
 //
 // ============================================================================
 // FOUR CONTROLS, AND THE FOURTH IS THE ONE THE PREVIOUS TWO LOOP GATES
 // LACKED.
 //
-//   NULL A — a threshold ABOVE the reachable ceiling declines nobody, and
-//     must be bit-identical to renewal switched off. Catches the mechanism
-//     being wired into something it should not touch, which would show up
-//     even when it declines no one.
+//   NULL A — a threshold above ANY ATTAINABLE RATIO declines nobody, and must
+//     be bit-identical to renewal switched off. Catches the mechanism being
+//     wired into something it should not touch, which would show up even when
+//     it declines no one. ⚠ That bound is EMPIRICAL since the threshold moved
+//     to the raw ratio; it was structural on the clamped one. See the arm.
 //
 //   NULL B — the arm paired with ITSELF. The difference is identically zero,
 //     so the trend test cannot fire. A test that fires here is measuring its
@@ -72,10 +77,11 @@ const YEARS = Number(process.env.YEARS ?? 14);
 /** Years the ledger needs before anyone can be rated at all. */
 const WARMUP = EXPERIENCE_MOD.minYears + 2;
 /** The tightest shipped level, and the one the ratchet would appear at first.
- *  ⚠ ON THE CLAMPED-RATIO SCALE NOW, not the displayed modifier — the threshold
- *  moved when the screen started showing what an underwriter judges rather than
- *  what a member is billed. Read from the shipped constant so this gate cannot
- *  drift from the UI. */
+ *  ⚠ ON THE RAW-RATIO SCALE NOW — the clamped one before it, and the displayed
+ *  modifier before that. The threshold moved to raw so that one pool has one
+ *  view of the quantity; see THE BASIS in renewalUnderwriting.ts. Read from the
+ *  shipped constant so this gate cannot drift from the UI, which is what makes
+ *  a second shipped level a data change here rather than an edit. */
 const TIGHTEST = Math.min(...RENEWAL_THRESHOLDS);
 /** The positive control, RE-DERIVED ON THE RATIO SCALE. 1.00 means "declines
  *  every member who cost more than their own expectation", which
@@ -129,8 +135,9 @@ function play(g: number, threshold: number | null): Record<string, YearRow[]> {
 console.log(RULE);
 console.log('RENEWAL UNDERWRITING STABILITY');
 console.log(RULE);
-console.log(`${GAMES} games x ${YEARS} years. Shipped level ${RENEWAL_THRESHOLDS.join(' / ')} `
-  + `on the CLAMPED RATIO (clamp [${EXPERIENCE_MOD.ratioFloor}, ${EXPERIENCE_MOD.ratioCeiling}]); `
+console.log(`${GAMES} games x ${YEARS} years. Shipped levels ${RENEWAL_THRESHOLDS.join(' / ')} `
+  + `on the RAW RATIO — the same basis New Business Appetite uses, and no longer the clamped `
+  + `[${EXPERIENCE_MOD.ratioFloor}, ${EXPERIENCE_MOD.ratioCeiling}] scale; `
   + `tightest ${TIGHTEST}, positive control ${ABSURD}. Warm-up ${WARMUP} years excluded from trends.`);
 console.log(`Z: ` + LINES.map(l => `${l} ${CREDIBILITY_Z[l]}`).join(' / ') + '\n');
 
@@ -187,19 +194,28 @@ console.log('--- 1. THE RATCHET: declines per year, early vs late (warmed years 
   }
 }
 
-// ------------------------------------------------- 2. null A: above the ceiling
-console.log('\n--- 2. NULL A: a threshold above the reachable ceiling declines nobody ---');
+// ------------------------------------------------- 2. null A: above any ratio
+console.log('\n--- 2. NULL A: a threshold above any attainable ratio declines nobody ---');
 {
-  // ⚠ THE DERIVATION CHANGED WITH THE SCALE AND THE OLD VALUE STILL PASSES,
-  // WHICH IS EXACTLY WHY IT IS RE-DERIVED RATHER THAN LEFT. The threshold now
-  // compares `clampedRatio`, which cannot exceed ratioCeiling, and the
-  // comparison is strictly-greater — so ratioCeiling itself is already
-  // unreachable and every value above it equally so. The old expression
-  // (ceiling/floor + 1 = 7) is still above the ceiling and would still decline
-  // nobody, so this null would have kept passing while measuring a bound that
-  // no longer describes the mechanism. Taking the ceiling directly makes the
-  // null test the tightest unreachable value rather than an arbitrary one.
-  const unreachable = EXPERIENCE_MOD.ratioCeiling;
+  // ⚠ THIS BOUND IS NOW EMPIRICAL AND IT USED TO BE STRUCTURAL. THAT IS THE
+  // PRICE OF THE BASIS CHANGE AND IT IS RECORDED HERE BECAUSE HERE IS WHERE IT
+  // LANDS.
+  //
+  // The threshold used to compare `clampedRatio`, which cannot exceed
+  // EXPERIENCE_MOD.ratioCeiling by construction, so ratioCeiling itself was
+  // unreachable and the null had a PROOF. It now compares `rawRatio` — Ap/Ep,
+  // unbounded above — so no finite value is unreachable by construction and
+  // this arm rests on a measurement instead.
+  //
+  // 10.0 is chosen against the measured maximum over 8 games x 14 years: 6.96
+  // on WC and 5.40 on GL, with the 99th percentile at 3.21 / 3.46. That is 44%
+  // of headroom above the worst member-year ever observed, and it is still a
+  // bound that a long enough run could breach. If this arm ever fires with a
+  // non-zero decline count, READ THE COUNT BEFORE READING THE MECHANISM: one or
+  // two declines means the sample finally found a member above 10.0 and the
+  // constant needs raising, not that renewal is reaching something it should
+  // not. A structural break would move the whole line.
+  const unreachable = 10.0;
   let mismatched = 0, compared = 0, declines = 0;
   for (let g = 0; g < GAMES; g++) {
     const high = play(g, unreachable);
@@ -216,7 +232,7 @@ console.log('\n--- 2. NULL A: a threshold above the reachable ceiling declines n
     + `${mismatched} of ${compared} line-years differing from renewal OFF (must be 0)   `
     + `${declines === 0 && mismatched === 0 ? 'PASS' : 'FAIL'}`);
   if (declines > 0 || mismatched > 0) {
-    failures.push(`a threshold above the reachable ceiling produced ${declines} declines and moved `
+    failures.push(`a threshold above every attainable ratio produced ${declines} declines and moved `
       + `${mismatched} line-years against renewal switched off. A control that declines nobody must be `
       + 'indistinguishable from the mechanism being absent; if it is not, renewal is reaching something '
       + 'other than the decline list.');
