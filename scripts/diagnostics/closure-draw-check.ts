@@ -56,8 +56,65 @@ import type { CoverageLine, GameState } from '../../src/types/simulation';
 
 const LINES: CoverageLine[] = ['WC', 'GL', 'Property'];
 const GAMES = Number(process.env.GAMES ?? 10);
-const YEARS = Number(process.env.YEARS ?? 6);
+/**
+ * ⚠ 14 AND NOT 6, AND IT RUNS IN THE SAME TIME. Each game pays for a ten-year
+ * PRE-GAME before a single played year exists, so years amortise that cost and
+ * games repeat it: 14 years costs 9s against the 6-year default's 8s and more
+ * than doubles every arm's sample.
+ *
+ * MEASURED, and the reason is that two arms here were short of what their own
+ * bounds need once the book froze at ~64 members:
+ *
+ *   THE MEAN ARM (MAX_MEAN_Z). n is CLAIMS, so it scales with the book. At the
+ *   old default the frozen book gave WC 30,882 / GL 19,718 / Property 2,310
+ *   against 42,410 / 26,532 / 3,094 with new business on — a 27% loss of sample
+ *   and a 17% loss of power. At 14 years it reads 67,793 / 5,329 on WC and
+ *   Property, which is MORE than the pre-freeze figure, so the minimum
+ *   detectable bias goes 0.575% -> 0.388% on WC and 2.10% -> 1.38% on Property.
+ *   Property matters most: the defect this arm exists to catch is a 2.36% bias,
+ *   so its headroom goes from 1.12x to 1.7x.
+ *
+ *   THE CROSS-GAME ARM. GL had 391 shared ids against the 403 its own bound
+ *   needs (see MIN_SHARED_FOR_R) and was being tested below its resolution. At
+ *   14 years it has 909 and is tested properly.
+ *
+ * ⚠ PROPERTY STILL CANNOT BE TESTED BY THE CROSS-GAME ARM AT ANY REASONABLE
+ * SAMPLE — 49 shared ids at 14 years against 403 needed, and closing that would
+ * take roughly eight times the years. It is skipped WITH ITS RESOLUTION PRINTED
+ * rather than silently omitted, which is the honest form of a line being out of
+ * scope for an instrument.
+ */
+const YEARS = Number(process.env.YEARS ?? 14);
 const MAX_AGE = 6;
+
+// ============================================================================
+// ⚠ DIAGNOSTIC SEAM — POWER MEASUREMENT ONLY. ABSENT IN EVERY SHIPPED RUN.
+//
+// This gate's bound is a Z-SCORE (or an SE multiple), and a z-score does not
+// FAIL when its sample shrinks — it loses POWER and goes quietly green. The
+// shipped default appetite is No New Business, which freezes the book at ~64
+// members; before that change the book grew past 120 and this arm saw roughly
+// twice the observations.
+//
+// APPETITE=open replays the same games with new business ON, so the arm's own
+// statistic can be measured at both book sizes and the minimum detectable
+// defect reported at each. Without a seam the comparison would have to
+// reimplement the statistic, and a probe that reimplements what it measures can
+// pass while the shipped path is broken.
+//
+// It changes nothing when unset. See the power-audit commit for the numbers.
+// ============================================================================
+const APPETITE_OPEN = process.env.APPETITE === 'open';
+function decisionsFor(y: number) {
+  const d = defaultDecisionSet(y);
+  if (APPETITE_OPEN) {
+    for (const l of Object.keys(d.byLine) as Array<keyof typeof d.byLine>) {
+      d.byLine[l].newBusinessAppetite = null;
+    }
+  }
+  return d;
+}
+
 
 // ⚠ A Z-SCORE, NOT AN ABSOLUTE DRIFT — AND THIS FILE MADE THE SAME MISTAKE
 // TWICE, ONCE HERE AND ONCE AT MAX_CALIBRATION_Z BELOW. The bound was 0.005,
@@ -108,6 +165,29 @@ const MAX_CALIBRATION_Z = 3.5;
 // |Pearson r| between two games' closure decisions on the ids they share.
 // Identical decisions score 1.0; the shipped hash scored exactly that.
 const MAX_CROSS_GAME_R = 0.10;
+/**
+ * ⚠ DERIVED FROM THE BOUND, NOT PICKED. THE LITERAL 20 IT REPLACES ADMITTED A
+ * LINE AT AN n WHERE THE BOUND WAS FINER THAN THE STATISTIC'S OWN RESOLUTION.
+ *
+ * The SE of a Pearson r near zero is about 1/sqrt(n-3). At the old threshold of
+ * 20 shared ids that is 0.243 — nearly two and a half times the 0.10 bound being
+ * applied to it, so the arm could only fire on noise. It did: at YEARS=14
+ * Property crossed 20 with 49 shared ids, read r = -0.174, and FAILED at 1.18 SE
+ * from zero. The bound had not caught anything; the sample had merely grown past
+ * the skip.
+ *
+ * ⚠ AND THAT IS THE MIRROR OF THE SILENT FAILURE THIS GATE'S MEAN ARM CARRIES.
+ * A z-bound with too few observations goes quietly GREEN; a fixed-magnitude
+ * bound with too few observations goes randomly RED. Both are the same defect —
+ * a threshold applied at a sample that cannot resolve it — and only the second
+ * announces itself, which is why this one was found by raising the sample rather
+ * than by the sweep.
+ *
+ * Requiring the bound to be at least 2 SE gives 1/sqrt(n-3) <= 0.10/2, so
+ * n >= 3 + (2/0.10)^2 = 403. Below that the line is REPORTED and skipped, with
+ * its resolution printed, rather than silently omitted.
+ */
+const MIN_SHARED_FOR_R = 3 + Math.round((2 / MAX_CROSS_GAME_R) ** 2);
 
 interface C { line: string; game: string; id: string; size: number }
 const claims: C[] = [];
@@ -122,7 +202,7 @@ function play(gameId: string, seed: number): C[] {
     poolState, lockedResults: [], currentDecisions: defaultDecisionSet(1), priorHistory,
   };
   for (let y = 1; y <= YEARS; y++) {
-    const p = processYear(gs, defaultDecisionSet(y));
+    const p = processYear(gs, decisionsFor(y));
     for (const l of LINES) {
       const cs = (p.result.byLine[l] as never as { claims?: { id: string; grossUltimate: number }[] }).claims ?? [];
       for (const c of cs) out.push({ line: l, game: gameId, id: c.id, size: c.grossUltimate });
@@ -229,7 +309,13 @@ console.log('\n--- SEED-INDEPENDENT: two games, the ids they share ---');
     const a = new Map(A.filter(c => c.line === line).map(c => [c.id, c]));
     const b = new Map(B.filter(c => c.line === line).map(c => [c.id, c]));
     const shared = [...a.keys()].filter(k => b.has(k));
-    if (shared.length < 20) { console.log(`  ${line.padEnd(10)} ${shared.length} shared — too few to test`); continue; }
+    if (shared.length < MIN_SHARED_FOR_R) {
+      const seR = shared.length > 3 ? 1 / Math.sqrt(shared.length - 3) : NaN;
+      console.log(`  ${line.padEnd(10)} ${String(shared.length).padStart(4)} shared — NOT TESTED: `
+        + `SE of r is ${seR.toFixed(3)} against a ${MAX_CROSS_GAME_R} bound, so a reading here `
+        + `could not tell signal from noise (needs ${MIN_SHARED_FOR_R})`);
+      continue;
+    }
     // The SAME curve for both, so only the unit differs. Anything else would
     // confound the hash with the claims' sizes.
     const curve = resolveClosureCurve(line, 0);

@@ -84,6 +84,35 @@ const YEARS = Number(process.env.YEARS ?? 10);
 
 // How many standard errors of the paired difference the level may move.
 const MAX_SE = 3;
+
+// ============================================================================
+// ⚠ DIAGNOSTIC SEAM — POWER MEASUREMENT ONLY. ABSENT IN EVERY SHIPPED RUN.
+//
+// This gate's bound is a Z-SCORE (or an SE multiple), and a z-score does not
+// FAIL when its sample shrinks — it loses POWER and goes quietly green. The
+// shipped default appetite is No New Business, which freezes the book at ~64
+// members; before that change the book grew past 120 and this arm saw roughly
+// twice the observations.
+//
+// APPETITE=open replays the same games with new business ON, so the arm's own
+// statistic can be measured at both book sizes and the minimum detectable
+// defect reported at each. Without a seam the comparison would have to
+// reimplement the statistic, and a probe that reimplements what it measures can
+// pass while the shipped path is broken.
+//
+// It changes nothing when unset. See the power-audit commit for the numbers.
+// ============================================================================
+const APPETITE_OPEN = process.env.APPETITE === 'open';
+function decisionsFor(y: number) {
+  const d = defaultDecisionSet(y);
+  if (APPETITE_OPEN) {
+    for (const l of Object.keys(d.byLine) as Array<keyof typeof d.byLine>) {
+      d.byLine[l].newBusinessAppetite = null;
+    }
+  }
+  return d;
+}
+
 // The recorded phi x2 drift, in points of the opening reserve. See the header.
 const PHI_ARM_DRIFT = -0.0204;
 
@@ -124,7 +153,7 @@ function runArm(rho: number, scale: Record<string, number>): Arm {
       const lineThis: Record<string, number[]> = {};
       for (const l of LINES) lineThis[l] = [];
       for (let y = 1; y <= YEARS; y++) {
-        const p = processYear(gs, defaultDecisionSet(y));
+        const p = processYear(gs, decisionsFor(y));
         let resid = 0, base = 0;
         for (const lr of p.lineResults) {
           const x = lr.result as never as Record<string, number>;

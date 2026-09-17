@@ -139,6 +139,35 @@ const YEARS = Number(process.env.YEARS ?? TRIANGLE_HISTORY_YEARS + 2);
 // ============================================================================
 /** One-sided sign-test threshold. Three lines are tested; 0.05 is too loose. */
 const MAX_P = 0.001;
+
+// ============================================================================
+// ⚠ DIAGNOSTIC SEAM — POWER MEASUREMENT ONLY. ABSENT IN EVERY SHIPPED RUN.
+//
+// This gate's bound is a Z-SCORE (or an SE multiple), and a z-score does not
+// FAIL when its sample shrinks — it loses POWER and goes quietly green. The
+// shipped default appetite is No New Business, which freezes the book at ~64
+// members; before that change the book grew past 120 and this arm saw roughly
+// twice the observations.
+//
+// APPETITE=open replays the same games with new business ON, so the arm's own
+// statistic can be measured at both book sizes and the minimum detectable
+// defect reported at each. Without a seam the comparison would have to
+// reimplement the statistic, and a probe that reimplements what it measures can
+// pass while the shipped path is broken.
+//
+// It changes nothing when unset. See the power-audit commit for the numbers.
+// ============================================================================
+const APPETITE_OPEN = process.env.APPETITE === 'open';
+function decisionsFor(y: number) {
+  const d = defaultDecisionSet(y);
+  if (APPETITE_OPEN) {
+    for (const l of Object.keys(d.byLine) as Array<keyof typeof d.byLine>) {
+      d.byLine[l].newBusinessAppetite = null;
+    }
+  }
+  return d;
+}
+
 /** A line-year needs at least this many carried within-horizon years to count. */
 const MIN_CARRIED = 2;
 
@@ -229,7 +258,7 @@ function runArm(flagged: boolean, seedOffset = 0, tag = ''): ArmResult {
           if (t) before[line] = JSON.parse(JSON.stringify(t)) as PricingTriangleState;
         }
 
-        const p = processYear(gs, defaultDecisionSet(y));
+        const p = processYear(gs, decisionsFor(y));
         st = p.updatedPoolState;
         gs = { ...gs, currentYearNumber: y + 1, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result] };
 
