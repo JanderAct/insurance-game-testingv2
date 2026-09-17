@@ -443,6 +443,33 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // basis. The mechanism's own correctness is held by cohort-ledger-check (three
 // identities, both arms), martingale-equivalence-check (term by term) and
 // terminal-severity-check (phi on its anchor), all green at this commit.
+// v44: WC'S CLF TABLE RE-DERIVED AT THE SMALL BAND. The shipped default writes
+// no new business on a frozen pre-game roster, so a player who touches nothing
+// plays a book frozen at ~62 — and WC's table was derived at 72-88. It is now
+// derived on 6,371 line-years of the small band across 2,000 games and FIVE
+// appetite arms, the fifth being the shipped default.
+//
+// 0 added, 0 removed, and only 3,948 of 31,200 moved across 63 fields — THE
+// SMALLEST CAPTURE IN THIS FILE'S RECENT HISTORY, against 21,481 at v43 and
+// 22,559 at v42.
+//
+// ⚠ AND THE SMALLNESS IS THE STRUCTURAL PROPERTY CONFIRMING ITSELF, NOT A WEAK
+// CHANGE. At all-defaults fundingAtExpected is TRUE, which pins selectedFundingCLF
+// to exactly 1.000, so the table is NEVER CONSULTED in a default game. The moved
+// fields are the ones that read it — fundingGap and capitalFundingGap lead the
+// list. A table re-derivation that moved the default game's own losses or
+// membership would mean the table had reached somewhere it must not.
+//
+// ⚠ ENDING SURPLUS OFF EXPECTED IS THE SAME NUMBER BEFORE AND AFTER. Measured,
+// 150 games x 10 years, full pool: Expected $83.435M on both arms, bit-identical.
+// At the 75% stop it goes $177.280M -> $182.198M, +$4.918M (+2.8%) — a GAIN in
+// funding rather than a cost, because the small-band curve is heavier (the 75%
+// stop moves 1.1373 -> 1.1716).
+//
+// THE COST OF THE RULING IS IN THE LABEL, NOT THE SURPLUS, and it is recorded at
+// WC_DERIVED: small -8.7 -> -3.1pp, mid +4.3 -> +9.3pp, large +13.0 -> +18.4pp.
+// WC goes from one band outside tolerance to two.
+//
 // v43: NO NEW BUSINESS AS THE DEFAULT APPETITE. One capture for a sequence of
 // four commits, and it MIXES EXACTLY ONE ENGINE CHANGE WITH THREE THAT MOVE
 // NOTHING — which is why the capture is taken once at the end rather than after
@@ -671,7 +698,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // capture is sufficient alone here: the hash guard cannot tell "different
 // members enrolled" from "the arithmetic broke", and this one says the
 // changed set is exactly the set a roster change explains.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v43.json');
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v44.json');
 
 function seedOf(id: string) {
   let h = 5381;

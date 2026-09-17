@@ -357,6 +357,23 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // reports the same thing in both cases. value-identity v37 is what separates
 // them, and its note records the confinement check: every changed field is
 // downstream of the roster, nothing roster-independent moved, no NaN.
+// v44: WC'S CLF TABLE RE-DERIVED AT THE SMALL BAND, so the label is honest for
+// the shipped default's frozen ~62-member book.
+//
+// ⚠ ALL 24 MOVED AND THAT IS MORE THAN THE CHANGE ITSELF WARRANTS, WHICH IS
+// WORTH SAYING BECAUSE value-identity MOVED ONLY 3,948 OF 31,200 FIELDS on the
+// same commit. These exports are hashes over whole workbooks: a single moved
+// cell in a shared summary re-hashes the sheet, so this guard cannot express
+// "WC only". value-identity is the instrument that can, and it says the movement
+// is confined to the fields that read the table — fundingGap and
+// capitalFundingGap lead its list.
+//
+// ⚠ SO GL-SOLO AND PR-SOLO MOVING IS NOT A LEAK, AND THE PROOF IS NEXT DOOR
+// rather than here. Read them together: RED here plus a narrow, named field set
+// there is the expected signature of a constant that only some code paths
+// consult. At all-defaults fundingAtExpected pins CLF to 1.000 and the table is
+// never read at all.
+//
 // v43: ALL 24 MOVED. NO NEW BUSINESS AS THE DEFAULT APPETITE — intake stops on
 // every line in every configuration, so no solo game can be exempt.
 //
@@ -450,7 +467,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 //
 // So this capture carries its own negative control: a table change that reaches
 // two lines and provably does not reach the third.
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v43.json');
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v44.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

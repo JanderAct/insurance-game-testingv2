@@ -514,12 +514,51 @@ export interface ClfTable {
 // ⚠ DO NOT READ THE GATE'S WC RED AS A REASON TO RE-DERIVE. Keeping this table
 // is the ruling; the -7.2pp that remains is a size effect on its own basis, and
 // the EXPECTED_RED entry in scripts/gates.ts separates the two.
+// ============================================================================
+// ⚠ RE-DERIVED AT THE SMALL BAND. THE DEFAULT GAME IS THE ONE THE LABEL IS NOW
+// HONEST FOR, AND TWO OTHER BANDS PAY FOR IT. READ THE COST BEFORE MOVING IT.
+//
+// The shipped default writes no new business on a frozen pre-game roster, so a
+// player who touches nothing plays a book frozen at its opening ~62 for the
+// whole game. This table is derived on 6,371 line-years of that band (p10 53,
+// median 63, p90 70), crossing 43.0%, across 2,000 games and FIVE appetite arms
+// — the fifth being NO_NEW_BUSINESS, added to clf-table-derive and
+// clf-label-backtest-check together at 2cf25b1.
+//
+// ⚠ THE COST, MEASURED RATHER THAN ESTIMATED. The derivation's own candidate
+// matrix, worst label error in pp per band:
+//
+//     derived at      small ~64   mid ~80   large ~97   POOLED
+//     small (SHIPPED)      +0.0      +7.7      +19.9      +9.9
+//     mid  (previous)      -7.9      +0.0      +12.5      +2.2
+//     large                -20.1    -12.6       +0.0     -10.2
+//
+// ⚠ THE MID BAND WAS EXACT AND IS NOW OUT OF TOLERANCE, WHICH THE RULING DID NOT
+// ANTICIPATE AND WHICH IS RECORDED HERE BECAUSE IT IS THE PART A READER WOULD
+// OTHERWISE INFER WRONGLY. This is not error moved from one end to the other: WC
+// goes from ONE band outside the 5pp tolerance to TWO. Pooled worst goes +2.2 ->
+// +9.9, four and a half times worse.
+//
+// ⚠ AND POOLED IS DELIBERATELY NOT THE SCORECARD, WHICH IS THE WHOLE RULING.
+// The band weights (small 32%, mid 30%, large 38%) come from the five sampled
+// arms, and four of those five are settings a player must deliberately opt into.
+// They are a SAMPLING choice, not a statement about how the game is played. If
+// most sessions run at defaults then the small band carries far more than 32% of
+// real exposure and the pooled figure understates the gain. That is a judgement
+// about play rather than about the engine, and it was taken explicitly.
+//
+// WHAT WOULD OVERTURN THIS: evidence that players routinely open the appetite
+// bar, which would make mid and large the populations that matter and put this
+// table back at mid. Or a BOOK-SIZE AXIS, which is the only thing that serves
+// all three bands at once and which this file considered and rejected — see the
+// single-curve cost recorded above.
+// ============================================================================
 const WC_DERIVED: ClfTable = {
   source: 'derived',
   stops: [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 97.5, 99],
   clf: [
-    0.7913, 0.8314, 0.8641, 0.8915, 0.9156, 0.9391, 0.9617, 0.9842, 1.0064, 1.0302,
-    1.0550, 1.0788, 1.1061, 1.1373, 1.1734, 1.2161, 1.2776, 1.3854, 1.4866, 1.6030,
+    0.8061, 0.8454, 0.8829, 0.9122, 0.9399, 0.9643, 0.9858, 1.0101, 1.0327, 1.0576,
+    1.0834, 1.1093, 1.1396, 1.1716, 1.2081, 1.2550, 1.3120, 1.4124, 1.4962, 1.6152,
   ],
 };
 
