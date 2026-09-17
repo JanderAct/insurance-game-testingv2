@@ -56,9 +56,19 @@
 // bit-identical while the ALLOCATION moves. That isolates the pricing path
 // from the selection path rather than hoping they separate on their own.
 //
-// A second clause then re-opens the channel and requires the roster to MOVE,
-// because a closed-channel test alone would also pass if departure had
-// silently stopped reading the modifier.
+// A second clause then re-opens the channel and requires the departure RISK
+// ORDERING to MOVE, because a closed-channel test alone would also pass if
+// departure had silently stopped reading the modifier.
+//
+// ⚠ THAT SECOND CLAUSE ASSERTED THE ROSTER UNTIL VOLUNTARY DEPARTURES WERE
+// SWITCHED OFF, AND IT WENT RED THE SAME DAY — CORRECTLY. With
+// VOLUNTARY_DEPARTURES_ENABLED false nobody leaves at default decisions, so no
+// perturbation can move the roster through departure and the clause was
+// reporting exactly the thing it was built to report: the channel it asserts
+// about has no observable outcome. It is re-pointed at the ORDERING, which
+// departureRisks still computes every year off the modifier, rather than
+// weakened or deleted. The same two cases are still distinguished — a departure
+// model that stopped reading the modifier would not move the ordering either.
 //
 // ⚠ AND IT FAILS IF THE PERTURBATION MOVES NO ALLOCATION, the same
 // inert-probe guard member-premium-check carries. A probe that cannot move
@@ -88,7 +98,8 @@ import { processYear } from '../../src/utils/simulationEngine';
 import {
   CREDIBILITY_Z, EXPERIENCE_MOD, memberExperienceMods, modBounds, primaryShare,
 } from '../../src/utils/memberExperienceMod';
-import { DEPARTURE } from '../../src/utils/memberDeparture';
+import { DEPARTURE, departureRisks } from '../../src/utils/memberDeparture';
+import { SeededRandom } from '../../src/utils/random';
 // Section 8 asserts the two controls' shipped levels sit where the raw and
 // clamped readings cannot disagree. Read from the shipped constants so the
 // assertion cannot drift from what either control offers.
@@ -282,23 +293,67 @@ console.log('\n--- 2. IT REACHES THE RATE ONLY THROUGH THE ROSTER (Z scaled x10 
     + `${leaked === 0 && modMoved > 0 && allocationMoved > 0 ? 'PASS' : 'FAIL'}`);
 
   // --- and the channel must actually be open in the shipped configuration ---
-  let rosterMoved = 0, openCompared = 0;
-  for (let g = 0; g < GAMES; g++) {
-    for (const [key, b] of base[g]) {
-      const p = pert[g].get(key);
-      if (!p) continue;
-      openCompared++;
-      if (b.enrolledIds !== p.enrolledIds) rosterMoved++;
+  //
+  // ⚠ THIS CLAUSE USED TO ASSERT THE ROSTER MOVED, AND IT WENT RED THE DAY
+  // VOLUNTARY DEPARTURES WERE SWITCHED OFF. IT WAS RIGHT TO. Its whole job is to
+  // distinguish "the channel is correctly closed when closed" from "there is no
+  // channel", and with VOLUNTARY_DEPARTURES_ENABLED false the departure OUTCOME
+  // is exactly the second thing — nobody leaves at default decisions, so no
+  // perturbation of any size can move the roster through departure.
+  //
+  // RE-POINTED AT THE QUANTITY THAT IS STILL LIVE RATHER THAN WEAKENED OR
+  // DISABLED. departureRisks still runs every year, still reads the modifier,
+  // still takes its draw per member and still produces the ordering — the flag
+  // changes only how many members are taken off the top of it. So the ORDERING
+  // is the channel now, and it distinguishes the same two cases just as sharply:
+  // if departure stopped reading the modifier, the ordering would not move
+  // either.
+  //
+  // ⚠ THE NOISE IS HELD IDENTICAL ACROSS THE TWO ARMS, which is what makes this
+  // an isolation rather than a comparison of two random orderings. Both arms get
+  // a fresh SeededRandom on the same seed, so noise_i is the same number for the
+  // same member in both, and every difference in the ordering is the modifier's.
+  //
+  // A POSITIVE pool-wide deviation is passed because priceShock is
+  // max(0, poolDev + ownChangePct): at a deviation of 0 a member whose own
+  // modifier fell reads exactly 0 and is insensitive to Z by clipping rather
+  // than by design. 5pp puts the whole book on the live side of the max.
+  const POOL_DEV_PP = 5;
+  let orderMoved = 0, openCompared = 0, ratedSeen = 0;
+  try {
+    for (let g = 0; g < GAMES; g++) {
+      for (const [key, b] of base[g]) {
+        const line = key.split('|')[0] as CoverageLine;
+        if ((originals[line] ?? 0) <= 0) continue;   // Property is unrated; nothing to move
+        openCompared++;
+        const order = (z: number) => {
+          for (const l of LINES) CREDIBILITY_Z[l] = originals[l] * z;
+          const r = departureRisks(b.members, line, b.historyBefore, POOL_DEV_PP, new SeededRandom(9_001));
+          if (z === 1) ratedSeen += r.filter(x => x.marketability > 0).length;
+          return [...r].sort((p, q) => q.risk - p.risk).map(x => x.memberId).join(',');
+        };
+        if (order(1) !== order(10)) orderMoved++;
+      }
     }
+  } finally {
+    for (const l of LINES) CREDIBILITY_Z[l] = originals[l];
   }
-  console.log(`  CHANNEL OPEN (shipped), ${openCompared} line-years: roster moved in ${rosterMoved}  `
-    + `(must be > 0 — this is adverse selection working)   ${rosterMoved > 0 ? 'PASS' : 'FAIL'}`);
-  if (rosterMoved === 0) {
-    failures.push('scaling credibility tenfold changed nobody\'s departure decision in the SHIPPED '
-      + 'configuration. The closed-channel assertion above would pass just as well if departure had '
-      + 'stopped reading the modifier altogether, so this clause is what distinguishes "the channel is '
-      + 'correctly closed when closed" from "there is no channel". Check that memberDeparture reads the '
-      + 'modifier and that DEPARTURE.priceWeight is not 0.');
+  console.log(`  CHANNEL OPEN (shipped), ${openCompared} rated line-years: departure ORDERING moved in `
+    + `${orderMoved}  (must be > 0 — this is the adverse-selection channel being live)   `
+    + `${orderMoved > 0 ? 'PASS' : 'FAIL'}`);
+  console.log(`    (${ratedSeen} member-years carried a non-zero marketability, so there was something to move)`);
+  if (orderMoved === 0) {
+    failures.push('scaling credibility tenfold changed nobody\'s departure RISK ORDERING. The '
+      + 'closed-channel assertion above would pass just as well if departure had stopped reading the '
+      + 'modifier altogether, so this clause is what distinguishes "the channel is correctly closed when '
+      + 'closed" from "there is no channel". Check that memberDeparture reads the modifier and that '
+      + 'DEPARTURE.priceWeight is not 0. NOTE: this deliberately tests the ORDERING and not the roster, '
+      + 'because VOLUNTARY_DEPARTURES_ENABLED suspends the outcome while leaving the channel wired.');
+  }
+  if (ratedSeen === 0) {
+    failures.push('no member-year carried a non-zero marketability, so the ordering test had nothing to '
+      + 'move and proves nothing. marketabilityOf returns 0 for every unrated member; check the ledger is '
+      + 'seeded and that the snapshots carry rated books.');
   }
   if (modMoved === 0 || allocationMoved === 0) {
     failures.push('scaling credibility tenfold changed no mod or no allocation, so assertion 2 proved nothing. '

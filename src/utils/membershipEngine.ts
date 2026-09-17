@@ -11,6 +11,7 @@ import { departureRisks } from './memberDeparture';
 import {
   MEMBER_MOVEMENT_WEIGHTS,
   BASE_RETENTION,
+  VOLUNTARY_DEPARTURES_ENABLED,
   APPLICATION_RATE,
   MAX_NEW_MEMBER_SHARE,
   RATE_NEUTRAL_CHANGE_PCT,
@@ -208,6 +209,57 @@ function calcRetentionProbability(inputs: MemberMovementInputs): number {
 // live. MEMBER_MOVEMENT_WEIGHTS.retention is untouched — departure still reads
 // it, and that is the half of the object that still does work.
 
+// ============================================================================
+// ⚠ THIS STOCK IS QUANTISED ONTO A GRID THE SAME SIZE AS ITS OWN ANNUAL MOVE,
+// AND THAT IS A DEFECT. RECORDED HERE BECAUSE A LATER VOLUNTARY-DEPARTURE
+// MECHANISM WILL WANT TO READ THIS QUANTITY AND WOULD BE READING A STAIRCASE.
+//
+// The return rounds to ONE DECIMAL, and `current` is therefore always already
+// 1-dp. So a year's delta either clears 0.05 and moves the stock by a whole
+// 0.1, or clears nothing and is discarded entirely. Nothing accumulates: the
+// result is re-quantised every year, so a sub-step delta is not saved up, it is
+// lost.
+//
+// MEASURED, 8 games x 14 years at defaults, where delta is
+// -changeDeviationPct x RATE_SATISFACTION_SENSITIVITY:
+//
+//   line       mean |delta|   as a share of the 0.05 step   year-pairs that moved
+//   WC            0.0425                0.85x                   30 of 104
+//   GL            0.0332                0.66x                   22 of 104
+//   Property      0.0343                0.69x                   31 of 104
+//
+// ⚠ SO IT IS NOT INERT, AND "INERT BY CONSTRUCTION" IS THE WRONG DIAGNOSIS —
+// IT WAS THE OBVIOUS ONE AND THE MEASUREMENT DOES NOT SUPPORT IT. The stock
+// takes 17-20 distinct values over a run and drifts -0.22 (WC) across fourteen
+// years. The signal gets through about three years in ten.
+//
+// THE ACTUAL DEFECT IS ATTENUATION AND LUMPINESS, WHICH IS WORSE THAN INERTNESS
+// BECAUSE IT LOOKS LIKE IT IS WORKING. The response is nonlinear in the input:
+// a year at 0.04 transmits zero and a year at 0.06 transmits 0.1, so the stock
+// over-responds to the years that cross and ignores the rest. A player making a
+// small, sustained pricing change sees nothing for several years and then a
+// jump, and neither is proportional to what they did.
+//
+// ⚠ AND THE CODEBASE ALREADY KNOWS THE RIGHT GRID. The joiner's own opening
+// satisfaction, drawn ~200 lines below, is stored to TWO decimals with a note
+// saying one decimal "would quantise a joiner's opening onto a coarser grid
+// than the thing it feeds". That argument applies here verbatim and this site
+// did not get it.
+//
+// NOT FIXED IN THIS COMMIT, DELIBERATELY. Changing the rounding moves this
+// stock, which feeds calcRetentionProbability, which is the thing being
+// switched off — so it would be a behavioural change folded into a commit whose
+// point is that the behaviour is suspended. It belongs with the derived
+// voluntary mechanism, where the stock's grid can be chosen against what that
+// mechanism needs to read rather than against nothing.
+//
+// ⚠ ONE TRAP FOR WHOEVER PICKS THIS UP: THERE ARE TWO SATISFACTIONS AND ONLY
+// THIS ONE IS ON THE COARSE GRID. memberSatisfaction.ts's per-member stock moves
+// in hundredths and is stored to two decimals; this pool-level scalar is the one
+// calcRetentionProbability reads, and it is the one quantised. Measuring the
+// per-member module's drift and concluding this term is fine would be reading
+// the wrong quantity.
+// ============================================================================
 function updateSatisfaction(
   current: number,
   decisions: LineDecisionSet,
@@ -279,6 +331,19 @@ export function simulateMemberMovement(inputs: MemberMovementInputs): MemberMove
   // calcRetentionProbability, so departures cannot exceed 20% of the book in
   // any year however bad it gets. The noise multiplier is bounded at 1.6. A
   // second bound on top of a bounded quantity would only mask the first.
+  //
+  // ⚠ THIS WHOLE BLOCK STILL RUNS WITH VOLUNTARY DEPARTURES OFF, AND EVERY LINE
+  // OF IT IS LOAD-BEARING FOR A REASON THAT IS NOT ITS RESULT. `rng.range(0.4,
+  // 1.6)` below is ONE DRAW FROM THE MEMBERSHIP STREAM. Guarding the draw
+  // instead of the slice would remove it, shift every subsequent draw in this
+  // stream by one, and re-roll the membership path of every seed — including
+  // the ten pre-game years, so the opening book would move too. Same reasoning
+  // the joiner-satisfaction draw below carries: changing what a draw MEANS is
+  // free, removing it is not.
+  //
+  // So the count is computed in full and discarded at the slice. See
+  // VOLUNTARY_DEPARTURES_ENABLED for why it is discarded, and for what has to
+  // happen before it is used again.
   const retentionProb = calcRetentionProbability(inputs);
   const expectedWithdrawals = currentMembers.length * (1 - retentionProb);
   const cappedWithdrawalCount = Math.min(
@@ -312,8 +377,21 @@ export function simulateMemberMovement(inputs: MemberMovementInputs): MemberMove
     (a, b) => (risks.get(b.id) ?? 0) - (risks.get(a.id) ?? 0)
   );
 
+  // ⚠ THE ONE LINE THE RULING IS. departureRisks above has already run and has
+  // already taken ONE DRAW PER MEMBER, in roster order — that is the second of
+  // the two draw sites in this function and it is retained for the same reason
+  // as the first. The SELECTION is therefore still computed, still correct, and
+  // still the thing a later voluntary mechanism will read; it simply selects the
+  // first zero members.
+  //
+  // ⚠ AND IT IS GATED HERE RATHER THAN INSIDE departureRisks, WHICH WOULD HAVE
+  // BEEN THE TIDIER-LOOKING PLACE AND WOULD HAVE BEEN WRONG. That function owns
+  // the per-member draw; an early return in it would delete N draws a year
+  // instead of one and re-phase everything after.
+  const withdrawalCount = VOLUNTARY_DEPARTURES_ENABLED ? cappedWithdrawalCount : 0;
+
   const withdrawnMembers: Member[] = membersSortedByLeaveRisk
-    .slice(0, cappedWithdrawalCount)
+    .slice(0, withdrawalCount)
     .map(m => ({ ...m, status: 'withdrawn' as const, yearWithdrawn: yearNumber }));
   const withdrawnIds = new Set(withdrawnMembers.map(m => m.id));
   // ⚠ PER-MEMBER SATISFACTION IS NOT COMPUTED HERE AND THAT IS THE POINT.

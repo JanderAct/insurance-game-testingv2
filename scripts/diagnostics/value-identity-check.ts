@@ -443,6 +443,49 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // basis. The mechanism's own correctness is held by cohort-ledger-check (three
 // identities, both arms), martingale-equivalence-check (term by term) and
 // terminal-severity-check (phi on its anchor), all green at this commit.
+// v41: VOLUNTARY DEPARTURES SWITCHED OFF. VOLUNTARY_DEPARTURES_ENABLED = false,
+// so the only way out of the pool is a renewal decline. The count that was
+// suspended was book x (1 - retentionProb), and retentionProb is BASE_RETENTION
+// = 0.95 — a constant from the root commit that has never been derived in this
+// repository. See the constant's own record for why an undeclared number could
+// not be left setting the book's trajectory once No New Business is a default.
+//
+// 0 fields added, 0 removed, 23,243 of 31,200 moved across 82 fields. That is
+// the largest capture in this file's history — half again the pin re-solve's
+// 14,744 — and the reason is that it moves the OPENING BOOK, not just the
+// played years.
+//
+// ⚠ THE PRE-GAME IS WHY IT IS THIS BIG. priorHistoryEngine plays PRE_GAME_DEPTH
+// = 10 years through the same processYear, so ten years of intake now run with
+// no outflow before the player sees year 1. activeMembers 62 -> 131 in the first
+// instance is that: the game does not start where it used to start.
+//
+// ⚠ AND THE CONFINEMENT IS CHECKABLE THE SAME WAY v40's WAS.
+// VOLUNTARY_DEPARTURES_ENABLED is read in exactly ONE place in src/:
+//
+//   membershipEngine.ts   the slice count in simulateMemberMovement
+//
+// Nothing else reads it. Every moved value is downstream of a different
+// enrolled book, and there is no second channel.
+//
+// ⚠ THE DRAWS ARE RETAINED, WHICH IS WHY "DIFFERENT BOOK" IS THE WHOLE STORY
+// AND NOT HALF OF IT. Both draw sites still run — the count multiplier
+// rng.range(0.4, 1.6) and departureRisks' one draw per member — so the
+// membership stream is not re-phased and no value moved because a draw landed
+// somewhere new. Guarding the draw instead of the slice would have made this
+// capture uninterpretable.
+//
+// THE LEAK CHECK: 0 added and 0 removed, all 38 absolute identities bit-exact
+// on every instance (including sqz|declinedMembers = 0 and
+// sqz|retainedAboveTower = 0), and no suspected partial identity. A change that
+// moved three-quarters of the fields introduced no new one and retired none.
+//
+// ⚠ ratePer100 5.2289 -> 4.6435, AND THAT FALL IS THE FINDING TO CARRY FORWARD.
+// A book roughly twice the size spreads the tower and admin over twice the
+// exposure, so the rate drops about 11%. clfTables.ts is derived at the band
+// containing each line's median book and says to re-derive if the membership
+// trajectory moves materially — it has, and by more than the band is wide.
+//
 // v40: STARTING_CAPITAL_TO_PREMIUM RE-SOLVED — WC 0.3250 -> 0.2503, GL 0.2062 ->
 // 0.1418. Property untouched. opening-centring-check had gone red on WC and GL:
 // the unfiltered candidate median sat +0.101 and +0.105 off its band midpoint,
@@ -565,7 +608,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // capture is sufficient alone here: the hash guard cannot tell "different
 // members enrolled" from "the arithmetic broke", and this one says the
 // changed set is exactly the set a roster change explains.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v40.json');
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v41.json');
 
 function seedOf(id: string) {
   let h = 5381;

@@ -357,6 +357,25 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // reports the same thing in both cases. value-identity v37 is what separates
 // them, and its note records the confinement check: every changed field is
 // downstream of the roster, nothing roster-independent moved, no NaN.
+// v41: ALL 24 MOVED, AND THERE IS NO CONTROL THIS TIME. Voluntary departures
+// were switched off (VOLUNTARY_DEPARTURES_ENABLED = false), so the only way out
+// of the pool is a renewal decline.
+//
+// ⚠ THE ABSENCE OF A CONTROL IS ITSELF THE EXPECTED RESULT, WHICH IS NOT THE
+// USUAL SITUATION IN THIS FILE. v39 held six exports and v40 held the three
+// Property-solo ones, and in both cases the line that did not move was the line
+// the change did not reach. Nothing is exempt here: departures ran on every
+// line, in every solo game, and — because priorHistoryEngine plays ten pre-game
+// years through the same processYear — in the pre-game that builds every
+// opening position too. A Property-solo export holding would have been the
+// finding, not the control.
+//
+// Property has no rated members and therefore no adverse SELECTION, but the
+// departure COUNT never depended on selection: it is book x (1 - retentionProb)
+// and Property paid it like everything else. That distinction is exactly what
+// the count/selection split in memberDeparture.ts's header describes, and this
+// capture is where it becomes visible.
+//
 // v40: ALL 24 MOVED. STARTING_CAPITAL_TO_PREMIUM was re-solved (WC 0.3250 ->
 // 0.2503, GL 0.2062 -> 0.1418), which changes which pre-game attempt the band
 // accepts and therefore the whole opening position every export is built from.
@@ -397,7 +416,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 //
 // So this capture carries its own negative control: a table change that reaches
 // two lines and provably does not reach the third.
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v40.json');
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v41.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

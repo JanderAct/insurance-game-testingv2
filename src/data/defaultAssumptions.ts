@@ -645,6 +645,61 @@ export const GL_LOSS_MODEL = {
 // Base retention probability per member per year — high by default for realistic public entity pools
 export const BASE_RETENTION = 0.95;
 
+/**
+ * ⚠ VOLUNTARY DEPARTURES ARE OFF. THE ONLY WAY OUT OF THE POOL IS A RENEWAL
+ * DECLINE — a decision the player takes.
+ *
+ * ============================================================================
+ * WHY, AND IT IS ABOUT PROVENANCE RATHER THAN ABOUT THE MECHANISM.
+ *
+ * The voluntary count is book x (1 - retentionProb), and retentionProb is
+ * BASE_RETENTION plus a small adjustment. So the whole outflow of the pool was
+ * set by the 0.95 directly above, which:
+ *
+ *   - traces to 116b96d, the root commit, "Add files via upload". It predates
+ *     this repository's history and has never been derived IN it.
+ *   - carries one line of justification: "high by default for realistic public
+ *     entity pools". No measurement, no source, no sensitivity.
+ *
+ * ⚠ AND IT IS NOT THE bdc98ec FAMILY, WHICH IS THE COMPARISON THAT MIGHT
+ * OTHERWISE BE DRAWN. RATE_RETENTION_SENSITIVITY and its two siblings also
+ * arrived without derivation, but they arrived with a worked table, a stated
+ * scale and an explicit "adopted as given rather than re-derived — there is no
+ * measurement in this model that could pin a member's price elasticity, so it
+ * is a judgment, and it is recorded as one". BASE_RETENTION has none of that.
+ * It is older and thinner.
+ *
+ * That was survivable while intake was open and the two flows crossed somewhere.
+ * It stops being survivable once No New Business is a default appetite: with
+ * nothing coming in, an undeclared constant would be the SOLE determinant of the
+ * book's trajectory for the whole game.
+ *
+ * ============================================================================
+ * WHAT THIS IS NOT. It is not a judgement that pools have no voluntary
+ * turnover, and it is not a deletion. A voluntary mechanism goes back in, and it
+ * will be DERIVED when it does.
+ *
+ * Everything the later mechanism needs is left standing and still runs every
+ * year: memberDeparture.ts's model, the marketability term derived off the
+ * credibility differential, the sort key, calcRetentionProbability and its five
+ * weights, and the satisfaction plumbing. The only thing this flag changes is
+ * how many members are taken off the sorted list — see simulateMemberMovement,
+ * which still computes the list and still takes every draw.
+ *
+ * ⚠ READ updateSatisfaction's OWN NOTE BEFORE BUILDING THAT MECHANISM. The
+ * pool-level satisfaction scalar is quantised to one decimal while its annual
+ * movement is an order of magnitude smaller, so it cannot currently respond to
+ * anything. A voluntary model that reads satisfaction would be reading a
+ * constant. That is recorded at the defect rather than here.
+ *
+ * ============================================================================
+ * ⚠ WHAT TURNING IT BACK ON COSTS, SO NOBODY FLIPS IT CASUALLY. Both baselines
+ * move — not through re-phased draws (every draw is retained, deliberately) but
+ * through WHICH MEMBERS ARE ENROLLED, which changes the book from the pre-game
+ * onward. Flipping this is a recapture commit either way.
+ */
+export const VOLUNTARY_DEPARTURES_ENABLED = false;
+
 // ============================================================================
 // ⚠ THE MEMBERSHIP TARGET IS DELETED. FOUR CONSTANTS WENT WITH IT.
 //
