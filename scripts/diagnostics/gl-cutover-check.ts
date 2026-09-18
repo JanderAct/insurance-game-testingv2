@@ -8,14 +8,38 @@
 // and claimCount must reconcile to the claims array (no more
 // per-sub breakdown to reconcile — the GL sub-coverage rebuild deleted it).
 //
-//   npx tsx scripts/diagnostics/gl-cutover-check.ts 6b   # assert the ratio
-//   npx tsx scripts/diagnostics/gl-cutover-check.ts      # 6a: report only
+//   npx tsx scripts/diagnostics/gl-cutover-check.ts
 //
-// THE TWO-PART LOSS-RATIO CHECK — same decomposition as wc-cutover-check.ts,
-// and GL is the reason it exists. GL's alpha=1.3 law-enforcement Pareto tail
-// and abuse batch totals (P99 ~8x mean) give the realized mean a +/-10pp CI of
-// its own, so a +/-2pp band around it is a coin flip. HARD ASSERT the analytic
-// gross-basis ratio; REPORT the realized draw against its own CI.
+// ============================================================================
+// ⚠ THE 66.8% ANALYTIC-RATIO ASSERTION WAS DELETED HERE. It was the identical
+// construction to wc-cutover-check.ts's, read 139.21% on GL, and sat behind the
+// same `process.argv[2] === '6b'` branch that scripts/gates.ts has no mechanism
+// to pass. Dead code, never run in a sweep, could not have been.
+//
+// THE FULL RECORD IS IN wc-cutover-check.ts's HEADER and is not duplicated here,
+// because two copies of a derivation are how the 0.39-versus-0.1254 band-width
+// error in opening-centring-check survived. In brief: 66.8% is
+// gross / (gross x 1.346 + 0.15 x gross), a GROSS-FUNDED pool at the old
+// 75%-confidence default; funding is net now and the default CLF is 1.000, so
+// neither input survives. Correct at the cutover, drifted in two steps —
+// a21d01b took the CLF default to 1.000 and d80aa9e moved the expected loss
+// ratios onto the net basis.
+//
+// TO RESTORE IT: divide by x.totalMemberCharge instead of
+// x.poolPremiumAndAdminExpense, drop the argv branch, and keep the 0.668 target
+// unchanged. The denominator was excluding reinsuranceCost while the numerator
+// was gross — and reinsurance is exactly what makes gross differ from net.
+//
+// ⚠ AND NOTHING NOW CHECKS THE LOADING STRUCTURE on either line. See the
+// matching note in wc-cutover-check.ts, including why expectedCombinedRatio
+// reading exactly 100.0000% is an identity rather than evidence.
+// ============================================================================
+//
+// THE REALIZED MEAN IS STILL NOT A SUBSTITUTE, and GL is the reason that rule
+// exists. GL's alpha=1.3 law-enforcement Pareto tail and abuse batch totals
+// (P99 ~8x mean) give the realized mean a +/-10pp CI of its own, so a +/-2pp
+// band around it is a coin flip. REPORT the realized draw against its own CI;
+// do not gate on it.
 import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
@@ -29,14 +53,13 @@ const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / Math.max(1, xs.le
 const sd = (xs: number[]) => Math.sqrt(xs.reduce((a, b) => a + (b - mean(xs)) ** 2, 0) / Math.max(1, xs.length - 1));
 const fmt$ = (x: number) => `$${(x / 1e6).toFixed(2)}M`;
 const problems: string[] = [];
-const MODE = process.argv[2] === '6b' ? '6b' : '6a';
 const note = (ok: boolean, m: string) => { if (!ok) problems.push(m); return ok ? 'OK' : 'FAIL'; };
 
 const SEEDS = Array.from({ length: 40 }, (_, i) => (((i + 1) * 2654435761) >>> 0).toString(36).toUpperCase().padStart(8, '0').slice(0, 8));
 const LINES: CoverageLine[] = ['WC', 'GL', 'Property'];
 const YEARS = 5;
 
-console.log(`=== GL CUTOVER (${MODE}) through the real engine: ${SEEDS.length} seeds x ${YEARS} live years, default decisions ===\n`);
+console.log(`=== GL CUTOVER through the real engine: ${SEEDS.length} seeds x ${YEARS} live years, default decisions ===\n`);
 console.log(`held neutral GL purePremiumPer100 (full canonical roster @ RQ=5) = ${deriveNeutralGlPurePremiumPer100(getPredefinedMarketMembers()).toFixed(4)}\n`);
 
 const glGrossLR: number[] = [], perSeedGlGross: number[] = [];
@@ -139,9 +162,9 @@ console.log(`  GL shock (occurrence > $1M) share of line-years: ${(mean(glShockY
 // product on a noisy realized mean:
 //   (a) draw == analytic expectation  — invariant 1, asserted by
 //       gl-claim-check.ts at full-market scale (0.992 over 300 draw-years).
-//   (b) analytic ratio == 66.8%       — the finding-6 constraint, HARD
-//       ASSERTED below; deterministic given the roster, zero draw noise.
-// (a) and (b) together imply realized ~ 66.8% IN EXPECTATION. Gating on a
+//   (b) analytic ratio == 66.8%       — the finding-6 constraint, DELETED; see
+//       the header for the derivation and the route back.
+// (a) and (b) together implied realized ~ 66.8% IN EXPECTATION. Gating on a
 // +/-2pp band around the realized mean is NOT a stricter test: GL's alpha=1.3
 // Pareto tail and abuse batches (P99 ~8x mean) give that mean a +/-6.6pp CI of
 // its own, so the band is a coin flip that fails on correct pricing. The
@@ -152,14 +175,9 @@ console.log(`  GL shock (occurrence > $1M) share of line-years: ${(mean(glShockY
 console.log('\n--- GL loss ratio (GROSS basis: gross loss / poolPremiumAndAdminExpense) ---');
 const m = mean(glGrossLR), s = sd(perSeedGlGross), ci = 1.96 * s / Math.sqrt(perSeedGlGross.length);
 const ma = mean(glAnalyticLR);
-console.log(`  [1] ANALYTIC (each enrolled book's own expected loss, no draw noise)`);
-console.log(`      mean ${(ma * 100).toFixed(2)}%  vs target 66.8%`);
+console.log(`  [1] ANALYTIC, MIXED BASIS — gross expected loss over NET-funded premium + admin`);
+console.log(`      mean ${(ma * 100).toFixed(2)}%  — NOT comparable to the retired 66.8% target; see header`);
 console.log(`      enrolled-book neutral PP ${mean(glEnrolledPP).toFixed(4)} vs held full-roster ${deriveNeutralGlPurePremiumPer100(getPredefinedMarketMembers()).toFixed(4)} (ratio ${(mean(glEnrolledPP) / deriveNeutralGlPurePremiumPer100(getPredefinedMarketMembers())).toFixed(4)} — the accepted ~0.7% composition effect, Correction 1)`);
-if (MODE === '6b') {
-  console.log(`      HARD ASSERT ${note(Math.abs(ma - 0.668) <= 0.02, `GL ANALYTIC gross loss ratio ${(ma * 100).toFixed(2)}% outside 66.8% +/- 2pp`)}`);
-} else {
-  console.log(`      [6a] not asserted — the OLD GL pure premium is still in place here; 6b flips it.`);
-}
 console.log(`  [2] REALIZED, GROUND-UP — REPORTED, NOT GATED (GL's blended CV is 29.55 post-rebuild)`);
 console.log(`      mean ${(m * 100).toFixed(2)}%   95% CI +/-${(ci * 100).toFixed(2)}pp across ${perSeedGlGross.length} seeds`);
 console.log(`      realized/analytic ratio ${mean(glDrawOverExp).toFixed(4)} over ${glDrawOverExp.length} GL line-years (finite-sample tail bias: heavy-tailed sample means sit low, repaid by rare huge draws)`);

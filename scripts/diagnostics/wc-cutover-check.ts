@@ -6,37 +6,78 @@
 // grossUltimateLoss, surplus reconciles, no non-finite fields — and that the
 // pricing lands where it should.
 //
-//   npx tsx scripts/diagnostics/wc-cutover-check.ts 6b   # assert the ratio
+//   npx tsx scripts/diagnostics/wc-cutover-check.ts
 //
-// ⚠ MODE 6b IS RED AND THE SWEEP HAS NEVER SEEN IT. scripts/gates.ts runs this
-// file with NO ARGUMENT, which is mode 6a, and the 66.8% analytic assertion
-// below is inside `if (MODE === '6b')`. So the repo contains a hard assertion
-// that fails and reports green. Measured at d1cef12, BEFORE the WC volatility
-// work and in a clean worktree: ANALYTIC gross basis 112.21% against a 66.8%
-// target, a 45pp gap. This is NOT a consequence of the year factor — the null
-// arm (shape at 1e9, Vg to zero) reads 112.24% and the parent commit reads
-// 112.21%. The year factor moves it to 115.47%, a +3.3pp contribution, through
-// the reinsurance risk load in the premium denominator.
+// ============================================================================
+// ⚠ THE 66.8% ANALYTIC-RATIO ASSERTION WAS DELETED HERE, AND THIS IS THE RECORD
+// OF WHY. It is a deletion of DEAD CODE, not a retreat from a check: it sat
+// behind `process.argv[2] === '6b'`, scripts/gates.ts spawns every gate as
+// `npx tsx <script>` with NO ARGUMENT AND NO ARGUMENT MECHANISM AT ALL, so the
+// assertion was unreachable from the registry from the moment it was written.
+// It has never run in a sweep and could not have.
 //
-// RECORDED RATHER THAN FIXED, deliberately: whatever put the analytic ratio 45pp
-// above its target is a pricing question that predates this work and closing it
-// is its own ruling. What must not happen again is it being invisible. Do not
-// "fix" this by deleting the 6b branch.
-//   npx tsx scripts/diagnostics/wc-cutover-check.ts      # 6a: report only
+// WHAT THE TARGET WAS. 66.8% is gross / (gross x 1.346 + 0.15 x gross) — one
+// over 1.496 — a GROSS-FUNDED pool at the old 75%-confidence default, where
+// 1.346 was that default's CLF and 0.15 the admin load on gross. Funding is NET
+// now and the default CLF is exactly 1.000, so NEITHER INPUT SURVIVES.
+//
+// IT WAS CORRECT AT THE CUTOVER AND DRIFTED, IN TWO STEPS. Measured in clean
+// worktrees at each commit:
+//
+//     9673b2d  this harness promoted            67.40%   passes
+//     a21d01b  CLF default 1.346 -> 1.000       86.05%   +18.7pp
+//     d80aa9e  expected loss ratios -> net      112.47%  +26.4pp
+//
+// and the arithmetic reproduces both steps: 1/(1.000 + 0.15) = 87.0% against
+// 86.05% measured, then net/gross ~ 0.73 giving ~110% against 112.47%. The
+// registry was added at b5acdaa, ELEVEN DAYS AFTER the second break, so no
+// sweep ever saw a passing 6b.
+//
+// ⚠ THE PRICING IS NOT WRONG, AND TWO INDEPENDENT REBUILDS SAY SO. Rebuilding
+// the denominator on the TARGET's own basis — gross-funded at 1.346 plus admin —
+// gives 66.81% against a 66.84% target. And simply pairing the gross numerator
+// with the denominator that matches it gives 67.24%. The 45pp was entirely the
+// denominator: it was poolPremiumAndAdminExpense, which is NET-funded premium
+// plus admin and EXCLUDES reinsuranceCost — about 41% of the total charge, and
+// the exact price of the cession that makes the numerator's gross differ from
+// net. The check billed the pool for gross losses while crediting it only the
+// net premium and none of what it paid to cede the difference.
+//
+// ⚠ HOW TO HAVE THE ASSERTION BACK, IN AN HOUR RATHER THAN A REDISCOVERY:
+//   1. numerator   expectedWcGrossLossForPricing(memberList, {riskQualityOverride: 5, kLine: 1})
+//                  — unchanged, this part was always right;
+//   2. denominator x.totalMemberCharge, NOT x.poolPremiumAndAdminExpense;
+//   3. assert |ratio - 0.668| <= 0.02, with NO argv branch so the registry runs it.
+// On that pairing it reads 67.24% (67.90% on the book's own RQ and k_line rather
+// than the neutral basis), inside the +/-2pp band. THE 66.8% CONSTANT ITSELF
+// NEEDS NO CHANGE — it is the loading structure's target and the loading
+// structure still meets it.
+//
+// ⚠ AND gl-cutover-check.ts CARRIED THE IDENTICAL CONSTRUCTION, reading 139.21%.
+// Deleted in the same commit, for the same reason, with the same route back.
+//
+// ⚠ WHAT IS NOW UNASSERTED, STATED PLAINLY SO THE GAP IS VISIBLE RATHER THAN
+// ASSUMED COVERED. NOTHING checks the LOADING STRUCTURE — that funded loss,
+// admin expense and reinsurance cost compose into the member charge in the
+// right proportions. That is what 66.8% was about, and no other gate tests it.
+// The engine's expectedCombinedRatio reads exactly 100.0000%, and THAT IS NOT
+// COVERAGE: at CLF 1.000 it is a closed identity, because poolPremium +
+// adminExpense + reinsuranceCost IS totalMemberCharge by construction. It would
+// read 100.0000% just as exactly if every one of those three components were
+// individually wrong. Do not cite it as evidence the loading is right.
+// ============================================================================
 //
 // THE TWO-PART LOSS-RATIO CHECK (see docs/PROJECT_STATE_SUMMARY.md section 3).
-// Pricing correctness decomposes into two independent propositions, and
-// asserting them separately is STRICTER than asserting their product on a
-// noisy realized mean:
+// Pricing correctness decomposes into two independent propositions:
 //   (a) draw == analytic expectation — invariant 1, asserted by
-//       wc-claim-check.ts at full-market scale.
-//   (b) analytic ratio == 66.8%      — the finding-6 constraint, HARD
-//       ASSERTED here; deterministic given the roster, zero draw noise.
-// Together they imply realized ~ 66.8% IN EXPECTATION. The realized figure is
-// REPORTED and flagged only if it drifts outside its own CI of the analytic,
-// which WOULD be a genuine draw/expectation bug. Do not "restore" a +/-2pp
-// band on the realized mean: WC's catastrophic annuity tier is lumpy enough
-// that such a band fails on correct pricing about as often as not.
+//       wc-severity-rebuild-check.ts at full-market scale.
+//   (b) analytic ratio == 66.8%      — the finding-6 constraint, DELETED here;
+//       see the record above for what it was and how to restore it.
+// The realized figure is REPORTED and flagged only if it drifts outside its own
+// CI of the analytic, which WOULD be a genuine draw/expectation bug. Do not
+// "restore" a +/-2pp band on the realized mean: WC's catastrophic annuity tier
+// is lumpy enough that such a band fails on correct pricing about as often as
+// not.
 import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
@@ -51,9 +92,6 @@ const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
 const sd = (xs: number[]) => Math.sqrt(xs.reduce((a, b) => a + (b - mean(xs)) ** 2, 0) / Math.max(1, xs.length - 1));
 const fmt$ = (x: number) => `$${(x / 1e6).toFixed(2)}M`;
 const problems: string[] = [];
-// 6a runs with the OLD pure premium still in place, so the loss ratio is
-// EXPECTED to be wrong there; only 6b asserts it.
-const MODE = process.argv[2] === '6b' ? '6b' : '6a';
 const note = (ok: boolean, m: string) => { if (!ok) problems.push(m); return ok ? 'OK' : 'FAIL'; };
 
 const SEEDS = Array.from({ length: 40 }, (_, i) => (((i + 1) * 2654435761) >>> 0).toString(36).toUpperCase().padStart(8, '0').slice(0, 8));
@@ -188,22 +226,18 @@ console.log('\n--- THE YEAR FACTOR IS MEAN-ONE ---');
   }
 }
 
-// --- the two-part 6b check (same decomposition GL uses) --------------------
+// --- the loss-ratio decomposition, REPORTED ---------------------------------
 // (a) draw == analytic expectation is asserted by wc-severity-rebuild-check.ts,
 // on the $1M-CAPPED basis, at full-market scale (wc-claim-check.ts was deleted
-// with the tier model); (b) the ANALYTIC gross-basis ratio == 66.8% is asserted
-// here, deterministic given the roster. Together they imply realized ~ 66.8%
-// in expectation. The realized mean is REPORTED, not gated: WC's catastrophic
-// annuity tier is lumpy enough that a +/-2pp band around it is noise-limited.
+// with the tier model). (b) the analytic-ratio assertion is GONE — see the
+// header for the target's derivation, the two commits that broke it, and the
+// three-line route back. The number is still printed, and it is printed on a
+// MIXED BASIS: a gross numerator over a net-funded denominator. It is a
+// diagnostic, not a pricing verdict, and is labelled so.
 const mg = mean(wcGrossLR), sg = sd(perSeedGross), cig = 1.96 * sg / Math.sqrt(perSeedGross.length);
 const ma = mean(wcAnalyticLR);
-console.log(`  [1] ANALYTIC gross basis (enrolled book's own expected loss, no draw noise)`);
-console.log(`      mean ${(ma * 100).toFixed(2)}%  vs target 66.8%`);
-if (MODE === '6b') {
-  console.log(`      HARD ASSERT ${note(Math.abs(ma - 0.668) <= 0.02, `WC ANALYTIC gross loss ratio ${(ma * 100).toFixed(2)}% outside 66.8% +/- 2pp`)}`);
-} else {
-  console.log(`      [6a] not asserted — OLD pure premium still in place.`);
-}
+console.log(`  [1] ANALYTIC, MIXED BASIS — gross expected loss over NET-funded premium + admin`);
+console.log(`      mean ${(ma * 100).toFixed(2)}%  — NOT comparable to the retired 66.8% target; see header`);
 console.log(`  [2] REALIZED gross basis (reported, not gated — catastrophic annuity lumpiness)`);
 console.log(`      mean ${(mg * 100).toFixed(2)}%   95% CI +/-${(cig * 100).toFixed(2)}pp across ${perSeedGross.length} seeds`);
 // ⚠ THIS IS NOW GENUINELY REPORTED, MATCHING THE COMMENT ABOVE IT. It used to
