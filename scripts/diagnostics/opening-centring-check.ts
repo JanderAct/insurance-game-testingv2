@@ -72,15 +72,41 @@
 // only cleared one. THE EFFECT: the drift this was written for ran +0.19 on WC
 // and +0.29 on Property, 49% and 52% of their band widths — so any tolerance
 // under ~40% catches it. THE NOISE: the thing being tested is a MEDIAN of a wide
-// distribution, and it has real sampling error. Bootstrap SE at 800 seeds is
-// 0.015 / 0.031 / 0.046 per line, so at this file's 400 it is about 0.021 /
-// 0.044 / 0.065 — which is 5% / 8% / 11% of the respective band widths.
+// distribution, and it has real sampling error.
 //
-// A 15% tolerance, which is what this file shipped with on its first draft,
-// would be 1.4-3 SE and would flap on noise alone. 25% is 2.3-4.8 SE and still
-// catches a 49% drift at nearly twice over. Raising SEEDS tightens the SE as
-// 1/sqrt(n) if a future reader wants a tighter gate; lowering it does the
-// opposite and the tolerance must follow.
+// ⚠ THE NOISE HALF OF THAT WAS ARITHMETICALLY WRONG AND THE GATE HAS BEEN
+// FLAPPING BECAUSE OF IT. This paragraph read: "Bootstrap SE at 800 seeds is
+// 0.015 / 0.031 / 0.046 per line, so at this file's 400 it is about 0.021 /
+// 0.044 / 0.065 — which is 5% / 8% / 11% of the respective band widths ... 25%
+// is 2.3-4.8 SE". It then listed the band widths as "WC 0.39, GL 0.58, Property
+// 0.57". THOSE ARE THE BANDS' UPPER BOUNDS, NOT THEIR WIDTHS. WC's band is
+// [0.2667, 0.3921], width 0.1254 — not 0.39. Property's figure coincided only
+// because its lower bound is 1.13, which is why the error survived.
+//
+// On the real widths, and using the SE this file PRINTS rather than an
+// extrapolated bootstrap, at 400 seeds:
+//
+//     line       SE     band width   SE/width   25% tolerance in SE
+//     WC       0.020      0.1254       16%            1.57
+//     GL       0.024      0.1928       12%            2.01
+//     Property 0.035      0.5700        6%            4.07
+//
+// So the tolerance was 1.6-4.1 SE, not 2.3-4.8, and WC's 1.57 SE is inside the
+// range this file itself calls "would flap on noise alone". It duly flapped: WC
+// went red at +0.034, 1.7 SE, and three independent measurements of the SAME
+// quantity at the SAME shipped pin read -0.0130 (600 seeds), +0.0336 (400) and
+// -0.0056 (2,400). The last is the true value and the pin was never off.
+//
+// ⚠ THE FIX IS THE SAMPLE, NOT THE TOLERANCE, AND NOT THE PIN. The rule at the
+// foot of this block says a red means re-solve K rather than widen the
+// threshold. Both of those are wrong for a 1.7 SE reading: re-solving on it
+// chases noise, and it produced a 16% disagreement between two seed families
+// (0.2949 against 0.3417) when tried. SEEDS goes to 1,600, which is 4x and puts
+// WC at 3.14 SE, GL at 4.02 and Property at 8.1 — every line past 3 SE, where a
+// red means something. Cost is ~57s -> ~230s in the sweep.
+//
+// Raising SEEDS tightens the SE as 1/sqrt(n) if a future reader wants a tighter
+// gate; lowering it does the opposite and the tolerance must follow.
 //
 // ⚠ THE GATE IS THE POINT, THE THRESHOLD IS NOT. If a future engine change trips
 // this at 0.26, the answer is to re-solve K — STARTING_CAPITAL_TO_PREMIUM's
@@ -95,7 +121,7 @@ import { OPENING_SURPLUS_BAND, STARTING_CAPITAL_TO_PREMIUM } from '../../src/dat
 import type { CoverageLine, GameInstance, GameSetupSettings } from '../../src/types/simulation';
 
 const LINES: CoverageLine[] = ['WC', 'GL', 'Property'];
-const SEEDS = Number(process.env.SEEDS ?? 400);
+const SEEDS = Number(process.env.SEEDS ?? 1600);
 /** Tolerance as a share of each band's own width — see the header. */
 const TOL_BAND_WIDTHS = 0.25;
 
