@@ -700,39 +700,128 @@ export const SATISFACTION = {
    * quarter of that is -0.027, which needs w = 0.024.
    *
    * WHAT THAT LEAVES: the ladder spans Deficient -2 steps to Strong +1, so end to
-   * end it is worth 0.072 points against the funding slider's own 0.41. That is
-   * 18% of the funding mechanic — smaller than the first two attempts wanted,
-   * and it is what the requirement permits: this term responds to the same
-   * decision the market level responds to, in the opposite direction, so every
-   * point of weight it carries is taken straight out of the player's main lever.
-   * member-satisfaction-check asserts BOTH halves — the decision stays visible,
-   * and the cancellation stays inside the quarter.
+   * end it is worth 0.141 points against the funding slider's own 0.41. That is
+   * 34% of the funding mechanic, and it is what the requirement permits: this
+   * term responds to the same decision the market level responds to, in the
+   * opposite direction, so every point of weight it carries is taken straight
+   * out of the player's main lever. member-satisfaction-check asserts BOTH
+   * halves — the decision stays visible, and the cancellation stays inside the
+   * quarter.
+   *
+   * ⚠ RE-SOLVED AT 0.0469 WHEN surplusComfortable MOVED, AND THE BOUND DID NOT
+   * CHANGE. The ruling is still a quarter. What moved is the boundary: solved to
+   * the median of default play it sits at 0.2399 instead of 1.15, so a funding
+   * stop now crosses FEWER band steps for the same weight, and more weight fits
+   * under the same quarter. Bisected over [0, 0.20] on the SOLVED boundary,
+   * seven passes, 24 games:
+   *
+   *     w = 0.0250  ->  footprint -0.0701,  12.9% cancelled
+   *     w = 0.0469  ->  footprint -0.0607,  24.6% cancelled   <- shipped
+   *     w = 0.0484  ->  footprint -0.0601,  25.4% cancelled   <- breaches
+   *
+   * against a limb-off footprint of -0.0805. It is the largest value on that
+   * grid inside the bound, so the headroom is 0.4pp BY CONSTRUCTION and section
+   * 6 will assert at 24.6% against 25.0%. That is deliberate: both quantities
+   * are seeded and deterministic, so the gate is stable at that margin, and any
+   * change to the book that moves the footprint trips it immediately rather than
+   * eroding the bound quietly. A tripwire that sits against its bound is doing
+   * its job.
+   *
+   * ⚠ THE ORDER MATTERS AND THE SOLVER ENFORCES IT. This is solved ON the
+   * boundary, because cancellation depends on how many band steps a funding stop
+   * crosses and that depends on where the boundary sits. Solving the two
+   * independently, or this one first, gives a weight calibrated against a ladder
+   * that is about to move.
+   *
+   * ⚠ WHAT TRIGGERS A RE-SOLVE, CHECKABLY, IN ORDER:
+   *   1. surplusComfortable changing AT ALL. This value is solved on that
+   *      boundary, so a new boundary makes it stale by construction — there is
+   *      no tolerance to quote.
+   *   2. Section 6's CANCELLATION line leaving 20-25%. Below 20% the term has
+   *      lost weight the bound would allow it; above 25% it breaches the ruling.
+   *      Re-solve from the measurement. DO NOT RELAX THE BOUND — that has been
+   *      the wrong answer twice, and the gate says so in its own failure text.
+   *   3. The limb-off footprint (the same line's `surplusWeight at 0` figure)
+   *      moving more than 20% from -0.0805, which is the denominator the
+   *      quarter is a quarter OF.
+   *
+   * ⚠ AND IT CANNOT BE EXPRESSED RELATIVELY EITHER, FOR A DIFFERENT REASON THAN
+   * THE BOUNDARY'S. This weight multiplies a DISCRETE numerator — band steps
+   * crossed — over a CONTINUOUS denominator, the footprint in satisfaction
+   * points. No fixed ratio between them survives a book change, because the step
+   * count changes in jumps while the footprint changes smoothly. What IS already
+   * relative is the RULE: "a quarter of the footprint." That is why the bound
+   * never went stale while the value solved against it did. Term 3's spread
+   * could be stated relatively (see lossLevelWeight) precisely because its
+   * target is a continuous quantity both sides share.
    */
-  surplusWeight: 0.024,
+  surplusWeight: 0.0469,
   /**
    * Where "comfortably above the requirement" sits, in units of
    * excessCapitalRatio = (availableSurplus - reserveRiskMarginNeeded) /
    * reserveRiskMarginNeeded.
    *
-   * ⚠ MEASURED, AS THE MEDIAN OF DEFAULT PLAY ON THE TWO LINES WHERE THE
-   * QUANTITY DISCRIMINATES. 24 games x 10 years at all-default decisions the
-   * ratio reads median 1.279 on WC and 0.969 on GL, so a boundary at 1.15 puts
-   * a default-playing pool at the edge of the positive band about half the time.
-   * That is the same rule anchorCentre follows — the neutral point sits where
-   * DEFAULT play sits, so the term reports what the PLAYER did rather than what
-   * the game does on its own.
+   * THE RULE, WHICH IS WHAT TO RE-SOLVE FROM — NOT THE NUMBER: the MEDIAN of
+   * default play, pooled over the lines where this quantity DISCRIMINATES. That
+   * is the same rule anchorCentre follows — the neutral point sits where DEFAULT
+   * play sits, so the term reports what the PLAYER did rather than what the game
+   * does on its own. Anyone re-deriving this runs
+   *
+   *     SOLVE=1 npx tsx scripts/diagnostics/member-satisfaction-check.ts
+   *
+   * which prints the distribution by line and the pooled median, and writes
+   * nothing. Re-solve it; do not re-pick it.
+   *
+   * ⚠ MEASURED. 24 games x 10 years at all-default decisions, per member-year:
+   *
+   *     line        n        p25    MEDIAN       p75
+   *     WC       16020    -0.1308    0.1831    0.6511
+   *     GL       14830    -0.0263    0.4358    1.1258
+   *     Property 15350     1.2039    3.1115    5.6828   (excluded by the rule)
+   *
+   * Pooled over WC and GL, n 30850, median 0.2399.
+   *
+   * ⚠ AND THE VALUE THIS REPLACES WAS MEASURED ON A BOOK THAT NO LONGER EXISTS.
+   * The superseded note recorded median 1.279 on WC and 0.969 on GL and set the
+   * boundary at 1.15 on them. Those numbers were taken before the roster freeze,
+   * before NO_NEW_BUSINESS became the default appetite, and before
+   * STARTING_CAPITAL_TO_PREMIUM's fourth re-solve. The ratio's denominator is a
+   * RESERVE risk margin: with the book frozen at enrolment and no new business,
+   * reserves accumulate against a premium base that no longer grows, so the
+   * excess collapses relative to them. 1.15 is now reached by 10.9% of WC
+   * member-years and 24.9% of GL's — the band was saturating from the other
+   * side, which is the failure section 8(c) exists to catch.
+   *
+   * ⚠ WHAT TRIGGERS A RE-SOLVE, CHECKABLY: run the SOLVE mode above and compare
+   * its pooled median against this value. It is stale once they differ by more
+   * than 0.10 — which is not a round number but the WIDTH OF THE Thin BAND
+   * (surplusBandOf's -0.10 edge), the one length scale this ladder already
+   * contains. A drift smaller than the narrowest band cannot move a member
+   * across a boundary; a drift larger than it can. Anything that changes surplus
+   * accumulation relative to the reserve risk margin moves it: the starting
+   * capital ratios, the default appetite, the roster freeze, the reserve margin
+   * factors, the funding default. The 1.15 -> 0.2399 move was 0.91, nine times
+   * that trigger, and nothing was watching for it.
+   *
+   * ⚠ IT CANNOT BE EXPRESSED RELATIVELY, AND THAT IS WHY IT WENT STALE SILENTLY.
+   * There is no runtime distribution to normalise against: surplusBandOf sees
+   * ONE ratio, for one member-year, and a rolling quantile would both need new
+   * stored state and make a member's band depend on other line-years. So the
+   * RULE is relative and the VALUE is absolute, and only the rule survives a
+   * book change. The trigger above is the substitute for the normalisation this
+   * constant cannot have.
    *
    * ⚠ PROPERTY DOES NOT DISCRIMINATE AND IS EXCLUDED FROM THE DERIVATION RATHER
-   * THAN AVERAGED INTO IT. Its median ratio is 4.963 and 93% of its line-years
-   * would sit in the positive band at any boundary in this range. The reason is
-   * structural and is a real limitation of reading this quantity:
-   * reserveRiskMarginNeeded is a RESERVE risk margin, Property is short-tail so
-   * its reserves are small, and its actual exposure is a $75M catastrophe that
-   * this denominator does not measure at all. The term is therefore close to
-   * constant on Property, and that is a property of the measure rather than of
-   * the pool.
+   * THAN AVERAGED INTO IT. Its median ratio is 3.11 and 75% of its member-years
+   * sit in the positive band at the old boundary. The reason is structural and
+   * is a real limitation of reading this quantity: reserveRiskMarginNeeded is a
+   * RESERVE risk margin, Property is short-tail so its reserves are small, and
+   * its actual exposure is a $75M catastrophe that this denominator does not
+   * measure at all. The term is therefore close to constant on Property, and
+   * that is a property of the measure rather than of the pool. Pooling it in
+   * would drag the boundary up by its own irrelevance.
    */
-  surplusComfortable: 1.15,
+  surplusComfortable: 0.2399,
   /** The stock's bounds. Same [1, 10] the field has always carried. */
   floor: 1.0,
   ceiling: 10.0,
@@ -935,20 +1024,76 @@ export function memberLossStanding(
 // capitalAdequacyStatus at 0.25 / 0 / -0.10. So the quantity and the ladder both
 // existed; this reads them.
 //
-// ⚠ WHAT IS NOT REUSED IS THE TOP BOUNDARY, AND THE REASON IS MEASURED. The
-// shipped 0.25 was drawn for a solvency LABEL, and as a satisfaction band it is
-// saturated: 24 games x 10 years at defaults puts 89.6% of WC line-years, 75.8%
-// of GL's and 96.7% of Property's in "Strong". A band that contains nine
-// line-years in ten cannot report anything about the player. surplusComfortable
-// replaces only that edge, at the median of default play; the two boundaries
-// that carry an absolute meaning — at the requirement, and below it — are the
-// shipped ones untouched, because 0 needs no derivation.
+// ⚠ WHAT IS NOT REUSED IS THE TOP BOUNDARY. surplusComfortable replaces only
+// that edge, at the median of default play; the two boundaries that carry an
+// absolute meaning — at the requirement, and below it — are the shipped ones
+// untouched, because 0 needs no derivation.
+//
+// ⚠ THE REASON RECORDED HERE FOR NOT REUSING 0.25 WAS MEASURED, WAS TRUE, AND IS
+// NO LONGER TRUE. It read: the shipped 0.25 was drawn for a solvency LABEL, and
+// as a satisfaction band it is saturated — 24 games x 10 years at defaults put
+// 89.6% of WC line-years, 75.8% of GL's and 96.7% of Property's in "Strong",
+// and a band holding nine line-years in ten reports nothing about the player.
+// On the CURRENT book that is false. The same measurement now puts the pooled
+// median of default play at 0.2399, within 0.01 of the shipped 0.25, so the
+// ladder's own boundary would today be very nearly the derived one. The cause is
+// the one that moved surplusComfortable: the roster freeze and NO_NEW_BUSINESS
+// collapsed the excess relative to a reserve risk margin that keeps
+// accumulating.
+//
+// ⚠ AND THE CONSTANT STAYS SEPARATE ANYWAY, BECAUSE THE AGREEMENT IS A
+// COINCIDENCE AND NOT A DERIVATION. capitalAdequacyStatus's 0.25 is a solvency
+// threshold: it does not move when default play moves, and it was not chosen to
+// sit at a median. Aliasing this boundary to it would read as a shared rule and
+// is not one — the two would part company again at the next book change, and
+// this one would go stale with nothing pointing at it. Two constants that
+// happen to agree are cheaper to maintain than one constant asked to mean two
+// things.
 //
 // ⚠ THE RATIO IS LAST YEAR'S, NOT THIS YEAR'S, AND THAT IS DELIBERATE TWICE
 // OVER. The satisfaction pass runs several hundred lines before the capital
 // block, so this year's ratio does not exist yet — and it should not be used
 // even if it did: the balance sheet a member can see when their bill arrives is
 // the one that closed last year.
+//
+// ⚠ THIS LIMB IS A DRIFT SOURCE BY CONSTRUCTION, IT IS THE LARGEST ONE AT
+// DEFAULTS, AND RE-SOLVING IT MADE THE DRIFT BIGGER RATHER THAN SMALLER. A LEVEL
+// term reading a TRENDING quantity produces a trend in the anchor, and
+// excessCapitalRatio trends upward through a game: the book is frozen at
+// enrolment, so surplus accumulates against a premium base that does not grow.
+// Measured over 24 games x 10 years at all-default decisions, the mean band step
+// and what it adds to the anchor per game year:
+//
+//     line       band step/yr   anchor pts/yr at 1.15/0.024   at 0.2399/0.0469
+//     WC            +0.0530            +0.00068                   +0.00248
+//     GL            +0.1134            +0.00252                   +0.00532
+//     Property      -0.0538            -0.00122                   -0.00252
+//
+// The stock closes 20.6% of its distance to the anchor per year, so it tracks a
+// standing anchor trend at a lag. On WC and GL the observed drift comes in at
+// about 0.6x the anchor trend — +0.0004 -> +0.0014 and +0.0044 -> +0.0062 across
+// the re-solve, against predictions of +0.00248 and +0.00532 — so this limb
+// accounts for essentially all of the drift on both lines, before and after.
+// GL's +0.0062 is 31% of member-satisfaction-check's 0.020 bound.
+//
+// ⚠ AND THE BOUNDARY WAS NEVER THE CAUSE, WHICH IS WORTH SAYING BECAUSE IT LOOKS
+// LIKE IT SHOULD HAVE BEEN. Moving the boundary to the median does not remove
+// the trend; it moves more member-years onto the rising side of it, and doubling
+// the weight doubles what the trend is worth. Removing this drift would mean
+// reading a DETRENDED ratio — a quantity relative to its own history rather than
+// to a fixed boundary — which is the rolling-quantile plumbing surplusComfortable
+// is recorded as not having. The drift is a known, bounded, measured cost of
+// reading an absolute boundary, not a calibration error.
+//
+// ⚠ PROPERTY'S DRIFT IS NOT THIS LIMB, AND THE SIGN PROVES IT. The limb's own
+// contribution there became MORE negative across the re-solve (-0.00122 ->
+// -0.00252) while the observed drift became LESS negative (-0.0035 -> -0.0028).
+// Whatever drives Property's drift is elsewhere and this term partly offsets it.
+// Note also that Property's mean band step FALLS while its median ratio RISES
+// (+0.2571/yr): catastrophe years drop a few member-years to Deficient at -2,
+// and a widening left tail drags the mean down under a rising middle. On
+// Property the mean and the median of this band point in opposite directions
+// over a game, which is another face of the same measure problem below.
 //
 // ⚠ FLICKER IS REAL AND THE ANCHOR IS WHAT ABSORBS IT. Measured band-change
 // rates per consecutive year pair at defaults: 13.0% WC, 18.5% GL, 6.9%

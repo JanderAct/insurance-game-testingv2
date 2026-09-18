@@ -373,7 +373,8 @@ if (process.env.SOLVE) {
     return mean(fps);
   };
   const fp0 = footprintAt(0);
-  console.log(`    footprint with the limb OFF: ${fp0.toFixed(4)} points over ${through} years`);
+  console.log(`    footprint with the limb OFF: ${fp0.toFixed(4)} points, measured at year ${through} — `
+    + `the decision year ${DECISION_YEAR} and the five after it, which is six years and not ${through}`);
   const TARGET = 0.25;
   let lo = 0, hi = 0.20, solvedW = 0;
   console.log('    pass     w        footprint   cancelled');
@@ -811,24 +812,46 @@ console.log(`\n--- 6. one blameless member, one stop on the funding slider in ye
   // the funding decision it responds to — and that constant was wrong twice by
   // arithmetic before it was solved from this measurement. So the measurement is
   // the gate, not the arithmetic.
+  //
+  // ⚠ AND BOTH SIDES OF THE RATIO ARE THE LINE MEAN, WHICH THEY WERE NOT UNTIL
+  // THE WEIGHT WAS RE-SOLVED. This block used to divide `fp` — the mean across
+  // games of ONE selected member's six-year delta, the figure the trace above
+  // prints — by a limb-off footprint measured as the mean across games of the
+  // LINE-MEAN delta. Two different estimators, and the mismatch ran lenient:
+  // at the then-shipped weight the mixed ratio read 11% where the matched one
+  // reads 12.9%. opening-pin-solve's header states the rule this broke — "a pin
+  // solved against a different estimator than the one that asserts is a pin that
+  // fails its own gate" — and the SOLVE mode below bisects on the line mean, so
+  // this is the side that had to move. The single-member figure stays in the
+  // TRACE, where it is a display of one member's path; the BOUND is about the
+  // decision's footprint on the membership, which is the population quantity and
+  // the lower-variance one. Fixing it is not a relaxation: the superseded weight
+  // passes under both readings, 11% and 12.9%, and the check below is stricter
+  // than the one it replaces.
   {
     const keep = SATISFACTION.surplusWeight;
+    const lineMeanFootprint = (rows: LineYear[][], base: LineYear[][]) => {
+      const out: number[] = [];
+      for (let g = 0; g < GAMES; g++) {
+        const b = base[g].filter(x => x.line === 'WC').slice(0, through);
+        const d = rows[g].filter(x => x.line === 'WC').slice(0, through);
+        if (b.length < through || d.length < through) continue;
+        out.push(mean(d[through - 1].members.map(m => m.satisfaction))
+          - mean(b[through - 1].members.map(m => m.satisfaction)));
+      }
+      return mean(out);
+    };
+    const fpShipped = lineMeanFootprint(decided, baseline);
     SATISFACTION.surplusWeight = 0;
     const noSurplus = Array.from({ length: GAMES }, (_, g) => playDecision(g, DECISION_YEAR));
     const noBase = Array.from({ length: GAMES }, (_, g) => play(g, false));
     SATISFACTION.surplusWeight = keep;
-    const fps0: number[] = [];
-    for (let g = 0; g < GAMES; g++) {
-      const b = noBase[g].filter(x => x.line === 'WC').slice(0, through);
-      const d = noSurplus[g].filter(x => x.line === 'WC').slice(0, through);
-      if (b.length < through || d.length < through) continue;
-      fps0.push(mean(d[through - 1].members.map(m => m.satisfaction))
-        - mean(b[through - 1].members.map(m => m.satisfaction)));
-    }
-    const fp0 = mean(fps0);
-    const cancelled = fp0 !== 0 ? 1 - Math.abs(fp) / Math.abs(fp0) : 0;
-    console.log(`  CANCELLATION: the same decision with surplusWeight at 0 reads ${fp0.toFixed(4)}, against `
-      + `${fp.toFixed(4)} shipped — the surplus limb cancels ${(100 * cancelled).toFixed(0)}% of it`);
+    const fp0 = lineMeanFootprint(noSurplus, noBase);
+    const cancelled = fp0 !== 0 ? 1 - Math.abs(fpShipped) / Math.abs(fp0) : 0;
+    console.log(`  CANCELLATION, line mean on both sides: the same decision with surplusWeight at 0 reads `
+      + `${fp0.toFixed(4)}, against ${fpShipped.toFixed(4)} shipped — the surplus limb cancels `
+      + `${(100 * cancelled).toFixed(1)}% of it`);
+    console.log(`    (the trace above follows ONE member, ${fp.toFixed(4)}; the bound is about the line)`);
     const okCancel = cancelled <= 0.25 + 1e-9;
     console.log(`  the surplus limb cancels at most a quarter of the funding decision: ${okCancel ? 'OK' : 'FAIL'}`);
     if (!okCancel) {
@@ -949,10 +972,14 @@ console.log('\n--- 8. term 3\'s spread and term 4\'s bands, against their own de
   console.log(`  on WC and GL the band is not saturated (>=30% outside its commonest band): ${okBands ? 'OK' : 'FAIL'}`);
   if (!okBands) {
     failures.push(`the surplus band sits in one bucket for more than 70% of member-years on WC and GL. `
-      + `That is why the shipped capitalAdequacyStatus ladder was NOT reused as-is — its 0.25 boundary put `
-      + `89.6% / 75.8% / 96.7% of line-years in "Strong" — and SATISFACTION.surplusComfortable was derived `
-      + `at the median of default play to avoid exactly this. A band that holds nine member-years in ten `
-      + `reports nothing about the player.`);
+      + `SATISFACTION.surplusComfortable is derived at the median of default play to avoid exactly this, `
+      + `and a band that holds nine member-years in ten reports nothing about the player. THIS FIRES FROM `
+      + `EITHER SIDE and the direction tells you which: a boundary far BELOW default play saturates into `
+      + `"Strong" (the shipped capitalAdequacyStatus 0.25 did that once, 89.6% / 75.8% / 96.7% of `
+      + `line-years, on a book with a growing premium base), and a boundary far ABOVE it saturates into `
+      + `"Adequate" and below (1.15 was heading there — 10.9% of WC member-years reached it — once the `
+      + `roster freeze and NO_NEW_BUSINESS collapsed the excess against an accumulating reserve margin). `
+      + `Re-solve the boundary with SOLVE=1; do not widen this assertion.`);
   }
   console.log('  ⚠ PROPERTY IS EXPECTED TO SATURATE AND IS EXCLUDED FROM THAT ASSERTION ON PURPOSE.');
   console.log('    reserveRiskMarginNeeded is a RESERVE risk margin; Property is short-tail so its reserves');
