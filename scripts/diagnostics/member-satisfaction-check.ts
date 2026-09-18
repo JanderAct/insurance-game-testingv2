@@ -289,6 +289,111 @@ console.log(`${GAMES} games x ${YEARS} years. Change weight ${SATISFACTION.price
   + `stock clamped to [${SATISFACTION.floor}, ${SATISFACTION.ceiling}].\n`);
 
 const baseline = Array.from({ length: GAMES }, (_, g) => play(g, false));
+// ============================================================================
+// ⚠ SOLVE MODE — SOLVE=1 RE-DERIVES THE TWO SURPLUS-LIMB CONSTANTS AND EXITS.
+//
+//   SOLVE=1 npx tsx scripts/diagnostics/member-satisfaction-check.ts
+//
+// It lives INSIDE the gate rather than beside it, and that is deliberate. Both
+// constants are solved against measurements this file already makes — the median
+// surplus ratio it bands in section 8(c), and the six-year footprint it measures
+// in section 6. A separate solver would have to reimplement the footprint, and
+// opening-pin-solve's own header records what that costs: "a pin solved against a
+// different estimator than the one that asserts is a pin that fails its own
+// gate." Solve through the gate's estimator.
+//
+// It changes nothing when unset.
+// ============================================================================
+if (process.env.SOLVE) {
+  const solveBase = Array.from({ length: GAMES }, (_, g) => play(g, false));
+  const med = (v: number[]) => { const t = [...v].sort((a, b) => a - b); const i = (t.length - 1) / 2;
+    return t.length % 2 ? t[i] : (t[Math.floor(i)] + t[Math.ceil(i)]) / 2; };
+
+  console.log(RULE);
+  console.log(`SURPLUS-LIMB SOLVE — ${GAMES} games x ${YEARS} years at defaults`);
+  console.log(RULE);
+
+  // --- (1) surplusComfortable = the median of default play, on the lines that
+  //     discriminate. Property is excluded BY THE RULE, not by convenience: its
+  //     reserve-based denominator does not measure its catastrophe exposure, so
+  //     its ratio runs a median near 5 and no boundary in range discriminates.
+  console.log('\n--- 1. surplusComfortable — the median of default play ---');
+  console.log('    line       n     p25      MEDIAN      p75     current boundary   share above');
+  const ratiosBy: Record<string, number[]> = {};
+  for (const run of solveBase) {
+    for (const ly of run) {
+      for (const mv of ly.moves) {
+        if (mv.surplusRatio === null || !Number.isFinite(mv.surplusRatio)) continue;
+        (ratiosBy[ly.line] ??= []).push(mv.surplusRatio);
+      }
+    }
+  }
+  const qq = (v: number[], p: number) => { const t = [...v].sort((a, b) => a - b);
+    const i = (t.length - 1) * p; const lo = Math.floor(i), hi = Math.ceil(i);
+    return lo === hi ? t[lo] : t[lo] + (t[hi] - t[lo]) * (i - lo); };
+  const discriminating = ['WC', 'GL'];
+  for (const l of LINES) {
+    const v = ratiosBy[l] ?? [];
+    if (!v.length) continue;
+    const above = v.filter(x => x >= SATISFACTION.surplusComfortable).length / v.length;
+    console.log(`    ${l.padEnd(9)}${String(v.length).padStart(6)}${qq(v, 0.25).toFixed(4).padStart(9)}`
+      + `${med(v).toFixed(4).padStart(12)}${qq(v, 0.75).toFixed(4).padStart(9)}`
+      + `${SATISFACTION.surplusComfortable.toFixed(4).padStart(19)}`
+      + `${`${(100 * above).toFixed(1)}%`.padStart(13)}`
+      + `${discriminating.includes(l) ? '' : '   (excluded from the rule)'}`);
+  }
+  const pooled = discriminating.flatMap(l => ratiosBy[l] ?? []);
+  const solvedComfortable = med(pooled);
+  console.log(`\n    THE RULE: the median of default play, POOLED over the lines that discriminate`);
+  console.log(`    (WC and GL). Pooled n ${pooled.length}, median ${solvedComfortable.toFixed(4)}`);
+  console.log(`    -> surplusComfortable: ${SATISFACTION.surplusComfortable.toFixed(4)} -> ${solvedComfortable.toFixed(4)}`);
+
+  // --- (2) surplusWeight, bisected against the footprint AS IT NOW IS, holding
+  //     the <=25% cancellation bound. The bound is a ruling and is not re-solved.
+  console.log('\n--- 2. surplusWeight — bisected to the 25% cancellation bound ---');
+  console.log('    Measured on the SOLVED boundary, because the cancellation depends on how many');
+  console.log('    band steps a funding stop crosses and that depends on where the boundary sits.');
+  const keepC = SATISFACTION.surplusComfortable;
+  SATISFACTION.surplusComfortable = solvedComfortable;
+  const through = DECISION_YEAR + 5;
+  const footprintAt = (w: number) => {
+    const keep = SATISFACTION.surplusWeight;
+    SATISFACTION.surplusWeight = w;
+    const base = Array.from({ length: GAMES }, (_, g) => play(g, false));
+    const dec = Array.from({ length: GAMES }, (_, g) => playDecision(g, DECISION_YEAR));
+    SATISFACTION.surplusWeight = keep;
+    const fps: number[] = [];
+    for (let g = 0; g < GAMES; g++) {
+      const b = base[g].filter(x => x.line === 'WC').slice(0, through);
+      const d = dec[g].filter(x => x.line === 'WC').slice(0, through);
+      if (b.length < through || d.length < through) continue;
+      fps.push(mean(d[through - 1].members.map(m => m.satisfaction))
+        - mean(b[through - 1].members.map(m => m.satisfaction)));
+    }
+    return mean(fps);
+  };
+  const fp0 = footprintAt(0);
+  console.log(`    footprint with the limb OFF: ${fp0.toFixed(4)} points over ${through} years`);
+  const TARGET = 0.25;
+  let lo = 0, hi = 0.20, solvedW = 0;
+  console.log('    pass     w        footprint   cancelled');
+  for (let i = 0; i < 7; i++) {
+    const w = (lo + hi) / 2;
+    const fp = footprintAt(w);
+    const cancelled = fp0 !== 0 ? 1 - Math.abs(fp) / Math.abs(fp0) : 0;
+    console.log(`    ${String(i).padStart(4)}  ${w.toFixed(4)}   ${fp.toFixed(4).padStart(10)}`
+      + `${`${(100 * cancelled).toFixed(1)}%`.padStart(12)}`);
+    if (cancelled > TARGET) hi = w; else { lo = w; solvedW = w; }
+  }
+  SATISFACTION.surplusComfortable = keepC;
+  console.log(`\n    -> surplusWeight: ${SATISFACTION.surplusWeight.toFixed(4)} -> ${solvedW.toFixed(4)}`);
+  console.log(`    (largest w whose cancellation stays inside the ${(100 * TARGET).toFixed(0)}% bound)`);
+  console.log(`\n${RULE}`);
+  console.log('SOLVE ONLY — nothing written. Paste both into memberSatisfaction.ts by hand.');
+  console.log(RULE);
+  process.exit(0);
+}
+
 
 // --- 1. it moves ------------------------------------------------------------
 console.log('--- 1. the field moves ---');
