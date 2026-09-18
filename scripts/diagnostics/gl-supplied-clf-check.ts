@@ -16,8 +16,14 @@
 //   3. Every confidence level the UI can request falls INSIDE the supplied
 //      curve's 25-95 range, so no reachable slider position is answered by a
 //      clamp.
-//   4. WC's table still crosses where its own derivation puts it (42.9%),
-//      i.e. the GL swap did not reach it.
+//   4. WC's SUPPLIED curve crosses 1.000 at 55.8%, WC_DERIVED is retained beside
+//      it and still crosses at 42.9%, and WC's extension joins its measured part
+//      with no step in volatility.
+//
+// ⚠ THE NAME OF THIS FILE IS NOW HALF RIGHT. WC prices off a supplied real-pool
+// curve too, so this guards two substitutions rather than one. It was not renamed
+// because the file's git history is the record of six moves in WC's crossing and
+// a rename would cost more than the wrong name does.
 //
 // WHAT IS MEASURED AND REPORTED (not gated — it is a property of a placeholder,
 // and gating on it would just encode the placeholder):
@@ -29,13 +35,40 @@ import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import {
-  STATIC_CLF_TABLE, GL_DERIVED, crossingOf, clfFromTable,
+  STATIC_CLF_TABLE, GL_DERIVED, WC_DERIVED, crossingOf, clfFromTable,
 } from '../../src/data/clfTables';
 import { SLIDER_RANGES } from '../../src/data/defaultAssumptions';
 import type { CoverageLine, GameState } from '../../src/types/simulation';
 
 const GAMES = Number(process.env.GAMES ?? 1000);
 const YEARS = 10;
+
+// Inverse normal CDF (Acklam), used only to check WC's extension for a step at
+// its join. Local to this file because nothing in src needs it.
+function probit(p: number): number {
+  const a = [-3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02,
+    1.383577518672690e+02, -3.066479806614716e+01, 2.506628277459239e+00];
+  const b = [-5.447609879822406e+01, 1.615858368580409e+02, -1.556989798598866e+02,
+    6.680131188771972e+01, -1.328068155288572e+01];
+  const c = [-7.784894002430293e-03, -3.223964580411365e-01, -2.400758277161838e+00,
+    -2.549732539343734e+00, 4.374664141464968e+00, 2.938163982698783e+00];
+  const d = [7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e+00,
+    3.754408661907416e+00];
+  const pl = 0.02425, ph = 1 - pl;
+  let q: number;
+  if (p < pl) {
+    q = Math.sqrt(-2 * Math.log(p));
+    return (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) / ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+  }
+  if (p > ph) {
+    q = Math.sqrt(-2 * Math.log(1 - p));
+    return -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) / ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
+  }
+  q = p - 0.5;
+  const r = q * q;
+  return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q /
+    (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);
+}
 
 // ⚠ THE VERDICT NAMES WHAT FAILED. IT USED TO COUNT. A bare "N CHECK(S) FAILED"
 // at the end of a long report makes the reader scroll back for the FAIL lines,
@@ -63,7 +96,12 @@ console.log('=== GL SUPPLIED CLF CURVE ===\n');
 
 console.log('--- 1. THE SUPPLIED CURVE ITSELF ---');
 check(supplied.source === 'supplied', 'GL table is tagged `supplied`, not `derived`');
-check(wc.source === 'derived', 'WC table is still tagged `derived`');
+// ⚠ WC IS NOW SUPPLIED TOO, SO THIS ASSERTION CHANGED SIDES. It used to read
+// `derived` and was half of how this file proved the GL swap had not reached WC.
+// WC now prices off its own supplied real-pool curve, so the tag it must carry is
+// `supplied`; the isolation claim is carried entirely by assertion 2 below, which
+// is the one that was always doing that work.
+check(wc.source === 'supplied', 'WC table is tagged `supplied`, not `derived`');
 {
   let mono = true;
   for (let i = 1; i < supplied.clf.length; i++) if (supplied.clf[i] <= supplied.clf[i - 1]) mono = false;
@@ -147,9 +185,46 @@ check(wc.source === 'derived', 'WC table is still tagged `derived`');
   // tautology catches nothing. An ACCIDENTAL edit to WC's table is exactly what
   // this catches, and it has to be updated deliberately when WC moves on purpose.
   // Four firings, four deliberate WC changes, zero false alarms.
-  check(Math.abs(crossingOf(wc) - 0.429) < 0.002,
-    'WC still crosses where its own derivation puts it (42.9%) — the GL swap did not reach it',
+  //
+  // ⚠ SEVENTH MOVE, 42.9% -> 55.8%, AND THIS ONE IS NOT A RE-DERIVATION AT ALL.
+  // WC was given a SUPPLIED real-pool curve, the same substitution GL carries.
+  // Every previous move on this list was the model's own crossing shifting as the
+  // model changed; this one replaces the model's crossing with someone else's, so
+  // the figure stops being a property of this engine. WC_DERIVED is retained
+  // beside it, still crossing at 42.9%, and that is now the number this list has
+  // been tracking all along — it gets its own assertion below so the history
+  // stays attached to the quantity it is a history OF.
+  //
+  // ⚠ AND THE TAUTOLOGY WARNING ABOVE NO LONGER APPLIES THE WAY IT READS.
+  // STATIC_CLF_TABLE.WC is WC_SUPPLIED now, not WC_DERIVED, so the two assertions
+  // below are genuinely independent: one guards a supplied curve that must not be
+  // edited by accident, the other guards a derived table that must not be quietly
+  // dropped. Neither can be derived from the other.
+  check(Math.abs(crossingOf(wc) - 0.5578) < 0.002,
+    'WC supplied curve crosses 1.000 at 55.8%',
     `${(crossingOf(wc) * 100).toFixed(2)}%`);
+  check(Math.abs(crossingOf(WC_DERIVED) - 0.429) < 0.002,
+    'WC_DERIVED is retained beside it and still crosses at 42.9%',
+    `${(crossingOf(WC_DERIVED) * 100).toFixed(2)}%`);
+  {
+    let mono = true;
+    for (let i = 1; i < wc.clf.length; i++) if (wc.clf[i] <= wc.clf[i - 1]) mono = false;
+    check(mono, 'WC supplied curve is strictly monotonic across the extension and the join');
+  }
+  // ⚠ THE EXTENSION IS CHECKED AS AN EXTENSION, not just as numbers. WC's curve
+  // was supplied over 45-95 and extended down to 10 on a fitted lognormal, so the
+  // thing that can silently go wrong is a STEP at the join. The local volatility
+  // d(ln CLF)/dz must not jump between the last extrapolated interval and the
+  // first measured one — measured 0.3515 against 0.3511, and the bound here is
+  // loose enough to allow a re-fit and tight enough to catch a discontinuity.
+  {
+    const sigmaAt = (i: number) => (Math.log(wc.clf[i]) - Math.log(wc.clf[i - 1]))
+      / (probit(wc.stops[i] / 100) - probit(wc.stops[i - 1] / 100));
+    const join = wc.stops.indexOf(45);
+    const gap = Math.abs(sigmaAt(join) - sigmaAt(join + 1));
+    check(gap < 0.01, 'no volatility step at the 45% join between the extension and the measurement',
+      `|${sigmaAt(join).toFixed(4)} - ${sigmaAt(join + 1).toFixed(4)}| = ${gap.toFixed(4)}`);
+  }
 }
 
 console.log('\n--- 2. "EXPECTED" IS STILL EXACTLY 1.000 ---');
@@ -190,6 +265,19 @@ console.log('\n--- 3. NO REACHABLE SLIDER POSITION HITS A CLAMP ---');
   check(min >= lo && max <= hi,
     'the whole slider range lies inside the supplied curve — no narrowing needed', `[${min}, ${max}] within [${lo}, ${hi}]`);
   check(0.90 >= lo && 0.90 <= hi, 'reserveMarginCLF\'s fixed 0.90 request is inside the range too');
+  // ⚠ AND THE SAME FOR WC, WHICH IS WHY ITS CURVE WAS EXTENDED AT ALL. The
+  // supplied WC curve covers 45-95 as delivered, and the slider floor is 0.30, so
+  // three reachable positions — 0.30, 0.35, 0.40 — would have been answered by a
+  // clamp. The extension exists to close exactly that gap, and this asserts it
+  // closed. The 97.5 and 99 stops are deliberately absent at the other end
+  // because nothing can request them; see WC_SUPPLIED.
+  {
+    const wlo = wc.stops[0] / 100, whi = wc.stops[wc.stops.length - 1] / 100;
+    console.log(`  WC supplied curve covers ${wlo}-${whi} after its extension`);
+    check(min >= wlo && max <= whi,
+      'the whole slider range lies inside WC\'s extended curve too', `[${min}, ${max}] within [${wlo}, ${whi}]`);
+    check(0.90 >= wlo && 0.90 <= whi, 'reserveMarginCLF\'s 0.90 request is inside WC\'s range too');
+  }
   // Every discrete slider position, and the "next step" preview's top request.
   let allInside = true;
   for (let v = min; v <= max + 1e-9; v = Math.round((v + step) * 100) / 100) {

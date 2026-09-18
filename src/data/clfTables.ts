@@ -553,12 +553,165 @@ export interface ClfTable {
 // all three bands at once and which this file considered and rejected — see the
 // single-curve cost recorded above.
 // ============================================================================
-const WC_DERIVED: ClfTable = {
+export const WC_DERIVED: ClfTable = {
   source: 'derived',
   stops: [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 97.5, 99],
   clf: [
     0.8061, 0.8454, 0.8829, 0.9122, 0.9399, 0.9643, 0.9858, 1.0101, 1.0327, 1.0576,
     1.0834, 1.1093, 1.1396, 1.1716, 1.2081, 1.2550, 1.3120, 1.4124, 1.4962, 1.6152,
+  ],
+};
+
+// ============================================================================
+// WC — SUPPLIED, NOT DERIVED. THIS IS THE ONE IN FORCE.
+//
+// A real public-entity pool's measured percentile curve, supplied over the 45-95
+// range. It REPLACES WC's own derived table, which stays above as WC_DERIVED and
+// out of force exactly as GL_DERIVED does — the honest description of this
+// model's own book, kept so the residual stays measurable rather than invisible.
+//
+// ⚠ THE MEASURED PART IS VERBATIM AND IS WRITTEN AT THREE DECIMALS SO THE JOIN IS
+// VISIBLE IN THE SOURCE. Stops 45 through 95 are the supplied numbers unchanged.
+// Stops 10 through 40 are extrapolated and carry four decimals. Anything at four
+// decimals below 45 is this file's arithmetic, not the pool's measurement.
+//
+// ============================================================================
+// THE FORM, AND THE RULING'S PREMISE ABOUT IT WAS CHECKED AND IS WRONG
+// ============================================================================
+//
+// The extension was ordered "from the curve's own implied CV, which runs 0.24 at
+// the bottom to 0.40 at 95% — rising, so a flat extension would understate the
+// tail." The rise is arithmetically real and the conclusion does not follow.
+//
+// ⚠ THE CURVE IS A LOGNORMAL WITH FLAT VOLATILITY, TO FOUR DECIMALS. Fitting
+// ln CLF = a + sigma z by least squares over all eleven supplied stops:
+//
+//     sigma 0.34169    a -0.04963    R^2 0.999897
+//     worst absolute error at any supplied stop: 0.0053 CLF points
+//
+// and a mean-one lognormal would carry a = -sigma^2/2 = -0.05837, so the curve's
+// implied mean is 1.00878 — it is normalised to 1 within 0.9%. The local
+// volatility d(ln CLF)/dz between adjacent stops reads
+//
+//     0.351  0.352  0.347  0.350  0.342  0.347  0.339  0.340  0.332  0.336
+//
+// which is flat, and whose OLS slope against z is -0.0128 +/- 0.0021 —
+// SIGNIFICANT, and NEGATIVE. The curve is slightly THINNER-tailed than lognormal
+// at the top, not fatter.
+//
+// ⚠ WHAT RISES IS THE READING, NOT THE CURVE. The 0.24-to-0.40 figure comes from
+// (CLF(p) - 1) / z_p, which reads the curve as mean 1 plus z standard deviations.
+// That quantity rises for ANY right-skewed mean-one distribution, because the
+// mean sits above the median, and a PURE constant-sigma lognormal at the fitted
+// sigma reproduces it nearly stop for stop:
+//
+//     stop      actual (CLF-1)/z      pure lognormal at sigma 0.34169
+//       65            0.2258                     0.2218
+//       75            0.2980                     0.2939
+//       85            0.3454                     0.3434
+//       95            0.4037                     0.4069
+//
+// So a flat-sigma extension does not understate the tail; it REGENERATES that
+// rise on its own. The reading is also only defined away from the crossing: at
+// the 45% stop it gives 0.72, at 50% it is undefined, and at 55% it is negative.
+// The 0.24 in the ruling corresponds to roughly the 65-67% stop, not to the
+// bottom of the supplied range.
+//
+// ============================================================================
+// THE EXTENSION
+// ============================================================================
+//
+// FORM: lognormal, because that is what the curve measurably is. ANCHORED at the
+// measured 45% value rather than at the fitted line, so the join is continuous by
+// construction and no measured stop is overwritten by a fit. CARRIED at the
+// volatility measured over the LOWEST supplied span, 45-55, sigma 0.35168, rather
+// than the global 0.34169 — because sigma declines with z, so the global value
+// would understate the spread at the end being extended.
+//
+// Implied CV at every stop of the shipped table, both readings, so the extension
+// is visibly continuous with the measured part:
+//
+//   stop     10     15     20     25     30     35     40     45     50     55
+//   (CLF-1)/z  .308  .328   .349   .372   .400   .442   .517   .724    n/a  -.056
+//   local sigma   -  .3517  .3517  .3510  .3524  .3516  .3515  .3515  .3511  .3523
+//
+//   stop     60     65     70     75     80     85     90     95
+//   (CLF-1)/z  .150  .226   .267   .298   .322   .345   .369   .404
+//   local sigma .3471 .3495  .3423  .3473  .3390  .3399  .3316  .3356
+//
+// The local-sigma row is the continuity that matters: 0.3510-0.3524 across every
+// extrapolated interval against 0.3316-0.3523 across every measured one. There is
+// no step at the join. The (CLF-1)/z row is discontinuous through the crossing
+// and that is a property of the reading, not of the curve.
+//
+// ⚠ THE 97.5 AND 99 STOPS ARE DROPPED, AS THE RULING INVITED, AND THE REASON IS
+// NOT JUST DISTANCE. Two things together:
+//
+//   1. UNREACHABLE. SLIDER_RANGES.fundingConfidenceLevel is 0.30-0.95 and the
+//      only other request in the engine is reserveMarginCLF at 0.90. Nothing can
+//      ask for 97.5 or 99. This is exactly GL's position, which has never carried
+//      them, and staticClf clamps.
+//   2. THEY WOULD EXTRAPOLATE AGAINST THE ONE TREND THE DATA SHOWS. The 99th stop
+//      is 38% of the measured span beyond the data, in the direction where sigma
+//      is provably declining. A constant-sigma extension there would read 2.1003,
+//      which is the one number in this table that would be knowingly too heavy.
+//      An extension whose only defence is a form the data contradicts at that end
+//      is not a defensible extension.
+//
+// The bottom is extended in full because 30, 35 and 40 ARE reachable — the slider
+// floor is 0.30. Stops 10 through 25 are not reachable either, and they are kept
+// because the ruling asked for the full grid at that end and because the
+// extension there runs WITH the sigma trend rather than against it. They are
+// descriptive; nothing in the game can request them.
+//
+// ============================================================================
+// WHAT THIS COSTS, MEASURED
+// ============================================================================
+//
+// ⚠ THE COST IS MUCH LARGER THAN THE RULING EXPECTED AND THE NUMBER IS SAID
+// PLAINLY HERE BECAUSE IT IS THE THING THAT WOULD OVERTURN THIS. The ruling put
+// the curve at "15-20% heavier than the model's own losses justify at the top",
+// from the 0.24-to-0.40 reading. On the definition this repo already uses for
+// exactly this comparison — (clf75 - clf25) / 1.349 / clf50, the one that
+// produces GL's recorded 0.3979 — the numbers are:
+//
+//     WC_SUPPLIED implied CV      0.3524
+//     WC calendar-year CV         0.1975   <- the basis WC is gated on
+//     WC_DERIVED implied CV       0.1862
+//
+// So the supplied curve is 78% heavier than this model's WC, not 15-20%, and the
+// derived table it replaces described that distribution to within 6%. FOR SCALE,
+// THIS IS NOT THE TRADE GL CARRIES: GL's supplied curve implies 0.3979 against
+// GL's own 0.4168, a 5% gap, which is why GL's residual is as small as -9.4pp.
+// WC's gap is an order of magnitude wider in relative terms and its residual is
+// correspondingly worse. The measured per-band label error is recorded at
+// clf-label-backtest-check's EXPECTED_RED entry.
+//
+// ⚠ AND THE CROSSING MOVES 12.9pp, NOT 7.9pp. The ruling put WC's model crossing
+// at 48.6%; the shipped table crosses at 42.92%, because WC_DERIVED was
+// re-derived at the SMALL band at 2cf25b1 and that moved it — gl-supplied-clf-check
+// records that as the sixth move of a constant it holds as a literal. The supplied
+// curve crosses at 55.78% on staticClf's own linear-in-stop interpolation. So the
+// move is 42.9% -> 55.8%.
+//
+// ⚠ WHAT THAT CHANGES IS THE LABEL, NOT THE BEHAVIOUR, AND THE DIRECTION IS THE
+// WRONG ONE. fundingAtExpected pins the multiplier at exactly 1.000, so how often
+// a pool funding at Expected comes in under budget is a property of the MODEL and
+// does not move at all. What moves is what the game TELLS the player Expected
+// means. Today that label is right by construction: WC_DERIVED crosses where the
+// model crosses because it was derived from that same sample. A supplied curve
+// breaks that identity and leaves the label 12.9pp away from the distribution it
+// describes. crossingOf already carries this warning for GL; it now applies to
+// two lines out of three.
+// ============================================================================
+const WC_SUPPLIED: ClfTable = {
+  source: 'supplied',
+  stops: [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95],
+  clf: [
+    // extrapolated — lognormal at sigma 0.35168, anchored at the measured 45% stop
+    0.6054, 0.6599, 0.7067, 0.7494, 0.7901, 0.8297, 0.8691,
+    // supplied, verbatim
+    0.909, 0.950, 0.993, 1.038, 1.087, 1.140, 1.201, 1.271, 1.358, 1.473, 1.664,
   ],
 };
 
@@ -828,7 +981,7 @@ const PROPERTY_DERIVED: ClfTable = {
 
 // WHAT THE ENGINE ACTUALLY READS.
 export const STATIC_CLF_TABLE: Record<StaticClfLine, ClfTable> = {
-  WC: WC_DERIVED,
+  WC: WC_SUPPLIED,
   GL: GL_SUPPLIED,
   Property: PROPERTY_DERIVED,
 };
@@ -868,14 +1021,20 @@ export function staticClf(line: StaticClfLine, confidenceLevel: number): number 
 // The percentile at which a table crosses 1.000 — what "Expected" delivers.
 //
 // DERIVED FROM THE TABLE, never stored alongside it, so the two cannot drift.
-// WC 48.8% (its own measured crossing, since its table is derived from that same
-// sample); Property 52.8%; GL 57.7% on the supplied curve, against 65.7% on its
-// derived one.
+// Property 52.8%; GL 57.7% on the supplied curve against 65.6% on its derived
+// one; WC 55.8% on the supplied curve against 42.9% on its derived one.
 //
-// ⚠ ON GL THIS IS NOW A DISPLAY FIGURE FOR A CURVE THAT IS NOT THE MODEL'S OWN.
-// It correctly reports where the SUPPLIED table crosses, which is what the pool
-// is actually being charged against; it is NOT where GL's real retained
-// distribution crosses. Those differ by 8.0pp and the gap is recorded above.
+// ⚠ ON GL AND NOW ON WC THIS IS A DISPLAY FIGURE FOR A CURVE THAT IS NOT THE
+// MODEL'S OWN. It correctly reports where the SUPPLIED table crosses, which is
+// what the pool is actually being charged against; it is NOT where that line's
+// real retained distribution crosses. GL differs by 8.0pp and WC by 12.9pp, and
+// both gaps are recorded at their tables above.
+//
+// ⚠ AND ONLY PROPERTY STILL HAS THE IDENTITY. On a derived table this figure is
+// the model's own crossing, because the table came from that sample; on a
+// supplied one it is a statement about someone else's book. Two lines out of
+// three now print a number that means the second thing while the UI says the
+// same words on all three.
 //
 // Returns a 0-1 fraction, clamped to the table's stop range.
 export function crossingOf(table: ClfTable): number {
