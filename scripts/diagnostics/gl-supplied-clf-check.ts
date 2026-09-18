@@ -16,7 +16,9 @@
 //   3. Every confidence level the UI can request falls INSIDE the supplied
 //      curve's 25-95 range, so no reachable slider position is answered by a
 //      clamp.
-//   4. WC's SUPPLIED curve crosses 1.000 at 55.8%, WC_DERIVED is retained beside
+//   4. WC's SUPPLIED curve crosses 1.000 at 55.8%, every stop of WC's OWN slider
+//      range (0.10-0.99, not SLIDER_RANGES) is answered by the table rather than
+//      by a clamp, WC_DERIVED is retained beside
 //      it and still crosses at 42.9%, and WC's extension joins its measured part
 //      with no step in volatility.
 //
@@ -37,7 +39,7 @@ import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import {
   STATIC_CLF_TABLE, GL_DERIVED, WC_DERIVED, crossingOf, clfFromTable,
 } from '../../src/data/clfTables';
-import { SLIDER_RANGES } from '../../src/data/defaultAssumptions';
+import { SLIDER_RANGES, WC_FUNDING_CONFIDENCE_RANGE } from '../../src/data/defaultAssumptions';
 import type { CoverageLine, GameState } from '../../src/types/simulation';
 
 const GAMES = Number(process.env.GAMES ?? 1000);
@@ -265,18 +267,32 @@ console.log('\n--- 3. NO REACHABLE SLIDER POSITION HITS A CLAMP ---');
   check(min >= lo && max <= hi,
     'the whole slider range lies inside the supplied curve — no narrowing needed', `[${min}, ${max}] within [${lo}, ${hi}]`);
   check(0.90 >= lo && 0.90 <= hi, 'reserveMarginCLF\'s fixed 0.90 request is inside the range too');
-  // ⚠ AND THE SAME FOR WC, WHICH IS WHY ITS CURVE WAS EXTENDED AT ALL. The
-  // supplied WC curve covers 45-95 as delivered, and the slider floor is 0.30, so
-  // three reachable positions — 0.30, 0.35, 0.40 — would have been answered by a
-  // clamp. The extension exists to close exactly that gap, and this asserts it
-  // closed. The 97.5 and 99 stops are deliberately absent at the other end
-  // because nothing can request them; see WC_SUPPLIED.
+  // ⚠ AND THE SAME FOR WC, AGAINST WC'S OWN RANGE — WHICH IS NOT SLIDER_RANGES,
+  // AND ASSUMING IT WAS IS A MISTAKE THIS CHECK EXISTS TO STOP ANYONE REPEATING.
+  // WC reads WC_FUNDING_CONFIDENCE_RANGE, 0.10-0.99, with explicit stops at 0.975
+  // and 0.99. The supplied curve arrived covering 45-95, so NINE reachable
+  // positions — seven below 45 and two above 95 — would have been answered by a
+  // clamp, and a clamp at the top silently delivers the 95% multiplier under a
+  // 99% label. WC's curve is extended at BOTH ends for that reason, and this
+  // asserts every discrete stop the WC slider can occupy is inside the table.
   {
     const wlo = wc.stops[0] / 100, whi = wc.stops[wc.stops.length - 1] / 100;
-    console.log(`  WC supplied curve covers ${wlo}-${whi} after its extension`);
-    check(min >= wlo && max <= whi,
-      'the whole slider range lies inside WC\'s extended curve too', `[${min}, ${max}] within [${wlo}, ${whi}]`);
+    const wr = WC_FUNDING_CONFIDENCE_RANGE;
+    console.log(`  WC slider ${wr.min}-${wr.max} (its OWN range, not SLIDER_RANGES); `
+      + `WC curve covers ${wlo}-${whi} after its extension`);
+    check(wr.min >= wlo && wr.max <= whi,
+      'the whole WC slider range lies inside WC\'s extended curve', `[${wr.min}, ${wr.max}] within [${wlo}, ${whi}]`);
     check(0.90 >= wlo && 0.90 <= whi, 'reserveMarginCLF\'s 0.90 request is inside WC\'s range too');
+    const outside = wr.stops.filter(v => v < wlo - 1e-9 || v > whi + 1e-9);
+    check(outside.length === 0,
+      'every discrete WC slider stop is answered by the table rather than by a clamp',
+      outside.length ? `outside: ${outside.join(', ')}` : `all ${wr.stops.length} stops inside`);
+    // A clamp is silent, so this catches it by VALUE rather than by range: the
+    // top two stops must not return the same multiplier as the 95% stop.
+    const at95 = clfFromTable(wc, 0.95);
+    check(clfFromTable(wc, 0.99) > at95 + 1e-9 && clfFromTable(wc, 0.975) > at95 + 1e-9,
+      'WC\'s 97.5% and 99% stops return more than its 95% stop — not a clamp',
+      `${at95.toFixed(4)} -> ${clfFromTable(wc, 0.975).toFixed(4)} -> ${clfFromTable(wc, 0.99).toFixed(4)}`);
   }
   // Every discrete slider position, and the "next step" preview's top request.
   let allInside = true;

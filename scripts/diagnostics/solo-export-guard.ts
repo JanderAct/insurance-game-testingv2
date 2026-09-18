@@ -357,6 +357,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // reports the same thing in both cases. value-identity v37 is what separates
 // them, and its note records the confinement check: every changed field is
 // downstream of the roster, nothing roster-independent moved, no NaN.
+// v45: WC TOOK A SUPPLIED CLF CURVE, and the surplus limb was re-solved behind
+// it. 12 of 24 exports moved, against all 24 at v44 — and the SPLIT IS EXACT,
+// which is the isolation claim holding at the export level rather than being
+// argued for. WC-solo 6 of 6 changed, tri (all three lines) 6 of 6 changed,
+// GL-solo 0 of 6, PR-solo 0 of 6. Every export that moved contains WC and every
+// export that did not contains no WC. Nothing leaked sideways. GL's and
+// Property's per-band label errors are bit-identical across the swap (GL -9.4 /
+// -9.0 / -8.0), and ending surplus at Expected is bit-identical on all three
+// lines, so what moved moved through reserveMarginCLF on WC alone.
+//
 // v44: WC'S CLF TABLE RE-DERIVED AT THE SMALL BAND, so the label is honest for
 // the shipped default's frozen ~62-member book.
 //
@@ -467,7 +477,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 //
 // So this capture carries its own negative control: a table change that reaches
 // two lines and provably does not reach the third.
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v44.json');
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v45.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

@@ -644,25 +644,33 @@ export const WC_DERIVED: ClfTable = {
 // no step at the join. The (CLF-1)/z row is discontinuous through the crossing
 // and that is a property of the reading, not of the curve.
 //
-// ⚠ THE 97.5 AND 99 STOPS ARE DROPPED, AS THE RULING INVITED, AND THE REASON IS
-// NOT JUST DISTANCE. Two things together:
+// ⚠ THE 97.5 AND 99 STOPS ARE KEPT, AND THE FIRST ANSWER HERE WAS WRONG. They
+// were dropped on the ruling's invitation, on the argument that nothing can
+// request them — SLIDER_RANGES.fundingConfidenceLevel is 0.30-0.95 and the only
+// other request in the engine is reserveMarginCLF at 0.90, which is exactly GL's
+// position. THAT ARGUMENT DOES NOT APPLY TO WC. WC does not read SLIDER_RANGES.
+// It has its own WC_FUNDING_CONFIDENCE_RANGE, which is 0.10-0.99 with explicit
+// stops at 0.975 and 0.99. Every stop in this table is reachable on WC, at both
+// ends, and dropping the top two would have left two slider positions answered
+// by a clamp that silently delivers the 95% value under a 99% label. That is a
+// far larger error than any extrapolation here could make.
 //
-//   1. UNREACHABLE. SLIDER_RANGES.fundingConfidenceLevel is 0.30-0.95 and the
-//      only other request in the engine is reserveMarginCLF at 0.90. Nothing can
-//      ask for 97.5 or 99. This is exactly GL's position, which has never carried
-//      them, and staticClf clamps.
-//   2. THEY WOULD EXTRAPOLATE AGAINST THE ONE TREND THE DATA SHOWS. The 99th stop
-//      is 38% of the measured span beyond the data, in the direction where sigma
-//      is provably declining. A constant-sigma extension there would read 2.1003,
-//      which is the one number in this table that would be knowingly too heavy.
-//      An extension whose only defence is a form the data contradicts at that end
-//      is not a defensible extension.
+// The remaining objection stands and is answered rather than dismissed: the 99th
+// stop is 38% of the measured span beyond the data, in the direction where sigma
+// is provably declining, so a constant-sigma extension would be knowingly too
+// heavy. So the top is carried at the volatility measured over the TOP supplied
+// span, 85-95, sigma 0.33400 — the mirror of what the bottom does with the 45-55
+// span. That uses what the trend says without extrapolating the trend itself.
+// The choice barely matters: the global sigma would give 1.8532 and 2.1003
+// against the 1.8487 and 2.0893 shipped, 0.2% and 0.5% apart.
 //
-// The bottom is extended in full because 30, 35 and 40 ARE reachable — the slider
-// floor is 0.30. Stops 10 through 25 are not reachable either, and they are kept
-// because the ruling asked for the full grid at that end and because the
-// extension there runs WITH the sigma trend rather than against it. They are
-// descriptive; nothing in the game can request them.
+// ⚠ AND THE BOTTOM EXTENSION WAS REQUIRED, NOT DESCRIPTIVE, FOR THE SAME REASON.
+// The first version of this note called stops 10-25 unreachable and kept them
+// only because the ruling asked for the full grid. WC's slider floor is 0.10, so
+// all seven extrapolated stops are reachable and the supplied curve's 45 floor
+// would have left SEVEN positions on a clamp. The extension is what the table
+// needs to answer its own slider, which gl-supplied-clf-check now asserts against
+// WC_FUNDING_CONFIDENCE_RANGE rather than against SLIDER_RANGES.
 //
 // ============================================================================
 // WHAT THIS COSTS, MEASURED
@@ -706,12 +714,16 @@ export const WC_DERIVED: ClfTable = {
 // ============================================================================
 const WC_SUPPLIED: ClfTable = {
   source: 'supplied',
-  stops: [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95],
+  stops: [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 97.5, 99],
   clf: [
-    // extrapolated — lognormal at sigma 0.35168, anchored at the measured 45% stop
+    // extrapolated below — lognormal at sigma 0.35168 (the 45-55 span),
+    // anchored at the measured 45% stop
     0.6054, 0.6599, 0.7067, 0.7494, 0.7901, 0.8297, 0.8691,
     // supplied, verbatim
     0.909, 0.950, 0.993, 1.038, 1.087, 1.140, 1.201, 1.271, 1.358, 1.473, 1.664,
+    // extrapolated above — lognormal at sigma 0.33400 (the 85-95 span),
+    // anchored at the measured 95% stop
+    1.8487, 2.0893,
   ],
 };
 

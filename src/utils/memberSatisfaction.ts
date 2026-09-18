@@ -700,32 +700,39 @@ export const SATISFACTION = {
    * quarter of that is -0.027, which needs w = 0.024.
    *
    * WHAT THAT LEAVES: the ladder spans Deficient -2 steps to Strong +1, so end to
-   * end it is worth 0.141 points against the funding slider's own 0.41. That is
-   * 34% of the funding mechanic, and it is what the requirement permits: this
+   * end it is worth 0.103 points against the funding slider's own 0.41. That is
+   * 25% of the funding mechanic, and it is what the requirement permits: this
    * term responds to the same decision the market level responds to, in the
    * opposite direction, so every point of weight it carries is taken straight
    * out of the player's main lever. member-satisfaction-check asserts BOTH
    * halves — the decision stays visible, and the cancellation stays inside the
    * quarter.
    *
-   * ⚠ RE-SOLVED AT 0.0469 WHEN surplusComfortable MOVED, AND THE BOUND DID NOT
-   * CHANGE. The ruling is still a quarter. What moved is the boundary: solved to
-   * the median of default play it sits at 0.2399 instead of 1.15, so a funding
-   * stop now crosses FEWER band steps for the same weight, and more weight fits
-   * under the same quarter. Bisected over [0, 0.20] on the SOLVED boundary,
-   * seven passes, 24 games:
+   * ⚠ RE-SOLVED TWICE IN TWO COMMITS, AND THE BOUND DID NOT CHANGE EITHER TIME.
+   * The ruling is still a quarter. Both re-solves were driven by the boundary
+   * moving under it, which is trigger 1 below doing exactly what it says.
    *
-   *     w = 0.0250  ->  footprint -0.0701,  12.9% cancelled
-   *     w = 0.0469  ->  footprint -0.0607,  24.6% cancelled   <- shipped
-   *     w = 0.0484  ->  footprint -0.0601,  25.4% cancelled   <- breaches
+   * FIRST, 0.024 -> 0.0469, when surplusComfortable was solved to the median of
+   * default play and fell 1.15 -> 0.2399. A funding stop then crossed fewer band
+   * steps for the same weight, so more weight fitted under the same quarter.
    *
-   * against a limb-off footprint of -0.0805. It is the largest value on that
-   * grid inside the bound, so the headroom is 0.4pp BY CONSTRUCTION and section
-   * 6 will assert at 24.6% against 25.0%. That is deliberate: both quantities
+   * SECOND, 0.0469 -> 0.0344, when WC took a supplied CLF curve and the boundary
+   * fell again to 0.0258. Bisected over [0, 0.20] on the SOLVED boundary, seven
+   * passes, 24 games:
+   *
+   *     w = 0.0250  ->  footprint -0.0485,  18.3% cancelled
+   *     w = 0.0344  ->  footprint -0.0447,  24.8% cancelled   <- shipped
+   *     w = 0.0359  ->  footprint -0.0438,  26.2% cancelled   <- breaches
+   *
+   * against a limb-off footprint of -0.0594. It is the largest value on that
+   * grid inside the bound, so the headroom is 0.2pp BY CONSTRUCTION and section
+   * 6 will assert at 24.8% against 25.0%. That is deliberate: both quantities
    * are seeded and deterministic, so the gate is stable at that margin, and any
    * change to the book that moves the footprint trips it immediately rather than
    * eroding the bound quietly. A tripwire that sits against its bound is doing
-   * its job.
+   * its job — AND IT DID. Left at 0.0469 after the CLF swap this term cancelled
+   * 31.6%, member-satisfaction-check went red on its own bound, and its failure
+   * text said what to do: re-solve the weight, do not relax the bound.
    *
    * ⚠ THE ORDER MATTERS AND THE SOLVER ENFORCES IT. This is solved ON the
    * boundary, because cancellation depends on how many band steps a funding stop
@@ -742,8 +749,15 @@ export const SATISFACTION = {
    *      Re-solve from the measurement. DO NOT RELAX THE BOUND — that has been
    *      the wrong answer twice, and the gate says so in its own failure text.
    *   3. The limb-off footprint (the same line's `surplusWeight at 0` figure)
-   *      moving more than 20% from -0.0805, which is the denominator the
+   *      moving more than 20% from -0.0594, which is the denominator the
    *      quarter is a quarter OF.
+   *
+   * ⚠ ALL THREE OF THESE FIRED AT ONCE AT THE COMMIT AFTER THEY WERE WRITTEN,
+   * WHICH IS THE ONLY EVIDENCE THAT THEY WORK. The CLF swap moved the boundary
+   * 0.214 against trigger 1's 0.10, pushed the cancellation to 31.6% against
+   * trigger 2's 20-25%, and moved the limb-off footprint -0.0805 -> -0.0594,
+   * 26% against trigger 3's 20%. None of that touched this file. A trigger that
+   * has never fired is an untested trigger; these are now tested.
    *
    * ⚠ AND IT CANNOT BE EXPRESSED RELATIVELY EITHER, FOR A DIFFERENT REASON THAN
    * THE BOUNDARY'S. This weight multiplies a DISCRETE numerator — band steps
@@ -755,7 +769,7 @@ export const SATISFACTION = {
    * could be stated relatively (see lossLevelWeight) precisely because its
    * target is a continuous quantity both sides share.
    */
-  surplusWeight: 0.0469,
+  surplusWeight: 0.0344,
   /**
    * Where "comfortably above the requirement" sits, in units of
    * excessCapitalRatio = (availableSurplus - reserveRiskMarginNeeded) /
@@ -775,11 +789,24 @@ export const SATISFACTION = {
    * ⚠ MEASURED. 24 games x 10 years at all-default decisions, per member-year:
    *
    *     line        n        p25    MEDIAN       p75
-   *     WC       16020    -0.1308    0.1831    0.6511
+   *     WC       16020    -0.4267   -0.2196    0.0891
    *     GL       14830    -0.0263    0.4358    1.1258
    *     Property 15350     1.2039    3.1115    5.6828   (excluded by the rule)
    *
-   * Pooled over WC and GL, n 30850, median 0.2399.
+   * Pooled over WC and GL, n 30850, median 0.0258.
+   *
+   * ⚠ THE TRIGGER BELOW FIRED AT THE VERY NEXT COMMIT, AND THE PATH IS WORTH
+   * KNOWING BECAUSE NOTHING ABOUT IT LOOKS LIKE SATISFACTION. This constant was
+   * solved to 0.2399 on the measurement one commit earlier — WC then read median
+   * 0.1831 — and the next commit installed a SUPPLIED CLF CURVE FOR WC. That
+   * curve is heavier than the derived table it replaced, so WC's 90% stop went
+   * 1.3120 -> 1.4730; reserveMarginCLF is staticClf(line, 0.90); and
+   * reserveRiskMarginNeeded = expectedNetUnpaidLoss x (reserveMarginCLF - 1),
+   * which rose about 52% on WC. That quantity is the DENOMINATOR of
+   * excessCapitalRatio, so WC's median fell 0.1831 -> -0.2196 and the pooled
+   * median 0.2399 -> 0.0258, a move of 0.214 against a 0.10 trigger. A pricing
+   * table reached a satisfaction constant through the reserve margin, in one
+   * commit, with no edit to this file. The trigger is what caught it.
    *
    * ⚠ AND THE VALUE THIS REPLACES WAS MEASURED ON A BOOK THAT NO LONGER EXISTS.
    * The superseded note recorded median 1.279 on WC and 0.969 on GL and set the
@@ -791,6 +818,27 @@ export const SATISFACTION = {
    * excess collapses relative to them. 1.15 is now reached by 10.9% of WC
    * member-years and 24.9% of GL's — the band was saturating from the other
    * side, which is the failure section 8(c) exists to catch.
+   *
+   * ⚠ AT 0.0258 THE Adequate BAND HAS ALL BUT COLLAPSED, AND THAT IS A LIMIT OF
+   * THE RULE RATHER THAN OF THIS VALUE. Adequate spans [0, surplusComfortable),
+   * so a boundary this close to zero leaves it a sliver: measured shares are
+   * Adequate 0.5% on WC and 0.4% on GL, against Deficient 63.0% / 19.4% and
+   * Strong 29.1% / 73.1%. The four-step ladder is behaving as a three-step one,
+   * and the distinction the top boundary was supposed to draw — "at the
+   * requirement" against "comfortably above it" — has stopped being a
+   * distinction. section 8(c) still passes, because it asks whether the band
+   * discriminates at all and it does; it does not ask whether every band is
+   * occupied.
+   *
+   * ⚠ WHAT THAT MEANS IF IT HAPPENS AGAIN: the rule is "the median of default
+   * play", and when default play's median sits AT the requirement the rule
+   * necessarily puts the top boundary on top of the middle one. That is not
+   * fixed by re-solving; it is fixed by deciding whether the ladder should have
+   * a floor under the Adequate band, or whether three steps is the honest number
+   * once a pool at defaults is running at its margin. NOT TAKEN HERE — this
+   * commit's ruling is about a CLF curve, and changing the ladder's shape on the
+   * strength of a side effect would be a second ruling taken quietly. It is
+   * recorded so the next person sees it was noticed rather than missed.
    *
    * ⚠ WHAT TRIGGERS A RE-SOLVE, CHECKABLY: run the SOLVE mode above and compare
    * its pooled median against this value. It is stale once they differ by more
@@ -821,7 +869,7 @@ export const SATISFACTION = {
    * that is a property of the measure rather than of the pool. Pooling it in
    * would drag the boundary up by its own irrelevance.
    */
-  surplusComfortable: 0.2399,
+  surplusComfortable: 0.0258,
   /** The stock's bounds. Same [1, 10] the field has always carried. */
   floor: 1.0,
   ceiling: 10.0,

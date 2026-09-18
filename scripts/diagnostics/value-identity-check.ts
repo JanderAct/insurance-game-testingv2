@@ -443,6 +443,29 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // basis. The mechanism's own correctness is held by cohort-ledger-check (three
 // identities, both arms), martingale-equivalence-check (term by term) and
 // terminal-severity-check (phi on its anchor), all green at this commit.
+// v45: WC TOOK A SUPPLIED CLF CURVE, AND THE SURPLUS LIMB WAS RE-SOLVED BEHIND
+// IT. WC now prices off a real public-entity pool's measured percentile curve
+// over 45-95, extended down to 10 on a fitted lognormal; WC_DERIVED is retained
+// out of force as GL_DERIVED is.
+//
+// ⚠ THIS CAPTURE IS LARGER THAN v44'S AND THE REASON IS NOT THE FUNDING SLIDER.
+// v44 moved only 3,948 of 31,200 fields because at all-defaults
+// fundingAtExpected pins selectedFundingCLF to 1.000 and the table is never
+// consulted. That still holds — ending surplus at Expected is BIT-IDENTICAL
+// across this swap, checksum 3316958079.914983 over 40 games. What moves the
+// extra fields is the OTHER reader: reserveMarginCLF is staticClf(line, 0.90),
+// WC's 90% stop went 1.3120 -> 1.4730, and reserveRiskMarginNeeded =
+// expectedNetUnpaidLoss x (reserveMarginCLF - 1) rose about 52% on WC. That is a
+// default-game quantity, so it moves whether or not anyone touches the slider.
+//
+// ⚠ AND IT REACHED SATISFACTION. excessCapitalRatio has reserveRiskMarginNeeded
+// as its denominator, so WC's median fell 0.1831 -> -0.2196 and the pooled
+// median 0.2399 -> 0.0258. SATISFACTION.surplusComfortable and surplusWeight
+// were re-solved to 0.0258 and 0.0344 in the same commit, because leaving them
+// put member-satisfaction-check red on its own 25% cancellation bound at 31.6%.
+// Those fields move here too. A CLF table reached a satisfaction constant
+// through the reserve margin, in one commit, with no edit to either file.
+//
 // v44: WC'S CLF TABLE RE-DERIVED AT THE SMALL BAND. The shipped default writes
 // no new business on a frozen pre-game roster, so a player who touches nothing
 // plays a book frozen at ~62 — and WC's table was derived at 72-88. It is now
@@ -698,7 +721,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // capture is sufficient alone here: the hash guard cannot tell "different
 // members enrolled" from "the arithmetic broke", and this one says the
 // changed set is exactly the set a roster change explains.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v44.json');
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v45.json');
 
 function seedOf(id: string) {
   let h = 5381;
