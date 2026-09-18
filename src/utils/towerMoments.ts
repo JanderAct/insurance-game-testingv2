@@ -97,11 +97,13 @@ const PM = PROPERTY_LOSS_MODEL;
 // 1, so WC has no analogous term. This is the whole reason GL's SD/E has a floor
 // and WC's does not — see layerRiskMoments.
 const VG = 1 / WM.poolYearFactor.shape;
+// WC'S OWN shared year factor's variance. Read from the model, not restated.
+const VG_WC = 1 / WM.wcYearFactor.shape;
 const GL_ALPHA_FREQ = GM.memberFrequencyNoise.shape;
 const WC_ALPHA_FREQ = WM.memberFrequencyNoise.shape;
 // Property has no gPool term either — propertyClaimEngine.ts's generator draws
-// no shared pool factor (see its "NO gPool" note), so Property's vg is 0, same
-// structural case as WC.
+// no shared pool factor (see its "NO gPool" note), so Property's vg is 0. It is
+// now the ONLY line in that case — WC left it when wcYearFactor shipped.
 const PR_ALPHA_FREQ = PM.memberFrequencyNoise.shape;
 
 // Index lookups as RECORDS, not Array.indexOf. These run once per member per
@@ -373,15 +375,23 @@ function memberLambda(line: TowerLine, member: Member, yearNumber: number): numb
 //   Var(C) = A2 + B2 x (1 + Vg) + A1^2 x Vg
 // with A1 = sum lambda_i m1, A2 = sum lambda_i m2, B2 = sum (lambda_i m1)^2/alpha.
 //
-// ⚠ GL HAS Vg = 1/25; WC HAS Vg = 0, because WC pins commonLossFactor to 1.
-// The consequence is structural, not a detail: the A1^2 x Vg term does not
-// diversify (it scales as exposure^2 against an exposure^2 denominator), so
-//   GL's SD/E floors at exactly sqrt(1/25) = 0.2000 and approaches it from above
-//   WC's SD/E decays toward 0 with no floor at all
-// Same code, different limit. Asserted in tower-runtime-check.ts, in both
-// directions — the floor is real, and it is NOT binding at any playable book
-// size (GL full-market 4xs1 sits at 0.452 against the 0.200 floor; it only
-// dominates past ~$26B of payroll).
+// ⚠ WC NO LONGER HAS Vg = 0, AND THIS PARAGRAPH USED TO SAY IT DID. It read:
+// "GL HAS Vg = 1/25; WC HAS Vg = 0, because WC pins commonLossFactor to 1 ...
+// GL's SD/E floors at exactly sqrt(1/25) = 0.2000 and approaches it from above;
+// WC's SD/E decays toward 0 with no floor at all. Same code, different limit."
+// The first half still holds. The second is now false: WC has its own shared
+// year factor (WC_LOSS_MODEL.wcYearFactor) and therefore its own floor.
+//
+//   GL     Vg = 1/25   -> SD/E floors at sqrt(1/25) = 0.2000
+//   WC     Vg = 1/8.01 -> SD/E floors at sqrt(1/8.01) = 0.3534
+//   Prop   Vg = 0      -> no floor; decays toward 0
+//
+// WC's floor is HIGHER than GL's, which is the whole point of the change: WC's
+// aggregate was averaging out and now it does not. The A1^2 x Vg term does not
+// diversify — it scales as exposure^2 against an exposure^2 denominator — so
+// this is a floor and not a level shift, and it binds harder as the book grows.
+// tower-runtime-check asserts the floors in both directions; its WC arm
+// asserted the ABSENCE of a floor and is the assertion this change inverts.
 // EVERY LAYER IN ONE PASS OVER THE BOOK. Pricing a program means pricing all
 // three layers, and doing that as three independent calls walked the member list
 // three times, re-resolving each member's rating group and lambda each time. One
@@ -395,7 +405,7 @@ export function allLayerRiskMoments(
 ): LayerRiskMoments[] {
   const layers = REINSURANCE_TOWER[line];
   const n = layers.length;
-  const vg = line === 'GL' ? VG : 0;
+  const vg = line === 'GL' ? VG : line === 'WC' ? VG_WC : 0;
   const alphaFreq = line === 'GL' ? GL_ALPHA_FREQ : line === 'Property' ? PR_ALPHA_FREQ : WC_ALPHA_FREQ;
 
   // THE BOOK IS COLLAPSED TO ITS SUFFICIENT STATISTICS BEFORE ANY BAND MOMENT IS
@@ -614,7 +624,7 @@ export function retainedRiskMoments(
   members: Member[],
   yearNumber: number,
 ): LayerRiskMoments {
-  const vg = line === 'GL' ? VG : 0;
+  const vg = line === 'GL' ? VG : line === 'WC' ? VG_WC : 0;
   const alphaFreq = line === 'GL' ? GL_ALPHA_FREQ : line === 'Property' ? PR_ALPHA_FREQ : WC_ALPHA_FREQ;
   let A1 = 0, A2 = 0, B2 = 0, lambda = 0;
 

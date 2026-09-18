@@ -27,7 +27,8 @@ import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
-import { deriveNeutralPurePremiumPer100, expectedWcGrossLossForPricing } from '../../src/utils/wcClaimEngine';
+import { deriveNeutralPurePremiumPer100, expectedWcGrossLossForPricing, wcYearFactor } from '../../src/utils/wcClaimEngine';
+import { WC_LOSS_MODEL } from '../../src/data/defaultAssumptions';
 import type { GameState, CoverageLine } from '../../src/types/simulation';
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
@@ -109,6 +110,69 @@ console.log(`    mean ${(m * 100).toFixed(2)}%   95% CI +/-${(ci * 100).toFixed(
 console.log(`  WIDE basis (as displayed, denominator includes reinsuranceCost): ${(mean(wcWideLR) * 100).toFixed(2)}%`);
 const above = wcNarrowLR.filter(r => r >= 0.668).length;
 console.log(`  line-years at/above 66.8%: ${above}/${wcNarrowLR.length} (${(above / wcNarrowLR.length * 100).toFixed(0)}%) — centred means ~half`);
+// ============================================================================
+// THE MEAN IS HELD, AND IT IS ASSERTED RATHER THAN ARGUED.
+//
+// WC_LOSS_MODEL.wcYearFactor multiplies every WC member's arrival rate by one
+// shared Gamma(shape, 1/shape) draw per year. Because scale = 1/shape the factor
+// has mean EXACTLY 1, so the book's expected loss is untouched — which is what
+// lets the held pure premium, the held class rates and k_line stand unchanged
+// through a volatility change. That argument is worth nothing unasserted, and it
+// is asserted here in the two ways that can actually fail.
+//
+// (1) STRUCTURAL, AND IT IS A PERTURBATION TEST. The pricing expectation must
+//     not be able to SEE the factor at all. Perturbing the shape by a factor of
+//     four and re-running expectedWcGrossLossForPricing must return a
+//     BIT-IDENTICAL number. If it ever moves, the frequency channel has leaked
+//     into the pricing side and the pure premium genuinely does re-derive —
+//     which is the expensive outcome this check exists to catch early.
+//
+// (2) DISTRIBUTIONAL. The factor's own realised mean over many (seed, year)
+//     pairs must sit on 1 within its CI. This catches a scale/shape mix-up,
+//     which is the one way a Gamma "mean-one" factor is usually got wrong and
+//     which the structural check above would not see.
+console.log('\n--- THE YEAR FACTOR IS MEAN-ONE ---');
+{
+  const roster = getPredefinedMarketMembers();
+  const before = expectedWcGrossLossForPricing(roster, { riskQualityOverride: 5, kLine: 1 });
+  const keep = WC_LOSS_MODEL.wcYearFactor.shape;
+  const keepScale = WC_LOSS_MODEL.wcYearFactor.scale;
+  WC_LOSS_MODEL.wcYearFactor.shape = keep * 4;
+  WC_LOSS_MODEL.wcYearFactor.scale = 1 / (keep * 4);
+  const after = expectedWcGrossLossForPricing(roster, { riskQualityOverride: 5, kLine: 1 });
+  WC_LOSS_MODEL.wcYearFactor.shape = keep;
+  WC_LOSS_MODEL.wcYearFactor.scale = keepScale;
+  console.log(`  [1] pricing expectation under a 4x perturbation of the shape:`);
+  console.log(`      ${before.toFixed(6)} -> ${after.toFixed(6)}  ${before === after ? 'BIT-IDENTICAL' : 'MOVED'}`);
+  if (before !== after) {
+    problems.push(`the WC pricing expectation MOVED when wcYearFactor.shape was perturbed `
+      + `(${before} -> ${after}). The volatility channel has leaked into the pricing side, so the held `
+      + `pure premium, the held class rates and k_line all re-derive. This is the expensive outcome; do `
+      + `not adjust the constant to make it agree.`);
+  }
+  // The realised mean of the factor itself, over a grid of (seed, year) pairs.
+  const draws: number[] = [];
+  for (let seed = 1; seed <= 4000; seed++) for (let y = 1; y <= 10; y++) draws.push(wcYearFactor(seed, y));
+  const gm = mean(draws), gsd = sd(draws), gci = 1.96 * gsd / Math.sqrt(draws.length);
+  const impliedShape = 1 / (gsd * gsd);
+  console.log(`  [2] factor mean over ${draws.length.toLocaleString()} (seed, year) pairs: `
+    + `${gm.toFixed(5)} +/- ${gci.toFixed(5)}   SD ${gsd.toFixed(5)} -> implied shape ${impliedShape.toFixed(2)} `
+    + `against ${WC_LOSS_MODEL.wcYearFactor.shape}`);
+  if (Math.abs(gm - 1) > gci) {
+    problems.push(`wcYearFactor's realised mean is ${gm.toFixed(5)}, outside 1 +/- ${gci.toFixed(5)}. `
+      + `A mean-one factor is the requirement — scale must be 1/shape — and the book's expected loss moves `
+      + `with it.`);
+  }
+  // Structural, and it cannot go stale: mean-one is scale === 1/shape.
+  const exact = WC_LOSS_MODEL.wcYearFactor.scale === 1 / WC_LOSS_MODEL.wcYearFactor.shape;
+  console.log(`  [3] scale === 1/shape exactly (mean-one by construction): ${exact ? 'OK' : 'FAIL'}`);
+  if (!exact) {
+    problems.push(`wcYearFactor.scale is ${WC_LOSS_MODEL.wcYearFactor.scale}, not 1/shape = `
+      + `${1 / WC_LOSS_MODEL.wcYearFactor.shape}. A Gamma(shape, scale) has mean shape x scale, so the `
+      + `factor is no longer mean-one and every WC expectation is off by that ratio.`);
+  }
+}
+
 // --- the two-part 6b check (same decomposition GL uses) --------------------
 // (a) draw == analytic expectation is asserted by wc-severity-rebuild-check.ts,
 // on the $1M-CAPPED basis, at full-market scale (wc-claim-check.ts was deleted

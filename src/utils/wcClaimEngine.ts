@@ -87,6 +87,18 @@ import {
 } from '../data/defaultAssumptions';
 import { shockFactorFor } from './shockEffects';
 
+// WC'S OWN SHARED YEAR FACTOR. One Gamma(shape, 1/shape) draw per year, mean
+// exactly 1, multiplying every WC member's arrival rate — see
+// WC_LOSS_MODEL.wcYearFactor for the derivation and for why it is WC's own
+// stream rather than the shared gPool. Defined here because this module is the
+// only one that draws WC claims; claimGeneration re-exports it so callers reach
+// it beside poolYearFactor.
+export function wcYearFactor(seed: number, yearNumber: number): number {
+  return deriveSubRng(seed, yearNumber, 'wc_gyear')
+    .gamma(WC_LOSS_MODEL.wcYearFactor.shape, WC_LOSS_MODEL.wcYearFactor.scale);
+}
+
+
 const M = WC_LOSS_MODEL;
 const LINE: CoverageLine = 'WC';
 // EXPORTED SO A GATE NEED NOT RE-TYPE THE 5. Each engine keeps its own — the
@@ -618,6 +630,13 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
     });
   };
 
+  // THE YEAR'S SHARED FACTOR, drawn once for the whole line-year and applied to
+  // every member's arrival rate below. Keyed on (seed, year) ONLY — it cannot
+  // see the roster, which is what keeps enrolment-independence-check true: a
+  // member's draws remain a pure function of (seed, year, memberId), because
+  // this multiplier is the same number whoever is enrolled.
+  const gYear = wcYearFactor(instanceSeed, yearNumber);
+
   for (const member of members) {
     // PER-MEMBER STREAMS, KEYED ON member.id. deriveSubRng hashes the whole
     // purpose string, so the key space is free.
@@ -638,11 +657,16 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
     const before = claims.length;
 
     if (payroll > 0) {
-      // Per member-year noise, mean 1. NO POOL FACTOR — it was removed from WC
-      // (see WC_LOSS_MODEL.poolYearFactor); the pool-level draw still happens for
-      // GL, and WC simply does not read it.
+      // Per member-year noise, mean 1, INDEPENDENT per member — and gYear, mean
+      // 1, SHARED by every member of this line-year. The two are different kinds
+      // of variance and only one of them survives a growing book: epsilon's
+      // contribution divides by the number of members, gYear's does not.
+      //
+      // ⚠ STILL NOT THE SHARED gPool. That draw exists and GL consumes it; WC
+      // does not read it and the ruling at WC_LOSS_MODEL.poolYearFactor that
+      // decoupled the lines stands. gYear is WC's own stream.
       const epsilon = freqRng.gamma(params.memberFrequencyNoise.shape, params.memberFrequencyNoise.scale);
-      const lambda = payroll * g.ratePer1M * thetaWc(rq) * kLine * trend * epsilon * rcFactor;
+      const lambda = payroll * g.ratePer1M * thetaWc(rq) * kLine * trend * epsilon * gYear * rcFactor;
       const weights = tiltedWeights(group, rq, params);
 
       // ⚠ POISSON THINNING: one Poisson draw PER COMPONENT at rate

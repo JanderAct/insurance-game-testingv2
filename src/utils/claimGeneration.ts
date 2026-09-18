@@ -44,6 +44,17 @@ export function poolYearFactor(seed: number, yearNumber: number): number {
     .gamma(WC_LOSS_MODEL.poolYearFactor.shape, WC_LOSS_MODEL.poolYearFactor.scale);
 }
 
+// WC'S OWN SHARED YEAR FACTOR — same shape of object as poolYearFactor above,
+// same purity, and a DIFFERENT DRAW. See WC_LOSS_MODEL.wcYearFactor for why it
+// is WC's own rather than the shared gPool.
+//
+// ⚠ IT LIVES IN wcClaimEngine AND IS RE-EXPORTED HERE, which is the opposite of
+// poolYearFactor's arrangement and is forced by the import direction: this
+// module imports the three generators, so a generator cannot import back from
+// it. Re-exporting keeps ONE definition while letting callers reach it from the
+// place they already reach poolYearFactor.
+export { wcYearFactor } from './wcClaimEngine';
+
 /** Everything a line-year's generator call needs, before the line is known. */
 export interface LineYearGenerationBase {
   members: Member[];

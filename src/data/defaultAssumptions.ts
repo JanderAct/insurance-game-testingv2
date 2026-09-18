@@ -368,6 +368,52 @@ export const WC_LOSS_MODEL = {
   // would touch GL's basis, so it stays here with this comment instead.
   poolYearFactor: { shape: 25, scale: 1 / 25 },
 
+  // ==========================================================================
+  // WC'S OWN SHARED YEAR FACTOR — the correlation channel, and the reason WC's
+  // aggregate stops averaging out.
+  //
+  // One Gamma(shape, 1/shape) draw per year, mean EXACTLY 1, multiplying every
+  // WC member's arrival rate. Structurally what GL has had all along; a pure
+  // function of (seed, year) on its own RNG label, so claim regeneration
+  // reproduces it and enrolment independence is untouched — it cannot see the
+  // roster.
+  //
+  // ⚠ WHY WC NEEDED ONE AT ALL. Without a shared factor WC's aggregate is a sum
+  // of independent member-years, so its volatility averages DOWN as the book
+  // grows. WC's implied CV was flat across book sizes for that reason, and that
+  // is the central limit theorem rather than a calibration. No amount of
+  // per-member noise fixes it: idiosyncratic variance divides by the book,
+  // shared variance does not.
+  //
+  // ⚠ AND IT IS *WC'S OWN*, NOT THE SHARED gPool ABOVE. Consuming gPool would
+  // have been fewer lines and would have re-coupled WC to GL, reversing the
+  // deliberate ruling recorded immediately above — "a bad WC year now carries
+  // no information about GL". The ruling that asked for this asked for a shared
+  // year factor on WC, not for cross-line correlation, and those are separable.
+  // They are separated. wc-gl-independence is therefore still true and the
+  // gates that assert it are untouched.
+  //
+  // ⚠ THE SHAPE IS SOLVED, NOT CHOSEN, AND THE LAW IS EXACT. Conditioning on the
+  // factor g and mixing, E[S] = A1 and Var(S) = A2 + B2 x (1 + Vg) + A1^2 x Vg
+  // — the same expression glLossDistribution derives for GL, with Vg = 1/shape.
+  // For a book large enough that the A1^2 term dominates, that is
+  //
+  //     CV^2 = CV_0^2 + Vg
+  //
+  // exactly. The target is a CALENDAR-YEAR CV of 0.30 on the basis WC's CLF
+  // table is gated against, and the measured pre-change value on that basis is
+  // 0.1975, so Vg = 0.09 - 0.03901 = 0.05099 and shape = 1/Vg = 19.61.
+  //
+  // ⚠ THE MEAN IS HELD BY CONSTRUCTION AND ASSERTED ANYWAY. scale = 1/shape
+  // makes E[g] = 1 identically, so E[S] is untouched for any shape — which is
+  // what lets the pure premium, the held rate and k_line stand unchanged. The
+  // channel is FREQUENCY, so no claim size moves either: the $25k primary
+  // split, the experience modifier's credibility, the tower attachment and the
+  // closure curves all see the same severity distribution they saw before, and
+  // only the year-to-year aggregate moves. Widening severity would have reached
+  // every one of them.
+  wcYearFactor: { shape: 6.28, scale: 1 / 6.28 },
+
   // --- Risk quality: two channels ----------------------------------------
   //
   // The retired model spent its RQ budget over three channels — frequency

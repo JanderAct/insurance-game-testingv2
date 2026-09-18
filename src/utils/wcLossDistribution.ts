@@ -20,10 +20,20 @@
 //      construction (interpolating two monotonic curves at matched
 //      percentile stops stays monotonic).
 //
-// THE CUMULANT DERIVATION (mean/CV), for the record: the aggregate loss for a
-// book of enrolled members is a SUM OF INDEPENDENT MEMBER PROCESSES, so its
-// cumulants are the SUM of each member's own cumulants (cumulants are
-// additive under independent summation). Each member's own process is a
+// ⚠ MEMBERS ARE NO LONGER INDEPENDENT, AND THE DERIVATION BELOW IS NOW THE
+// CONDITIONAL ONE. It opened "the aggregate loss for a book of enrolled members
+// is a SUM OF INDEPENDENT MEMBER PROCESSES", which was true until
+// WC_LOSS_MODEL.wcYearFactor shipped: one shared Gamma draw now multiplies every
+// member's arrival rate, so members are independent GIVEN that factor and
+// correlated without it. Everything below is correct conditional on g, and
+// wcAggregateCumulants mixes over g at the end — read the two together. The
+// mixing touches the VARIANCE only; the mean is untouched because E[g] = 1.
+//
+// THE CUMULANT DERIVATION (mean/CV), for the record: conditional on the year
+// factor the aggregate loss for a book of enrolled members is a sum of
+// independent member processes, so its cumulants are the SUM of each member's
+// own cumulants (cumulants are additive under independent summation). Each
+// member's own process is a
 // Gamma-mixed compound Poisson: a Poisson count PER SEVERITY COMPONENT,
 // jointly thinned by memberFrequencyNoise (Gamma(shape=16, mean=1),
 // multiplying every component's rate for that member SIMULTANEOUSLY — a
@@ -196,11 +206,46 @@ export interface WcAggregateCumulants {
 // recompute this exactly. `cv` is what computeWcClf interpolates the grid on.
 export function wcAggregateCumulants(members: Member[], kLine: number, yearNumber: number): WcAggregateCumulants {
   let k1 = 0, k2 = 0, k3 = 0, k4 = 0;
+  // A1 and B2 are accumulated alongside, for the shared-year-factor mixing
+  // below: A1 = sum_i c1_i (the book's expected loss) and B2 = sum_i c1_i^2/alpha
+  // (the part of variance that comes from per-member frequency noise rather than
+  // from severity). A2 is then k2 - B2.
+  let A1 = 0, B2 = 0;
   for (const member of members) {
     const seeds = memberRawCumulantSeeds(member, kLine, yearNumber);
     const [mk1, mk2, mk3, mk4] = memberCumulants(seeds);
     k1 += mk1; k2 += mk2; k3 += mk3; k4 += mk4;
+    A1 += seeds[0];
+    B2 += (seeds[0] * seeds[0]) / ALPHA;
   }
+  // ⚠ THE BOOK IS NO LONGER A SUM OF INDEPENDENT MEMBER PROCESSES, AND THE
+  // DERIVATION ABOVE IS CORRECT ONLY CONDITIONAL ON THE YEAR FACTOR.
+  // WC_LOSS_MODEL.wcYearFactor multiplies EVERY member's arrival rate by one
+  // shared Gamma(shape, 1/shape) draw, so members are conditionally independent
+  // given g and correlated unconditionally. Conditioning and mixing, with
+  // A2 = sum_i c2_i, exactly as glLossDistribution derives for GL:
+  //
+  //   E[S]   = A1                              (E[g] = 1 — the mean is untouched)
+  //   Var(S) = A2 + B2 x (1 + Vg) + A1^2 x Vg
+  //
+  // The A1^2 x Vg term is the one that matters: it scales as exposure^2 against
+  // an exposure^2 denominator, so it does NOT diversify away as the book grows.
+  // That is the whole reason this channel was chosen over widening severity.
+  const VG_WC = 1 / WC_LOSS_MODEL.wcYearFactor.shape;
+  const A2 = k2 - B2;
+  k2 = A2 + B2 * (1 + VG_WC) + A1 * A1 * VG_WC;
+  // ⚠ kappa_3 AND kappa_4 ARE *NOT* MIXED, AND THAT IS A KNOWN GAP RATHER THAN
+  // AN OVERSIGHT. Mixing them means converting four cumulants to moments,
+  // integrating polynomials in g up to g^4 against the Gamma, and converting
+  // back — doable, and it would be the only correct thing to do IF either were
+  // used. Neither is: the fields are documented above as "VERIFIED, no longer
+  // used for percentiles", computeWcClf indexes the grid on `cv` alone, and
+  // wcClfGrid.ts records that the engine does not price off that grid either.
+  // They are now UNDERSTATEMENTS of the true third and fourth cumulants, since
+  // a shared multiplicative factor adds right skew. Anything that starts reading
+  // them must mix them first. wc-cutover-check asserts that the PRICING
+  // expectation cannot see this factor at all, which is the invariant that
+  // matters; nothing asserts kappa_3/kappa_4 because nothing reads them.
   const sd = Math.sqrt(Math.max(0, k2));
   return {
     mean: k1,

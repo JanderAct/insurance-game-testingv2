@@ -17,10 +17,12 @@
 //      whether the algebra describes the draw. Monte Carlo cross-check, with CIs.
 //      (This is where the retired wc-tower-rederive.ts's simulation machinery
 //      went — it used to produce constants; now it validates a computation.)
-//   3. THE gPool FLOOR. GL's SD/E cannot go below sqrt(1/25) = 0.2000 no matter
-//      how large the book gets, because gPool multiplies every member
-//      simultaneously and does not diversify. WC has no such term and decays
-//      toward zero. Same code, different limit — asserted in both directions.
+//   3. THE SHARED-FACTOR FLOOR. A line whose members all share one annual factor
+//      has an SD/E that cannot go below sqrt(Vg) no matter how large the book
+//      gets, because that factor multiplies every member simultaneously and does
+//      not diversify. GL floors at sqrt(1/25) = 0.2000 and WC at
+//      sqrt(1/8.01) = 0.3534; Property has no such term and decays toward zero.
+//      Same code, different limit — asserted in both directions.
 //
 // Plus: the above-tower band's gate (newly possible — see section 5), the
 // runtime cost budget, and the enrolment feedback loop the runtime price
@@ -240,26 +242,63 @@ console.log('\n--- 3. ANALYTIC vs MONTE CARLO (the algebra vs the generator) ---
 }
 
 // ---------------------------------------------------------------------------
-console.log('\n--- 4. THE gPool FLOOR: GL floors at 0.2000, WC has none ---');
+// ⚠ THIS SECTION ASSERTED THAT WC HAS NO FLOOR, AND THE CHANGE THAT RAISED WC'S
+// VOLATILITY INVERTED IT DELIBERATELY. The old assertion read "WC SD/E decays
+// well below GL's floor — no shared factor, no floor", and it was the correct
+// statement of the model until WC_LOSS_MODEL.wcYearFactor shipped. WC now has a
+// shared year factor of its own, so it has a floor of its own, and the floor is
+// HIGHER than GL's because WC's factor is more dispersed:
+//
+//     GL        Vg = 1/25    -> floor sqrt(1/25)   = 0.2000
+//     WC        Vg = 1/8.01  -> floor sqrt(1/8.01) = 0.3534
+//     Property  Vg = 0       -> no floor; still decays toward zero
+//
+// The assertion is therefore re-pointed rather than removed: WC must now be
+// ABOVE its own floor at every book size and must CONVERGE to it, which is the
+// same pair of claims GL has always carried. Property is the line that now
+// carries the no-floor case, and it is asserted here so the "same code,
+// different limit" property still has a witness — without one, this section
+// would only test lines that floor and would stop being able to fail in the
+// direction it was written to catch.
+console.log('\n--- 4. THE SHARED-FACTOR FLOOR: GL at 0.2000, WC at 0.3534, Property none ---');
 {
   const FLOOR = Math.sqrt(1 / WC_LOSS_MODEL.poolYearFactor.shape);
-  console.log(`  sqrt(Vg) = sqrt(1/${WC_LOSS_MODEL.poolYearFactor.shape}) = ${FLOOR.toFixed(4)}`);
+  const FLOOR_WC = Math.sqrt(1 / WC_LOSS_MODEL.wcYearFactor.shape);
+  console.log(`  GL   sqrt(Vg) = sqrt(1/${WC_LOSS_MODEL.poolYearFactor.shape}) = ${FLOOR.toFixed(4)}`);
+  console.log(`  WC   sqrt(Vg) = sqrt(1/${WC_LOSS_MODEL.wcYearFactor.shape}) = ${FLOOR_WC.toFixed(4)}`);
   console.log('  book multiple      GL 4xs1     WC 4xs1');
-  let glAbove = true, glConverges = false, wcDecays = true;
+  let glAbove = true, glConverges = false, wcAbove = true, wcConverges = false;
   let prevGl = Infinity, prevWc = Infinity;
   for (const reps of [1, 4, 20, 200]) {
     const big = Array.from({ length: reps }, () => ROSTER).flat();
     const g = layerRiskMoments('GL', 0, big, 1).sdOverExpected;
     const w = layerRiskMoments('WC', 0, big, 1).sdOverExpected;
     if (g < FLOOR) glAbove = false;
+    if (w < FLOOR_WC) wcAbove = false;
     if (g > prevGl || w > prevWc) { /* must be monotone decreasing */ }
     prevGl = g; prevWc = w;
-    if (reps === 200) { glConverges = Math.abs(g - FLOOR) < 0.01; wcDecays = w < FLOOR / 2; }
+    if (reps === 200) {
+      glConverges = Math.abs(g - FLOOR) < 0.01;
+      wcConverges = Math.abs(w - FLOOR_WC) < 0.01;
+    }
     console.log(`  x${String(reps).padStart(3)}            ${g.toFixed(4)}      ${w.toFixed(4)}`);
   }
   check(glAbove, 'GL SD/E never drops below the 0.2000 floor at any book size');
   check(glConverges, 'GL SD/E converges TO the floor at 200x the roster (within 0.01)');
-  check(wcDecays, 'WC SD/E decays well below GL\'s floor — no shared factor, no floor');
+  check(wcAbove, `WC SD/E never drops below its OWN ${FLOOR_WC.toFixed(4)} floor at any book size`);
+  check(wcConverges, 'WC SD/E converges TO its own floor at 200x the roster (within 0.01)');
+  // THE NO-FLOOR CASE STILL NEEDS A WITNESS, and Property is now the only line
+  // that can be one. Without this the section would assert only lines that
+  // floor, and would quietly stop being able to fail in the direction it was
+  // written to catch — "same code, different limit" is not tested by testing one
+  // limit twice.
+  {
+    const huge = Array.from({ length: 200 }, () => ROSTER).flat();
+    const pr = layerRiskMoments('Property', 0, huge, 1).sdOverExpected;
+    console.log(`  Property at x200 (no shared factor): ${pr.toFixed(4)}`);
+    check(pr < FLOOR / 2, 'Property SD/E decays well below GL\'s floor — no shared factor, no floor',
+      `${pr.toFixed(4)} vs ${(FLOOR / 2).toFixed(4)}`);
+  }
   // Not binding at playable sizes, and that matters: the floor is a structural
   // property, not the thing setting today's prices.
   const glFull = layerRiskMoments('GL', 0, ROSTER, 1).sdOverExpected;
