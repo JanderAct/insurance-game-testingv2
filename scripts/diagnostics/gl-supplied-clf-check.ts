@@ -16,7 +16,7 @@
 //   3. Every confidence level the UI can request falls INSIDE the supplied
 //      curve's 25-95 range, so no reachable slider position is answered by a
 //      clamp.
-//   4. WC's table still crosses where its own derivation puts it (48.6%),
+//   4. WC's table still crosses where its own derivation puts it (42.9%),
 //      i.e. the GL swap did not reach it.
 //
 // WHAT IS MEASURED AND REPORTED (not gated — it is a property of a placeholder,
@@ -126,8 +126,29 @@ check(wc.source === 'derived', 'WC table is still tagged `derived`');
   // that grepping the old value is what finds them. Here the full sweep found it
   // instead, at the commit that moved the tables, before they were pushed. That
   // is the cheaper mechanism and it is the one to rely on.
-  check(Math.abs(crossingOf(wc) - 0.486) < 0.002,
-    'WC still crosses where its own derivation puts it (48.6%) — the GL swap did not reach it',
+  //
+  // Sixth, 48.6% -> 42.9%, at the SMALL-BAND re-derivation. WC's table is now
+  // fitted to the shipped default's frozen ~62-member book rather than to the
+  // 72-88 band, and a smaller book runs a higher loss ratio, so its whole
+  // distribution sits higher and the crossing falls. Same direction as the
+  // fifth movement and a larger step, which is what a whole band rather than a
+  // re-fit should produce.
+  //
+  // ⚠ FOURTH TIME THIS TRIPWIRE HAS FIRED, AND IT IS NOT A DEFECT IN THE
+  // TRIPWIRE. It is worth being explicit, because the obvious reading after four
+  // firings is that the literal should go: this assertion is NOT an isolation
+  // test despite its wording, it is a REGRESSION TRIPWIRE on WC's table, and the
+  // isolation claim it names is carried by assertion 2 above — "Expected" pinned
+  // bit-exactly at 1.000 on BOTH lines, which is what actually proves the GL swap
+  // did not reach WC's pricing.
+  //
+  // So the literal is maintenance by design. Deriving it from WC's own shipped
+  // table would make it tautological — STATIC_CLF_TABLE.WC IS WC_DERIVED — and a
+  // tautology catches nothing. An ACCIDENTAL edit to WC's table is exactly what
+  // this catches, and it has to be updated deliberately when WC moves on purpose.
+  // Four firings, four deliberate WC changes, zero false alarms.
+  check(Math.abs(crossingOf(wc) - 0.429) < 0.002,
+    'WC still crosses where its own derivation puts it (42.9%) — the GL swap did not reach it',
     `${(crossingOf(wc) * 100).toFixed(2)}%`);
 }
 
