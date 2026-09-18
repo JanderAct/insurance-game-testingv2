@@ -138,7 +138,7 @@ const FAST: string[] = [
   'terminal-severity-check',         //  30s   STAGE 1 — derives phi against the pool's settled log-SD
   'tower-runtime-check',             //  13s
   'trend-memoization-check',
-  'triangle-check',         //   2s
+  'triangle-check',         //  27s
   'value-identity-check',            //   3s
   'wc-cap-check',                    //   4s
   'wc-cutover-check',                //   6s   PROMOTED at this commit
@@ -878,29 +878,18 @@ const EXPECTED_RED: Record<string, { code: number; why: string }> = {
   // cannot work in principle: frequency only lowers CV and the gap needs it to
   // rise. clfTables.ts still names the frequency route as "the real fix" and is
   // corrected in the same commit as this entry.
-  'triangle-check': {
-    code: 1,
-    why: '⚠ GL\'S TERMINAL DOES NOT PRESERVE THE MEAN, BY -6%, AND THE DEFAULT SAMPLE WAS HIDING IT. '
-      + 'Section 3/4 asserts that a claim developed to its terminal averages 1.000 of the value drawn, '
-      + 'because a triangle read as a loss cost would otherwise misprice by that factor. GL reads 0.9429 '
-      + 'against a 0.05 tolerance. ⚠ THIS IS NOT THE WC VOLATILITY WORK AND WAS MEASURED BEFORE '
-      + 'ATTRIBUTING IT: at the parent commit d1cef12, in a clean worktree, GL reads 0.9608 at 6 seed '
-      + 'families and 0.9395 at 30 — the SAME values this branch produces, because the shared year factor '
-      + 'is drawn on WC\'s own label and GL is byte-identical across it (solo-export-guard: GL-solo 0 of 6 '
-      + 'hashes moved). ⚠ WHAT CHANGED IS THAT IT BECAME VISIBLE. FAMILIES went 6 -> 24 because at 6 the '
-      + 'estimator is too noisy for its own tolerance once WC carries a year factor — WC\'s across-family '
-      + 'SD went 0.0406 -> 0.0738 and WC read 1.0696, a fail on noise; at 24 WC reads 1.0389 and passes. '
-      + 'The larger sample moved GL AWAY from 1.000 rather than toward it, which is what distinguishes a '
-      + 'bias from noise, and it is why raising the sample was the right call even though it turned this '
-      + 'gate red. ⚠ THE OTHER TWO LINES ARE FINE — WC 1.0389, Property 0.9930 — so this is GL\'s drift '
-      + 'law and not the shared machinery. WHAT RETIRES IT: re-solving GL\'s TRIANGLE_INITIAL_CONTRACTION '
-      + 'A against the drift as it now is, which is a measurement commit of its own and must not be folded '
-      + 'into a calibration change. DO NOT lower FAMILIES to make this green; that restores exactly the '
-      + 'silence it was found in.',
-  },
   'clf-label-backtest-check': {
     code: 1,
-    why: '⚠ WC\'S RESIDUAL IS NOW A SUPPLIED-CURVE RESIDUAL, WHICH IS A DIFFERENT THING FROM THE BAND '
+    why: '⚠ GL\'S RESIDUAL MOVED -9.4 -> -10.2pp WHEN GL\'S TRIANGLE CONTRACTION WAS RE-SOLVED, and '
+      + 'the direction is a real cost of that fix rather than a regression in it. '
+      + 'TRIANGLE_INITIAL_CONTRACTION.GL.A went 2.156982 -> 2.295852 to close a 6% mean-preservation '
+      + 'failure; that raises GL\'s booked ultimates, which widens its accident-year distribution '
+      + '(CV 0.4082 -> 0.4188) against a SUPPLIED curve that did not move. A curve fitted to someone '
+      + 'else\'s book gets slightly less accurate when this model\'s own book gets more accurate, and '
+      + 'that is the trade the supplied curve already carries. Worst per band, GL on its gated '
+      + 'accident-year basis: small -10.2, mid -9.1, large -7.1. WHAT RETIRES IT is unchanged — a GL '
+      + 'curve with a different low tail, not a re-derivation. PREVIOUS ENTRY FOLLOWS. '
+      + '⚠ WC\'S RESIDUAL IS NOW A SUPPLIED-CURVE RESIDUAL, WHICH IS A DIFFERENT THING FROM THE BAND '
       + 'MISMATCH THIS ENTRY USED TO NAME, AND IT IS 2.7x GL\'S. WC prices off a supplied real-pool curve '
       + 'as of the swap; WC_DERIVED is retained out of force. A band mismatch is a curve of the right '
       + 'SHAPE fitted to the wrong book, and it is closed by re-deriving at the right band. This is a '

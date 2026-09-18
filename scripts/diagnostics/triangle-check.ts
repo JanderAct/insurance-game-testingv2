@@ -194,6 +194,84 @@ console.log('  off-by-one in the ages, a wrong paid share, a settlement applied 
       `the triangle disagrees with an independent walk of the same law by ${Math.max(worstInc, worstPaid).toExponential(2)} — the module's loop is not doing what claimRevision does`)}`);
 }
 
+// ============================================================================
+// SOLVE MODE — re-solve TRIANGLE_INITIAL_CONTRACTION's A from the measurement
+// this file already makes. `SOLVE=1 FAMILIES=30 npx tsx ...`. Writes nothing.
+//
+// IT LIVES INSIDE THE GATE for the reason opening-pin-solve's header records:
+// "a pin solved against a different estimator than the one that asserts is a
+// pin that fails its own gate." Section 3 & 4 below IS the estimator; a
+// separate solver would be a second copy of this loop.
+//
+// ⚠ WHY A ALONE, AND WHY ONE PASS IS ENOUGH. The terminal is
+// cumulativeDevelopment(closureAge) x claimTerminalValue(initial, ...) and the
+// initial is A x drawn^k, so THE TERMINAL IS EXACTLY PROPORTIONAL TO A. Two
+// consequences, and both are load-bearing:
+//   1. the mean ratio scales linearly in A, so A_solved = A x (1 / ratio) is
+//      exact rather than a first step — no bisection, and the verification pass
+//      below is a check rather than an iteration;
+//   2. sd(ln terminal) is INVARIANT to A, because sd(ln(A x)) = sd(ln x). So
+//      the spread assertion cannot be moved by this solve and does not need
+//      re-checking against it.
+// That second point is also the DIAGNOSIS: the spread statistic isolates k and
+// the climb, the mean statistic isolates A, and when the spread passes while
+// the mean fails the defect is in the STARTING POINT and not in the climb.
+// ============================================================================
+function meanRatioFor(line: CoverageLine, families: number): number {
+  const pattern = LINE_PAYOUT_PATTERN[line];
+  const reps = line === 'Property' ? 30 : line === 'GL' ? 6 : 5;
+  const mrs: number[] = [];
+  for (let fam = 0; fam < families; fam++) {
+    let sumTerm = 0, sumDrawn = 0;
+    for (let g = 0; g < reps; g++) {
+      const gameId = `SPR${line}${fam}_${g}#tri1`;
+      for (let y = 1; y <= 4; y++) {
+        const base = { members, yearNumber: y, calendarYear: 2025 + y, instanceSeed: 4_300_000 + fam * 131_071 + g * 7919, riskControlEffectiveness: 0 };
+        const r = line === 'WC' ? generateWcClaims({ ...base, kLine: 1 })
+          : line === 'GL' ? generateGlClaims({ ...base, kGl: 1, gPool: 1 })
+            : generatePropertyClaims({ ...base, kPr: 1 });
+        for (const c of r.claims) {
+          const init = initialEstimate(line, c.grossUltimate);
+          sumDrawn += c.grossUltimate;
+          const curve = resolveClosureCurve(line, c.grossUltimate);
+          const u = claimClosureUnit(gameId, c.id);
+          let ca = 40;
+          for (let t = 1; t <= 40; t++) if (closedShare(curve, t) >= u) { ca = t; break; }
+          sumTerm += cumulativeDevelopment(line, ca)
+            * claimTerminalValue(gameId, c.id, init, ca, undefined,
+              age => Math.min(0.999, cumulativePaid(pattern, age)));
+        }
+      }
+    }
+    mrs.push(sumTerm / sumDrawn);
+  }
+  return mean(mrs);
+}
+
+if (process.env.SOLVE) {
+  console.log(RULE);
+  console.log(`TRIANGLE_INITIAL_CONTRACTION SOLVE — A only, ${FAMILIES} seed families`);
+  console.log(RULE);
+  console.log('  line       shipped A    mean ratio    implied A    verified ratio   move');
+  for (const line of LINES) {
+    const shipped = TRIANGLE_INITIAL_CONTRACTION[line].A;
+    const r0 = meanRatioFor(line, FAMILIES);
+    const solved = shipped / r0;
+    TRIANGLE_INITIAL_CONTRACTION[line].A = solved;
+    const r1 = meanRatioFor(line, FAMILIES);
+    TRIANGLE_INITIAL_CONTRACTION[line].A = shipped;
+    console.log(`  ${line.padEnd(9)} ${shipped.toFixed(6).padStart(10)} ${r0.toFixed(4).padStart(13)} `
+      + `${solved.toFixed(6).padStart(12)} ${r1.toFixed(4).padStart(16)}   `
+      + `${((solved / shipped - 1) * 100 >= 0 ? '+' : '')}${((solved / shipped - 1) * 100).toFixed(2)}%`);
+  }
+  console.log('');
+  console.log('  "verified ratio" re-measures at the solved A. Exact proportionality means it');
+  console.log('  should read 1.0000 to rounding; anything else means the terminal is NOT linear');
+  console.log('  in A and this solve is only a first step.');
+  console.log(RULE);
+  process.exit(0);
+}
+
 // --------------------------------------- 3 & 4. terminal spread, and the mean
 console.log('\n--- 3 & 4. THE TERMINAL LANDS ON THE FIT, AND THE MEAN IS PRESERVED ---');
 console.log('  ⚠ AVERAGED ACROSS SEED FAMILIES, AND THE SPREAD IS PRINTED. Both statistics');
@@ -210,7 +288,11 @@ console.log('    same sample makes GL read 0.9429, and GL IS NOT AFFECTED BY THA
 console.log('    measured at the parent commit d1cef12, GL reads 0.9608 at 6 families and');
 console.log('    0.9395 at 30, IDENTICALLY on both commits. More families moved GL AWAY from');
 console.log('    1.000, not toward it, which is what distinguishes a bias from noise.');
-console.log('    GL is entered in gates.ts EXPECTED_RED. Do NOT lower FAMILIES to hide it.\n');
+console.log('    GL WAS entered in gates.ts EXPECTED_RED and is now CLOSED: its A was re-solved');
+console.log('    2.156982 -> 2.295852 (+6.44%) and the ratio reads 1.0000 at 30 families, 1.0036');
+console.log('    at this file\'s 24. Do NOT lower FAMILIES — the low default is what hid it.');
+console.log('    WC remains at 1.0336, the same defect on the other side, inside tolerance and');
+console.log('    NOT re-solved; its implied A is 1.457474. See TRIANGLE_INITIAL_CONTRACTION.\n');
 console.log('  line       k         A       sd(ln terminal) +/- sd   target   mean term/drawn +/- sd');
 for (const line of LINES) {
   const { k, A } = TRIANGLE_INITIAL_CONTRACTION[line];

@@ -443,6 +443,23 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // basis. The mechanism's own correctness is held by cohort-ledger-check (three
 // identities, both arms), martingale-equivalence-check (term by term) and
 // terminal-severity-check (phi on its anchor), all green at this commit.
+// v47: GL'S TRIANGLE CONTRACTION RE-SOLVED, A 2.156982 -> 2.295852 (+6.44%), to
+// close a 6% mean-preservation failure — a claim developed to its terminal was
+// averaging 0.9395 of the value drawn. 8,260 of 31,200 fields moved across 78
+// fields, 0 added, 0 removed.
+//
+// ⚠ IT IS A REPRICING, NOT A RESERVE CORRECTION, AND THAT WAS ESTABLISHED BY
+// PERTURBATION BEFORE SOLVING ANYTHING. GL's rate reads the pool's own played
+// paid triangle (currentPurePremiumPer100's ExperienceBasis — the S3 path), so
+// the contraction feeds the rate. poolPremium and purePremiumPer100 are in the
+// moved list for that reason, not as a side effect of reserves. Measured:
+// GL booked reserve +9.14%, GL premium +8.39%, ending surplus +0.22%.
+//
+// ⚠ AND THE MOVE IS CONFINED TO GL. solo-export-guard moved GL-solo 6 of 6 and
+// tri 6 of 6, with WC-SOLO AND PR-SOLO BYTE-IDENTICAL — the mirror image of
+// v46, where WC moved and GL did not. Two commits in a row where the export
+// split is what proves the scope claim rather than an argument for it.
+//
 // v46: WC'S AGGREGATE LOSS VOLATILITY RAISED TO 0.30 ON THE CALENDAR BASIS, via
 // a shared year factor (WC_LOSS_MODEL.wcYearFactor, Gamma shape 6.28, mean
 // exactly 1) multiplying every WC member's arrival rate. 8,796 of 31,200 fields
@@ -747,7 +764,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // capture is sufficient alone here: the hash guard cannot tell "different
 // members enrolled" from "the arithmetic broke", and this one says the
 // changed set is exactly the set a roster change explains.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v46.json');
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v47.json');
 
 function seedOf(id: string) {
   let h = 5381;

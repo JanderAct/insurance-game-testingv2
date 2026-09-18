@@ -4586,9 +4586,54 @@ export const TRIANGLE_HISTORY_YEARS = 10;
 // The constants below are solved against the SHIPPED law at the SHIPPED phi.
 // They are not free parameters: triangle-check re-solves them and fails if
 // either the terminal spread or the preserved mean has drifted.
+//
+// ⚠ GL'S A WAS RE-SOLVED 2.156982 -> 2.295852, +6.44%, AND IT IS A REPRICING
+// RATHER THAN A RESERVE CORRECTION. The mean-preservation identity — a claim
+// developed to its terminal must average 1.000 of the value drawn — read 0.9395
+// on GL at 30 seed families. Six percent low, which means a triangle read as a
+// loss cost understated by that much.
+//
+// ⚠ IT WAS A BIAS AND THE SHIPPED SAMPLE WAS HIDING IT. triangle-check defaulted
+// to 6 families; raising it moved GL AWAY from 1.000 rather than toward it
+// (0.9608 at 6, 0.9395 at 30), which is what distinguishes a bias from noise.
+// Identical at d1cef12 and after the WC volatility work, so nothing recent
+// caused it.
+//
+// ⚠ THE DEFECT IS IN THE STARTING POINT, NOT THE CLIMB, AND THE TWO STATISTICS
+// SEPARATE CLEANLY. The terminal is cumulativeDevelopment(closureAge) x
+// claimTerminalValue(A x drawn^k, ...), so it is EXACTLY PROPORTIONAL TO A.
+// Therefore sd(ln terminal) is INVARIANT to A — sd(ln(A x)) = sd(ln x) — and
+// the spread statistic measures k and the climb alone. GL PASSES the spread
+// (2.1369 against a 2.140 target) and FAILS the mean. A climb defect would have
+// moved both. So one constant is the whole fix, the solve is exact rather than
+// iterative, and triangle-check's SOLVE mode verifies it: re-measured at the
+// solved A, the ratio reads 1.0000.
+//
+// ⚠ GL'S RATE READS THIS, WHICH IS WHY IT IS A REPRICING. Established by
+// perturbation before solving anything, +10% on GL's A, 24 games x 8 years:
+//
+//     purePremiumPer100      +4.80%      poolPremium         +12.31%
+//     endingNetReserve      +13.53%      totalMemberCharge    +7.16%
+//     expectedNetUnpaidLoss +13.53%      endingSurplus        +4.30%
+//     WC and Property        BIT-IDENTICAL on every field, 192 line-years both arms
+//
+// The channel is S3: currentPurePremiumPer100 takes an ExperienceBasis — "the
+// pool's own played paid triangle" — so the pool prices off its own booked
+// experience and the contraction feeds the rate. This is NOT the case one might
+// assume from the other two lines; it was measured rather than inferred, and the
+// grep suggested the opposite (towerMoments and reinsuranceTower read neither
+// FORWARD_BOOKING nor initialEstimate).
+//
+// ⚠ WC HAS THE SAME DEFECT, SMALLER, ON THE OTHER SIDE, AND IS DELIBERATELY NOT
+// TOUCHED HERE. Its ratio reads 1.0336 at 30 families — implied A 1.457474, a
+// -3.25% move — inside the 0.05 tolerance but not centred. It was 1.0259 before
+// WC gained its shared year factor and 1.0336 after, so most of it predates that
+// change. Property is effectively exact at 0.9971 (implied +0.29%). This commit
+// re-solves GL because that is what was ruled; WC's number is recorded so the
+// next person does not have to re-derive it.
 export const TRIANGLE_INITIAL_CONTRACTION: Record<string, { k: number; A: number }> = {
   WC: { k: 0.901934, A: 1.506467 },
-  GL: { k: 0.855989, A: 2.156982 },
+  GL: { k: 0.855989, A: 2.295852 },
   Property: { k: 0.924533, A: 2.431518 },
 };
 
