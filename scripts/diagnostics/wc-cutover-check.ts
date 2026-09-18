@@ -7,6 +7,21 @@
 // pricing lands where it should.
 //
 //   npx tsx scripts/diagnostics/wc-cutover-check.ts 6b   # assert the ratio
+//
+// ⚠ MODE 6b IS RED AND THE SWEEP HAS NEVER SEEN IT. scripts/gates.ts runs this
+// file with NO ARGUMENT, which is mode 6a, and the 66.8% analytic assertion
+// below is inside `if (MODE === '6b')`. So the repo contains a hard assertion
+// that fails and reports green. Measured at d1cef12, BEFORE the WC volatility
+// work and in a clean worktree: ANALYTIC gross basis 112.21% against a 66.8%
+// target, a 45pp gap. This is NOT a consequence of the year factor — the null
+// arm (shape at 1e9, Vg to zero) reads 112.24% and the parent commit reads
+// 112.21%. The year factor moves it to 115.47%, a +3.3pp contribution, through
+// the reinsurance risk load in the premium denominator.
+//
+// RECORDED RATHER THAN FIXED, deliberately: whatever put the analytic ratio 45pp
+// above its target is a pricing question that predates this work and closing it
+// is its own ruling. What must not happen again is it being invisible. Do not
+// "fix" this by deleting the 6b branch.
 //   npx tsx scripts/diagnostics/wc-cutover-check.ts      # 6a: report only
 //
 // THE TWO-PART LOSS-RATIO CHECK (see docs/PROJECT_STATE_SUMMARY.md section 3).
