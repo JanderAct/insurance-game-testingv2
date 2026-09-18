@@ -769,7 +769,7 @@ export const SATISFACTION = {
    * could be stated relatively (see lossLevelWeight) precisely because its
    * target is a continuous quantity both sides share.
    */
-  surplusWeight: 0.0344,
+  surplusWeight: 0.0516,
   /**
    * Where "comfortably above the requirement" sits, in units of
    * excessCapitalRatio = (availableSurplus - reserveRiskMarginNeeded) /
@@ -789,11 +789,25 @@ export const SATISFACTION = {
    * ⚠ MEASURED. 24 games x 10 years at all-default decisions, per member-year:
    *
    *     line        n        p25    MEDIAN       p75
-   *     WC       16020    -0.4267   -0.2196    0.0891
+   *     WC       15150    -0.4739   -0.1895    0.4657
    *     GL       14830    -0.0263    0.4358    1.1258
    *     Property 15350     1.2039    3.1115    5.6828   (excluded by the rule)
    *
-   * Pooled over WC and GL, n 30850, median 0.0258.
+   * Pooled over WC and GL, n 29980, median 0.1385.
+   *
+   * ⚠ THE POOLED MEDIAN IS A KNIFE-EDGE STATISTIC HERE AND THE NEXT RE-SOLVE
+   * SHOULD KNOW IT. WC's distribution sits almost entirely below zero and GL's
+   * almost entirely above, with near-equal n, so the pooled median lands in the
+   * thin overlap between them and moves far for a small shift in either line.
+   * Across the WC volatility change WC's own median moved only -0.2196 ->
+   * -0.1895, 0.03, while the POOLED median moved 0.0258 -> 0.1385, 0.11 — nearly
+   * four times as far, from a shift in one line and none in the other. WC's
+   * sample also fell 16,020 -> 15,150 member-years, 5.4%, which is games ending
+   * early: a more volatile WC insolves more often, and that reweights the pool
+   * as well as moving it. The RULE is still the right one — the boundary belongs
+   * where default play sits — but its estimator is fragile in a way a single
+   * line's median would not be, and a future reader seeing a large move should
+   * check whether either line moved at all before concluding the book did.
    *
    * ⚠ THE TRIGGER BELOW FIRED AT THE VERY NEXT COMMIT, AND THE PATH IS WORTH
    * KNOWING BECAUSE NOTHING ABOUT IT LOOKS LIKE SATISFACTION. This constant was
@@ -819,11 +833,14 @@ export const SATISFACTION = {
    * member-years and 24.9% of GL's — the band was saturating from the other
    * side, which is the failure section 8(c) exists to catch.
    *
-   * ⚠ AT 0.0258 THE Adequate BAND HAS ALL BUT COLLAPSED, AND THAT IS A LIMIT OF
-   * THE RULE RATHER THAN OF THIS VALUE. Adequate spans [0, surplusComfortable),
-   * so a boundary this close to zero leaves it a sliver: measured shares are
-   * Adequate 0.5% on WC and 0.4% on GL, against Deficient 63.0% / 19.4% and
-   * Strong 29.1% / 73.1%. The four-step ladder is behaving as a three-step one,
+   * ⚠ THE Adequate BAND IS STILL THIN AND IS NO LONGER COLLAPSED, AND THE LIMIT
+   * IS IN THE RULE RATHER THAN IN THIS VALUE. Adequate spans
+   * [0, surplusComfortable), so a boundary near zero leaves it a sliver. At the
+   * previous 0.0258 it held 0.5% of WC member-years and 0.4% of GL's — a
+   * four-step ladder behaving as three. At 0.1385 it holds 4.3% and 9.5%,
+   * against Deficient 55.3% / 19.4% and Strong 36.0% / 64.0%. Recovered, not
+   * fixed: the band is occupied again because the boundary happened to move
+   * away from zero, not because anything decided it should be. The four-step ladder is behaving as a three-step one,
    * and the distinction the top boundary was supposed to draw — "at the
    * requirement" against "comfortably above it" — has stopped being a
    * distinction. section 8(c) still passes, because it asks whether the band
@@ -869,7 +886,7 @@ export const SATISFACTION = {
    * that is a property of the measure rather than of the pool. Pooling it in
    * would drag the boundary up by its own irrelevance.
    */
-  surplusComfortable: 0.0258,
+  surplusComfortable: 0.1385,
   /** The stock's bounds. Same [1, 10] the field has always carried. */
   floor: 1.0,
   ceiling: 10.0,

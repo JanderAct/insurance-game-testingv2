@@ -443,6 +443,32 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // basis. The mechanism's own correctness is held by cohort-ledger-check (three
 // identities, both arms), martingale-equivalence-check (term by term) and
 // terminal-severity-check (phi on its anchor), all green at this commit.
+// v46: WC'S AGGREGATE LOSS VOLATILITY RAISED TO 0.30 ON THE CALENDAR BASIS, via
+// a shared year factor (WC_LOSS_MODEL.wcYearFactor, Gamma shape 6.28, mean
+// exactly 1) multiplying every WC member's arrival rate. 8,796 of 31,200 fields
+// moved across 77 fields, 0 added, 0 removed.
+//
+// ⚠ THE MEAN DID NOT MOVE AND THAT IS ASSERTED, NOT ASSUMED. wc-cutover-check
+// perturbs the factor's shape by 4x and requires expectedWcGrossLossForPricing
+// to come back BIT-IDENTICAL, which it does at 48608807.629813. So no held pure
+// premium, held class rate or k_line re-derives, and every field that moved here
+// moved through VARIANCE rather than through level.
+//
+// WHAT MOVED, and it is three distinct channels rather than one:
+//   1. the losses themselves, year to year, which is the point;
+//   2. the reinsurance risk load — WC's layer SD/E gained a floor at
+//      sqrt(1/6.28) = 0.399, HIGHER than GL's 0.200, so towerMoments prices WC's
+//      tower differently. This is the only place the change touches a price;
+//   3. SATISFACTION.surplusComfortable 0.0258 -> 0.1385 and surplusWeight
+//      0.0344 -> 0.0516, re-solved because excessCapitalRatio's denominator
+//      moved again. Second consecutive commit in which those two re-solve.
+//
+// ⚠ AND THE OPENING PIN DID NOT MOVE, WHICH IS THE INTERESTING ONE.
+// opening-centring-check went red on WC at 1.7 SE and the pin is correct:
+// measured at 2,400 seeds the shipped 0.3254 sits 0.18 SE off its band
+// midpoint. The gate's sample was too small for its own tolerance and has been
+// raised 400 -> 1,600; STARTING_CAPITAL_TO_PREMIUM is untouched. See that file.
+//
 // v45: WC TOOK A SUPPLIED CLF CURVE, AND THE SURPLUS LIMB WAS RE-SOLVED BEHIND
 // IT. WC now prices off a real public-entity pool's measured percentile curve
 // over 45-95, extended down to 10 on a fitted lognormal; WC_DERIVED is retained
@@ -721,7 +747,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // capture is sufficient alone here: the hash guard cannot tell "different
 // members enrolled" from "the arithmetic broke", and this one says the
 // changed set is exactly the set a roster change explains.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v45.json');
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v46.json');
 
 function seedOf(id: string) {
   let h = 5381;

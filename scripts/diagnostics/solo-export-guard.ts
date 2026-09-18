@@ -357,6 +357,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // reports the same thing in both cases. value-identity v37 is what separates
 // them, and its note records the confinement check: every changed field is
 // downstream of the roster, nothing roster-independent moved, no NaN.
+// v46: WC'S AGGREGATE LOSS VOLATILITY RAISED TO 0.30 via a shared year factor.
+// EXACTLY 6 OF 12 CONFIGURATIONS MOVED — WC-solo on all three seeds and tri on
+// all three. GL-SOLO AND PR-SOLO ARE BYTE-IDENTICAL, which is the leak check and
+// the strongest available statement of scope: the factor is drawn on WC's own
+// RNG label and is NOT the shared gPool, so GL keeps its own year factor
+// untouched and nothing reaches Property at all. Had the change consumed gPool
+// instead — the cheaper implementation — GL-solo would necessarily have moved,
+// and these six identical hashes are what proves it did not.
+//
 // v45: WC TOOK A SUPPLIED CLF CURVE, and the surplus limb was re-solved behind
 // it. 12 of 24 exports moved, against all 24 at v44 — and the SPLIT IS EXACT,
 // which is the isolation claim holding at the export level rather than being
@@ -477,7 +486,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 //
 // So this capture carries its own negative control: a table change that reaches
 // two lines and provably does not reach the third.
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v45.json');
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v46.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');
