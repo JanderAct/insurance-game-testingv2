@@ -81,7 +81,7 @@ const SD_TOL = 0.08;
 const MEAN_TOL = 0.05;
 // Seed families averaged over. The statistics below are value-weighted on a
 // heavy tail, so one family is not a measurement — see assertion 3 & 4's note.
-const FAMILIES = Number(process.env.FAMILIES ?? 6);
+const FAMILIES = Number(process.env.FAMILIES ?? 24);
 
 const members = getPredefinedMarketMembers();
 const failed: string[] = [];
@@ -202,6 +202,15 @@ console.log('    family swings several percent on nothing — finding 26, which 
 console.log('    gl-cutover-check and marketplace-generation-check onto a bounded basis. A');
 console.log('    single sample here read 1.055 / 0.926 / 0.964 on the mean and would have');
 console.log('    failed a 2% tolerance while the constants were correct.\n');
+console.log('  ⚠ FAMILIES WENT 6 -> 24 AND THAT EXPOSED A REAL GL BIAS THE DEFAULT WAS HIDING.');
+console.log('    At 6 families the estimator is too noisy for its own 0.05 tolerance once WC');
+console.log('    carries a shared year factor: WC\'s across-family SD went 0.0406 -> 0.0738 and');
+console.log('    WC read 1.0696, a fail on noise. At 24 it reads 1.0389 and passes. But the');
+console.log('    same sample makes GL read 0.9429, and GL IS NOT AFFECTED BY THAT CHANGE —');
+console.log('    measured at the parent commit d1cef12, GL reads 0.9608 at 6 families and');
+console.log('    0.9395 at 30, IDENTICALLY on both commits. More families moved GL AWAY from');
+console.log('    1.000, not toward it, which is what distinguishes a bias from noise.');
+console.log('    GL is entered in gates.ts EXPECTED_RED. Do NOT lower FAMILIES to hide it.\n');
 console.log('  line       k         A       sd(ln terminal) +/- sd   target   mean term/drawn +/- sd');
 for (const line of LINES) {
   const { k, A } = TRIANGLE_INITIAL_CONTRACTION[line];

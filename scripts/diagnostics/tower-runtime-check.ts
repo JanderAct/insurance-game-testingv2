@@ -171,8 +171,30 @@ console.log('\n--- 2. YEAR-1 FULL-MARKET REPRODUCES THE CLOSED-FORM REFERENCE --
   // as the pure premium, that is the thing to be suspicious of.
   //
   // GL's are untouched — region never entered GL's severity.
+  //
+  // ⚠ WC'S SD/E LITERALS MOVED AGAIN WHEN WC GAINED A SHARED YEAR FACTOR, AND
+  // WC'S per100 DID NOT. That split is the whole point and is worth reading
+  // before updating anything here:
+  //
+  //   layer            per100            SD/E
+  //   $4M xs $1M     0.6647 (unchanged)  0.541 -> 0.672
+  //   $5M xs $5M     0.1481 (unchanged)  1.446 -> 1.500
+  //   $40M xs $10M   0.1390 (unchanged)  3.366 -> 3.389
+  //
+  // WC_LOSS_MODEL.wcYearFactor is a MEAN-ONE multiplier on arrival rates, so
+  // E[ceded to a layer] cannot move — and it does not, to four decimals, on all
+  // three layers. Only the dispersion moves. If a future change to that factor
+  // ever moves a per100 here, the factor has stopped being mean-one and the
+  // failure is in the model, not in these literals.
+  //
+  // The move is LARGEST AT THE SHALLOWEST LAYER (+24% at $1M, +3.7% at $5M,
+  // +0.7% at $10M), which is the mirror image of the elasticity note above.
+  // A shared frequency factor adds variance that scales with the layer's
+  // EXPECTED count; the $1M layer is hit often enough for that term to dominate,
+  // while the $10M layer's dispersion is already governed by whether its rare
+  // claim happens at all.
   const REF: Record<string, { per100: number[]; sdOverE: number[] }> = {
-    WC: { per100: [0.6647, 0.1481, 0.1390], sdOverE: [0.541, 1.446, 3.366] },
+    WC: { per100: [0.6647, 0.1481, 0.1390], sdOverE: [0.672, 1.500, 3.389] },
     GL: { per100: [1.3621, 0.4889, 0.5015], sdOverE: [0.452, 0.846, 1.366] },
   };
   resetTowerMomentCache();
