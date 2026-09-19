@@ -33,6 +33,7 @@ import { getMemberExposure, selectResultView } from './utils/lineHelpers';
 import { computeFundingConsequence } from './utils/fundingConsequence';
 import { endingPosition } from './utils/endingPosition';
 import { LINE_FULL_NAME } from './utils/lineDisplay';
+import { seedFromInstanceId } from './seedHash';
 import LoanPromptModal from './components/LoanPromptModal';
 import type { LineLoanInfo } from './pages/DecisionsPage';
 
@@ -53,16 +54,6 @@ import DepartmentsPage from './pages/DepartmentsPage';
 
 const AUDIT_TAB: TabId = 'audit';
 const SPREADSHEET_TAB: TabId = 'spreadsheet';
-
-// Derive numeric seed from instance ID string
-function seedFromInstanceId(id: string): number {
-  let hash = 5381;
-  for (let i = 0; i < id.length; i++) {
-    hash = ((hash << 5) + hash) ^ id.charCodeAt(i);
-    hash = hash >>> 0;
-  }
-  return hash;
-}
 
 // Pages that support the Pool / per-line view toggle (Stage 2.1; 'history'
 // added in Stage 2.10 — each line now has its own real pre-game history).

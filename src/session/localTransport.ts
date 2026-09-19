@@ -14,17 +14,30 @@
 // the injectable fault are how the loading spinner and the error state get
 // written and walked NOW, while the cost of getting them wrong is nothing.
 //
-// ⚠ THE READ-MODIFY-WRITE IS SYNCHRONOUS AND THAT IS LOAD-BEARING. Four tabs
-// share one localStorage and there is no transaction, so a mutation that read
-// the room, awaited anything, and then wrote it back would be a lost-update race
-// between tabs — two teams locking in the same second and one of them silently
-// vanishing from the host's table. Every mutator below does its read, its
-// change, and its write inside ONE synchronous block with no await anywhere in
-// the middle. JavaScript is single-threaded per tab and localStorage writes are
-// synchronous and immediately visible to other tabs, so that block cannot be
-// interleaved. The artificial latency is awaited BEFORE the block, never inside
-// it. A hosted implementation gets this property from the server for free; this
-// one has to arrange it, and arranging it is why the delay sits where it does.
+// ⚠ MUTATIONS TAKE A CROSS-TAB LOCK, AND THIS WAS A BUG BEFORE THEY DID. Four
+// tabs share one localStorage and there is no transaction. The first version of
+// this file kept each read-modify-write in one synchronous block and argued that
+// JavaScript being single-threaded made it un-interleavable. THAT ARGUMENT IS
+// WRONG, and the four-tab run proved it within minutes: single-threadedness
+// holds WITHIN a tab, but separate tabs are genuinely parallel, so tab A could
+// read, tab B read, tab A write and tab B write — losing A's update entirely. It
+// showed up as a team whose posted result silently never arrived, with the host
+// table reporting it a year behind while its own screen showed the year computed
+// and posted.
+//
+// navigator.locks is the right primitive: per ORIGIN, honoured across every tab,
+// and it releases if a tab dies mid-hold. Every mutating endpoint runs its whole
+// read-modify-write inside it. READS ARE DELIBERATELY NOT LOCKED — a poll is
+// harmless against a half-finished sequence because each localStorage write is
+// itself atomic, and serialising four pollers behind every write would make the
+// lock the bottleneck it exists to avoid.
+//
+// Where the API is absent (the Node contract harness, an old browser) the work
+// runs unlocked — correct there, because there is exactly one thread to race.
+//
+// The artificial latency is awaited BEFORE the lock is taken, never inside it,
+// so a fake round trip cannot widen the window it is meant to be testing. A
+// hosted implementation gets all of this from the server for free.
 // ============================================================================
 
 import type {
@@ -216,6 +229,27 @@ function callerView(role: CallerRole, team: TeamRecord | null): CallerView {
   return view;
 }
 
+// ---------------------------------------------------------------- locking
+
+const LOCK_NAME = 'ripple.session.v1.rooms';
+
+// navigator.locks is typed in lib.dom, but the harness runs under a DOM-less
+// Node, so this reads it defensively rather than assuming the global shape.
+interface LockManagerLike {
+  request<T>(name: string, cb: () => T | Promise<T>): Promise<T>;
+}
+
+function lockManager(): LockManagerLike | null {
+  const nav = (globalThis as { navigator?: { locks?: LockManagerLike } }).navigator;
+  return nav?.locks ?? null;
+}
+
+async function withRoomLock<T>(work: () => T): Promise<T> {
+  const locks = lockManager();
+  if (!locks) return work();
+  return locks.request(LOCK_NAME, work);
+}
+
 // ---------------------------------------------------------------- faults
 
 interface PendingFault {
@@ -277,15 +311,16 @@ export class LocalSessionTransport implements SessionTransport {
 
   // The one place latency and injected failure are applied.
   //
-  // ⚠ THE AWAIT HAPPENS HERE, BEFORE `work` RUNS, AND `work` IS SYNCHRONOUS.
-  // That is what keeps every read-modify-write below un-interleavable across
-  // tabs. Do not make a `work` callback async.
-  private async call<T>(work: () => T): Promise<T> {
+  // ⚠ `work` MUST STAY SYNCHRONOUS. The lock below guarantees only that no other
+  // TAB is inside the critical section; an await inside `work` would reopen the
+  // same lost-update window within this one.
+  private async call<T>(work: () => T, exclusive = false): Promise<T> {
     const fault = this.faults.take();
     const delay = this.faults.latencyMs;
     if (delay > 0) await new Promise(r => setTimeout(r, delay));
     if (fault) throw new SessionError(fault.code, fault.message, true);
-    return work();
+    if (!exclusive) return work();
+    return withRoomLock(work);
   }
 
   createRoom(req: CreateRoomRequest): Promise<CreateRoomResponse> {
@@ -341,7 +376,7 @@ export class LocalSessionTransport implements SessionTransport {
 
       store.setItem(KEY_PREFIX + code, JSON.stringify(room));
       return { code, hostToken: room.hostToken, room: roomView(room) };
-    });
+    }, true);
   }
 
   join(req: JoinRequest): Promise<JoinResponse> {
@@ -383,7 +418,7 @@ export class LocalSessionTransport implements SessionTransport {
       team.joined = true;
       saveRoom(room);
       return { teamToken: token, teamName: team.name, role: 'player' as const, rejoined: false, room: roomView(room) };
-    });
+    }, true);
   }
 
   submit(req: SubmitRequest): Promise<SubmitResponse> {
@@ -429,7 +464,7 @@ export class LocalSessionTransport implements SessionTransport {
 
       saveRoom(room);
       return { room: roomView(room), you: callerView(role, team) };
-    });
+    }, true);
   }
 
   advance(req: AdvanceRequest): Promise<AdvanceResponse> {
@@ -446,7 +481,7 @@ export class LocalSessionTransport implements SessionTransport {
       room.currentYear += 1;
       saveRoom(room);
       return { room: roomView(room), currentYear: room.currentYear };
-    });
+    }, true);
   }
 
   read(req: ReadRequest): Promise<ReadResponse> {

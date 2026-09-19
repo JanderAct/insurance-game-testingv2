@@ -28,6 +28,8 @@ import { clearActive, forgetTeamCredential, loadActive, loadHeld, rememberTeamCr
 import { useRoom } from '../client/useRoom';
 import { decisionsForYear, decisionsToJson } from '../client/decisions';
 import DecisionPanel from '../components/DecisionPanel';
+import { useSessionGame } from '../client/useSessionGame';
+import TeamResultCard from '../components/TeamResultCard';
 import type { DecisionSet } from '../../types/simulation';
 
 interface Props {
@@ -51,6 +53,11 @@ export default function JoinScreen({ code }: Props) {
   const [decisions, setDecisions] = useState<DecisionSet | null>(null);
 
   const { room, you, error, loading, refresh } = useRoom(code, teamToken);
+
+  // ⚠ THE TURN CYCLE. This browser builds its own game from the room's seed and
+  // plays its own year the moment the host's advance shows up in a poll. Nothing
+  // central simulates anything.
+  const game = useSessionGame(code, room, you, teamToken);
 
   // A stored token the room rejects is a token for a room that no longer
   // exists. Drop it and fall back to the picker rather than showing an error
@@ -280,6 +287,24 @@ export default function JoinScreen({ code }: Props) {
             </button>
           </>
         )}
+
+        {/* ---- what this browser computed ---- */}
+        {game.phase === 'building' && (
+          <p data-testid="game-building" className="mt-4 text-center text-xs text-slate-400">
+            Building the pool's opening position…
+          </p>
+        )}
+        {game.phase === 'processing' && (
+          <p data-testid="game-processing" className="mt-4 text-center text-xs text-slate-500">
+            Running year {game.processedYear === null ? room.currentYear - 1 : game.processedYear + 1}…
+          </p>
+        )}
+        {game.error && (
+          <p data-testid="game-error" className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            {game.error}
+          </p>
+        )}
+        {game.lastResult && <TeamResultCard result={game.lastResult} />}
       </div>
     </div>
   );

@@ -94,6 +94,15 @@ export default function HostRoomScreen({ code }: Props) {
   const outstanding = joined.filter(t => !t.locked);
   const complete = room?.status === 'complete';
 
+  // ⚠ RESULTS ARE FOR THE YEAR JUST PLAYED, WHICH IS THE ONE BEHIND THE ROOM.
+  // The host advances to year N+1; every browser then computes year N and posts
+  // it. So "reported" always trails the current year by one, and before the
+  // first advance there is no year to have reported on at all.
+  const reportingYear = (room?.currentYear ?? 1) - 1;
+  const awaitingResults = reportingYear >= 1
+    ? joined.filter(t => (t.resultYear ?? 0) < reportingYear)
+    : [];
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50/30 p-6">
       <div className="mx-auto w-full max-w-[860px]">
@@ -213,6 +222,7 @@ export default function HostRoomScreen({ code }: Props) {
                 <th className="px-5 py-2 font-medium">Team</th>
                 <th className="px-5 py-2 font-medium">Joined</th>
                 <th className="px-5 py-2 font-medium">Locked</th>
+                <th className="px-5 py-2 font-medium">Reported</th>
               </tr>
             </thead>
             <tbody data-testid="team-table">
@@ -229,6 +239,13 @@ export default function HostRoomScreen({ code }: Props) {
                       ? <span data-testid={`locked-${t.name}`} className="flex items-center gap-1.5 text-emerald-600"><CheckCircle2 size={14} /> locked</span>
                       : <span className="flex items-center gap-1.5 text-slate-300"><Circle size={14} /> open</span>}
                   </td>
+                  <td className="px-5 py-2.5">
+                    {t.resultYear !== null
+                      ? <span data-testid={`reported-${t.name}`} className="flex items-center gap-1.5 text-slate-600">
+                          <CheckCircle2 size={14} className="text-emerald-600" /> year {t.resultYear}
+                        </span>
+                      : <span className="flex items-center gap-1.5 text-slate-300"><Circle size={14} /> —</span>}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -241,6 +258,14 @@ export default function HostRoomScreen({ code }: Props) {
             {actionError && (
               <p data-testid="advance-error" className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
                 {actionError.message}
+              </p>
+            )}
+            {reportingYear >= 1 && (
+              <p className="mb-3 text-xs text-slate-500">
+                {/* ⚠ BY NAME, NOT BY COUNT — the names are who gets chased. */}
+                {awaitingResults.length === 0
+                  ? <>Year {reportingYear} results are in from every team.</>
+                  : <>Year {reportingYear} results outstanding from <span data-testid="awaiting-results" className="font-medium text-slate-700">{awaitingResults.map(t => t.name).join(', ')}</span></>}
               </p>
             )}
             {complete ? (
