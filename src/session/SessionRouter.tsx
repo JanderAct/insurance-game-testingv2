@@ -13,6 +13,8 @@ import App from '../App';
 import { onRouteChange, parseRoute, type Route } from './client/navigation';
 import HostCreateScreen from './screens/HostCreateScreen';
 import HostRoomScreen from './screens/HostRoomScreen';
+import JoinScreen from './screens/JoinScreen';
+import ViewScreen from './screens/ViewScreen';
 
 function useRoute(): Route {
   const [route, setRoute] = useState<Route>(() => parseRoute(window.location.pathname));
@@ -29,14 +31,9 @@ export default function SessionRouter() {
     case 'host-room':
       return <HostRoomScreen code={route.code} />;
     case 'join':
+      return <JoinScreen code={route.code} />;
     case 'view':
-      // Built in the next commit. Parsed here already so the path shape is
-      // settled in one place rather than moving once the screens land.
-      return (
-        <div className="flex min-h-screen items-center justify-center text-sm text-slate-400">
-          {route.kind === 'join' ? 'Joining' : 'Viewing'} room {route.code} — screen lands in the next commit.
-        </div>
-      );
+      return <ViewScreen code={route.code} />;
     case 'solo':
       return <App />;
   }

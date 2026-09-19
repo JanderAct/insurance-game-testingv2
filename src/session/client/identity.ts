@@ -1,58 +1,116 @@
 // ============================================================================
-// WHAT THIS BROWSER HOLDS — the credential store, keyed by room code.
+// WHAT THIS BROWSER HOLDS — and, separately, what THIS TAB is.
 //
-// ⚠ THIS IS THE ONE localStorage USE THAT SURVIVES THE SWAP, and it is worth
-// being clear about why it is not a contradiction. The ROOM lives in
-// localStorage only because LocalSessionTransport puts it there; move to a
-// hosted backend and the room moves with it. WHO THIS BROWSER IS does not move:
-// a token identifying the caller has to live on the client in any architecture,
-// and this is that. It is the cookie jar, not the database.
+// ⚠ THIS SPLIT IS NOT DECORATION. It was a bug, found the first time four tabs
+// were driven against one browser. Credentials keyed only by room code in
+// localStorage are shared by every tab in the browser, so the second tab to open
+// /join/CODE read the first tab's token, decided it was already Harbour Mutual,
+// and never showed the picker. One browser could only ever be one participant.
+// Four ISOLATED browser contexts would have passed that test cheerfully, which
+// is exactly why the four-tab check is run in one.
 //
-// ⚠ KEYED BY ROOM CODE, NOT GLOBAL. The code is in the URL so a refresh returns
-// to the same room; the token is here so the browser that already claimed a team
-// gets that team back rather than being read as a second person claiming it. One
-// machine may legitimately hold a host token for one room and a team token for
-// another — an instructor demonstrating on the projector while a laptop drives a
-// team — and a single global "current token" would make those two overwrite each
-// other.
+// SO THERE ARE TWO STORES, AND THEY ANSWER TWO DIFFERENT QUESTIONS:
+//
+//   ACTIVE (sessionStorage, per tab) — "who is this tab?" sessionStorage is
+//   per-tab by definition and survives a RELOAD, which is the case that matters:
+//   a refresh must return the same player to the same team rather than reading
+//   as a second person claiming it. Four tabs get four answers.
+//
+//   HELD (localStorage, per browser) — "what has this browser ever been handed
+//   for this room?" This survives the tab closing, and is what makes a team
+//   recoverable after a crash: the credential is offered back as a RESUME
+//   CHOICE, never applied silently. Auto-applying it is the bug above.
+//
+// THE HOST IS THE ONE EXCEPTION AND IT IS PRINCIPLED: a room has exactly one
+// host, so a second tab opening /host/CODE on the same browser is the same host
+// and may resume automatically. There is no other host for it to collide with.
+// A team is the opposite — the whole point is that several of them coexist.
 // ============================================================================
 
-const KEY_PREFIX = 'ripple.session.v1.identity.';
+const ACTIVE_PREFIX = 'ripple.session.v1.active.';
+const HELD_PREFIX = 'ripple.session.v1.held.';
 
 export interface RoomIdentity {
-  // Present only in the browser that created the room, or one that has been
-  // given the resume code.
   hostToken?: string;
   teamToken?: string;
   teamName?: string;
   role?: 'player' | 'viewer';
 }
 
-export function loadIdentity(code: string): RoomIdentity {
+export interface HeldCredential {
+  teamToken: string;
+  teamName: string;
+  role: 'player' | 'viewer';
+}
+
+export interface HeldCredentials {
+  hostToken?: string;
+  teams: HeldCredential[];
+}
+
+// A browser blocking storage is a browser that cannot rejoin. That is a real
+// limitation to surface where it bites, not a crash here.
+function readJson<T>(store: Storage | undefined, key: string, fallback: T): T {
   try {
-    const raw = window.localStorage.getItem(KEY_PREFIX + code);
-    return raw ? (JSON.parse(raw) as RoomIdentity) : {};
+    const raw = store?.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
   } catch {
-    // A browser blocking storage is a browser that cannot rejoin. That is a
-    // real limitation to surface at the point of use, not a crash here.
-    return {};
+    return fallback;
   }
 }
 
-export function saveIdentity(code: string, patch: RoomIdentity): RoomIdentity {
-  const merged = { ...loadIdentity(code), ...patch };
+function writeJson(store: Storage | undefined, key: string, value: unknown): void {
   try {
-    window.localStorage.setItem(KEY_PREFIX + code, JSON.stringify(merged));
+    store?.setItem(key, JSON.stringify(value));
   } catch {
-    // Ignored deliberately: the caller already holds the token in memory and
-    // the session works for as long as the tab stays open. Failing the join
-    // outright because persistence is unavailable would be worse.
+    // Ignored deliberately: the caller already holds the token in memory, so the
+    // session works for as long as the tab stays open. Failing the join outright
+    // because persistence is unavailable would be the worse outcome.
   }
+}
+
+// ---------------------------------------------------------------- active
+
+export function loadActive(code: string): RoomIdentity {
+  return readJson<RoomIdentity>(globalThis.sessionStorage, ACTIVE_PREFIX + code, {});
+}
+
+export function saveActive(code: string, patch: RoomIdentity): RoomIdentity {
+  const merged = { ...loadActive(code), ...patch };
+  writeJson(globalThis.sessionStorage, ACTIVE_PREFIX + code, merged);
   return merged;
 }
 
-export function clearIdentity(code: string): void {
+export function clearActive(code: string): void {
   try {
-    window.localStorage.removeItem(KEY_PREFIX + code);
+    globalThis.sessionStorage?.removeItem(ACTIVE_PREFIX + code);
   } catch { /* nothing to clear if storage is unreachable */ }
+}
+
+// ---------------------------------------------------------------- held
+
+export function loadHeld(code: string): HeldCredentials {
+  return readJson<HeldCredentials>(globalThis.localStorage, HELD_PREFIX + code, { teams: [] });
+}
+
+export function rememberHostToken(code: string, hostToken: string): void {
+  const held = loadHeld(code);
+  writeJson(globalThis.localStorage, HELD_PREFIX + code, { ...held, hostToken });
+}
+
+export function rememberTeamCredential(code: string, cred: HeldCredential): void {
+  const held = loadHeld(code);
+  // Keyed by team AND role: one browser may legitimately have driven a team and
+  // also watched another, and neither should evict the other.
+  const teams = held.teams.filter(t => !(t.teamName === cred.teamName && t.role === cred.role));
+  teams.push(cred);
+  writeJson(globalThis.localStorage, HELD_PREFIX + code, { ...held, teams });
+}
+
+export function forgetTeamCredential(code: string, token: string): void {
+  const held = loadHeld(code);
+  writeJson(globalThis.localStorage, HELD_PREFIX + code, {
+    ...held,
+    teams: held.teams.filter(t => t.teamToken !== token),
+  });
 }

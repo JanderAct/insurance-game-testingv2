@@ -18,7 +18,7 @@ import type { CoverageLine } from '../../types/simulation';
 import { SHOCK_CATALOG } from '../../data/shockCatalog';
 import { IMPLEMENTED_EFFECTS } from '../../types/shocks';
 import { sessionTransport, isSessionError, type ScheduledShockSpec, type SessionError } from '../index';
-import { saveIdentity } from '../client/identity';
+import { rememberHostToken, saveActive } from '../client/identity';
 import { navigate } from '../client/navigation';
 
 const COVERAGE_LINES: { value: CoverageLine; label: string }[] = [
@@ -82,7 +82,8 @@ export default function HostCreateScreen() {
       // ⚠ PERSIST THE HOST TOKEN BEFORE NAVIGATING. The room exists the moment
       // createRoom resolves; a navigation that happened first and then failed to
       // store would leave a live room nobody can drive.
-      saveIdentity(res.code, { hostToken: res.hostToken });
+      saveActive(res.code, { hostToken: res.hostToken });
+      rememberHostToken(res.code, res.hostToken);
       navigate(`/host/${res.code}`);
     } catch (e) {
       setError(isSessionError(e) ? e : null);

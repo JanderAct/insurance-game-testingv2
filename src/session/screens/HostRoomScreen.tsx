@@ -18,7 +18,7 @@
 import { useEffect, useState } from 'react';
 import { CheckCircle2, Circle, Copy, KeyRound, Loader2 } from 'lucide-react';
 import { sessionTransport, isSessionError, type SessionError } from '../index';
-import { loadIdentity, saveIdentity } from '../client/identity';
+import { loadActive, loadHeld, rememberHostToken, saveActive } from '../client/identity';
 import { useRoom } from '../client/useRoom';
 
 interface Props {
@@ -26,7 +26,12 @@ interface Props {
 }
 
 export default function HostRoomScreen({ code }: Props) {
-  const [hostToken, setHostToken] = useState<string | undefined>(() => loadIdentity(code).hostToken);
+  // ⚠ A ROOM HAS EXACTLY ONE HOST, so a second tab on the same browser is the
+  // same host and may resume from the browser-wide store automatically. That is
+  // the one credential for which this is safe — a team is the opposite case.
+  const [hostToken, setHostToken] = useState<string | undefined>(
+    () => loadActive(code).hostToken ?? loadHeld(code).hostToken,
+  );
   const [resumeInput, setResumeInput] = useState('');
   const [advancing, setAdvancing] = useState(false);
   const [actionError, setActionError] = useState<SessionError | null>(null);
@@ -58,7 +63,8 @@ export default function HostRoomScreen({ code }: Props) {
   function handleResume() {
     const t = resumeInput.trim();
     if (!t) return;
-    saveIdentity(code, { hostToken: t });
+    saveActive(code, { hostToken: t });
+    rememberHostToken(code, t);
     setHostToken(t);
     setResumeInput('');
   }
