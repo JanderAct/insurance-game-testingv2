@@ -62,7 +62,12 @@ const SPREADSHEET_TAB: TabId = 'spreadsheet';
 
 // Pages that support the Pool / per-line view toggle (Stage 2.1; 'history'
 // added in Stage 2.10 — each line now has its own real pre-game history).
-const LINE_VIEW_PAGES: TabId[] = ['history', 'dashboard', 'decisions', 'decisionHistory', 'financials', 'results', 'audit'];
+// ⚠ 'membership' JOINED THIS LIST, AND IT IS THE REASON THE PAGE CAN BE HONEST.
+// Its per-member experience columns are PER LINE — a member has one loss ratio
+// on WC and another on GL, not one ratio — and until the bar existed the page
+// read WC unconditionally whatever the pool wrote. The selector is what lets the
+// three per-line columns name their line instead of assuming one.
+const LINE_VIEW_PAGES: TabId[] = ['history', 'dashboard', 'decisions', 'decisionHistory', 'financials', 'results', 'audit', 'membership'];
 
 const LINE_VIEW_ICONS: Record<LineView, React.ReactNode> = {
   pool: <Layers size={14} />,
@@ -269,6 +274,7 @@ export default function GameShell({
             initialMembers={initialMembers}
             startingYear={gameState.setup.startingYear}
             memberLossHistory={gameState.poolState.memberLossHistory ?? {}}
+            lineView={lineView}
           />
         )}
       </main>
