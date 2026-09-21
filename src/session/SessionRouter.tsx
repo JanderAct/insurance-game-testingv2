@@ -13,8 +13,7 @@ import App from '../App';
 import { onRouteChange, parseRoute, type Route } from './client/navigation';
 import HostCreateScreen from './screens/HostCreateScreen';
 import HostRoomScreen from './screens/HostRoomScreen';
-import JoinScreen from './screens/JoinScreen';
-import ViewScreen from './screens/ViewScreen';
+import PlayScreen from './screens/PlayScreen';
 
 function useRoute(): Route {
   const [route, setRoute] = useState<Route>(() => parseRoute(window.location.pathname));
@@ -30,10 +29,12 @@ export default function SessionRouter() {
       return <HostCreateScreen />;
     case 'host-room':
       return <HostRoomScreen code={route.code} />;
+    // ⚠ ONE COMPONENT, TWO ROLES. /view is the player's screen read-only, not a
+    // second rendering of the same data — see PlayScreen's header.
     case 'join':
-      return <JoinScreen code={route.code} />;
+      return <PlayScreen code={route.code} role="player" />;
     case 'view':
-      return <ViewScreen code={route.code} />;
+      return <PlayScreen code={route.code} role="viewer" />;
     case 'solo':
       return <App />;
   }

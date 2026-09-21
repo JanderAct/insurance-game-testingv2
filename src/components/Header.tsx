@@ -10,8 +10,11 @@ interface HeaderProps {
    *  player who restarted would desync from a room that is still advancing. The
    *  solo game always passes it, so its button is unchanged. */
   onNewGame?: () => void;
-  onAdvanceYear: () => void;
-  canAdvance: boolean;
+  /** Omitted by a VIEWER: there is no submit on a read-only screen, and a
+   *  disabled button would still invite the click. The solo game and a playing
+   *  session player both pass it, so their button is unchanged. */
+  onAdvanceYear?: () => void;
+  canAdvance?: boolean;
   /** Overrides the advance button's text. Defaults to the solo wording. A
    *  session player who has already locked shows what it is waiting for
    *  instead. */
@@ -121,7 +124,7 @@ export default function Header({ gameState, startingFinancials, onNewGame, onAdv
                 New Game
               </button>
             )}
-            {isStarted && !isComplete && (
+            {isStarted && !isComplete && onAdvanceYear && (
               <button
                 onClick={onAdvanceYear}
                 disabled={!canAdvance}

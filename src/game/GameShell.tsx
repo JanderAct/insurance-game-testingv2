@@ -99,8 +99,9 @@ export interface GameShellProps {
   lineView: LineView;
   onSelectLineView: (v: LineView) => void;
 
-  onAdvanceYear: () => void;
-  canAdvance: boolean;
+  /** Omitted by a viewer — see Header. */
+  onAdvanceYear?: () => void;
+  canAdvance?: boolean;
   advanceLabel?: string;
   onNewGame?: () => void;
 

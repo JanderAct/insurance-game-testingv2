@@ -152,7 +152,14 @@ export function useSessionGame(
   // ---- process when the room's year moves ahead of ours --------------------
   useEffect(() => {
     if (phase !== 'ready' || busy.current) return;
-    if (!room || !token || you?.role !== 'player') return;
+    // ⚠ A VIEWER RUNS THE SAME TURN CYCLE, AND THAT IS THE WHOLE OF WHAT MAKES
+    // /view A FLAG RATHER THAN A SCREEN. callerOf resolves a viewer to the team
+    // it watches and callerView hands back THAT TEAM's decisions, so a viewer
+    // builds the same game from the same seed and plays the same years with the
+    // same choices. Its numbers are the driver's numbers because they are the
+    // same computation, not because anything was copied across.
+    const plays = you?.role === 'player' || you?.role === 'viewer';
+    if (!room || !token || !plays) return;
 
     const gs = gameState;
     if (!gs || gs.isComplete) return;
@@ -205,15 +212,23 @@ export function useSessionGame(
         if (produced) {
           setLastResult(produced);
           setProcessedYear(produced.yearNumber);
-          // Posting is best-effort: the year is played and held locally whether
-          // or not the scoreboard entry lands, so a failed post must not roll
-          // back a computed year. It is retried by the next year's post.
-          await sessionTransport().submit({
-            code,
-            token,
-            yearNumber: produced.yearNumber,
-            result: summaryToJson(summarize(produced)),
-          });
+          // ⚠ A VIEWER COMPUTES BUT DOES NOT POST, AND SUPPRESSING IT HERE IS
+          // NOT BELT-AND-BRACES. The transport already refuses — submit requires
+          // a player token and a viewer's raises BAD_TOKEN — so attempting the
+          // post would put a transport error on a read-only screen every single
+          // year, for a write that was never wanted. The scoreboard belongs to
+          // the team that drives it; a watcher adds nothing to it.
+          if (you.role === 'player') {
+            // Posting is best-effort: the year is played and held locally whether
+            // or not the scoreboard entry lands, so a failed post must not roll
+            // back a computed year. It is retried by the next year's post.
+            await sessionTransport().submit({
+              code,
+              token,
+              yearNumber: produced.yearNumber,
+              result: summaryToJson(summarize(produced)),
+            });
+          }
         }
         setError(null);
         setPhase('ready');
