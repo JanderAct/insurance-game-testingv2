@@ -91,10 +91,10 @@ interface RoomRecord {
   code: string;
   hostToken: string;
   seed: string;
-  poolName: string;
+  eventName: string;
   yearCount: number;
   startingYear: number;
-  availableLines: CoverageLine[];
+  expectedTeams: number;
   currentYear: number;
   shocks: ScheduledShockSpec[];
   teams: TeamRecord[];
@@ -185,10 +185,10 @@ function roomView(room: RoomRecord): RoomView {
     code: room.code,
     status: statusOf(room),
     seed: room.seed,
-    poolName: room.poolName,
+    eventName: room.eventName,
     yearCount: room.yearCount,
     startingYear: room.startingYear,
-    availableLines: [...room.availableLines],
+    expectedTeams: room.expectedTeams,
     currentYear: room.currentYear,
     shocks: room.shocks.map(s => ({ ...s })),
     teams: room.teams.map(t => teamView(t, room.currentYear)),
@@ -340,8 +340,11 @@ export class LocalSessionTransport implements SessionTransport {
       if (!Number.isInteger(req.yearCount) || req.yearCount < 1) {
         throw new SessionError('INVALID_REQUEST', 'Year count must be a positive whole number.');
       }
-      if (req.availableLines.length === 0) {
-        throw new SessionError('INVALID_REQUEST', 'A room must offer at least one coverage line.');
+      // ⚠ NOT VALIDATED AGAINST A CEILING, ON PURPOSE. expectedTeams is the
+      // host's estimate of attendance, not a capacity — see the contract. A
+      // zero or negative expectation is still nonsense, so that much is checked.
+      if (!Number.isInteger(req.expectedTeams) || req.expectedTeams < 1) {
+        throw new SessionError('INVALID_REQUEST', 'Expected teams must be a positive whole number.');
       }
 
       const store = storage();
@@ -357,10 +360,10 @@ export class LocalSessionTransport implements SessionTransport {
         code,
         hostToken: newToken(),
         seed: req.seed,
-        poolName: req.poolName,
+        eventName: req.eventName,
         yearCount: req.yearCount,
         startingYear: req.startingYear,
-        availableLines: [...req.availableLines],
+        expectedTeams: req.expectedTeams,
         currentYear: 1,
         shocks: req.shocks.map(s => ({ ...s })),
         // ⚠ A ROOM OPENS EMPTY. Teams are created by JOINING, not registered in
@@ -440,13 +443,12 @@ export class LocalSessionTransport implements SessionTransport {
       if (lines.length === 0) {
         throw new SessionError('INVALID_REQUEST', 'A team must play at least one coverage line.');
       }
-      const offered = new Set(room.availableLines);
-      const notOffered = lines.filter(l => !offered.has(l));
-      if (notOffered.length > 0) {
-        throw new SessionError(
-          'INVALID_REQUEST',
-          `This room does not offer ${notOffered.join(', ')}.`,
-        );
+      // ⚠ VALIDATED AGAINST THE REAL LINES, NOT AGAINST A ROOM MENU. Every room
+      // offers all three and the host does not constrain it, so the only wrong
+      // answer here is one that is not a coverage line at all.
+      const notALine = lines.filter(l => !LINE_ORDER.includes(l));
+      if (notALine.length > 0) {
+        throw new SessionError('INVALID_REQUEST', `${notALine.join(', ')} is not a coverage line.`);
       }
 
       const token = newToken();

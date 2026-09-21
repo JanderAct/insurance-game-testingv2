@@ -68,8 +68,6 @@ async function rejects(p: Promise<unknown>, code: SessionErrorCode, what: string
 
 // ---------------------------------------------------------------- fixture
 
-// What the ROOM OFFERS. Teams choose their own subset of it at join.
-const OFFERED: CoverageLine[] = ['WC', 'GL', 'Property'];
 const TEAMS = ['Harbour Mutual', 'Cedar Valley', 'Tri-County'];
 
 function transport() {
@@ -81,8 +79,8 @@ async function freshRoom(t: LocalSessionTransport) {
     seed: 'MAMC6EA4',
     yearCount: 3,
     startingYear: 2026,
-    poolName: 'Test Pool',
-    availableLines: [...OFFERED],
+    eventName: 'Ripple Game',
+    expectedTeams: 3,
     shocks: [{ shockId: 'pandemic', yearNumber: 2 }],
   });
 }
@@ -110,7 +108,8 @@ async function main(): Promise<void> {
     // ⚠ A ROOM OPENS EMPTY NOW. Teams are created by joining, because a team's
     // name and its lines are one act of setup performed by the team itself.
     eq(created.room.teams.length, 0, 'a new room has no teams — they are created by joining');
-    eq(created.room.availableLines.length, 3, 'the room carries the lines it OFFERS');
+    eq(created.room.expectedTeams, 3, 'the room carries how many teams the host expects');
+    eq(created.room.eventName, 'Ripple Game', 'the room is named for the EVENT, not a pool');
 
     // The shock list is CARRIED. Nothing consumes it yet — see the note in
     // contract.ts — but it must survive the round trip or the seam that lands
@@ -125,12 +124,12 @@ async function main(): Promise<void> {
     ok(!JSON.stringify(created.room).includes(created.hostToken), 'the room view never discloses the host token');
 
     await rejects(
-      t.createRoom({ seed: 's', yearCount: 0, startingYear: 2026, poolName: 'p', availableLines: [...OFFERED], shocks: [] }),
+      t.createRoom({ seed: 's', yearCount: 0, startingYear: 2026, eventName: 'p', expectedTeams: 3, shocks: [] }),
       'INVALID_REQUEST', 'a zero-year game is refused',
     );
     await rejects(
-      t.createRoom({ seed: 's', yearCount: 3, startingYear: 2026, poolName: 'p', availableLines: [], shocks: [] }),
-      'INVALID_REQUEST', 'a room offering no lines is refused',
+      t.createRoom({ seed: 's', yearCount: 3, startingYear: 2026, eventName: 'p', expectedTeams: 0, shocks: [] }),
+      'INVALID_REQUEST', 'a room expecting no teams is refused',
     );
     await rejects(t.read({ code: 'ZZZZZZ' }), 'ROOM_NOT_FOUND', 'an unknown code is not found');
   }
@@ -326,15 +325,26 @@ async function main(): Promise<void> {
     eq(rowOf('WC Only').lines.join(','), 'WC', "the host's table carries each team's lines");
     eq(rowOf('All Three').lines.join(','), 'WC,GL,Property', 'teams in one room may play different books');
 
-    // ⚠ THE MENU IS ENFORCED, NOT SUGGESTED.
+    // ⚠ THERE IS NO MENU ANY MORE, AND THAT IS THE ASSERTION. Every room offers
+    // all three lines; the host does not constrain the choice. What is still
+    // refused is a set that is empty or not made of coverage lines.
     const narrow = await t.createRoom({
-      seed: 's', yearCount: 3, startingYear: 2026, poolName: 'p',
-      availableLines: ['WC'], shocks: [],
+      seed: 's', yearCount: 3, startingYear: 2026, eventName: 'p',
+      expectedTeams: 2, shocks: [],
     });
-    await rejects(
-      t.join({ code: narrow.code, teamName: 'Greedy', role: 'player', lines: ['WC', 'GL'] }),
-      'INVALID_REQUEST', 'a team cannot choose a line the room does not offer',
-    );
+    const anyLines = await t.join({ code: narrow.code, teamName: 'Greedy', role: 'player', lines: ['WC', 'GL'] });
+    eq(anyLines.lines.join(','), 'WC,GL', 'any room permits any combination of the three lines');
+
+    // ⚠ expectedTeams BINDS NOTHING. The host guessed two; a third team must
+    // still get in, or a room where more people turn up than expected is broken
+    // by an estimate made before anyone arrived.
+    await t.join({ code: narrow.code, teamName: 'Second', role: 'player', lines: ['WC'] });
+    const third = await t.join({ code: narrow.code, teamName: 'Third', role: 'player', lines: ['WC'] });
+    eq(third.rejoined, false, 'a team beyond expectedTeams still joins');
+    const overfull = await t.read({ code: narrow.code, token: narrow.hostToken });
+    eq(overfull.room.teams.length, 3, 'the room holds more teams than the host expected');
+    eq(overfull.room.expectedTeams, 2, 'and the expectation is unchanged by that');
+
     await rejects(
       t.join({ code, teamName: 'Empty', role: 'player', lines: [] }),
       'INVALID_REQUEST', 'a team must play at least one line',

@@ -1,38 +1,31 @@
 // ============================================================================
-// /host — CREATE A ROOM.
+// THE GAME SETUP TAB — what the host sets, and only what the host sets.
 //
-// Setup writes the four things a room is: seed, year count, shock list and the
-// team list. It is the solo game's Game Setup plus a roster.
+// ⚠ WHAT THE HOST OWNS HAS NARROWED TO WHAT NOTHING ELSE CAN SET: the seed, the
+// year count, the starting year and the shock schedule. Those are properties of
+// the EVENT and every team must share them or the session is not one session.
 //
-// ⚠ THE HOST SETS A MENU, NOT A SEATING PLAN. Coverage lines here are what this
-// room OFFERS; each team chooses its own subset when it joins, and that choice
-// plus its name is the team's own game setup. The room therefore opens with no
-// teams at all and the host's table fills as they arrive.
+// ⚠ COVERAGE LINES CAME OFF, AND THE MENU WENT WITH THEM. All three are
+// available in every room; each team picks its own at join. The host constrained
+// nothing with that control — a "menu" that always listed everything was a
+// setting that could only be used to take something away, and nobody wanted to.
 //
-// ⚠ THE PRE-REGISTERED ROSTER THAT STOOD HERE IS GONE, and the argument that put
-// it there is worth recording because it was not wrong — a fixed roster makes
-// the host's table a checklist against a list the host wrote, and it rules out
-// two teams a character apart. What outweighs it: a team's name and its lines
-// are one act of setup performed once, by the team, and splitting them so the
-// host owns one half and the team the other made the name the only thing a team
-// could not decide about its own game. Name collisions are refused at the
-// transport instead (TEAM_TAKEN), which costs a retry rather than a design.
+// ⚠ THE TEAM LIST IS A COUNT, NOT NAMES, AND NOT A NUMBERED PLACEHOLDER LIST.
+// Players name their own teams, so host-typed names were dead. A numbered list
+// ("Team 1", "Team 2") would have been the pre-registered roster wearing a
+// different hat: it implies the host reserved a slot that a player then fills,
+// and the table would inherit rows describing teams that do not exist. A plain
+// count claims only what the host actually knows before the room opens — how
+// many to expect — and it BINDS NOTHING (see the transport).
 // ============================================================================
 
 import { useState } from 'react';
 import { Trash2, Zap } from 'lucide-react';
-import type { CoverageLine } from '../../types/simulation';
 import { SHOCK_CATALOG } from '../../data/shockCatalog';
 import { IMPLEMENTED_EFFECTS } from '../../types/shocks';
 import { sessionTransport, isSessionError, type ScheduledShockSpec, type SessionError } from '../index';
 import { rememberHostToken, saveActive } from '../client/identity';
 import { navigate } from '../client/navigation';
-
-const COVERAGE_LINES: { value: CoverageLine; label: string }[] = [
-  { value: 'WC', label: "Workers' Compensation" },
-  { value: 'GL', label: 'General Liability' },
-  { value: 'Property', label: 'Property' },
-];
 
 // A shock whose effects the generators cannot execute throws inside the
 // resolver rather than quietly doing nothing (see shockResolver.ts). Offering it
@@ -52,11 +45,11 @@ function randomSeed(): string {
 }
 
 export default function HostCreateScreen() {
-  const [poolName, setPoolName] = useState('Clearwater Public Entity Pool');
+  const [eventName, setEventName] = useState('Ripple Game');
   const [seed, setSeed] = useState(() => randomSeed());
   const [yearCount, setYearCount] = useState(5);
   const [startingYear, setStartingYear] = useState(2026);
-  const [availableLines, setAvailableLines] = useState<CoverageLine[]>(['WC', 'GL', 'Property']);
+  const [expectedTeams, setExpectedTeams] = useState(3);
   const [shocks, setShocks] = useState<ScheduledShockSpec[]>([]);
   const [shockId, setShockId] = useState(SCHEDULABLE.find(s => s.buildable)?.id ?? '');
   const [shockYear, setShockYear] = useState(2);
@@ -64,11 +57,7 @@ export default function HostCreateScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<SessionError | null>(null);
 
-  const canCreate = availableLines.length > 0 && yearCount >= 1 && !busy;
-
-  function toggleLine(line: CoverageLine) {
-    setAvailableLines(prev => prev.includes(line) ? prev.filter(l => l !== line) : [...prev, line]);
-  }
+  const canCreate = yearCount >= 1 && expectedTeams >= 1 && !busy;
 
   async function handleCreate() {
     setBusy(true);
@@ -78,8 +67,8 @@ export default function HostCreateScreen() {
         seed: seed.trim() || randomSeed(),
         yearCount,
         startingYear,
-        poolName: poolName.trim() || 'Pool',
-        availableLines: COVERAGE_LINES.map(l => l.value).filter(l => availableLines.includes(l)),
+        eventName: eventName.trim() || 'Ripple Game',
+        expectedTeams,
         shocks,
       });
       // ⚠ PERSIST THE HOST TOKEN BEFORE NAVIGATING. The room exists the moment
@@ -95,10 +84,9 @@ export default function HostCreateScreen() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50/30 p-6">
-      <div className="mx-auto w-full max-w-[720px]">
-        <h1 className="text-2xl font-semibold text-slate-800">Host a session</h1>
-        <p className="mt-1 text-sm text-slate-500">
+    <>
+      <div className="w-full">
+        <p className="text-sm text-slate-500">
           Every team plays the same instance. Teams name themselves and choose their own lines when they join.
         </p>
 
@@ -111,12 +99,12 @@ export default function HostCreateScreen() {
         <div className="mt-5 space-y-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="grid grid-cols-2 gap-4">
             <label className="block">
-              <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Pool name</span>
+              <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Event</span>
               <input
-                data-testid="pool-name"
+                data-testid="event-name"
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                value={poolName}
-                onChange={e => setPoolName(e.target.value)}
+                value={eventName}
+                onChange={e => setEventName(e.target.value)}
               />
             </label>
             <label className="block">
@@ -150,30 +138,23 @@ export default function HostCreateScreen() {
           </div>
 
           <div>
-            <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Coverage lines available</span>
-            <p className="mt-1 text-xs text-slate-400">
-              What teams may choose from. Each team picks its own subset at join, and teams in one room may play different books.
+            <label className="block max-w-[220px]">
+              <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Teams expected</span>
+              <input
+                data-testid="expected-teams"
+                type="number" min={1} max={40}
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                value={expectedTeams}
+                onChange={e => setExpectedTeams(Number(e.target.value))}
+              />
+            </label>
+            {/* ⚠ SAID ON SCREEN BECAUSE A NUMBER FIELD LOOKS LIKE A LIMIT. It is
+                not one: the room does not turn anyone away, and the count exists
+                so the host knows when everybody has arrived. */}
+            <p className="mt-1.5 text-xs text-slate-400">
+              How many to expect, so you know when everyone has arrived. It does not limit who can join, and
+              teams name themselves and pick their own coverage lines at join.
             </p>
-            <div className="mt-2 flex gap-2">
-              {COVERAGE_LINES.map(l => (
-                <button
-                  key={l.value}
-                  type="button"
-                  data-testid={`line-${l.value}`}
-                  onClick={() => toggleLine(l.value)}
-                  className={`rounded-lg border px-3 py-1.5 text-sm ${
-                    availableLines.includes(l.value)
-                      ? 'border-blue-500 bg-blue-50 text-blue-700'
-                      : 'border-slate-300 text-slate-600'
-                  }`}
-                >
-                  {l.label}
-                </button>
-              ))}
-            </div>
-            {availableLines.length === 0 && (
-              <p className="mt-2 text-xs text-red-600">A room must offer at least one line.</p>
-            )}
           </div>
 
           {/* ---- shocks ---- */}
@@ -243,6 +224,6 @@ export default function HostCreateScreen() {
           </button>
         </div>
       </div>
-    </div>
+    </>
   );
 }

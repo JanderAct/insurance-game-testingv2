@@ -56,6 +56,8 @@ import type { TabId } from '../../components/TabNav';
 import type { CoverageLine, DecisionSet, LineView } from '../../types/simulation';
 import { LINE_FULL_NAME } from '../../utils/lineDisplay';
 
+const LINE_ORDER: CoverageLine[] = ['WC', 'GL', 'Property'];
+
 export type PlayRole = 'player' | 'viewer';
 
 interface Props {
@@ -171,7 +173,7 @@ export default function PlayScreen({ code, role }: Props) {
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50/30 p-6">
         <div className="mx-auto w-full max-w-[480px] pt-10">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Room {code}</p>
-          <h1 className="text-2xl font-semibold text-slate-800">{room.poolName}</h1>
+          <h1 className="text-2xl font-semibold text-slate-800">{room.eventName}</h1>
           <p className="mt-1 text-sm text-slate-500">
             {isViewer ? 'Choose a team to watch. Watching claims nothing.' : 'Name your team and choose the lines you will write.'}
           </p>
@@ -253,7 +255,9 @@ export default function PlayScreen({ code, role }: Props) {
                   Chosen once. Your pool's history and claims are built from these, so they cannot be changed after you join.
                 </p>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  {room.availableLines.map(l => (
+                  {/* ⚠ ALL THREE, ALWAYS. The host no longer offers a menu — see
+                      HostCreateScreen — so the choice is the team's alone. */}
+                  {LINE_ORDER.map(l => (
                     <button
                       key={l}
                       type="button"

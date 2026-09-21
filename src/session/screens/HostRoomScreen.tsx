@@ -71,7 +71,7 @@ export default function HostRoomScreen({ code }: Props) {
 
   if (loading && !room) {
     return (
-      <div className="flex min-h-screen items-center justify-center text-slate-400">
+      <div className="flex items-center justify-center py-16 text-slate-400">
         <Loader2 className="animate-spin" size={18} />
         <span className="ml-2 text-sm">Loading room {code}…</span>
       </div>
@@ -80,7 +80,7 @@ export default function HostRoomScreen({ code }: Props) {
 
   if (error?.code === 'ROOM_NOT_FOUND') {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <div className="flex items-center justify-center py-16">
         <div className="rounded-xl border border-slate-200 bg-white p-6 text-center shadow-sm">
           <p className="text-sm text-slate-600">No room with code <span className="font-mono font-semibold">{code}</span>.</p>
         </div>
@@ -98,14 +98,15 @@ export default function HostRoomScreen({ code }: Props) {
   // The host advances to year N+1; every browser then computes year N and posts
   // it. So "reported" always trails the current year by one, and before the
   // first advance there is no year to have reported on at all.
+  const expectedTeams = room?.expectedTeams ?? null;
   const reportingYear = (room?.currentYear ?? 1) - 1;
   const awaitingResults = reportingYear >= 1
     ? joined.filter(t => (t.resultYear ?? 0) < reportingYear)
     : [];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50/30 p-6">
-      <div className="mx-auto w-full max-w-[860px]">
+    <>
+      <div className="w-full">
 
         {/* ---- the code, for the projector ---- */}
         <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -116,8 +117,7 @@ export default function HostRoomScreen({ code }: Props) {
                 {code}
               </p>
               <p className="mt-1 text-sm text-slate-500">
-                {room?.poolName} · seed <span className="font-mono">{room?.seed}</span> · {room?.yearCount} years
-                {' · offering '}<span className="font-mono">{(room?.availableLines ?? []).join(' + ')}</span>
+                {room?.eventName} · seed <span className="font-mono">{room?.seed}</span> · {room?.yearCount} years
               </p>
             </div>
             <div className="text-right">
@@ -213,8 +213,18 @@ export default function HostRoomScreen({ code }: Props) {
         <div className="mt-4 rounded-xl border border-slate-200 bg-white shadow-sm">
           <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
             <p className="text-sm font-medium text-slate-700">Teams</p>
-            <p className="text-xs text-slate-400">
-              {teams.length === 0 ? 'none yet' : `${teams.length} joined`}
+            {/* ⚠ A COUNTER, NOT PHANTOM ROWS. An expected-but-absent team has no
+                name, no lines and no record, so a row for it would describe
+                nothing and would read as a seat reserved for someone — which is
+                the pre-registered roster this design removed. The expectation
+                lives here, beside the real rows, where it is plainly the host's
+                estimate rather than a fact about the room. */}
+            <p className="text-xs text-slate-400" data-testid="joined-count">
+              {expectedTeams === null
+                ? `${teams.length} joined`
+                : teams.length >= expectedTeams
+                  ? `${teams.length} of ${expectedTeams} joined — everyone is here`
+                  : `${teams.length} of ${expectedTeams} joined — waiting for ${expectedTeams - teams.length} more`}
             </p>
           </div>
           <table className="w-full text-sm">
@@ -232,6 +242,7 @@ export default function HostRoomScreen({ code }: Props) {
                 <tr>
                   <td colSpan={4} data-testid="no-teams-yet" className="px-5 py-6 text-center text-sm text-slate-400">
                     Waiting for teams to join at /join/{code}. Each names itself and picks its own lines.
+                    {expectedTeams !== null && ` Expecting ${expectedTeams}.`}
                   </td>
                 </tr>
               )}
@@ -316,6 +327,6 @@ export default function HostRoomScreen({ code }: Props) {
           </div>
         )}
       </div>
-    </div>
+    </>
   );
 }

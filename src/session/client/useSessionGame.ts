@@ -86,13 +86,19 @@ export function useSessionGame(
   // assembled for a different book.
   const myLines = you?.lines;
   const buildKey = room && myLines && myLines.length > 0
-    ? `${room.seed}|${room.yearCount}|${room.startingYear}|${myLines.join(',')}|${room.poolName}`
+    ? `${room.seed}|${room.yearCount}|${room.startingYear}|${myLines.join(',')}|${room.eventName}`
     : null;
   const builtKey = useRef<string | null>(null);
 
   const build = useCallback((r: RoomView, lines: CoverageLine[]) => {
     const settings: GameSetupSettings = {
-      poolName: r.poolName,
+      // ⚠ THE EVENT'S NAME, DELIBERATELY UNCHANGED IN MEANING. The engine's
+      // GameSetupSettings.poolName is display-only (the Header chip), and it has
+      // always carried the room's name for every team. Renaming the room field
+      // does not change what the engine is handed. Naming each team's pool after
+      // the TEAM would read better and is a separate decision — it would change
+      // what every session player sees in the header.
+      poolName: r.eventName,
       gameLength: r.yearCount,
       startingYear: r.startingYear,
       instanceId: r.seed,

@@ -11,8 +11,7 @@
 import { useEffect, useState } from 'react';
 import App from '../App';
 import { onRouteChange, parseRoute, type Route } from './client/navigation';
-import HostCreateScreen from './screens/HostCreateScreen';
-import HostRoomScreen from './screens/HostRoomScreen';
+import HostScreen from './screens/HostScreen';
 import PlayScreen from './screens/PlayScreen';
 
 function useRoute(): Route {
@@ -25,10 +24,12 @@ export default function SessionRouter() {
   const route = useRoute();
 
   switch (route.kind) {
+    // ⚠ ONE COMPONENT FOR BOTH HOST ROUTES. They are two states of one tabbed
+    // screen — see HostScreen.
     case 'host-create':
-      return <HostCreateScreen />;
+      return <HostScreen />;
     case 'host-room':
-      return <HostRoomScreen code={route.code} />;
+      return <HostScreen code={route.code} />;
     // ⚠ ONE COMPONENT, TWO ROLES. /view is the player's screen read-only, not a
     // second rendering of the same data — see PlayScreen's header.
     case 'join':

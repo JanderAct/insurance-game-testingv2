@@ -149,12 +149,22 @@ export interface RoomView {
   code: string;
   status: RoomStatus;
   seed: string;
-  poolName: string;
+  /**
+   * ⚠ THE EVENT, NOT A POOL. The host is running a SESSION — a class, a
+   * workshop — and each team runs its own pool inside it. Naming the room after
+   * a pool made sense only while every team shared one.
+   */
+  eventName: string;
   yearCount: number;
   startingYear: number;
-  // What a joining team may CHOOSE FROM — not what any team plays. The host
-  // sets the menu; each team orders from it.
-  availableLines: CoverageLine[];
+  /**
+   * ⚠ HOW MANY TEAMS THE HOST EXPECTS, AND IT BINDS NOTHING. It exists for one
+   * question — is everyone here yet — which is what decides when to advance
+   * year 1. The transport does NOT refuse an extra team: the number is the
+   * host's estimate before the room opens, and a room where four turn up
+   * instead of five must not be stuck forever because of a guess.
+   */
+  expectedTeams: number;
   currentYear: number;
   shocks: ScheduledShockSpec[];
   teams: TeamView[];
@@ -188,11 +198,9 @@ export interface CreateRoomRequest {
   seed: string;
   yearCount: number;
   startingYear: number;
-  poolName: string;
-  // ⚠ AVAILABLE, NOT ASSIGNED. The host sets which coverage lines this room
-  // OFFERS; each team chooses its own subset when it joins. A room is a menu
-  // and a schedule, not a seating plan.
-  availableLines: CoverageLine[];
+  eventName: string;
+  /** Non-binding — see RoomView.expectedTeams. */
+  expectedTeams: number;
   shocks: ScheduledShockSpec[];
 }
 
@@ -217,8 +225,11 @@ export interface JoinRequest {
   role: 'player' | 'viewer';
   /**
    * ⚠ THE TEAM'S COVERAGE LINES, REQUIRED FOR A PLAYER'S FIRST JOIN AND FIXED
-   * FROM THAT MOMENT. Every line must be one the room offers, and the set may
-   * not be empty. On a REJOIN this may be omitted; if it is supplied and
+   * FROM THAT MOMENT. The set may not be empty and every entry must be a real
+   * coverage line, but there is no room-level MENU any more: all three are
+   * available in every room and the host does not constrain the choice. (A
+   * menu, if one is ever wanted, is a field on the room record and a filter
+   * here — it was removed because nothing was using it to say no.) On a REJOIN this may be omitted; if it is supplied and
    * differs from what the team already holds, the call is refused with
    * LINES_LOCKED rather than quietly honoured or quietly ignored. Changing them
    * mid-game would restart that team's book — its pre-game, its roster and its
