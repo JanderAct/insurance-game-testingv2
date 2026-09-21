@@ -1,67 +1,78 @@
 // ============================================================================
-// /join/CODE — CLAIM A TEAM AND PLAY IT.
+// /join/CODE — CLAIM A TEAM AND PLAY THE GAME.
+//
+// ⚠ THE PLAYER GETS THE WHOLE GAME, NOT A SESSION-SHAPED VERSION OF IT. This
+// screen renders GameShell — the same tab list, the same decisions page with the
+// same thirteen props, the same results, financials, audit, spreadsheet and
+// membership pages that a solo player sees at '/'. It is the second caller of
+// one implementation, not a second implementation.
+//
+// FOUR THINGS DIFFER, AND EVERY ONE OF THEM IS A PROP ON THAT SHELL:
+//
+//   the year advances when the HOST says so. The header's Lock Year button
+//   submits and locks instead of processing, and then reads as waiting.
+//   there is no Game Setup tab. The ROOM owns the seed, the year count, the
+//   lines and the shock schedule; a player choosing any of them would fork
+//   their instance away from every other team's.
+//   there is no New Game. The host owns the lifecycle.
+//   results post at year end, from the turn cycle in useSessionGame.
+//
+// ⚠ AND ONE THING IS ABSENT RATHER THAN DIFFERENT: THE LOAN STEP. Solo play
+// blocks on LoanPromptModal until the player authorises or declines. A session
+// year is processed when the host advances — the player may not have the tab
+// focused, and the host cannot wait on three modals. The offer is declined
+// automatically (see useSessionGame), which is the choice that changes nothing
+// on its own initiative. That is a real capability gap, stated rather than
+// papered over: it is not a session-flavoured loan step, it is no loan step.
 //
 // ⚠ THE ROLE IS IN THE PATH, NOT BEHIND A BUTTON, BECAUSE THE FAILURE MODES ARE
 // NOT SYMMETRIC. Landing here by accident CLAIMS A TEAM and locks out the person
-// who was supposed to drive it — recoverable only by the host. Landing on
-// /view/CODE by accident affects nobody. A single landing page with a
-// player/viewer toggle makes the damaging mistake exactly as easy as the
-// harmless one, so the two are different URLs and the host hands out whichever
-// one it means.
+// who was supposed to drive it. Landing on /view/CODE by accident affects nobody.
 //
-// ⚠ REJOIN BY TOKEN. The same browser returning to the same code presents the
-// token it already holds and is the SAME player — not a second one claiming a
-// team that is already taken. Without this a refresh would lock the real driver
-// out of their own game for the rest of the session, and the only fix would be
-// the host rebuilding the room.
-//
-// THE ADVANCE BUTTON BECOMES SUBMIT-AND-WAIT. A player does not advance time;
-// the host does. Decisions post and lock, and the screen then says plainly that
-// it is waiting — because a locked screen that looked the same as an unlocked
-// one is a team that resubmits, and a blank one is a team that thinks it broke.
+// ⚠ REJOIN BY TOKEN, AND WHAT IT COSTS. The same browser returning to the same
+// code is the same player. But a session player does NOT write the solo save —
+// four tabs on one origin share one key and would clobber each other and the
+// solo game — so a reload rebuilds from the seed and REPLAYS. The replay uses
+// the team's last submitted decisions for every year it catches up on, because
+// the room stores one decision slot per team rather than a per-year history. A
+// team that varied its decisions and then reloads can see numbers that differ
+// from the ones it originally posted. Pre-existing, and far more visible now
+// that the decisions are the real ones.
 // ============================================================================
 
 import { useEffect, useRef, useState } from 'react';
-import { CheckCircle2, Loader2, Lock } from 'lucide-react';
+import { CheckCircle2, Clock, Loader2 } from 'lucide-react';
 import { sessionTransport, isSessionError, type SessionError } from '../index';
 import { clearActive, forgetTeamCredential, loadActive, loadHeld, rememberTeamCredential, saveActive } from '../client/identity';
 import { useRoom } from '../client/useRoom';
 import { decisionsForYear, decisionsToJson } from '../client/decisions';
-import DecisionPanel from '../components/DecisionPanel';
 import { useSessionGame } from '../client/useSessionGame';
-import TeamResultCard from '../components/TeamResultCard';
-import type { DecisionSet } from '../../types/simulation';
+import GameShell from '../../game/GameShell';
+import type { TabId } from '../../components/TabNav';
+import type { DecisionSet, LineView } from '../../types/simulation';
 
 interface Props {
   code: string;
 }
 
 export default function JoinScreen({ code }: Props) {
-  // ⚠ THIS TAB'S identity, not the browser's. sessionStorage is per-tab, so
-  // four tabs are four players; it survives a reload, which is the case rejoin
-  // has to cover. What the BROWSER has ever held is offered below as a resume
-  // choice instead of being applied silently — applying it silently is what made
-  // the second tab think it was already the first.
   const active = loadActive(code);
   const [teamToken, setTeamToken] = useState<string | undefined>(
     active.role === 'player' ? active.teamToken : undefined,
   );
   const heldPlayerCreds = loadHeld(code).teams.filter(c => c.role === 'player');
+
   const [claiming, setClaiming] = useState<string | null>(null);
   const [claimError, setClaimError] = useState<SessionError | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [decisions, setDecisions] = useState<DecisionSet | null>(null);
 
-  const { room, you, error, loading, refresh } = useRoom(code, teamToken);
+  const [activeTab, setActiveTab] = useState<TabId>('decisions');
+  const [lineView, setLineView] = useState<LineView>('pool');
 
-  // ⚠ THE TURN CYCLE. This browser builds its own game from the room's seed and
-  // plays its own year the moment the host's advance shows up in a poll. Nothing
-  // central simulates anything.
+  const { room, you, error, loading, refresh } = useRoom(code, teamToken);
   const game = useSessionGame(code, room, you, teamToken);
 
-  // A stored token the room rejects is a token for a room that no longer
-  // exists. Drop it and fall back to the picker rather than showing an error
-  // the player cannot act on.
   useEffect(() => {
     if (error?.code === 'BAD_TOKEN' && teamToken) {
       clearActive(code);
@@ -71,9 +82,9 @@ export default function JoinScreen({ code }: Props) {
   }, [error, teamToken, code]);
 
   // ⚠ RESEED ON YEAR CHANGE, FROM THE LAST SUBMITTED SET. The host advancing is
-  // what starts a new turn for this team, and what the team should find in front
-  // of it is what it chose last time — not engine defaults. seededYear guards
-  // the reseed so that editing during a year is never clobbered by a poll.
+  // what starts a new turn for this team, and what it should find in front of it
+  // is what it chose last time — not engine defaults. seededYear guards the
+  // reseed so editing during a year is never clobbered by a poll.
   const seededYear = useRef<number | null>(null);
   useEffect(() => {
     if (!room || you?.role !== 'player') return;
@@ -86,15 +97,8 @@ export default function JoinScreen({ code }: Props) {
     setClaiming(teamName);
     setClaimError(null);
     try {
-      // The token passed is the one THIS BROWSER already holds for THIS team, if
-      // any — that is what turns a re-claim into a rejoin rather than a refusal.
       const held = heldPlayerCreds.find(c => c.teamName === teamName);
-      const res = await sessionTransport().join({
-        code,
-        teamName,
-        role: 'player',
-        token: held?.teamToken,
-      });
+      const res = await sessionTransport().join({ code, teamName, role: 'player', token: held?.teamToken });
       saveActive(code, { teamToken: res.teamToken, teamName: res.teamName, role: 'player' });
       rememberTeamCredential(code, { teamToken: res.teamToken, teamName: res.teamName, role: 'player' });
       setTeamToken(res.teamToken);
@@ -108,14 +112,12 @@ export default function JoinScreen({ code }: Props) {
   }
 
   async function submit() {
-    if (!room || !decisions) return;
+    if (!room || !decisions || !teamToken) return;
     setSubmitting(true);
     setClaimError(null);
     try {
       await sessionTransport().submit({
-        code,
-        token: teamToken!,
-        yearNumber: room.currentYear,
+        code, token: teamToken, yearNumber: room.currentYear,
         decisions: decisionsToJson(decisions),
       });
       refresh();
@@ -209,103 +211,107 @@ export default function JoinScreen({ code }: Props) {
     );
   }
 
-  // ---- claimed ------------------------------------------------------------
-  const locked = room.teams.find(t => t.name === you.teamName)?.locked ?? false;
-  const complete = room.status === 'complete';
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50/30 p-6">
-      <div className="mx-auto w-full max-w-[560px]">
-        <div className="flex items-end justify-between">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Room {code}</p>
-            <h1 data-testid="my-team" className="text-2xl font-semibold text-slate-800">{you.teamName}</h1>
-          </div>
-          <div className="text-right">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Year</p>
-            <p data-testid="player-year" className="text-2xl font-semibold text-slate-800">
-              {complete ? '—' : room.currentYear}
-            </p>
-          </div>
-        </div>
-
-        {error && error.code !== 'BAD_TOKEN' && (
-          <div data-testid="player-poll-error" className="mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-xs text-red-700">
-            Last refresh failed ({error.code}). Showing the last known state.
-          </div>
-        )}
-
-        {claimError && (
-          <div data-testid="submit-error" className="mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
-            {claimError.message}
-          </div>
-        )}
-
-        {complete ? (
-          <div className="mt-5 rounded-xl border border-slate-200 bg-white p-6 text-center shadow-sm">
-            <p data-testid="player-complete" className="text-sm text-slate-600">The session is complete.</p>
-          </div>
-        ) : locked ? (
-          // ⚠ SUBMIT-AND-WAIT, SAID OUT LOUD. The team has done its part and
-          // cannot do more until the host moves; a screen that did not say so
-          // is a team that either resubmits or assumes it is broken.
-          <div data-testid="waiting" className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-6 text-center">
-            <CheckCircle2 className="mx-auto text-emerald-600" size={22} />
-            <p className="mt-2 text-sm font-medium text-emerald-800">
-              Locked in for year {room.currentYear}.
-            </p>
-            <p className="mt-1 text-xs text-emerald-700">
-              Waiting for the host to advance the year.
-            </p>
-            <p className="mt-3 text-xs text-emerald-600">
-              {room.teams.filter(t => t.joined && !t.locked).length === 0
-                ? 'Every team is in.'
-                : `Still waiting on ${room.teams.filter(t => t.joined && !t.locked).map(t => t.name).join(', ')}.`}
-            </p>
-          </div>
-        ) : (
-          <>
-            <div className="mt-5">
-              {decisions && (
-                <DecisionPanel
-                  decisions={decisions}
-                  activeLines={room.activeLines}
-                  disabled={submitting}
-                  onChange={setDecisions}
-                />
-              )}
-            </div>
-            <button
-              type="button"
-              data-testid="submit-lock"
-              disabled={submitting || !decisions}
-              onClick={() => { void submit(); }}
-              className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-medium text-white disabled:bg-slate-300"
-            >
-              <Lock size={15} />
-              {submitting ? 'Submitting…' : `Submit and lock year ${room.currentYear}`}
-            </button>
-          </>
-        )}
-
-        {/* ---- what this browser computed ---- */}
-        {game.phase === 'building' && (
-          <p data-testid="game-building" className="mt-4 text-center text-xs text-slate-400">
-            Building the pool's opening position…
-          </p>
-        )}
-        {game.phase === 'processing' && (
-          <p data-testid="game-processing" className="mt-4 text-center text-xs text-slate-500">
-            Running year {game.processedYear === null ? room.currentYear - 1 : game.processedYear + 1}…
-          </p>
-        )}
+  // ---- claimed, but the pre-game is still running -------------------------
+  if (!game.gameState || !decisions) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center text-slate-500">
+        <Loader2 className="animate-spin" size={20} />
+        <p className="mt-3 text-sm font-medium" data-testid="game-building">
+          Building {you.teamName}'s opening position…
+        </p>
+        <p className="mt-1 text-xs text-slate-400">
+          Three pre-game years are simulated in this browser, from the room's seed.
+        </p>
         {game.error && (
-          <p data-testid="game-error" className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          <p data-testid="game-error" className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
             {game.error}
           </p>
         )}
-        {game.lastResult && <TeamResultCard result={game.lastResult} />}
       </div>
-    </div>
+    );
+  }
+
+  const myTeam = room.teams.find(t => t.name === you.teamName);
+  const locked = myTeam?.locked ?? false;
+  const complete = room.status === 'complete';
+  const outstanding = room.teams.filter(t => t.joined && !t.locked).map(t => t.name);
+  const processing = game.phase === 'processing';
+
+  return (
+    <GameShell
+      gameState={game.gameState}
+      startingFinancials={game.startingFinancials}
+      initialMembers={game.initialMembers}
+      currentDecisions={decisions}
+      onDecisionsChange={setDecisions}
+      activeTab={activeTab}
+      onSelectTab={setActiveTab}
+      lineView={lineView}
+      onSelectLineView={setLineView}
+      onAdvanceYear={() => { void submit(); }}
+      canAdvance={!locked && !submitting && !complete && !processing}
+      advanceLabel={
+        submitting ? 'Submitting…'
+          : locked ? 'Waiting for host'
+          : `Lock Year ${room.currentYear}`
+      }
+      decisionsDisabled={locked}
+      // No setupPage (the room owns setup), no onNewGame (the host owns the
+      // lifecycle), no loanPrompt (see the header note).
+      statusStrip={
+        <div data-testid="session-strip" className="border-b border-slate-200 bg-white px-4 py-2">
+          <div className="mx-auto flex max-w-screen-2xl flex-wrap items-center gap-x-5 gap-y-1 text-xs">
+            <span className="font-medium text-slate-700" data-testid="my-team">{you.teamName}</span>
+            <span className="text-slate-400">room <span className="font-mono">{code}</span></span>
+            <span className="text-slate-500">
+              Year <span data-testid="player-year" className="font-medium text-slate-700">{complete ? '—' : room.currentYear}</span>
+              {' '}of {room.yearCount}
+            </span>
+
+            {complete ? (
+              <span data-testid="player-complete" className="flex items-center gap-1.5 text-emerald-700">
+                <CheckCircle2 size={13} /> Session complete
+              </span>
+            ) : processing ? (
+              <span data-testid="game-processing" className="flex items-center gap-1.5 text-slate-500">
+                <Loader2 size={13} className="animate-spin" /> Running year {game.gameState.currentYearNumber}…
+              </span>
+            ) : locked ? (
+              <span data-testid="waiting" className="flex items-center gap-1.5 text-emerald-700">
+                <CheckCircle2 size={13} /> Locked in — waiting for the host
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 text-slate-500">
+                <Clock size={13} /> Open for decisions
+              </span>
+            )}
+
+            {!complete && outstanding.length > 0 && (
+              <span className="text-slate-400">
+                still deciding: <span data-testid="outstanding">{outstanding.join(', ')}</span>
+              </span>
+            )}
+
+            {game.processedYear !== null && (
+              <span className="text-slate-400" data-testid="posted-year">
+                year {game.processedYear} result posted
+              </span>
+            )}
+
+            {claimError && (
+              <span data-testid="submit-error" className="text-red-600">{claimError.message}</span>
+            )}
+            {error && error.code !== 'BAD_TOKEN' && (
+              <span data-testid="player-poll-error" className="text-red-600">
+                refresh failed ({error.code})
+              </span>
+            )}
+            {game.error && (
+              <span data-testid="game-error" className="text-red-600">{game.error}</span>
+            )}
+          </div>
+        </div>
+      }
+    />
   );
 }

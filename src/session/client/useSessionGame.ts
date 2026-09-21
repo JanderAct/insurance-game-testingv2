@@ -31,7 +31,7 @@ import { generateGameInstance } from '../../utils/instanceGenerator';
 import { runPriorHistory } from '../../utils/priorHistoryEngine';
 import { applyLoanAuthorizations, processYear } from '../../utils/simulationEngine';
 import { defaultDecisionSet } from '../../utils/decisionDefaults';
-import type { GameSetupSettings, GameState, ResultSet } from '../../types/simulation';
+import type { GameSetupSettings, GameState, Member, ResultSet, StartingFinancials } from '../../types/simulation';
 import { sessionTransport, type CallerView, type RoomView } from '../index';
 import { decisionsForYear } from './decisions';
 import { summarize, summaryToJson } from './results';
@@ -40,6 +40,20 @@ export type GamePhase = 'idle' | 'building' | 'ready' | 'processing' | 'failed';
 
 export interface SessionGame {
   phase: GamePhase;
+  // ⚠ THE GAME ITSELF, BECAUSE THE PLAYER NOW RENDERS IT. This used to be a ref
+  // on the grounds that "nothing renders from it directly" — true when the
+  // player had a four-slider panel, and false the moment they get the real game.
+  // The shell reads every tab off this, so it is state.
+  gameState: GameState | null;
+  // The Year 1 opening position, out of the same runPriorHistory call that
+  // builds the pool. The solo path takes it from there too.
+  startingFinancials: StartingFinancials | null;
+  // ⚠ MIRRORS App.tsx's handleStartGame EXACTLY, INCLUDING ITS `lines.WC`. That
+  // is a solo assumption that predates this work; reproducing it keeps the two
+  // paths identical, and 'fixing' it here would make the session assemble a
+  // GameState differently from the solo path — the hazard this whole extraction
+  // exists to avoid. It is flagged, not diverged from.
+  initialMembers: Member[];
   // The last year this browser actually processed, or null.
   processedYear: number | null;
   lastResult: ResultSet | null;
@@ -57,10 +71,9 @@ export function useSessionGame(
   const [lastResult, setLastResult] = useState<ResultSet | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // The GameState lives in a ref rather than state: it is large, it is mutated
-  // once per turn, and nothing renders from it directly. Keeping it out of state
-  // avoids re-rendering every screen on a change only this file reads.
-  const game = useRef<GameState | null>(null);
+  const [gameState, setGameState] = useState<GameState | null>(null);
+  const [startingFinancials, setStartingFinancials] = useState<StartingFinancials | null>(null);
+  const [initialMembers, setInitialMembers] = useState<Member[]>([]);
   const busy = useRef(false);
 
   // The room fields the instance is built from. If any of them changed the game
@@ -98,7 +111,7 @@ export function useSessionGame(
     // Until then a room's shock list is carried, displayed and ignored, which
     // leaves the game byte-identical to one with no shocks at all.
 
-    const { poolState, priorHistory } = runPriorHistory(instance, settings);
+    const { poolState, startingFinancials: sf, priorHistory } = runPriorHistory(instance, settings);
 
     const gs: GameState = {
       setup: settings,
@@ -111,7 +124,9 @@ export function useSessionGame(
       currentDecisions: defaultDecisionSet(1),
       priorHistory,
     };
-    game.current = gs;
+    setGameState(gs);
+    setStartingFinancials(sf);
+    setInitialMembers(poolState.lines.WC.members.filter(m => m.status === 'active'));
   }, []);
 
   // ---- build once per room identity ---------------------------------------
@@ -139,7 +154,7 @@ export function useSessionGame(
     if (phase !== 'ready' || busy.current) return;
     if (!room || !token || you?.role !== 'player') return;
 
-    const gs = game.current;
+    const gs = gameState;
     if (!gs || gs.isComplete) return;
     if (gs.currentYearNumber >= room.currentYear) return;
 
@@ -185,7 +200,7 @@ export function useSessionGame(
           produced = settled.result;
         }
 
-        game.current = state;
+        setGameState(state);
 
         if (produced) {
           setLastResult(produced);
@@ -209,7 +224,7 @@ export function useSessionGame(
         busy.current = false;
       }
     })();
-  }, [phase, room, you, token, code]);
+  }, [phase, room, you, token, code, gameState]);
 
-  return { phase, processedYear, lastResult, error };
+  return { phase, gameState, startingFinancials, initialMembers, processedYear, lastResult, error };
 }
