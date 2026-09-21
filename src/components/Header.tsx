@@ -6,12 +6,19 @@ import { RippleMark } from '../assets/RippleLogo';
 interface HeaderProps {
   gameState: GameState | null;
   startingFinancials?: { surplus: number; annualPremium: number; marketShare: number } | null;
-  onNewGame: () => void;
+  /** Omitted by a session player: the room owns the game's lifecycle, and a
+   *  player who restarted would desync from a room that is still advancing. The
+   *  solo game always passes it, so its button is unchanged. */
+  onNewGame?: () => void;
   onAdvanceYear: () => void;
   canAdvance: boolean;
+  /** Overrides the advance button's text. Defaults to the solo wording. A
+   *  session player who has already locked shows what it is waiting for
+   *  instead. */
+  advanceLabel?: string;
 }
 
-export default function Header({ gameState, startingFinancials, onNewGame, onAdvanceYear, canAdvance }: HeaderProps) {
+export default function Header({ gameState, startingFinancials, onNewGame, onAdvanceYear, canAdvance, advanceLabel }: HeaderProps) {
   const lastResult = gameState?.lockedResults?.[gameState.lockedResults.length - 1];
 
   const surplus = lastResult?.endingSurplus ?? startingFinancials?.surplus ?? 0;
@@ -105,20 +112,22 @@ export default function Header({ gameState, startingFinancials, onNewGame, onAdv
 
           {/* Right: actions */}
           <div className="flex items-center gap-2 flex-shrink-0">
-            <button
-              onClick={onNewGame}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium transition-colors"
-            >
-              <RefreshCw size={14} />
-              New Game
-            </button>
+            {onNewGame && (
+              <button
+                onClick={onNewGame}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium transition-colors"
+              >
+                <RefreshCw size={14} />
+                New Game
+              </button>
+            )}
             {isStarted && !isComplete && (
               <button
                 onClick={onAdvanceYear}
                 disabled={!canAdvance}
                 className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-bold transition-colors"
               >
-                Lock Year {yearNumber}
+                {advanceLabel ?? `Lock Year ${yearNumber}`}
                 <ChevronRight size={14} />
               </button>
             )}

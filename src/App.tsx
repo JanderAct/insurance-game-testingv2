@@ -2,85 +2,26 @@ import React, { useState, useCallback } from 'react';
 import { DEFAULT_LAYERS_PLACED } from './data/reinsuranceTower';
 import type { TowerLine } from './data/reinsuranceTower';
 import { normalizeAggregateStopLevel, normalizeLayersPlaced } from './utils/reinsuranceTower';
-import {
-  LayoutDashboard,
-  ClipboardList,
-  FileText,
-  Users,
-  Settings,
-  BarChart2,
-  Calculator,
-  Table,
-  History as HistoryIcon,
-  Layers,
-  HardHat,
-  Scale,
-  Building2,
-  ScrollText,
-  BookOpen,
-  Landmark,
-} from 'lucide-react';
 
 import type { GameState, GameSetupSettings, DecisionSet, StartingFinancials, Member, LinePoolState, CoverageLine, LineView } from './types/simulation';
 import { getPredefinedMarketMembers } from './data/memberCatalog';
 import { generateGameInstance } from './utils/instanceGenerator';
-import { processYear, applyLoanAuthorizations, aggregateTermsRetainedPer100, type ProcessYearResult } from './utils/simulationEngine';
-import { runPriorHistory, toHistoricalYear } from './utils/priorHistoryEngine';
+import { processYear, applyLoanAuthorizations, type ProcessYearResult } from './utils/simulationEngine';
+import { runPriorHistory } from './utils/priorHistoryEngine';
 import { defaultDecisionSet } from './utils/decisionDefaults';
 import { SAVE_KEY, unpackSave, writeSave, type SaveEnvelope, type SaveOutcome } from './utils/gameSave';
 import { createSaveScheduler, type SaveScheduler } from './utils/saveScheduler';
-import { getMemberExposure, selectResultView } from './utils/lineHelpers';
-import { computeFundingConsequence } from './utils/fundingConsequence';
-import { endingPosition } from './utils/endingPosition';
-import { LINE_FULL_NAME } from './utils/lineDisplay';
 import { seedFromInstanceId } from './seedHash';
 import LoanPromptModal from './components/LoanPromptModal';
-import type { LineLoanInfo } from './pages/DecisionsPage';
-
-import Header from './components/Header';
-import TabNav, { type TabId } from './components/TabNav';
+import type { TabId } from './components/TabNav';
 import SetupPage from './pages/SetupPage';
-import DashboardPage from './pages/DashboardPage';
-import DecisionsPage from './pages/DecisionsPage';
-import DecisionHistoryPage from './pages/DecisionHistoryPage';
-import FinancialsPage from './pages/FinancialsPage';
-import ResultsPage from './pages/ResultsPage';
-import MembershipPage from './pages/MembershipPage';
-import CalculationAuditPage from './pages/CalculationAuditPage';
-import ResultSpreadsheetPage from './pages/ResultSpreadsheetPage';
-import HistoryPage from './pages/HistoryPage';
-import IntroductionPage from './pages/IntroductionPage';
-import DepartmentsPage from './pages/DepartmentsPage';
 
-const AUDIT_TAB: TabId = 'audit';
-const SPREADSHEET_TAB: TabId = 'spreadsheet';
-
-// Pages that support the Pool / per-line view toggle (Stage 2.1; 'history'
-// added in Stage 2.10 — each line now has its own real pre-game history).
-const LINE_VIEW_PAGES: TabId[] = ['history', 'dashboard', 'decisions', 'decisionHistory', 'financials', 'results', 'audit'];
-
-
-const LINE_VIEW_ICONS: Record<LineView, React.ReactNode> = {
-  pool: <Layers size={14} />,
-  WC: <HardHat size={14} />,
-  GL: <Scale size={14} />,
-  Property: <Building2 size={14} />,
-};
-
-const TABS = [
-  { id: 'setup' as TabId, label: 'Game Setup', icon: <Settings size={16} /> },
-  { id: 'introduction' as TabId, label: 'Introduction', icon: <BookOpen size={16} /> },
-  { id: 'departments' as TabId, label: 'Departments', icon: <Landmark size={16} /> },
-  { id: 'history' as TabId, label: 'Pool History', icon: <HistoryIcon size={16} /> },
-  { id: 'dashboard' as TabId, label: 'Dashboard', icon: <LayoutDashboard size={16} /> },
-  { id: 'decisions' as TabId, label: 'Decisions', icon: <ClipboardList size={16} /> },
-  { id: 'decisionHistory' as TabId, label: 'Decision History', icon: <ScrollText size={16} /> },
-  { id: 'financials' as TabId, label: 'Financial Statements', icon: <FileText size={16} /> },
-  { id: 'results' as TabId, label: 'Results', icon: <BarChart2 size={16} /> },
-  { id: SPREADSHEET_TAB, label: 'Result Spreadsheet', icon: <Table size={16} /> },
-  { id: AUDIT_TAB, label: 'Calculation Audit', icon: <Calculator size={16} /> },
-  { id: 'membership' as TabId, label: 'Membership', icon: <Users size={16} /> },
-];
+// ⚠ THE TAB LIST, THE LINE-VIEW BAR, THE PAGE WIRING AND THE THIRTEEN
+// DECISION-PAGE PROPS ALL MOVED TO src/game/. This file is now the SOLO CALLER
+// of that shell: it owns the save, the setup screen, and an advance that
+// processes the year immediately. The session player screen is the second
+// caller and owns a different advance. Neither owns a copy of the game.
+import GameShell from './game/GameShell';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('setup');
@@ -416,178 +357,34 @@ export default function App() {
     ? lineViewRaw
     : 'pool';
 
-  // Decision pages regained their Pool tab (pool-wide allocation + risk
-  // control decisions live there); every line-view page now honors 'pool'.
-  const effectiveLineView: LineView = lineView;
-
-  const viewResults = React.useMemo(() => {
-    if (!gameState) return [];
-    return selectResultView(gameState.lockedResults, effectiveLineView);
-  }, [gameState, effectiveLineView]);
-
-  const lineLoanInfo = React.useMemo(() => {
-    const lastResult = gameState?.lockedResults[gameState.lockedResults.length - 1];
-    const info: Record<CoverageLine, LineLoanInfo> = { WC: { balance: 0, dividendBlocked: false }, GL: { balance: 0, dividendBlocked: false }, Property: { balance: 0, dividendBlocked: false } };
-    for (const line of (['WC', 'GL', 'Property'] as CoverageLine[])) {
-      info[line] = {
-        balance: gameState?.poolState.interLineLoans.find(l => l.borrowingLine === line)?.remainingBalance ?? 0,
-        dividendBlocked: (lastResult?.byLine[line]?.endingSurplus ?? 0) < 0,
-      };
-    }
-    return info;
-  }, [gameState]);
-
-  // Stage 2.10: the pre-game history is real per-line engine output. Filter it
-  // to the current view (pool aggregate or a single line), then adapt to the
-  // HistoricalYear display shape the history-aware pages render.
-  const viewPriorResults = React.useMemo(() => {
-    if (!gameState) return [];
-    return selectResultView(gameState.priorHistory, lineView);
-  }, [gameState, lineView]);
-
-  const historicalYears = React.useMemo(
-    () => viewPriorResults.map(toHistoricalYear),
-    [viewPriorResults]
-  );
-
-  // Tabs are disabled before game starts (except setup)
-  const tabs = TABS.map(t => ({
-    ...t,
-    disabled: !isStarted && t.id !== 'setup',
-  }));
-
-  // Decisions-page reinsurance preview estimates, scoped to the line currently
-  // being edited (Stage 2.7). Uses that line's own exposure basis — payroll for
-  // WC/GL, TIV for Property — and its own ratePer100 / purePremiumPer100.
-  // These are intentionally simple previews; the real premium is recomputed per
-  // line in simulationEngine.ts at lock.
-  //
-  // The (1 + rateChange) factor this used to carry is GONE — CLF-only pricing
-  // removed the Rate Change decision, so lineState.ratePer100 (last year's
-  // total member charge rate) is used directly.
-  const decisionLine = effectiveLineView === 'pool' ? 'WC' : (effectiveLineView as CoverageLine);
-
-  // (The `estimatedExposure` memo that used to live here is gone. It existed
-  // solely to feed the reinsurance tower a per-$100 exposure base; the tower now
-  // prices off `decisionLineActiveMembers` and the year directly, so a nominal
-  // exposure figure is no longer an input to any price.)
-
-  const estimatedExpectedLoss = React.useMemo(() => {
-    if (!gameState) return 3_500_000;
-
-    const lineState = gameState.poolState.lines[decisionLine];
-    const exposure = lineState.members
-      .filter(m => m.status === 'active')
-      .reduce((s, m) => s + getMemberExposure(m, decisionLine, gameState.currentYearNumber), 0);
-
-    return exposure * lineState.purePremiumPer100 * 10_000;
-  }, [gameState, decisionLine]);
-
-  // ⚠ THE AGGREGATE'S AGREED TERMS, FOR THE TOWER TILE ONLY. Once the pool
-  // prices off its own triangle the engine sets the attachment from the
-  // triangle's retained estimate rather than from the rate (see quoteAggregate's
-  // header), so a tile deriving it from `estimatedExpectedLoss` would quote a
-  // layer the engine will not write. Undefined on the held path, which restores
-  // the tile's previous arithmetic exactly.
-  //
-  // ⚠ AND `estimatedExpectedLoss` ABOVE IS STILL LAST YEAR'S RATE. That
-  // approximation is older than this and is deliberate — the tile is indicative
-  // and re-renders live off the CURRENT placements — but it is the reason the
-  // tile's E[R] and the engine's differ even when the terms agree.
-  const estimatedAggregateTermsRetained = React.useMemo(() => {
-    if (!gameState) return undefined;
-    const lineState = gameState.poolState.lines[decisionLine];
-    const rate = aggregateTermsRetainedPer100(decisionLine, {
-      rows: lineState.reserveDevelopment ?? [],
-      allMarketMembers: gameState.poolState.allMarketMembers,
-      membershipHistory: gameState.poolState.membershipHistory,
-    });
-    if (rate === undefined) return undefined;
-    const exposure = lineState.members
-      .filter(m => m.status === 'active')
-      .reduce((s, m) => s + getMemberExposure(m, decisionLine, gameState.currentYearNumber), 0);
-    return exposure * rate * 10_000;
-  }, [gameState, decisionLine]);
-
-  // The last computed result for the line currently being edited — pool
-  // accounting fields the consequence panel surfaces are not carried on
-  // LinePoolState itself (excessCapitalRatio, capitalAdequacyStatus), only on
-  // the LineResultSet each processed year returns. Falls back to the last
-  // pre-game year when no year has been locked yet (mirrors lineLoanInfo's
-  // pattern, but that one only reads lockedResults since it does not need to
-  // cover the pre-Year-1 gap).
-  const lastLineResult = React.useMemo(() => {
-    if (!gameState) return undefined;
-    if (gameState.lockedResults.length > 0) {
-      return gameState.lockedResults[gameState.lockedResults.length - 1].byLine[decisionLine];
-    }
-    if (gameState.priorHistory.length > 0) {
-      return gameState.priorHistory[gameState.priorHistory.length - 1].byLine[decisionLine];
-    }
-    return undefined;
-  }, [gameState, decisionLine]);
-
-  // CLF-only pricing consequence panel (Decisions page). lineState.ratePer100
-  // is already last year's totalMemberChargeRatePer100, so it doubles as the
-  // "vs last year" basis with no separate lookup. Narrow deps (not all of
-  // currentDecisions) so this does not recompute when an unrelated line's or
-  // pool decision changes.
-  // The decision line's active book. Shared by the funding-consequence panel and
-  // by the reinsurance tower, which now prices off the members themselves rather
-  // than off a frozen per-$100 rate card times exposure.
-  const decisionLineActiveMembers = React.useMemo(() => {
-    if (!gameState) return [];
-    return gameState.poolState.lines[decisionLine].members.filter(m => m.status === 'active');
-  }, [gameState, decisionLine]);
-
-  const decisionLineFundingLevel = currentDecisions.byLine[decisionLine].fundingConfidenceLevel;
-  const decisionLineFundingAtExpected = currentDecisions.byLine[decisionLine].fundingAtExpected;
-  const fundingConsequence = React.useMemo(() => {
-    if (!gameState) return null;
-    const lineState = gameState.poolState.lines[decisionLine];
-    const d = currentDecisions.byLine[decisionLine];
-    return computeFundingConsequence(
-      decisionLineFundingLevel,
-      lineState.ratePer100,
-      decisionLine,
-      decisionLineFundingAtExpected,
-      {
-        yearNumber: gameState.currentYearNumber,
-        // The tower prices off the book itself, so the panel needs the members
-        // and the year, not just an exposure total.
-        members: decisionLineActiveMembers,
-        exposure: decisionLineActiveMembers.reduce(
-          (sum, m) => sum + getMemberExposure(m, decisionLine, gameState.currentYearNumber), 0,
-        ),
-        layersPlaced: d.layersPlaced,
-        aggregateStopLevel: d.aggregateStopLevel,
-        pricingAdjustment: lineState.rateLevel / 100,
-        priorPurePremiumPer100: lineState.purePremiumPer100,
-        lossTrend: gameState.instance.lossEnvironment.lossTrend,
-        priorRcEffectiveness: lineState.riskControlEffectiveness,
-        riskControlPct: d.riskControlPct,
-        // S3: the panel prices off the same played triangle the engine does.
-        experience: {
-          rows: lineState.reserveDevelopment ?? [],
-          allMarketMembers: gameState.poolState.allMarketMembers,
-          membershipHistory: gameState.poolState.membershipHistory,
-        },
-      },
-    );
-  }, [gameState, decisionLine, decisionLineFundingLevel, decisionLineFundingAtExpected, decisionLineActiveMembers, currentDecisions]);
-
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/*
-        ⚠ THE SAVE-FAILURE BANNER, AND IT IS DELIBERATELY NOT DISMISSABLE.
-        The defect this replaces was a swallowed QuotaExceededError: the game
-        stopped being written at year 4 and said nothing, so the loss only
-        surfaced on reload, by which time the session was over. This sits above
-        the header, stays for the rest of the session, and names the remedy the
-        player can actually act on — finish and export, rather than reload.
-        A dismissable toast would be the same defect with a longer fuse.
-      */}
-      {saveFailure && (
+    <GameShell
+      gameState={gameState}
+      startingFinancials={startingFinancials}
+      initialMembers={initialMembers}
+      currentDecisions={currentDecisions}
+      onDecisionsChange={handleDecisionsChange}
+      activeTab={activeTab}
+      onSelectTab={setActiveTab}
+      lineView={lineView}
+      onSelectLineView={setLineView}
+      onNewGame={handleNewGame}
+      onAdvanceYear={handleAdvanceYear}
+      canAdvance={isStarted && !gameState?.isComplete}
+      setupPage={<SetupPage onStart={handleStartGame} />}
+      loanPrompt={pendingYear
+        ? <LoanPromptModal offers={pendingYear.loanOffers} onResolve={handleResolveLoans} />
+        : undefined}
+      banner={saveFailure ? (
+        /*
+          ⚠ THE SAVE-FAILURE BANNER, AND IT IS DELIBERATELY NOT DISMISSABLE.
+          The defect this replaces was a swallowed QuotaExceededError: the game
+          stopped being written at year 4 and said nothing, so the loss only
+          surfaced on reload, by which time the session was over. This sits above
+          the header, stays for the rest of the session, and names the remedy the
+          player can actually act on — finish and export, rather than reload.
+          A dismissable toast would be the same defect with a longer fuse.
+        */
         <div role="alert" className="bg-red-700 text-white px-4 py-3 text-sm font-medium">
           <span className="font-bold">This game is no longer being saved.</span>{' '}
           {saveFailure.reason === 'quota'
@@ -596,142 +393,7 @@ export default function App() {
           Keep playing — the session in this tab is intact — but do NOT reload or close
           this tab, and export your results before you finish.
         </div>
-      )}
-      <Header
-        gameState={gameState}
-        startingFinancials={startingFinancials}
-        onNewGame={handleNewGame}
-        onAdvanceYear={handleAdvanceYear}
-        canAdvance={isStarted && !gameState?.isComplete}
-      />
-
-      {isStarted && (
-        <TabNav
-          tabs={tabs}
-          activeTab={activeTab}
-          onSelect={setActiveTab}
-        />
-      )}
-
-      {isStarted && LINE_VIEW_PAGES.includes(activeTab) && (
-        <TabNav<LineView>
-          tabs={[
-            { id: 'pool' as LineView, label: 'Pool', icon: LINE_VIEW_ICONS.pool },
-            ...activeLines.map(line => ({ id: line as LineView, label: LINE_FULL_NAME[line], icon: LINE_VIEW_ICONS[line] })),
-          ]}
-          activeTab={effectiveLineView}
-          onSelect={setLineView}
-          stickyTop={108}
-          zIndex={20}
-        />
-      )}
-
-      <main>
-        {activeTab === 'setup' && (
-          <SetupPage onStart={handleStartGame} />
-        )}
-
-        {activeTab === 'introduction' && gameState && (
-          <IntroductionPage gameState={gameState} />
-        )}
-
-        {activeTab === 'departments' && gameState && (
-          <DepartmentsPage gameState={gameState} />
-        )}
-
-        {activeTab === 'dashboard' && gameState && startingFinancials && (
-          <DashboardPage
-            lockedResults={viewResults}
-            historicalYears={historicalYears}
-            startingFinancials={startingFinancials}
-            currentYearNumber={gameState.currentYearNumber}
-            lineView={lineView}
-            // ⚠ COMPUTED FROM THE WHOLE GAME STATE, NOT FROM `viewResults`, and
-            // passed in rather than derived inside the page. The panel shows
-            // every line at once whatever the line view is set to — the contrast
-            // between a short-tail and a long-tail runoff is the lesson — and
-            // DashboardPage only ever receives the filtered slice.
-            endingPositionRows={endingPosition(gameState)}
-            gameComplete={gameState.isComplete}
-          />
-        )}
-
-        {activeTab === 'history' && gameState && startingFinancials && (
-          <HistoryPage
-            historicalYears={historicalYears}
-            lineView={lineView}
-          />
-        )}
-
-        {activeTab === 'decisions' && gameState && (
-          <DecisionsPage
-            memberLossHistory={gameState.poolState.memberLossHistory ?? {}}
-            allMarketMembers={gameState.poolState.allMarketMembers}
-            membershipHistory={gameState.poolState.membershipHistory}
-            decisions={currentDecisions}
-            onChange={handleDecisionsChange}
-            yearNumber={gameState.currentYearNumber}
-            estimatedExpectedLoss={estimatedExpectedLoss}
-            estimatedAggregateTermsRetained={estimatedAggregateTermsRetained}
-            disabled={gameState.isComplete}
-            lineView={effectiveLineView}
-            lineLoanInfo={lineLoanInfo}
-            lastLineResult={lastLineResult}
-            fundingConsequence={fundingConsequence}
-            activeMembers={decisionLineActiveMembers}
-          />
-        )}
-
-        {activeTab === 'decisionHistory' && gameState && (
-          <DecisionHistoryPage lockedResults={viewResults} lineView={effectiveLineView} />
-        )}
-
-        {activeTab === 'financials' && gameState && startingFinancials && (
-          <FinancialsPage
-            lockedResults={viewResults}
-            priorResults={viewPriorResults}
-            lineView={lineView}
-          />
-        )}
-
-        {activeTab === 'results' && gameState && (
-          <ResultsPage lockedResults={viewResults} lineView={lineView} />
-        )}
-
-        {activeTab === SPREADSHEET_TAB && gameState && (
-          <ResultSpreadsheetPage
-            lockedResults={gameState.lockedResults}
-            priorHistory={gameState.priorHistory}
-            instance={gameState.instance}
-            activeLines={gameState.setup.activeLines}
-            instanceId={gameState.setup.instanceId}
-            poolState={gameState.poolState}
-          />
-        )}
-
-        {activeTab === AUDIT_TAB && gameState && (
-          <CalculationAuditPage
-            lockedResults={gameState.lockedResults}
-            priorHistory={gameState.priorHistory}
-            instanceSeed={gameState.instance.seed}
-            lineView={effectiveLineView}
-          />
-        )}
-
-        {activeTab === 'membership' && gameState && startingFinancials && (
-          <MembershipPage
-            lockedResults={gameState.lockedResults}
-            startingFinancials={startingFinancials}
-            initialMembers={initialMembers}
-            startingYear={gameState.setup.startingYear}
-            memberLossHistory={gameState.poolState.memberLossHistory ?? {}}
-          />
-        )}
-      </main>
-
-      {pendingYear && (
-        <LoanPromptModal offers={pendingYear.loanOffers} onResolve={handleResolveLoans} />
-      )}
-    </div>
+      ) : undefined}
+    />
   );
 }
