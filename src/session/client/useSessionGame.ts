@@ -27,6 +27,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { seedFromInstanceId } from '../../seedHash';
+import { openingRoster } from '../../game/openingRoster';
 import { generateGameInstance } from '../../utils/instanceGenerator';
 import { runPriorHistory } from '../../utils/priorHistoryEngine';
 import { applyLoanAuthorizations, processYear } from '../../utils/simulationEngine';
@@ -48,11 +49,10 @@ export interface SessionGame {
   // The Year 1 opening position, out of the same runPriorHistory call that
   // builds the pool. The solo path takes it from there too.
   startingFinancials: StartingFinancials | null;
-  // ⚠ MIRRORS App.tsx's handleStartGame EXACTLY, INCLUDING ITS `lines.WC`. That
-  // is a solo assumption that predates this work; reproducing it keeps the two
-  // paths identical, and 'fixing' it here would make the session assemble a
-  // GameState differently from the solo path — the hazard this whole extraction
-  // exists to avoid. It is flagged, not diverged from.
+  // The year-0 roster, from the shared openingRoster the solo path also calls —
+  // every active line's members, deduplicated. This was `lines.WC` in BOTH
+  // callers until the fix landed in one place for both; mirroring the defect was
+  // deliberate while it was only fixable in one of them.
   initialMembers: Member[];
   // The last year this browser actually processed, or null.
   processedYear: number | null;
@@ -132,19 +132,11 @@ export function useSessionGame(
     };
     setGameState(gs);
     setStartingFinancials(sf);
-    // ⚠ MIRRORS App.tsx's handleStartGame, WHICH READS lines.WC UNCONDITIONALLY,
-    // AND THAT MIRROR IS DELIBERATE EVEN THOUGH TEAM-CHOSEN LINES MAKE IT BITE
-    // MORE OFTEN. A team that did not choose WC gets an empty initial roster —
-    // exactly as a GL-only SOLO game does, because the assumption is the solo
-    // path's. MembershipPage only falls back on this before the first locked
-    // year, so the visible cost is one screen for one turn.
-    //
-    // Reading settings.activeLines[0] here instead would fix it for session
-    // players and leave solo broken, which is a session layer assembling a
-    // GameState differently from the solo path — the hazard this whole
-    // extraction exists to prevent. The fix belongs in handleStartGame, where it
-    // serves both callers at once.
-    setInitialMembers(poolState.lines.WC.members.filter(m => m.status === 'active'));
+    // The same openingRoster the solo path calls, over THIS TEAM's lines. The
+    // lines.WC read that stood here — mirroring App.tsx's own — is gone from
+    // both callers at once, which is the only way to fix it without the session
+    // assembling a GameState differently from solo.
+    setInitialMembers(openingRoster(poolState, settings.activeLines));
   }, []);
 
   // ---- build once per room identity ---------------------------------------

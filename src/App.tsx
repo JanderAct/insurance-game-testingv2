@@ -22,6 +22,7 @@ import SetupPage from './pages/SetupPage';
 // processes the year immediately. The session player screen is the second
 // caller and owns a different advance. Neither owns a copy of the game.
 import GameShell from './game/GameShell';
+import { openingRoster } from './game/openingRoster';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('setup');
@@ -250,7 +251,9 @@ export default function App() {
     // through the real engine; the ending state is the Year 1 opening position.
     const { poolState, startingFinancials: sf, priorHistory } = runPriorHistory(instance, settings);
 
-    const initMembers = poolState.lines.WC.members.filter(m => m.status === 'active');
+    // Every active line's roster, deduplicated — the same object the pool row's
+    // memberList is, which is what replaces this at year 1. See openingRoster.
+    const initMembers = openingRoster(poolState, settings.activeLines);
 
     const gs: GameState = {
       setup: settings,
