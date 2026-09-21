@@ -700,8 +700,8 @@ export const SATISFACTION = {
    * quarter of that is -0.027, which needs w = 0.024.
    *
    * WHAT THAT LEAVES: the ladder spans Deficient -2 steps to Strong +1, so end to
-   * end it is worth 0.103 points against the funding slider's own 0.41. That is
-   * 25% of the funding mechanic, and it is what the requirement permits: this
+   * end it is worth 0.155 points against the funding slider's own 0.41. That is
+   * 38% of the funding mechanic, and it is what the requirement permits: this
    * term responds to the same decision the market level responds to, in the
    * opposite direction, so every point of weight it carries is taken straight
    * out of the player's main lever. member-satisfaction-check asserts BOTH
@@ -717,16 +717,19 @@ export const SATISFACTION = {
    * steps for the same weight, so more weight fitted under the same quarter.
    *
    * SECOND, 0.0469 -> 0.0344, when WC took a supplied CLF curve and the boundary
-   * fell again to 0.0258. Bisected over [0, 0.20] on the SOLVED boundary, seven
-   * passes, 24 games:
+   * fell again to 0.0258, against a limb-off footprint of -0.0594.
    *
-   *     w = 0.0250  ->  footprint -0.0485,  18.3% cancelled
-   *     w = 0.0344  ->  footprint -0.0447,  24.8% cancelled   <- shipped
-   *     w = 0.0359  ->  footprint -0.0438,  26.2% cancelled   <- breaches
+   * THIRD, 0.0344 -> 0.0516, when WC's aggregate volatility was raised and the
+   * boundary rose to 0.1385. Bisected over [0, 0.20] on the SOLVED boundary,
+   * seven passes, 24 games:
    *
-   * against a limb-off footprint of -0.0594. It is the largest value on that
-   * grid inside the bound, so the headroom is 0.2pp BY CONSTRUCTION and section
-   * 6 will assert at 24.8% against 25.0%. That is deliberate: both quantities
+   *     w = 0.0500  ->  footprint -0.0573,  23.5% cancelled
+   *     w = 0.0516  ->  footprint -0.0566,  24.4% cancelled   <- shipped
+   *     w = 0.0531  ->  footprint -0.0561,  25.2% cancelled   <- breaches
+   *
+   * against a limb-off footprint of -0.0749. It is the largest value on that
+   * grid inside the bound, so the headroom is 0.6pp BY CONSTRUCTION and section
+   * 6 will assert at 24.4% against 25.0%. That is deliberate: both quantities
    * are seeded and deterministic, so the gate is stable at that margin, and any
    * change to the book that moves the footprint trips it immediately rather than
    * eroding the bound quietly. A tripwire that sits against its bound is doing
@@ -749,8 +752,24 @@ export const SATISFACTION = {
    *      Re-solve from the measurement. DO NOT RELAX THE BOUND — that has been
    *      the wrong answer twice, and the gate says so in its own failure text.
    *   3. The limb-off footprint (the same line's `surplusWeight at 0` figure)
-   *      moving more than 20% from -0.0594, which is the denominator the
+   *      moving more than 20% from -0.0749, which is the denominator the
    *      quarter is a quarter OF.
+   *
+   * ⚠ THAT REFERENCE READ -0.0594 FOR A COMMIT AND WAS THE SECOND SOLVE'S
+   * DENOMINATOR, NOT THIS VALUE'S. The third re-solve installed 0.0516 against
+   * -0.0749 and updated the constant without updating the narrative above it or
+   * this trigger, so the block described a superseded value and its bisection
+   * table. Read literally the trigger then said FIRED — the live figure is
+   * -0.0749, a 26% move from -0.0594 — when nothing had moved at all. A trigger
+   * that names the wrong denominator is worse than no trigger: it sends the next
+   * reader into a re-solve that will return the value already shipped. WHEN THIS
+   * CONSTANT IS RE-SOLVED, THE LIMB-OFF FIGURE ON THIS LINE MOVES WITH IT.
+   *
+   * ⚠ AND AS OF THE LAST FULL RE-MEASUREMENT NONE OF THE THREE HAS FIRED.
+   * Pooled median 0.1482 against a 0.1385 boundary (0.0097, against a 0.10
+   * trigger), cancellation 24.4% (inside 20-25%), limb-off -0.0749 (unmoved).
+   * The GL contraction re-solve moved GL's own median 0.4358 -> 0.4708 and its
+   * p25 across zero, but WC's did not move, so the pooled median barely did.
    *
    * ⚠ ALL THREE OF THESE FIRED AT ONCE AT THE COMMIT AFTER THEY WERE WRITTEN,
    * WHICH IS THE ONLY EVIDENCE THAT THEY WORK. The CLF swap moved the boundary
@@ -758,6 +777,13 @@ export const SATISFACTION = {
    * trigger 2's 20-25%, and moved the limb-off footprint -0.0805 -> -0.0594,
    * 26% against trigger 3's 20%. None of that touched this file. A trigger that
    * has never fired is an untested trigger; these are now tested.
+   *
+   * ⚠ THIS IS ONE OF THE TWO RECORDED EXCEPTIONS TO THE RELATIVE-TARGET RULE in
+   * docs/WORKING_PRACTICES.md ("A constant pinned to a ratio re-derives itself.
+   * One pinned to a number goes silently stale"). The rule says to pin a
+   * calibrated constant to a ratio wherever the quantity has a natural
+   * reference; this one has none, and the reason is below so nobody spends an
+   * afternoon looking for one.
    *
    * ⚠ AND IT CANNOT BE EXPRESSED RELATIVELY EITHER, FOR A DIFFERENT REASON THAN
    * THE BOUNDARY'S. This weight multiplies a DISCRETE numerator — band steps
@@ -867,6 +893,12 @@ export const SATISFACTION = {
    * capital ratios, the default appetite, the roster freeze, the reserve margin
    * factors, the funding default. The 1.15 -> 0.2399 move was 0.91, nine times
    * that trigger, and nothing was watching for it.
+   *
+   * ⚠ THIS IS THE OTHER RECORDED EXCEPTION TO THE RELATIVE-TARGET RULE in
+   * docs/WORKING_PRACTICES.md. The rule holds generally — term 3's spread and
+   * the surplus cancellation bound, both relative, survived five structural
+   * changes untouched while the two absolute-pinned quantities drifted 16-17%.
+   * This constant is one of the two places it cannot be applied.
    *
    * ⚠ IT CANNOT BE EXPRESSED RELATIVELY, AND THAT IS WHY IT WENT STALE SILENTLY.
    * There is no runtime distribution to normalise against: surplusBandOf sees

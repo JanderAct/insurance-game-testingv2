@@ -778,12 +778,54 @@ console.log(`\n--- 6. one blameless member, one stop on the funding slider in ye
   const fp = mean(footprints);
   console.log(`  FOOTPRINT over the decision year and the five after it, ${footprints.length} games: `
     + `${fp.toFixed(3)} points (SD across games ${sd(footprints).toFixed(3)})`);
+  // THE LINE-MEAN FOOTPRINT, used by the split below and the cancellation bound
+  // after it. Hoisted so the two cannot drift onto different estimators, which
+  // is a failure this very block has had.
+  const lineMeanFootprint = (rows: LineYear[][], base: LineYear[][]) => {
+    const out: number[] = [];
+    for (let g = 0; g < GAMES; g++) {
+      const b = base[g].filter(x => x.line === 'WC').slice(0, through);
+      const d = rows[g].filter(x => x.line === 'WC').slice(0, through);
+      if (b.length < through || d.length < through) continue;
+      out.push(mean(d[through - 1].members.map(m => m.satisfaction))
+        - mean(b[through - 1].members.map(m => m.satisfaction)));
+    }
+    return mean(out);
+  };
   // ⚠ SPLIT INTO ITS TWO LIMBS, AND ASSERTED, BECAUSE THE RATIO WENT STALE ONCE
   // ALREADY. levelWeight was derived against a change-limb figure measured
   // BEFORE the anchor existed — see the constant — and nothing checked the split
-  // afterwards. The level limb's contribution is computable exactly from the
+  // afterwards. The anchor limb's contribution is computable exactly from the
   // rows: the two arms' anchors differ by a known amount and the stock closes
   // 1 - 0.5^(years/halfLife) of that distance. The change limb is the residual.
+  //
+  // ⚠ THIS IS THE ANCHOR LIMB AND IT WAS LABELLED "level limb", WHICH NAMED ONE
+  // OF THE THREE TERMS IT CONTAINS. `anchor` is
+  // satisfactionAnchor(levelGapPct, st.level, surplusBand) — market level PLUS
+  // loss standing PLUS surplus band — so a split computed from it has never been
+  // a market-level figure. Measured by ablation on these same arms and seeds,
+  // the three anchor terms contribute -0.0540, +0.0005 and +0.0183 against a
+  // total footprint of -0.0566: the market level really does carry almost all of
+  // it, so the old label happened to be nearly right about the magnitude while
+  // being wrong about the quantity. The assertion is unchanged in intent — a
+  // SUSTAINED decision must act mainly through the anchor rather than through
+  // the one-year change term — and now says so.
+  //
+  // ⚠ AND BOTH SIDES ARE THE LINE MEAN, WHICH THEY WERE NOT. The anchor gap took
+  // `moves[0]` — the first member in the array — while the total it was split
+  // against was a DIFFERENT member, the blameless one the trace follows. Two
+  // single members, neither of them the population. That is the same
+  // mixed-estimator defect the cancellation bound below carried until it was
+  // fixed, in the same file, one block apart.
+  //
+  // ⚠ AND THE MISMATCH WAS CARRYING A FALSE FINDING. On the mixed estimator this
+  // split read 2.1:1 and was reported as the anchor:change ratio having DRIFTED
+  // from the 2.5:1 it was solved at — cited as evidence that absolute-pinned
+  // constants go stale. On one estimator it reads 2.5:1. Nothing had drifted;
+  // the denominator was a different member from the numerator. A ratio between
+  // two live limbs is relative by construction and does not go stale, which is
+  // the rule in docs/WORKING_PRACTICES.md, and this block was the counter-example
+  // to it until it was measured consistently.
   {
     const conv = 1 - Math.pow(0.5, (through - DECISION_YEAR + 1) / SATISFACTION.levelHalfLifeYears);
     const anchorGaps: number[] = [];
@@ -791,17 +833,22 @@ console.log(`\n--- 6. one blameless member, one stop on the funding slider in ye
       const b = baseline[g].filter(x => x.line === 'WC').slice(DECISION_YEAR - 1, through);
       const d = decided[g].filter(x => x.line === 'WC').slice(DECISION_YEAR - 1, through);
       if (!b.length || !d.length) continue;
-      anchorGaps.push(mean(d.map(r => r.moves[0]?.anchor ?? 0)) - mean(b.map(r => r.moves[0]?.anchor ?? 0)));
+      const lineMeanAnchor = (rows: LineYear[]) =>
+        mean(rows.map(r => (r.moves.length ? mean(r.moves.map(m => m.anchor)) : 0)));
+      anchorGaps.push(lineMeanAnchor(d) - lineMeanAnchor(b));
     }
-    const levelLimb = mean(anchorGaps) * conv;
-    const changeLimb = fp - levelLimb;
-    console.log(`  SPLIT: level limb ${levelLimb.toFixed(4)} (anchor gap ${mean(anchorGaps).toFixed(4)} x `
-      + `${(100 * conv).toFixed(0)}% convergence), change limb ${changeLimb.toFixed(4)} — `
-      + `ratio ${Math.abs(levelLimb / (changeLimb || 1e-9)).toFixed(1)}:1`);
-    const ok = Math.abs(levelLimb) > Math.abs(changeLimb);
-    console.log(`  the level limb is the larger of the two: ${ok ? 'OK' : 'FAIL'}`);
+    const fpMean = lineMeanFootprint(decided, baseline);
+    const anchorLimb = mean(anchorGaps) * conv;
+    const changeLimb = fpMean - anchorLimb;
+    console.log(`  SPLIT, line mean on both sides: ANCHOR limb ${anchorLimb.toFixed(4)} `
+      + `(anchor gap ${mean(anchorGaps).toFixed(4)} x ${(100 * conv).toFixed(0)}% convergence), `
+      + `change limb ${changeLimb.toFixed(4)} — ratio ${Math.abs(anchorLimb / (changeLimb || 1e-9)).toFixed(1)}:1`);
+    console.log(`    (anchor = market level + loss standing + surplus band; the trace above follows ONE `
+      + `member at ${fp.toFixed(4)}, the split is against the line mean ${fpMean.toFixed(4)})`);
+    const ok = Math.abs(anchorLimb) > Math.abs(changeLimb);
+    console.log(`  the anchor limb is the larger of the two: ${ok ? 'OK' : 'FAIL'}`);
     if (!ok) {
-      failures.push(`the level limb contributes ${levelLimb.toFixed(4)} against the change limb's `
+      failures.push(`the anchor limb contributes ${anchorLimb.toFixed(4)} against the change limb's `
         + `${changeLimb.toFixed(4)} for a SUSTAINED decision. A gap that applies every year must outweigh `
         + `one that applies once — that is the whole reason the two limbs carry separate weights. See `
         + `SATISFACTION.levelWeight, whose derivation this replaced after it went stale.`);
@@ -830,17 +877,6 @@ console.log(`\n--- 6. one blameless member, one stop on the funding slider in ye
   // than the one it replaces.
   {
     const keep = SATISFACTION.surplusWeight;
-    const lineMeanFootprint = (rows: LineYear[][], base: LineYear[][]) => {
-      const out: number[] = [];
-      for (let g = 0; g < GAMES; g++) {
-        const b = base[g].filter(x => x.line === 'WC').slice(0, through);
-        const d = rows[g].filter(x => x.line === 'WC').slice(0, through);
-        if (b.length < through || d.length < through) continue;
-        out.push(mean(d[through - 1].members.map(m => m.satisfaction))
-          - mean(b[through - 1].members.map(m => m.satisfaction)));
-      }
-      return mean(out);
-    };
     const fpShipped = lineMeanFootprint(decided, baseline);
     SATISFACTION.surplusWeight = 0;
     const noSurplus = Array.from({ length: GAMES }, (_, g) => playDecision(g, DECISION_YEAR));

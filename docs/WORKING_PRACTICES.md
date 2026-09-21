@@ -823,6 +823,82 @@ threshold, not both — and if the threshold depends on another measurement in t
 same request, say so instead of pricing it in advance. The recorded form of this,
 from the user who wrote it: *"210 ms is fine and 210 ms eighty times is not."*
 
+## ⚠ A CONSTANT PINNED TO A RATIO RE-DERIVES ITSELF. ONE PINNED TO A NUMBER GOES SILENTLY STALE
+
+**State a calibrated constant's target as a ratio to another live quantity wherever the quantity has a
+natural reference.** A relative target moves with the thing it describes, so when the book changes the
+error cancels on both sides and the constant is still right. An absolute target is a photograph of a book
+that no longer exists: it does not fail, it does not complain, it is simply wrong from the moment the
+thing it was measured against moves, and it stays wrong until somebody re-measures for an unrelated reason.
+
+That is the mechanism, and it is worth stating separately from the observation, because the observation on
+its own reads as luck.
+
+### The evidence
+
+Five structural changes landed in sequence — the pre-game roster freeze, the opening-pin re-solve, WC's
+aggregate volatility change, the supplied WC CLF curve, and GL's triangle contraction fix. None of them
+touched `memberSatisfaction.ts`. Every one of them moved something the satisfaction limbs were calibrated
+against. Measured afterwards:
+
+| quantity | how it is pinned | intended | after all five | moved |
+|---|---|---|---|---|
+| term 3 spread | **relative** — × one funding stop through the market level | 1.00 | 1.03 / 1.01 / 0.97 | held |
+| surplus cancellation | **relative** — ¼ of the decision's footprint | ≤25% | 24.4% | held |
+| anchor : change ratio | **relative** — one limb against another | 2.5 : 1 | 2.5 : 1 | held |
+| footprint magnitude | **absolute** — a number of points | −0.072 | −0.060 | **−17%** |
+
+Every quantity expressed as a ratio to another live quantity held across all five changes. The one
+expressed as a number of points drifted by about a sixth, with nothing reporting it.
+
+⚠ THE THIRD ROW IS A CORRECTION, AND THE WAY IT WAS WRONG IS ITSELF THE POINT. It was first measured at
+2.1 : 1 and written up as a drifted absolute. It is neither: the split that produced 2.1 was dividing an
+ANCHOR limb computed from the line mean by a change limb taken as the residual against a SINGLE member's
+footprint. Put both sides on the same estimator and the ratio reads 2.5 : 1, which is where it was solved.
+A ratio between two live limbs is relative by construction and behaves like one — it was the measurement
+that had drifted, not the constant. See `member-satisfaction-check`'s section 6, where the fix is recorded
+next to the same defect the cancellation bound in the following block had already had.
+
+⚠ AND THE EVIDENCE IS THREE RELATIVE QUANTITIES HOLDING AGAINST ONE ABSOLUTE DRIFTING, WHICH IS A PATTERN
+AND NOT YET A LAW. One absolute data point cannot carry the strong form of this claim. What makes it worth
+recording anyway is that the mechanism is not statistical: a relative target is re-derived from live
+quantities every time it is evaluated, so there is no state to go stale. That is a structural argument, and
+the table is consistent with it rather than being the whole case for it.
+
+### What it predicts
+
+When something structural moves, **the absolute-pinned constants are the ones that need attention** and
+the relative-pinned ones can be left alone until a gate says otherwise. That is a cheap triage rule and it
+has been right three times.
+
+It also says what to reach for when writing a new constant: find the quantity it is really a fraction of
+and pin it there. `surplusWeight`'s bound is the model case — "this term may not cancel more than a quarter
+of the funding decision it responds to" never went stale across five changes, while the VALUE solved
+against it was re-solved three times. The rule outlived every number it produced.
+
+### And where it cannot be done, say so at the constant
+
+Some constants have no natural reference and forcing one is worse than leaving them absolute. Two worked
+examples, both recorded at their own definitions so the next reader does not spend the afternoon trying:
+
+- **`SATISFACTION.surplusComfortable`** has no runtime distribution to normalise against. `surplusBandOf`
+  sees ONE ratio, for one member-year; a rolling quantile would need new stored state and would make a
+  member's band depend on other line-years.
+- **`SATISFACTION.surplusWeight`** multiplies a DISCRETE numerator — band steps crossed — over a
+  CONTINUOUS denominator, the footprint in points. No fixed ratio between them survives a book change,
+  because the step count moves in jumps while the footprint moves smoothly.
+
+In both cases the RULE is relative and the VALUE is absolute, and the substitute for the normalisation the
+constant cannot have is a **checkable re-solve trigger** written at the constant: which quantity has to
+move, and by how much, before the value is stale. Those triggers are not documentation. They fired, all
+three at once, on the commit after they were written.
+
+⚠ **A TRIGGER THAT NAMES A SUPERSEDED REFERENCE IS WORSE THAN NO TRIGGER.** `surplusWeight`'s third
+re-solve updated the constant and left the narrative and the trigger describing the second. The trigger
+named a limb-off footprint of −0.0594 when the shipped value had been solved against −0.0749, so read
+literally it reported FIRED when nothing had moved. When a constant with a trigger is re-solved, the
+trigger's reference quantities move with it in the same edit.
+
 ## Rulings and stopping
 - **A failed verification check stops the work UNCOMMITTED. Whether it blocks is the user's call, not
   Claude Code's.** Diagnosing the cause is exactly right; deciding it doesn't count is not. This applies
