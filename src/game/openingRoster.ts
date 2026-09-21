@@ -24,6 +24,21 @@
 
 import type { CoverageLine, Member, PoolState } from '../types/simulation';
 
+/**
+ * ⚠ ONE LINE'S OPENING MEMBERS, AND IT IS DERIVED RATHER THAN STORED. The union
+ * above is what App holds in state and writes to the save; a per-line breakdown
+ * cannot be recovered from it afterwards, because Member.exposureByLine is a
+ * CATALOG ATTRIBUTE (every member has payroll and a TIV whatever they buy) and
+ * not an enrolment record — the type says so next to yearJoined.
+ *
+ * So it is not persisted. poolState IS in the save, this is a pure function of
+ * it, and recomputing costs a filter. Storing a second copy would have changed
+ * the save shape to answer a question the save can already answer.
+ */
+export function openingRosterForLine(poolState: PoolState, line: CoverageLine): Member[] {
+  return poolState.lines[line].members.filter(m => m.status === 'active');
+}
+
 export function openingRoster(poolState: PoolState, activeLines: CoverageLine[]): Member[] {
   const seen = new Set<string>();
   const roster: Member[] = [];

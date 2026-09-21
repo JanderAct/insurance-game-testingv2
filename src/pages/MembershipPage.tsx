@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { Users, UserPlus, UserMinus, Globe } from 'lucide-react';
 import type { ResultSet, Member, StartingFinancials, MemberLossHistory, CoverageLine, LineView } from '../types/simulation';
 import { formatMillions, formatPct } from '../utils/formatters';
-import { getMemberExposure } from '../utils/lineHelpers';
+import { getMemberExposure, selectResultView } from '../utils/lineHelpers';
+import { LINE_FULL_NAME } from '../utils/lineDisplay';
 import { EXPERIENCE_MOD, memberExperienceMods } from '../utils/memberExperienceMod';
 import { OPENING_SATISFACTION } from '../data/memberCatalog';
 import { experienceWindow } from '../utils/memberLossHistory';
@@ -30,9 +31,12 @@ interface MembershipPageProps {
    * than blank; see the note above the table for why absent rather than dashes.
    */
   lineView: LineView;
+  /** The pool's lines — needed only to decide whether the POOL view's exposure
+   *  tiles share one unit basis. See EXPOSURE_BASIS. */
+  activeLines: CoverageLine[];
 }
 
-export default function MembershipPage({ lockedResults, startingFinancials, initialMembers, startingYear, memberLossHistory, lineView }: MembershipPageProps) {
+export default function MembershipPage({ lockedResults, startingFinancials, initialMembers, startingYear, memberLossHistory, lineView, activeLines }: MembershipPageProps) {
   // The line whose per-member record this table can show, or null on the pool
   // view where no such record exists.
   const expLine: CoverageLine | null = lineView === 'pool' ? null : lineView;
@@ -40,6 +44,9 @@ export default function MembershipPage({ lockedResults, startingFinancials, init
   // matching the premium and member charge shown elsewhere. Roster payroll is
   // frozen in year-1 dollars; wageFactor carries it forward. See lineHelpers.
   const displayYear = lockedResults.length > 0 ? lockedResults[lockedResults.length - 1].yearNumber : 1;
+  // ⚠ WC AND GL ARE PER $100 OF PAYROLL; PROPERTY IS PER $100 OF TIV. The two
+  // exposure tiles are only meaningful where one basis applies — see their note.
+  const EXPOSURE_BASIS: Record<CoverageLine, 'Payroll' | 'TIV'> = { WC: 'Payroll', GL: 'Payroll', Property: 'TIV' };
   // ⚠ 'riskQuality' IS GONE FROM THIS UNION AND THAT IS LOAD-BEARING. Risk
   // quality is no longer shown per member anywhere, so there is nothing to
   // sort by; leaving the key would let a future column reintroduce the
@@ -54,7 +61,26 @@ export default function MembershipPage({ lockedResults, startingFinancials, init
   const [sortKey, setSortKey] = useState<'name' | 'exposure' | 'satisfaction' | 'ratio' | 'lossCost' | 'yearJoined'>('exposure');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
-  const last = lockedResults[lockedResults.length - 1];
+  // ============================================================================
+  // ⚠ EVERY FIGURE ON THIS PAGE READS THE VIEW'S ROW, NOT THE POOL'S.
+  //
+  // It used to read the pool row for all ten tiles and for the roster, whatever
+  // the line bar said — so a WC+GL pool on the WC view reported 116 Active
+  // Members (the distinct union across both lines) and listed all 116 under a
+  // heading reading Workers' Compensation. The experience COLUMNS were taught to
+  // follow the view; the set they describe was not, which left the page
+  // describing one population with another population's numbers.
+  //
+  // selectResultView is the same one-line filter every other line-view page
+  // uses, and on 'pool' it returns lockedResults BY REFERENCE — so the Pool view
+  // is provably the pool row rather than merely tested to match it.
+  // ============================================================================
+  const viewRows = selectResultView(lockedResults, lineView);
+  const last = viewRows[viewRows.length - 1];
+  // The pool row is still needed for ONE thing: averaging a member's
+  // satisfaction across the lines they hold, which is a pool-scope question and
+  // only asked on the pool view.
+  const poolLast = lockedResults[lockedResults.length - 1];
 
   const activeMembers: Member[] = last ? last.memberList : initialMembers;
   const newThisYear = last ? last.newMembers : 0;
@@ -118,10 +144,14 @@ export default function MembershipPage({ lockedResults, startingFinancials, init
   // named rather than left to look like a considered weighting.
   const satisfactionByMember = React.useMemo(() => {
     const out = new Map<string, number>();
-    if (!last) return out;
+    // ⚠ POOL ONLY, BY CONSTRUCTION. Averaging a member's satisfaction across the
+    // lines they hold answers a pool-scope question. On a line view the member
+    // appears once, carrying that line's own satisfaction, and the fallback
+    // below returns it untouched — which is the right answer there.
+    if (!poolLast || lineView !== 'pool') return out;
     const sums = new Map<string, { total: number; lines: number }>();
-    for (const line of Object.keys(last.byLine) as Array<keyof typeof last.byLine>) {
-      for (const m of last.byLine[line]?.memberList ?? []) {
+    for (const line of Object.keys(poolLast.byLine) as Array<keyof typeof poolLast.byLine>) {
+      for (const m of poolLast.byLine[line]?.memberList ?? []) {
         const e = sums.get(m.id) ?? { total: 0, lines: 0 };
         e.total += m.satisfaction; e.lines += 1;
         sums.set(m.id, e);
@@ -129,7 +159,7 @@ export default function MembershipPage({ lockedResults, startingFinancials, init
     }
     for (const [id, e] of sums) if (e.lines > 0) out.set(id, e.total / e.lines);
     return out;
-  }, [last]);
+  }, [poolLast, lineView]);
   const satisfactionOf = (m: Member) => satisfactionByMember.get(m.id) ?? m.satisfaction;
 
   const memberMeanSatisfaction = activeMembers.length > 0
@@ -215,7 +245,25 @@ export default function MembershipPage({ lockedResults, startingFinancials, init
 
   // ⚠ WC AND GL ARE PER $100 OF PAYROLL; PROPERTY IS PER $100 OF TIV. Derived
   // from the selected line rather than written once — see the block above.
-  const basis = expLine === 'Property' ? 'TIV' : 'Payroll';
+  const basis = expLine ? EXPOSURE_BASIS[expLine] : 'Payroll';
+
+  // ⚠ THE TWO EXPOSURE TILES ARE THE ONE PLACE A POOL FIGURE IS NOT MERELY
+  // POOLED BUT INCOHERENT, AND THE ENGINE SAYS SO IN SO MANY WORDS:
+  // activeExposure and totalMarketExposure at pool scope are
+  // "DIMENSIONALLY MEANINGLESS ... pool-scope hazards, not pool-scope facts",
+  // kept alive only because display code still reads them — and this page is
+  // named in that list.
+  //
+  // ⚠ BUT THE INCOHERENCE IS CONDITIONAL, SO REMOVING THEM OUTRIGHT WOULD THROW
+  // AWAY A GOOD NUMBER. WC and GL are both payroll: a WC+GL pool's sum is
+  // payroll plus payroll, which is payroll. Only a pool mixing Property with
+  // either of the others adds $M of payroll to $M of TIV. So the tiles show
+  // when ONE basis applies and are absent when two do — the same rule the
+  // per-line columns follow on the pool view, for the same reason: a figure
+  // with no coherent value is better absent than plausible.
+  const poolBases = new Set(activeLines.map(l => EXPOSURE_BASIS[l]));
+  const exposureBasis: 'Payroll' | 'TIV' | null =
+    expLine ? EXPOSURE_BASIS[expLine] : (poolBases.size === 1 ? [...poolBases][0] : null);
 
   // On the pool view the three per-line columns are gone, so a sort key naming
   // one of them would order the table by a column nobody can see. Fall back to
@@ -260,7 +308,14 @@ export default function MembershipPage({ lockedResults, startingFinancials, init
   return (
     <div className="max-w-screen-2xl mx-auto px-4 py-6 space-y-6">
       <div>
-        <h2 className="text-xl font-bold text-gray-900">Active Membership</h2>
+        {/* ⚠ THE SCOPE IS NAMED ONCE, AT THE TOP, FOR THE WHOLE PAGE. It used to
+            be named in a line under the table that said "Experience columns show
+            WC" — a disclaimer for the days when those columns were the only
+            thing on the page that knew about lines. Everything follows the view
+            now, so singling the columns out would imply the rest does not. */}
+        <h2 data-testid="membership-scope" className="text-xl font-bold text-gray-900">
+          Active Membership{lineView === 'pool' ? '' : ` — ${LINE_FULL_NAME[lineView]}`}
+        </h2>
         <p className="text-gray-500 text-sm">
           {last ? `Current membership as of Year ${last.yearNumber} / ${last.calendarYear}` : `Starting membership — ${startingYear}`}
         </p>
@@ -276,10 +331,20 @@ export default function MembershipPage({ lockedResults, startingFinancials, init
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 p-4 grid grid-cols-2 sm:grid-cols-4 gap-4 shadow-sm">
-        <Metric label="Payroll Exposure ($M)" value={formatMillions(activeExposure)} />
-        <Metric label="Total Market Payroll ($M)" value={formatMillions(totalMarketExposure)} />
+        {exposureBasis && (
+          <Metric label={`${exposureBasis} Exposure ($M)`} value={formatMillions(activeExposure)} />
+        )}
+        {exposureBasis && (
+          <Metric label={`Total Market ${exposureBasis} ($M)`} value={formatMillions(totalMarketExposure)} />
+        )}
         <Metric label="Avg. Risk Quality" value={`${avgRiskQuality.toFixed(1)} / 10`} />
         <Metric label="Avg. Member Satisfaction" value={`${memberMeanSatisfaction.toFixed(2)} / 10`} />
+        {!exposureBasis && (
+          <p data-testid="exposure-mixed" className="col-span-2 self-center text-xs text-gray-400">
+            Exposure is payroll on WC and GL and insured value on Property; this pool writes both, so there is
+            no one figure. Pick a line above.
+          </p>
+        )}
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
@@ -289,11 +354,7 @@ export default function MembershipPage({ lockedResults, startingFinancials, init
             <h3 className="font-bold text-gray-900">Active Member Roster</h3>
             <span className="bg-blue-100 text-blue-700 text-xs font-semibold px-2 py-0.5 rounded-full">{activeMembers.length}</span>
           </div>
-          <p className="text-xs text-gray-400">
-            {expLine
-              ? `Experience columns show ${expLine}. Click column headers to sort`
-              : 'Click column headers to sort'}
-          </p>
+          <p className="text-xs text-gray-400">Click column headers to sort</p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">

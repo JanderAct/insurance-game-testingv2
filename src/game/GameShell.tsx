@@ -42,6 +42,7 @@ import type {
 import { endingPosition } from '../utils/endingPosition';
 import { LINE_FULL_NAME } from '../utils/lineDisplay';
 import { useGameDerivations } from './derivations';
+import { openingRosterForLine } from './openingRoster';
 
 import Header from '../components/Header';
 import TabNav, { type TabId } from '../components/TabNav';
@@ -271,10 +272,21 @@ export default function GameShell({
           <MembershipPage
             lockedResults={gameState.lockedResults}
             startingFinancials={startingFinancials}
-            initialMembers={initialMembers}
+            {...{
+              /* ⚠ THE PRE-YEAR-1 FALLBACK FOLLOWS THE VIEW TOO. Before any year
+                 is locked the page has no result to read, so it falls back to
+                 the opening roster — and on a line view that has to be THAT
+                 LINE's opening members, not the pool union, or the page shows
+                 116 members under a WC heading for exactly one turn. Derived
+                 from poolState rather than stored; see openingRosterForLine. */
+            }}
+            initialMembers={lineView === 'pool'
+              ? initialMembers
+              : openingRosterForLine(gameState.poolState, lineView)}
             startingYear={gameState.setup.startingYear}
             memberLossHistory={gameState.poolState.memberLossHistory ?? {}}
             lineView={lineView}
+            activeLines={gameState.setup.activeLines}
           />
         )}
       </main>
