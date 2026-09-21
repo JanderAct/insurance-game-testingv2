@@ -45,6 +45,11 @@ import DecisionHistoryPage from './pages/DecisionHistoryPage';
 import FinancialsPage from './pages/FinancialsPage';
 import ResultsPage from './pages/ResultsPage';
 import MembershipPage from './pages/MembershipPage';
+// ⚠ PORTED FROM claude/bold-bardeen-38lhp5, WHERE BOTH IMPORTS ARE SPLIT
+// ACROSS App.tsx AND game/GameShell.tsx. That branch extracted the game
+// shell out of this file; here the two call sites are still one file, so
+// one import covers both. The module itself is byte-identical to 741c240.
+import { openingRoster, openingRosterForLine } from './game/openingRoster';
 import CalculationAuditPage from './pages/CalculationAuditPage';
 import ResultSpreadsheetPage from './pages/ResultSpreadsheetPage';
 import HistoryPage from './pages/HistoryPage';
@@ -66,7 +71,12 @@ function seedFromInstanceId(id: string): number {
 
 // Pages that support the Pool / per-line view toggle (Stage 2.1; 'history'
 // added in Stage 2.10 — each line now has its own real pre-game history).
-const LINE_VIEW_PAGES: TabId[] = ['history', 'dashboard', 'decisions', 'decisionHistory', 'financials', 'results', 'audit'];
+// ⚠ 'membership' JOINED THIS LIST, AND IT IS THE REASON THE PAGE CAN BE HONEST.
+// Its per-member experience columns are PER LINE — a member has one loss ratio
+// on WC and another on GL, not one ratio — and until the bar existed the page
+// read WC unconditionally whatever the pool wrote. The selector is what lets the
+// three per-line columns name their line instead of assuming one.
+const LINE_VIEW_PAGES: TabId[] = ['history', 'dashboard', 'decisions', 'decisionHistory', 'financials', 'results', 'audit', 'membership'];
 
 
 const LINE_VIEW_ICONS: Record<LineView, React.ReactNode> = {
@@ -318,7 +328,9 @@ export default function App() {
     // through the real engine; the ending state is the Year 1 opening position.
     const { poolState, startingFinancials: sf, priorHistory } = runPriorHistory(instance, settings);
 
-    const initMembers = poolState.lines.WC.members.filter(m => m.status === 'active');
+    // Every active line's roster, deduplicated — the same object the pool row's
+    // memberList is, which is what replaces this at year 1. See openingRoster.
+    const initMembers = openingRoster(poolState, settings.activeLines);
 
     const gs: GameState = {
       setup: settings,
@@ -731,9 +743,21 @@ export default function App() {
           <MembershipPage
             lockedResults={gameState.lockedResults}
             startingFinancials={startingFinancials}
-            initialMembers={initialMembers}
+            {...{
+              /* ⚠ THE PRE-YEAR-1 FALLBACK FOLLOWS THE VIEW TOO. Before any year
+                 is locked the page has no result to read, so it falls back to
+                 the opening roster — and on a line view that has to be THAT
+                 LINE's opening members, not the pool union, or the page shows
+                 116 members under a WC heading for exactly one turn. Derived
+                 from poolState rather than stored; see openingRosterForLine. */
+            }}
+            initialMembers={lineView === 'pool'
+              ? initialMembers
+              : openingRosterForLine(gameState.poolState, lineView)}
             startingYear={gameState.setup.startingYear}
             memberLossHistory={gameState.poolState.memberLossHistory ?? {}}
+            lineView={lineView}
+            activeLines={gameState.setup.activeLines}
           />
         )}
       </main>
