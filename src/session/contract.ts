@@ -84,6 +84,11 @@ export type SessionErrorCode =
   | 'WRONG_YEAR'
   | 'GAME_COMPLETE'
   | 'INVALID_REQUEST'
+  // A rejoin asked for different coverage lines than the team already holds.
+  // Lines are that team's game setup, chosen once; changing them mid-game would
+  // restart its book, so the transport refuses rather than the screen merely
+  // hiding the control.
+  | 'LINES_LOCKED'
   | 'TRANSPORT_FAILURE';
 
 // ⚠ ONE ERROR TYPE FOR EVERY IMPLEMENTATION, and `code` is what callers branch
@@ -125,6 +130,11 @@ export type CallerRole = 'host' | 'player' | 'viewer' | 'anonymous';
 // trusting the caller to look away.
 export interface TeamView {
   name: string;
+  // ⚠ THE TEAM'S OWN COVERAGE LINES, CHOSEN AT JOIN AND FIXED FOR THE SESSION.
+  // Teams in one room now play different books, so the host is reading a table
+  // of games rather than a table of seats — which is why this belongs in the
+  // view rather than being inferable from the room.
+  lines: CoverageLine[];
   joined: boolean;
   // The last year this team locked decisions for, or null if it never has.
   lockedYear: number | null;
@@ -142,7 +152,9 @@ export interface RoomView {
   poolName: string;
   yearCount: number;
   startingYear: number;
-  activeLines: CoverageLine[];
+  // What a joining team may CHOOSE FROM — not what any team plays. The host
+  // sets the menu; each team orders from it.
+  availableLines: CoverageLine[];
   currentYear: number;
   shocks: ScheduledShockSpec[];
   teams: TeamView[];
@@ -158,6 +170,9 @@ export interface RoomView {
 export interface CallerView {
   role: CallerRole;
   teamName?: string;
+  // The caller's own team's lines — the set its GameState is built from. A
+  // viewer gets the watched team's, which is what lets it build the same game.
+  lines?: CoverageLine[];
   // This caller's own last submitted decisions. The carry-forward source: a team
   // that does not lock in time is processed on THIS, not on engine defaults.
   lastDecisions?: JsonValue;
@@ -174,11 +189,10 @@ export interface CreateRoomRequest {
   yearCount: number;
   startingYear: number;
   poolName: string;
-  activeLines: CoverageLine[];
-  // Pre-registered. The host types the names; players pick from them rather
-  // than inventing their own, so the host's table is a fixed roster from the
-  // moment the room exists instead of growing whatever people type.
-  teamNames: string[];
+  // ⚠ AVAILABLE, NOT ASSIGNED. The host sets which coverage lines this room
+  // OFFERS; each team chooses its own subset when it joins. A room is a menu
+  // and a schedule, not a seating plan.
+  availableLines: CoverageLine[];
   shocks: ScheduledShockSpec[];
 }
 
@@ -193,8 +207,24 @@ export interface CreateRoomResponse {
 
 export interface JoinRequest {
   code: string;
+  /**
+   * A PLAYER NAMES ITS OWN TEAM HERE and the name must be free in this room; a
+   * VIEWER names an existing team to watch. The host no longer pre-registers a
+   * roster, because the name is part of the team's own game setup — the same
+   * act as choosing its lines, and set at the same single moment.
+   */
   teamName: string;
   role: 'player' | 'viewer';
+  /**
+   * ⚠ THE TEAM'S COVERAGE LINES, REQUIRED FOR A PLAYER'S FIRST JOIN AND FIXED
+   * FROM THAT MOMENT. Every line must be one the room offers, and the set may
+   * not be empty. On a REJOIN this may be omitted; if it is supplied and
+   * differs from what the team already holds, the call is refused with
+   * LINES_LOCKED rather than quietly honoured or quietly ignored. Changing them
+   * mid-game would restart that team's book — its pre-game, its roster and its
+   * whole claim history are a function of the lines it opened with.
+   */
+  lines?: CoverageLine[];
   // ⚠ REJOIN, NOT A SECOND CLAIM. The same browser returning to the same code
   // presents the token it already holds and gets its own seat back. Without
   // this, a refresh reads as a different person trying to take a team that is
@@ -206,6 +236,9 @@ export interface JoinResponse {
   teamToken: string;
   teamName: string;
   role: 'player' | 'viewer';
+  /** What the team actually holds — authoritative, and on a rejoin this is the
+   *  set chosen originally rather than anything the caller asked for. */
+  lines: CoverageLine[];
   rejoined: boolean;
   room: RoomView;
 }

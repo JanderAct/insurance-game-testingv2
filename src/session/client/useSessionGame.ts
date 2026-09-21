@@ -31,7 +31,7 @@ import { generateGameInstance } from '../../utils/instanceGenerator';
 import { runPriorHistory } from '../../utils/priorHistoryEngine';
 import { applyLoanAuthorizations, processYear } from '../../utils/simulationEngine';
 import { defaultDecisionSet } from '../../utils/decisionDefaults';
-import type { GameSetupSettings, GameState, Member, ResultSet, StartingFinancials } from '../../types/simulation';
+import type { CoverageLine, GameSetupSettings, GameState, Member, ResultSet, StartingFinancials } from '../../types/simulation';
 import { sessionTransport, type CallerView, type RoomView } from '../index';
 import { decisionsForYear } from './decisions';
 import { summarize, summaryToJson } from './results';
@@ -76,21 +76,27 @@ export function useSessionGame(
   const [initialMembers, setInitialMembers] = useState<Member[]>([]);
   const busy = useRef(false);
 
-  // The room fields the instance is built from. If any of them changed the game
-  // would be a different game, so the build is keyed on them rather than on the
-  // room object's identity, which changes on every poll.
-  const buildKey = room
-    ? `${room.seed}|${room.yearCount}|${room.startingYear}|${room.activeLines.join(',')}|${room.poolName}`
+  // ⚠ THE TEAM'S OWN LINES, NOT THE ROOM'S MENU. Teams in one room now play
+  // different books: the room offers a set and each team chose a subset of it at
+  // join. Building from room.availableLines would hand every team every line the
+  // host listed and quietly undo the choice.
+  //
+  // ⚠ AND THE LINE SET IS PART OF THE BUILD KEY. Two different subsets are two
+  // different games, so a key that omitted them would let a rebuild reuse a game
+  // assembled for a different book.
+  const myLines = you?.lines;
+  const buildKey = room && myLines && myLines.length > 0
+    ? `${room.seed}|${room.yearCount}|${room.startingYear}|${myLines.join(',')}|${room.poolName}`
     : null;
   const builtKey = useRef<string | null>(null);
 
-  const build = useCallback((r: RoomView) => {
+  const build = useCallback((r: RoomView, lines: CoverageLine[]) => {
     const settings: GameSetupSettings = {
       poolName: r.poolName,
       gameLength: r.yearCount,
       startingYear: r.startingYear,
       instanceId: r.seed,
-      activeLines: [...r.activeLines],
+      activeLines: [...lines],
     };
 
     const instance = generateGameInstance(r.seed, seedFromInstanceId(r.seed));
@@ -126,6 +132,18 @@ export function useSessionGame(
     };
     setGameState(gs);
     setStartingFinancials(sf);
+    // ⚠ MIRRORS App.tsx's handleStartGame, WHICH READS lines.WC UNCONDITIONALLY,
+    // AND THAT MIRROR IS DELIBERATE EVEN THOUGH TEAM-CHOSEN LINES MAKE IT BITE
+    // MORE OFTEN. A team that did not choose WC gets an empty initial roster —
+    // exactly as a GL-only SOLO game does, because the assumption is the solo
+    // path's. MembershipPage only falls back on this before the first locked
+    // year, so the visible cost is one screen for one turn.
+    //
+    // Reading settings.activeLines[0] here instead would fix it for session
+    // players and leave solo broken, which is a session layer assembling a
+    // GameState differently from the solo path — the hazard this whole
+    // extraction exists to prevent. The fix belongs in handleStartGame, where it
+    // serves both callers at once.
     setInitialMembers(poolState.lines.WC.members.filter(m => m.status === 'active'));
   }, []);
 
@@ -139,7 +157,7 @@ export function useSessionGame(
     // the screen — runPriorHistory plays three years through the real engine.
     const id = window.setTimeout(() => {
       try {
-        build(room);
+        build(room, myLines!);
         setPhase('ready');
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -147,7 +165,7 @@ export function useSessionGame(
       }
     }, 0);
     return () => window.clearTimeout(id);
-  }, [room, buildKey, build]);
+  }, [room, buildKey, build, myLines]);
 
   // ---- process when the room's year moves ahead of ours --------------------
   useEffect(() => {

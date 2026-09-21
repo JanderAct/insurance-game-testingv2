@@ -4,16 +4,23 @@
 // Setup writes the four things a room is: seed, year count, shock list and the
 // team list. It is the solo game's Game Setup plus a roster.
 //
-// ⚠ THE TEAM LIST IS PRE-REGISTERED, AND THAT IS THE POINT. The host types the
-// names and players PICK FROM THEM. A room where players invent their own names
-// has a roster the host cannot read at a glance, two teams one character apart,
-// and no way to tell "nobody has joined as Cedar Valley yet" from "Cedar Valley
-// is here under a name I do not recognise". Fixing the roster at creation makes
-// the host's table a checklist against a list the host wrote.
+// ⚠ THE HOST SETS A MENU, NOT A SEATING PLAN. Coverage lines here are what this
+// room OFFERS; each team chooses its own subset when it joins, and that choice
+// plus its name is the team's own game setup. The room therefore opens with no
+// teams at all and the host's table fills as they arrive.
+//
+// ⚠ THE PRE-REGISTERED ROSTER THAT STOOD HERE IS GONE, and the argument that put
+// it there is worth recording because it was not wrong — a fixed roster makes
+// the host's table a checklist against a list the host wrote, and it rules out
+// two teams a character apart. What outweighs it: a team's name and its lines
+// are one act of setup performed once, by the team, and splitting them so the
+// host owns one half and the team the other made the name the only thing a team
+// could not decide about its own game. Name collisions are refused at the
+// transport instead (TEAM_TAKEN), which costs a retry rather than a design.
 // ============================================================================
 
 import { useState } from 'react';
-import { Plus, Trash2, Zap } from 'lucide-react';
+import { Trash2, Zap } from 'lucide-react';
 import type { CoverageLine } from '../../types/simulation';
 import { SHOCK_CATALOG } from '../../data/shockCatalog';
 import { IMPLEMENTED_EFFECTS } from '../../types/shocks';
@@ -49,8 +56,7 @@ export default function HostCreateScreen() {
   const [seed, setSeed] = useState(() => randomSeed());
   const [yearCount, setYearCount] = useState(5);
   const [startingYear, setStartingYear] = useState(2026);
-  const [activeLines, setActiveLines] = useState<CoverageLine[]>(['WC']);
-  const [teamNames, setTeamNames] = useState<string[]>(['Harbour Mutual', 'Cedar Valley', 'Tri-County']);
+  const [availableLines, setAvailableLines] = useState<CoverageLine[]>(['WC', 'GL', 'Property']);
   const [shocks, setShocks] = useState<ScheduledShockSpec[]>([]);
   const [shockId, setShockId] = useState(SCHEDULABLE.find(s => s.buildable)?.id ?? '');
   const [shockYear, setShockYear] = useState(2);
@@ -58,12 +64,10 @@ export default function HostCreateScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<SessionError | null>(null);
 
-  const trimmed = teamNames.map(n => n.trim()).filter(n => n.length > 0);
-  const duplicate = new Set(trimmed).size !== trimmed.length;
-  const canCreate = trimmed.length > 0 && !duplicate && activeLines.length > 0 && yearCount >= 1 && !busy;
+  const canCreate = availableLines.length > 0 && yearCount >= 1 && !busy;
 
   function toggleLine(line: CoverageLine) {
-    setActiveLines(prev => prev.includes(line) ? prev.filter(l => l !== line) : [...prev, line]);
+    setAvailableLines(prev => prev.includes(line) ? prev.filter(l => l !== line) : [...prev, line]);
   }
 
   async function handleCreate() {
@@ -75,8 +79,7 @@ export default function HostCreateScreen() {
         yearCount,
         startingYear,
         poolName: poolName.trim() || 'Pool',
-        activeLines: COVERAGE_LINES.map(l => l.value).filter(l => activeLines.includes(l)),
-        teamNames: trimmed,
+        availableLines: COVERAGE_LINES.map(l => l.value).filter(l => availableLines.includes(l)),
         shocks,
       });
       // ⚠ PERSIST THE HOST TOKEN BEFORE NAVIGATING. The room exists the moment
@@ -96,7 +99,7 @@ export default function HostCreateScreen() {
       <div className="mx-auto w-full max-w-[720px]">
         <h1 className="text-2xl font-semibold text-slate-800">Host a session</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Every team plays the same instance. The seed and the shock schedule are fixed here, once.
+          Every team plays the same instance. Teams name themselves and choose their own lines when they join.
         </p>
 
         {error && (
@@ -147,7 +150,10 @@ export default function HostCreateScreen() {
           </div>
 
           <div>
-            <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Coverage lines</span>
+            <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Coverage lines available</span>
+            <p className="mt-1 text-xs text-slate-400">
+              What teams may choose from. Each team picks its own subset at join, and teams in one room may play different books.
+            </p>
             <div className="mt-2 flex gap-2">
               {COVERAGE_LINES.map(l => (
                 <button
@@ -156,7 +162,7 @@ export default function HostCreateScreen() {
                   data-testid={`line-${l.value}`}
                   onClick={() => toggleLine(l.value)}
                   className={`rounded-lg border px-3 py-1.5 text-sm ${
-                    activeLines.includes(l.value)
+                    availableLines.includes(l.value)
                       ? 'border-blue-500 bg-blue-50 text-blue-700'
                       : 'border-slate-300 text-slate-600'
                   }`}
@@ -165,44 +171,8 @@ export default function HostCreateScreen() {
                 </button>
               ))}
             </div>
-          </div>
-
-          {/* ---- teams ---- */}
-          <div>
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Teams</span>
-              <button
-                type="button"
-                data-testid="add-team"
-                onClick={() => setTeamNames(prev => [...prev, ''])}
-                className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
-              >
-                <Plus size={14} /> Add team
-              </button>
-            </div>
-            <div className="mt-2 space-y-2">
-              {teamNames.map((name, i) => (
-                <div key={i} className="flex gap-2">
-                  <input
-                    data-testid={`team-name-${i}`}
-                    className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    placeholder={`Team ${i + 1}`}
-                    value={name}
-                    onChange={e => setTeamNames(prev => prev.map((v, j) => j === i ? e.target.value : v))}
-                  />
-                  <button
-                    type="button"
-                    aria-label={`Remove team ${i + 1}`}
-                    onClick={() => setTeamNames(prev => prev.filter((_, j) => j !== i))}
-                    className="rounded-lg border border-slate-200 px-2 text-slate-400 hover:text-red-600"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              ))}
-            </div>
-            {duplicate && (
-              <p className="mt-2 text-xs text-red-600">Team names must be distinct — players pick from this list.</p>
+            {availableLines.length === 0 && (
+              <p className="mt-2 text-xs text-red-600">A room must offer at least one line.</p>
             )}
           </div>
 

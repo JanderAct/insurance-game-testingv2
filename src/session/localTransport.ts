@@ -71,6 +71,8 @@ const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 // this shape directly.
 interface TeamRecord {
   name: string;
+  // Chosen at join, never written again. See the LINES_LOCKED path below.
+  lines: CoverageLine[];
   token: string | null;
   joined: boolean;
   lockedYear: number | null;
@@ -92,7 +94,7 @@ interface RoomRecord {
   poolName: string;
   yearCount: number;
   startingYear: number;
-  activeLines: CoverageLine[];
+  availableLines: CoverageLine[];
   currentYear: number;
   shocks: ScheduledShockSpec[];
   teams: TeamRecord[];
@@ -152,6 +154,14 @@ function saveRoom(room: RoomRecord): void {
   storage().setItem(KEY_PREFIX + room.code, JSON.stringify(room));
 }
 
+const LINE_ORDER: CoverageLine[] = ['WC', 'GL', 'Property'];
+
+function sameLines(a: CoverageLine[], b: CoverageLine[]): boolean {
+  if (a.length !== b.length) return false;
+  const sa = [...a].sort(), sb = [...b].sort();
+  return sa.every((x, i) => x === sb[i]);
+}
+
 // ---------------------------------------------------------------- views
 
 function statusOf(room: RoomRecord): RoomStatus {
@@ -162,6 +172,7 @@ function statusOf(room: RoomRecord): RoomStatus {
 function teamView(t: TeamRecord, currentYear: number): TeamView {
   return {
     name: t.name,
+    lines: [...t.lines],
     joined: t.joined,
     lockedYear: t.lockedYear,
     locked: t.lockedYear === currentYear,
@@ -177,7 +188,7 @@ function roomView(room: RoomRecord): RoomView {
     poolName: room.poolName,
     yearCount: room.yearCount,
     startingYear: room.startingYear,
-    activeLines: [...room.activeLines],
+    availableLines: [...room.availableLines],
     currentYear: room.currentYear,
     shocks: room.shocks.map(s => ({ ...s })),
     teams: room.teams.map(t => teamView(t, room.currentYear)),
@@ -214,6 +225,7 @@ function callerView(role: CallerRole, team: TeamRecord | null): CallerView {
   if (!team) return view;
 
   view.teamName = team.name;
+  view.lines = [...team.lines];
   // ⚠ OWN SLICE ONLY. A player and the viewer watching that player get that
   // team's decisions and results; nobody gets anybody else's, and the host gets
   // no team's. The host runs the room from the table in RoomView, which carries
@@ -325,18 +337,11 @@ export class LocalSessionTransport implements SessionTransport {
 
   createRoom(req: CreateRoomRequest): Promise<CreateRoomResponse> {
     return this.call(() => {
-      const names = req.teamNames.map(n => n.trim()).filter(n => n.length > 0);
-      if (names.length === 0) {
-        throw new SessionError('INVALID_REQUEST', 'A room needs at least one team.');
-      }
-      if (new Set(names).size !== names.length) {
-        throw new SessionError('INVALID_REQUEST', 'Team names must be distinct.');
-      }
       if (!Number.isInteger(req.yearCount) || req.yearCount < 1) {
         throw new SessionError('INVALID_REQUEST', 'Year count must be a positive whole number.');
       }
-      if (req.activeLines.length === 0) {
-        throw new SessionError('INVALID_REQUEST', 'A room needs at least one coverage line.');
+      if (req.availableLines.length === 0) {
+        throw new SessionError('INVALID_REQUEST', 'A room must offer at least one coverage line.');
       }
 
       const store = storage();
@@ -355,19 +360,13 @@ export class LocalSessionTransport implements SessionTransport {
         poolName: req.poolName,
         yearCount: req.yearCount,
         startingYear: req.startingYear,
-        activeLines: [...req.activeLines],
+        availableLines: [...req.availableLines],
         currentYear: 1,
         shocks: req.shocks.map(s => ({ ...s })),
-        teams: names.map(name => ({
-          name,
-          token: null,
-          joined: false,
-          lockedYear: null,
-          decisions: null,
-          decisionsYear: null,
-          result: null,
-          resultYear: null,
-        })),
+        // ⚠ A ROOM OPENS EMPTY. Teams are created by JOINING, not registered in
+        // advance, because a team's name and its coverage lines are one act of
+        // setup performed by the team itself.
+        teams: [],
         viewers: [],
         createdAt: now,
         updatedAt: now,
@@ -382,42 +381,91 @@ export class LocalSessionTransport implements SessionTransport {
   join(req: JoinRequest): Promise<JoinResponse> {
     return this.call(() => {
       const room = loadRoom(req.code);
-      const team = room.teams.find(t => t.name === req.teamName);
-      if (!team) {
-        throw new SessionError('TEAM_NOT_FOUND', `${req.teamName} is not a team in this room.`);
+      const name = req.teamName.trim();
+      if (name.length === 0) {
+        throw new SessionError('INVALID_REQUEST', 'A team needs a name.');
+      }
+      const team = room.teams.find(t => t.name === name);
+
+      // ⚠ A VIEWER WATCHES SOMETHING THAT EXISTS; A PLAYER MAY CREATE IT. That
+      // is the whole asymmetry now that the roster is not pre-registered — the
+      // player's join is the moment the team comes into being, so "not found"
+      // is an error for one role and the normal case for the other.
+      if (req.role === 'viewer' && !team) {
+        throw new SessionError('TEAM_NOT_FOUND', `${name} is not a team in this room.`);
       }
 
-      if (req.role === 'viewer') {
+      if (req.role === 'viewer' && team) {
         // A viewer never claims the team, so any number of them may watch and
         // none of them can block the driver.
         const existing = req.token
           ? room.viewers.find(v => v.token === req.token && v.teamName === team.name)
           : undefined;
         if (existing) {
-          return { teamToken: existing.token, teamName: team.name, role: 'viewer' as const, rejoined: true, room: roomView(room) };
+          return { teamToken: existing.token, teamName: team.name, lines: [...team.lines], role: 'viewer' as const, rejoined: true, room: roomView(room) };
         }
         const token = newToken();
         room.viewers.push({ token, teamName: team.name });
         saveRoom(room);
-        return { teamToken: token, teamName: team.name, role: 'viewer' as const, rejoined: false, room: roomView(room) };
+        return { teamToken: token, teamName: team.name, lines: [...team.lines], role: 'viewer' as const, rejoined: false, room: roomView(room) };
       }
 
-      // ⚠ REJOIN BEFORE TAKEN. The same browser coming back to the same code
-      // presents the token it already holds, and that is a rejoin — not a second
-      // person claiming a team that is already claimed. Checking TEAM_TAKEN
-      // first would lock the real driver out of their own team on a refresh.
-      if (req.token && team.token === req.token) {
-        return { teamToken: team.token, teamName: team.name, role: 'player' as const, rejoined: true, room: roomView(room) };
+      // ---- a player, on a team that already exists ------------------------
+      if (team) {
+        // ⚠ REJOIN BEFORE TAKEN. The same browser coming back to the same code
+        // presents the token it already holds, and that is a rejoin — not a
+        // second person claiming a team that is already claimed. Checking
+        // TEAM_TAKEN first would lock the real driver out on a refresh.
+        if (req.token && team.token === req.token) {
+          // ⚠ LINES ARE FIXED, AND THE REFUSAL IS THE POINT. A rejoin that asks
+          // for a different set is not honoured and not silently ignored: the
+          // team's pre-game, its roster and its whole claim history are a
+          // function of the lines it opened with, so changing them would
+          // restart its book while looking like a preference change.
+          if (req.lines && !sameLines(req.lines, team.lines)) {
+            throw new SessionError(
+              'LINES_LOCKED',
+              `${team.name} plays ${team.lines.join(' + ')}. Coverage lines are chosen once, when a team joins.`,
+            );
+          }
+          return { teamToken: team.token, teamName: team.name, lines: [...team.lines], role: 'player' as const, rejoined: true, room: roomView(room) };
+        }
+        // The name is the identity now, so a second person arriving with a name
+        // already in the room is a COLLISION rather than a claim on a seat.
+        throw new SessionError('TEAM_TAKEN', `A team called ${team.name} is already in this room.`);
       }
-      if (team.token !== null) {
-        throw new SessionError('TEAM_TAKEN', `${team.name} has already been claimed.`);
+
+      // ---- a player creating its team -------------------------------------
+      const lines = req.lines ?? [];
+      if (lines.length === 0) {
+        throw new SessionError('INVALID_REQUEST', 'A team must play at least one coverage line.');
+      }
+      const offered = new Set(room.availableLines);
+      const notOffered = lines.filter(l => !offered.has(l));
+      if (notOffered.length > 0) {
+        throw new SessionError(
+          'INVALID_REQUEST',
+          `This room does not offer ${notOffered.join(', ')}.`,
+        );
       }
 
       const token = newToken();
-      team.token = token;
-      team.joined = true;
+      const created: TeamRecord = {
+        name,
+        // Canonical WC/GL/Property order regardless of click sequence, so two
+        // teams with the same choice compare equal everywhere they are shown.
+        lines: LINE_ORDER.filter(l => lines.includes(l)),
+        token,
+        joined: true,
+        lockedYear: null,
+        decisions: null,
+        decisionsYear: null,
+        result: null,
+        resultYear: null,
+      };
+      room.teams.push(created);
       saveRoom(room);
-      return { teamToken: token, teamName: team.name, role: 'player' as const, rejoined: false, room: roomView(room) };
+      return { teamToken: token, teamName: created.name, lines: [...created.lines], role: 'player' as const, rejoined: false, room: roomView(room) };
     }, true);
   }
 

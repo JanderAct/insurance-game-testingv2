@@ -11,9 +11,10 @@
 //
 // WHAT THE ROLE ACTUALLY CHANGES, AND IT IS ALL OF IT:
 //
-//   claiming   a player CLAIMS a team and a taken one is refused; a viewer
-//              claims nothing, so any number may watch the same team and none
-//              of them can lock the driver out.
+//   joining    a player NAMES its team and CHOOSES ITS COVERAGE LINES, and that
+//              join is the moment the team comes into being. A viewer picks from
+//              the teams that already exist, claims nothing, and any number may
+//              watch the same one.
 //   submitting a player's header button submits and locks. A viewer HAS NO
 //              BUTTON — not a disabled one, because a disabled control still
 //              invites the click and still implies the screen might write.
@@ -31,9 +32,16 @@
 // that does not exist and that nothing else wants.
 //
 // ⚠ A VIEWER'S NUMBERS ARE THE DRIVER'S NUMBERS BY CONSTRUCTION. Same seed, same
-// decisions, same engine, so the same results — not copied over the wire, and
-// not trusted from it. The viewer never posts (see useSessionGame): the
-// scoreboard belongs to the team that drives it.
+// LINES, same decisions, same engine, so the same results — not copied over the
+// wire, and not trusted from it. The viewer never posts (see useSessionGame):
+// the scoreboard belongs to the team that drives it.
+//
+// ⚠ COVERAGE LINES ARE CHOSEN ONCE AND THE SCREEN SAYS SO TWICE. Before the
+// choice, the form states that it is permanent; after it, the status strip shows
+// the set with no control to change it. Behind both, the transport refuses a
+// rejoin asking for a different set — because a team's pre-game, its roster and
+// its whole claim history are a function of the lines it opened with, so
+// changing them mid-game would restart its book rather than adjust it.
 // ============================================================================
 
 import { useEffect, useRef, useState } from 'react';
@@ -45,7 +53,8 @@ import { decisionsForYear, decisionsToJson } from '../client/decisions';
 import { useSessionGame } from '../client/useSessionGame';
 import GameShell from '../../game/GameShell';
 import type { TabId } from '../../components/TabNav';
-import type { DecisionSet, LineView } from '../../types/simulation';
+import type { CoverageLine, DecisionSet, LineView } from '../../types/simulation';
+import { LINE_FULL_NAME } from '../../utils/lineDisplay';
 
 export type PlayRole = 'player' | 'viewer';
 
@@ -64,6 +73,8 @@ export default function PlayScreen({ code, role }: Props) {
   const heldCreds = loadHeld(code).teams.filter(c => c.role === role);
 
   const [claiming, setClaiming] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState('');
+  const [lineDraft, setLineDraft] = useState<CoverageLine[]>([]);
   const [actionError, setActionError] = useState<SessionError | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [decisions, setDecisions] = useState<DecisionSet | null>(null);
@@ -93,12 +104,19 @@ export default function PlayScreen({ code, role }: Props) {
     setDecisions(decisionsForYear(room.currentYear, you.lastDecisions));
   }, [room, you, role]);
 
-  async function enter(teamName: string) {
+  async function enter(teamName: string, lines?: CoverageLine[]) {
     setClaiming(teamName);
     setActionError(null);
     try {
       const held = heldCreds.find(c => c.teamName === teamName);
-      const res = await sessionTransport().join({ code, teamName, role, token: held?.teamToken });
+      // ⚠ NO `lines` ON A REJOIN. The team already holds its set and the
+      // transport refuses a rejoin that asks for a different one (LINES_LOCKED);
+      // sending the form's current state would turn a refresh into that refusal.
+      const res = await sessionTransport().join({
+        code, teamName, role,
+        token: held?.teamToken,
+        lines: held ? undefined : lines,
+      });
       saveActive(code, { teamToken: res.teamToken, teamName: res.teamName, role });
       rememberTeamCredential(code, { teamToken: res.teamToken, teamName: res.teamName, role });
       setToken(res.teamToken);
@@ -155,7 +173,7 @@ export default function PlayScreen({ code, role }: Props) {
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Room {code}</p>
           <h1 className="text-2xl font-semibold text-slate-800">{room.poolName}</h1>
           <p className="mt-1 text-sm text-slate-500">
-            {isViewer ? 'Choose a team to watch. Watching claims nothing.' : 'Choose your team.'}
+            {isViewer ? 'Choose a team to watch. Watching claims nothing.' : 'Name your team and choose the lines you will write.'}
           </p>
 
           {actionError && (
@@ -187,34 +205,92 @@ export default function PlayScreen({ code, role }: Props) {
             </div>
           )}
 
-          <div data-testid={isViewer ? 'viewer-picker' : 'team-picker'} className="mt-4 space-y-2">
-            {room.teams.map(t => {
-              // A viewer never claims, so a team already being driven is still
-              // available to watch — that is the asymmetry the two URLs exist for.
-              const blocked = !isViewer && t.joined;
-              return (
+          {isViewer ? (
+            // A viewer picks from the teams that EXIST. Before anyone has
+            // joined there is nothing to watch, and saying so beats an empty box.
+            <div data-testid="viewer-picker" className="mt-4 space-y-2">
+              {room.teams.length === 0 && (
+                <p data-testid="no-teams" className="rounded-xl border border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-400">
+                  No teams have joined yet.
+                </p>
+              )}
+              {room.teams.map(t => (
                 <button
                   key={t.name}
                   type="button"
-                  data-testid={`${isViewer ? 'watch' : 'claim'}-${t.name}`}
-                  disabled={blocked || claiming !== null}
+                  data-testid={`watch-${t.name}`}
+                  disabled={claiming !== null}
                   onClick={() => { void enter(t.name); }}
-                  className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left text-sm ${
-                    blocked
-                      ? 'cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400'
-                      : 'border-slate-300 bg-white text-slate-700 hover:border-blue-400 hover:bg-blue-50'
-                  }`}
+                  className="flex w-full items-center justify-between rounded-xl border border-slate-300 bg-white px-4 py-3 text-left text-sm text-slate-700 hover:border-blue-400 hover:bg-blue-50"
                 >
-                  <span className="font-medium">{t.name}</span>
-                  <span className="text-xs">
-                    {claiming === t.name
-                      ? (isViewer ? 'Opening…' : 'Joining…')
-                      : isViewer ? 'watch' : t.joined ? 'taken' : 'available'}
+                  <span>
+                    <span className="font-medium">{t.name}</span>
+                    <span className="ml-2 text-xs text-slate-400">{t.lines.join(' + ')}</span>
                   </span>
+                  <span className="text-xs">{claiming === t.name ? 'Opening…' : 'watch'}</span>
                 </button>
-              );
-            })}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div data-testid="team-picker" className="mt-4 space-y-4">
+              <label className="block">
+                <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Team name</span>
+                <input
+                  data-testid="team-name"
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  placeholder="e.g. Harbour Mutual"
+                  value={nameDraft}
+                  onChange={e => setNameDraft(e.target.value)}
+                />
+              </label>
+
+              <div>
+                <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Your coverage lines</span>
+                {/* ⚠ SAID BEFORE THE CHOICE IS MADE, not discovered after. The
+                    transport refuses a later change, so the screen must not
+                    imply one is possible. */}
+                <p className="mt-1 text-xs text-amber-700">
+                  Chosen once. Your pool's history and claims are built from these, so they cannot be changed after you join.
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {room.availableLines.map(l => (
+                    <button
+                      key={l}
+                      type="button"
+                      data-testid={`pick-line-${l}`}
+                      onClick={() => setLineDraft(prev => prev.includes(l) ? prev.filter(x => x !== l) : [...prev, l])}
+                      className={`rounded-lg border px-3 py-1.5 text-sm ${
+                        lineDraft.includes(l)
+                          ? 'border-blue-500 bg-blue-50 text-blue-700'
+                          : 'border-slate-300 bg-white text-slate-600'
+                      }`}
+                    >
+                      {LINE_FULL_NAME[l]}
+                    </button>
+                  ))}
+                </div>
+                {lineDraft.length === 0 && (
+                  <p className="mt-2 text-xs text-slate-400">Pick at least one line.</p>
+                )}
+              </div>
+
+              <button
+                type="button"
+                data-testid="join-team"
+                disabled={nameDraft.trim().length === 0 || lineDraft.length === 0 || claiming !== null}
+                onClick={() => { void enter(nameDraft.trim(), lineDraft); }}
+                className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white disabled:bg-slate-300"
+              >
+                {claiming !== null ? 'Joining…' : 'Join as this team'}
+              </button>
+
+              {room.teams.length > 0 && (
+                <p className="text-xs text-slate-400">
+                  Already in: {room.teams.map(t => `${t.name} (${t.lines.join('+')})`).join(', ')}
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -281,6 +357,13 @@ export default function PlayScreen({ code, role }: Props) {
               data-testid={isViewer ? 'watched-team' : 'my-team'}
             >
               {you.teamName}
+            </span>
+            {/* ⚠ SHOWN, WITH NO CONTROL BESIDE IT. After the join the lines are
+                a fact about this team rather than a setting, so the strip states
+                them and offers nothing to change. */}
+            <span className="text-slate-500" data-testid="my-lines">
+              {(you.lines ?? []).join(' + ')}
+              <span className="ml-1 text-slate-400">(fixed)</span>
             </span>
             <span className="text-slate-400">room <span className="font-mono">{code}</span></span>
             <span className="text-slate-500">

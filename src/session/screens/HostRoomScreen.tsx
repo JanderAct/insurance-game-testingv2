@@ -117,6 +117,7 @@ export default function HostRoomScreen({ code }: Props) {
               </p>
               <p className="mt-1 text-sm text-slate-500">
                 {room?.poolName} · seed <span className="font-mono">{room?.seed}</span> · {room?.yearCount} years
+                {' · offering '}<span className="font-mono">{(room?.availableLines ?? []).join(' + ')}</span>
               </p>
             </div>
             <div className="text-right">
@@ -213,22 +214,39 @@ export default function HostRoomScreen({ code }: Props) {
           <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
             <p className="text-sm font-medium text-slate-700">Teams</p>
             <p className="text-xs text-slate-400">
-              {joined.length} of {teams.length} joined
+              {teams.length === 0 ? 'none yet' : `${teams.length} joined`}
             </p>
           </div>
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase tracking-wide text-slate-400">
                 <th className="px-5 py-2 font-medium">Team</th>
+                <th className="px-5 py-2 font-medium">Lines</th>
                 <th className="px-5 py-2 font-medium">Joined</th>
                 <th className="px-5 py-2 font-medium">Locked</th>
                 <th className="px-5 py-2 font-medium">Reported</th>
               </tr>
             </thead>
             <tbody data-testid="team-table">
+              {teams.length === 0 && (
+                <tr>
+                  <td colSpan={4} data-testid="no-teams-yet" className="px-5 py-6 text-center text-sm text-slate-400">
+                    Waiting for teams to join at /join/{code}. Each names itself and picks its own lines.
+                  </td>
+                </tr>
+              )}
               {teams.map(t => (
                 <tr key={t.name} data-testid={`team-row-${t.name}`} className="border-t border-slate-50">
                   <td className="px-5 py-2.5 text-slate-700">{t.name}</td>
+                  {/* ⚠ THE HOST IS NOW READING A TABLE OF DIFFERENT GAMES, not
+                      of seats at one. Two teams' numbers are not comparable
+                      unless this column matches, so it sits beside the name
+                      rather than behind a hover. */}
+                  <td className="px-5 py-2.5">
+                    <span data-testid={`lines-${t.name}`} className="font-mono text-xs text-slate-600">
+                      {t.lines.join(' + ')}
+                    </span>
+                  </td>
                   <td className="px-5 py-2.5">
                     {t.joined
                       ? <span data-testid={`joined-${t.name}`} className="flex items-center gap-1.5 text-emerald-600"><CheckCircle2 size={14} /> in</span>
