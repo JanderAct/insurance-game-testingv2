@@ -52,6 +52,7 @@ import type {
   ScheduledShockSpec,
   SessionErrorCode,
   SessionTransport,
+  TeamYearSummary,
   SubmitRequest, SubmitResponse,
   TeamView,
 } from './contract';
@@ -78,7 +79,7 @@ interface TeamRecord {
   lockedYear: number | null;
   decisions: JsonValue | null;
   decisionsYear: number | null;
-  result: JsonValue | null;
+  result: TeamYearSummary | null;
   resultYear: number | null;
 }
 
@@ -177,6 +178,9 @@ function teamView(t: TeamRecord, currentYear: number): TeamView {
     lockedYear: t.lockedYear,
     locked: t.lockedYear === currentYear,
     resultYear: t.resultYear,
+    // The scoreboard the host's Teams tab reads. Undefined until the team has
+    // posted a year — which is a DIFFERENT state from a line it does not write.
+    lastResult: t.result ?? undefined,
   };
 }
 

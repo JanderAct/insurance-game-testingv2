@@ -116,6 +116,62 @@ export function isSessionError(e: unknown): e is SessionError {
   return e instanceof SessionError;
 }
 
+// ---------------------------------------------------------------- results
+
+/**
+ * The five figures the host's Teams tab scans, for one scope of one team-year.
+ *
+ * ⚠ EVERY ONE IS A RESULT_METRICS KEY, AND THAT IS THE POINT. The on-screen
+ * spreadsheet and the .xlsx export share one list precisely because two copies
+ * drifted twice; a host table quoting figures from a list of its own would be
+ * the third copy. Field for field:
+ *
+ *   endingSurplus                  <- RESULT_METRICS 'endingSurplus'
+ *   actualLossRatioPricingBasis    <- 'actualLossRatioPricingBasis'
+ *   poolPremium                    <- 'poolPremium'
+ *   activeMembers                  <- 'activeMembers'
+ *   selectedFundingConfidenceLevel <- 'fundingConfidenceLevel' (the metric reads
+ *                                     this field; the key is named for the
+ *                                     decision, the field for what was selected)
+ *
+ * ⚠ AND poolPremium REPLACES grossPremium, WHICH WAS NEVER IN THE LIST. The
+ * first version of this summary posted grossPremium — a real ResultSet field,
+ * but not a metric anybody had chosen to publish. It had already forked, quietly
+ * and by one field. It reads as Pool Premium at Selected CLF now, the same thing
+ * the Result Spreadsheet calls it.
+ */
+export interface TeamYearFigures {
+  endingSurplus: number;
+  actualLossRatioPricingBasis: number;
+  poolPremium: number;
+  activeMembers: number;
+  selectedFundingConfidenceLevel: number;
+}
+
+/**
+ * What a team posts at the end of a year, and the ONE payload in this contract
+ * that is typed rather than opaque.
+ *
+ * ⚠ DECISIONS STAY OPAQUE; RESULTS DO NOT, AND THE SPLIT IS PRINCIPLED RATHER
+ * THAN CONVENIENT. A team's decisions are read by exactly one client — the one
+ * that wrote them — so this layer never needs to know their shape and is better
+ * off not knowing. A result is read by a SECOND PARTY: the host renders it in a
+ * table. A payload a second party renders has to have an agreed shape, or the
+ * agreement lives in two places and drifts.
+ *
+ * ⚠ byLine CARRIES ONLY THE LINES THE TEAM WRITES. A team that does not write GL
+ * has no GL entry — not a zeroed one. That absence is what lets the host's table
+ * say "does not write GL" instead of showing a surplus of $0, and it is the
+ * distinction the whole Teams tab turns on.
+ */
+export interface TeamYearSummary {
+  yearNumber: number;
+  calendarYear: number;
+  /** The pooled row — the aggregate, meaning what it means everywhere else. */
+  pool: TeamYearFigures;
+  byLine: Partial<Record<CoverageLine, TeamYearFigures>>;
+}
+
 // ---------------------------------------------------------------- views
 
 export type RoomStatus = 'lobby' | 'running' | 'complete';
@@ -143,6 +199,15 @@ export interface TeamView {
   locked: boolean;
   // The last year this team posted a result for, or null.
   resultYear: number | null;
+  /**
+   * ⚠ THE SCOREBOARD, AND THE HOST IS MEANT TO SEE IT. The redaction rule next
+   * to callerView still holds for DECISIONS — presence and progress, never
+   * content — because a host who could read what a team chose before the year is
+   * processed is one render away from projecting it. A posted RESULT is the
+   * opposite: it is the thing the room exists to compare, it describes a year
+   * already played, and the host's Teams tab is where it is read.
+   */
+  lastResult?: TeamYearSummary;
 }
 
 export interface RoomView {
@@ -187,8 +252,9 @@ export interface CallerView {
   // that does not lock in time is processed on THIS, not on engine defaults.
   lastDecisions?: JsonValue;
   lastDecisionsYear?: number;
-  // This caller's own last posted result.
-  lastResult?: JsonValue;
+  // This caller's own last posted result — the same typed summary the host
+  // reads, so a team and the host are never looking at two shapes of one thing.
+  lastResult?: TeamYearSummary;
   lastResultYear?: number;
 }
 
@@ -265,8 +331,9 @@ export interface SubmitRequest {
   code: string;
   token: string;
   yearNumber: number;
+  /** Opaque by design — see TeamYearSummary's note on why results are not. */
   decisions?: JsonValue;
-  result?: JsonValue;
+  result?: TeamYearSummary;
 }
 
 export interface SubmitResponse {

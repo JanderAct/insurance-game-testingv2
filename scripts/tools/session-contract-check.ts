@@ -23,6 +23,23 @@
 import { LocalSessionTransport } from '../../src/session/localTransport';
 import { isSessionError, type SessionErrorCode, type JsonValue } from '../../src/session/contract';
 import type { CoverageLine } from '../../src/types/simulation';
+import type { TeamYearFigures, TeamYearSummary } from '../../src/session/contract';
+
+// A posted scoreboard row. Every field is a RESULT_METRICS key — see
+// TeamYearFigures in the contract.
+const figures = (surplus: number): TeamYearFigures => ({
+  endingSurplus: surplus,
+  actualLossRatioPricingBasis: 0.82,
+  poolPremium: 4_000_000,
+  activeMembers: 41,
+  selectedFundingConfidenceLevel: 0.6,
+});
+const summaryFor = (year: number, surplus: number, lines: CoverageLine[] = ['WC']): TeamYearSummary => ({
+  yearNumber: year,
+  calendarYear: 2025 + year,
+  pool: figures(surplus),
+  byLine: Object.fromEntries(lines.map(l => [l, figures(surplus)])),
+});
 
 // ---------------------------------------------------------------- shim
 
@@ -250,12 +267,21 @@ async function main(): Promise<void> {
 
     // A result is for a year already processed, so it arrives for a year BEHIND
     // the room's current one. That is the normal case, not an error.
-    const posted = await t.submit({ code, token: p.teamToken, yearNumber: 1, result: { surplus: 1234 } as JsonValue });
+    const posted = await t.submit({ code, token: p.teamToken, yearNumber: 1, result: summaryFor(1, 1234) });
     eq(posted.room.teams[0].resultYear, 1, 'a result for a completed year is accepted');
-    eq((posted.you.lastResult as { surplus: number }).surplus, 1234, 'the posting team reads its own result back');
+    eq(posted.you.lastResult?.pool.endingSurplus, 1234, 'the posting team reads its own result back');
+
+    // ⚠ THE HOST READS THE SCOREBOARD, AND THAT IS DELIBERATE. Decisions stay
+    // redacted from the host (asserted below); a posted result is the thing the
+    // room exists to compare, and the Teams tab is where it is read.
+    const asHost = await t.read({ code, token: hostToken });
+    eq(asHost.room.teams[0].lastResult?.pool.endingSurplus, 1234, "the host's table carries a posted result");
+    eq(asHost.room.teams[0].lastResult?.byLine.WC?.endingSurplus, 1234, 'and carries the per-line slice it needs');
+    eq(asHost.room.teams[0].lastResult?.byLine.GL, undefined,
+       'a line the team does not write has NO entry — absent, not zero');
 
     await rejects(
-      t.submit({ code, token: p.teamToken, yearNumber: 9, result: { surplus: 0 } as JsonValue }),
+      t.submit({ code, token: p.teamToken, yearNumber: 9, result: summaryFor(9, 0) }),
       'WRONG_YEAR', 'a result from the future is refused',
     );
     await rejects(

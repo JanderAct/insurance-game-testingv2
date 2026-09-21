@@ -13,6 +13,7 @@ import HostShell from './HostShell';
 import { type HostTabId } from './hostTabs';
 import HostCreateScreen from './HostCreateScreen';
 import HostRoomScreen from './HostRoomScreen';
+import HostTeamsTab from './HostTeamsTab';
 import { useRoom } from '../client/useRoom';
 import { loadActive, loadHeld } from '../client/identity';
 
@@ -39,6 +40,11 @@ export default function HostScreen({ code }: Props) {
       eventName={code ? room?.eventName : undefined}
     >
       {activeTab === 'setup' && (code ? <HostRoomScreen code={code} /> : <HostCreateScreen />)}
+      {activeTab === 'teams' && (
+        room
+          ? <HostTeamsTab room={room} />
+          : <p className="text-sm text-slate-400">Loading room…</p>
+      )}
     </HostShell>
   );
 }

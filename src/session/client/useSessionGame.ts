@@ -35,7 +35,7 @@ import { defaultDecisionSet } from '../../utils/decisionDefaults';
 import type { CoverageLine, GameSetupSettings, GameState, Member, ResultSet, StartingFinancials } from '../../types/simulation';
 import { sessionTransport, type CallerView, type RoomView } from '../index';
 import { decisionsForYear } from './decisions';
-import { summarize, summaryToJson } from './results';
+import { summarize } from './results';
 
 export type GamePhase = 'idle' | 'building' | 'ready' | 'processing' | 'failed';
 
@@ -242,7 +242,7 @@ export function useSessionGame(
               code,
               token,
               yearNumber: produced.yearNumber,
-              result: summaryToJson(summarize(produced)),
+              result: summarize(produced, state.setup.activeLines),
             });
           }
         }
