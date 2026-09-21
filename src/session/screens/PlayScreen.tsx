@@ -103,7 +103,10 @@ export default function PlayScreen({ code, role }: Props) {
     if (!room || you?.role !== role) return;
     if (seededYear.current === room.currentYear) return;
     seededYear.current = room.currentYear;
-    setDecisions(decisionsForYear(room.currentYear, you.lastDecisions));
+    // Seeding the editable set is the same question the replay asks: what was
+    // this team playing in this year? For an unlocked year that is the most
+    // recent lock before it — carry-forward, unchanged in meaning.
+    setDecisions(decisionsForYear(room.currentYear, you.decisionsByYear));
   }, [room, you, role]);
 
   async function enter(teamName: string, lines?: CoverageLine[]) {

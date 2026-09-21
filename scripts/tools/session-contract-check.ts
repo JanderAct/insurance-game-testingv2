@@ -23,6 +23,7 @@
 import { LocalSessionTransport } from '../../src/session/localTransport';
 import { isSessionError, type SessionErrorCode, type JsonValue } from '../../src/session/contract';
 import type { CoverageLine } from '../../src/types/simulation';
+import { decisionsForYear, governingYear } from '../../src/session/client/decisions';
 import type { TeamYearFigures, TeamYearSummary } from '../../src/session/contract';
 
 // A posted scoreboard row. Every field is a RESULT_METRICS key — see
@@ -251,9 +252,50 @@ async function main(): Promise<void> {
     const mine = await t.read({ code, token: p.teamToken });
     eq(mine.room.currentYear, 2, 'the room moved on to year 2');
     eq(mine.room.teams[0].locked, false, 'the team has not locked for year 2');
-    ok(mine.you.lastDecisions !== undefined, 'an unlocked team still has its last submitted decisions to carry');
-    eq((mine.you.lastDecisions as { marker: string }).marker, 'deliberate', 'the carried decisions are the last DELIBERATE ones, not defaults');
-    eq(mine.you.lastDecisionsYear, 1, 'the carried decisions know which year they came from');
+    ok(mine.you.decisionsByYear !== undefined, 'an unlocked team still has a decision history to carry from');
+    eq(governingYear(2, mine.you.decisionsByYear), 1, 'year 2 is governed by year 1 — the last lock BEFORE it');
+    eq((decisionsForYear(2, mine.you.decisionsByYear) as unknown as { marker: string }).marker, 'deliberate',
+       'the carried decisions are the last DELIBERATE ones, not defaults');
+  }
+
+  // ---- the decision history -------------------------------------------
+  {
+    const t = transport();
+    // Its own room: this block needs six years, and the shared fixture is three.
+    const { code, hostToken } = await t.createRoom({
+      seed: 'MAMC6EA4', yearCount: 6, startingYear: 2026,
+      eventName: 'History', expectedTeams: 1, shocks: [],
+    });
+    const p = await t.join({ code, teamName: TEAMS[0], role: 'player', lines: WC });
+
+    // Lock years 1 and 2 with DIFFERENT sets, skip 3, lock 4.
+    await t.submit({ code, token: p.teamToken, yearNumber: 1, decisions: decisionsFor(1, 'y1') });
+    await t.advance({ code, token: hostToken });
+    await t.submit({ code, token: p.teamToken, yearNumber: 2, decisions: decisionsFor(2, 'y2') });
+    await t.advance({ code, token: hostToken });
+    await t.advance({ code, token: hostToken });   // year 3 never locked
+    await t.submit({ code, token: p.teamToken, yearNumber: 4, decisions: decisionsFor(4, 'y4') });
+
+    const mine = await t.read({ code, token: p.teamToken });
+    const h = mine.you.decisionsByYear;
+    eq(Object.keys(h ?? {}).sort().join(','), '1,2,4', 'every locked year is kept, and only those');
+
+    // ⚠ THE ASSERTION THE OLD SHAPE COULD NOT MAKE. With one slot, every one of
+    // these read 'y4' — which is precisely why a reload replayed years the team
+    // never played.
+    const marker = (y: number) => (decisionsForYear(y, h) as unknown as { marker: string }).marker;
+    eq(marker(1), 'y1', 'year 1 replays on year 1');
+    eq(marker(2), 'y2', 'year 2 replays on year 2, NOT on the latest set');
+    eq(marker(3), 'y2', 'the skipped year 3 carries forward from year 2, the last lock before it');
+    eq(marker(4), 'y4', 'year 4 replays on year 4');
+    eq(governingYear(3, h), 2, 'and the governing year for a skipped year is named, not inferred');
+
+    // Re-submitting a year replaces THAT year and leaves the others alone.
+    await t.advance({ code, token: hostToken });
+    await t.submit({ code, token: p.teamToken, yearNumber: 5, decisions: decisionsFor(5, 'y5') });
+    const after = await t.read({ code, token: p.teamToken });
+    eq(marker(1), 'y1', 'a later submit does not disturb an earlier year');
+    eq(Object.keys(after.you.decisionsByYear ?? {}).sort().join(','), '1,2,4,5', 'the history grows by one');
   }
 
   // ---- results ---------------------------------------------------------
@@ -319,7 +361,8 @@ async function main(): Promise<void> {
     ok(!JSON.stringify(asHost).includes('secret-a'), "the host view does not carry a team's decisions");
 
     const asP0 = await t.read({ code, token: p0.teamToken });
-    eq((asP0.you.lastDecisions as { marker: string }).marker, 'secret-a', 'a player reads its own decisions back');
+    eq((decisionsForYear(1, asP0.you.decisionsByYear) as unknown as { marker: string }).marker, 'secret-a',
+       'a player reads its own decisions back');
     ok(!JSON.stringify(asP0).includes('secret-b'), "a player cannot see another team's decisions");
 
     const asViewer = await t.read({ code, token: viewer.teamToken });

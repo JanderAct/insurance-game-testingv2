@@ -248,10 +248,27 @@ export interface CallerView {
   // The caller's own team's lines — the set its GameState is built from. A
   // viewer gets the watched team's, which is what lets it build the same game.
   lines?: CoverageLine[];
-  // This caller's own last submitted decisions. The carry-forward source: a team
-  // that does not lock in time is processed on THIS, not on engine defaults.
-  lastDecisions?: JsonValue;
-  lastDecisionsYear?: number;
+  /**
+   * ⚠ THE CALLER'S OWN DECISIONS, PER YEAR, AND IT REPLACED A SINGLE SLOT.
+   * The room used to hold one `lastDecisions` per team, overwritten on every
+   * submit. That made the record flat in the year count — pleasingly cheap, and
+   * wrong: a client rebuilding from the seed after a reload had only the LATEST
+   * set to replay every prior year with, so a team that varied its choices was
+   * shown numbers it never played, and the host's table (built from what was
+   * posted at the time) disagreed with the team's own screen. Viewers replayed
+   * identically wrong.
+   *
+   * ⚠ KEYED BY YEAR AS A STRING, BECAUSE THAT IS WHAT JSON DOES. A numeric key
+   * survives JSON.stringify as "3"; typing it as a number here would be a lie
+   * the first time this crossed a real network.
+   *
+   * ⚠ CARRY-FORWARD NOW MEANS "THE MOST RECENT YEAR THAT HAS ONE", not "the
+   * single slot". A team that did not lock year 3 is still processed on what it
+   * last chose — that is unchanged and still the point — but "what it last
+   * chose" is now answered per target year rather than globally. See
+   * decisionsForYear.
+   */
+  decisionsByYear?: Record<string, JsonValue>;
   // This caller's own last posted result — the same typed summary the host
   // reads, so a team and the host are never looking at two shapes of one thing.
   lastResult?: TeamYearSummary;

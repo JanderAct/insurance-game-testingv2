@@ -77,8 +77,8 @@ interface TeamRecord {
   token: string | null;
   joined: boolean;
   lockedYear: number | null;
-  decisions: JsonValue | null;
-  decisionsYear: number | null;
+  // Year number (as a string key, per JSON) -> that year's submitted decisions.
+  decisionsByYear: Record<string, JsonValue>;
   result: TeamYearSummary | null;
   resultYear: number | null;
 }
@@ -234,9 +234,8 @@ function callerView(role: CallerRole, team: TeamRecord | null): CallerView {
   // team's decisions and results; nobody gets anybody else's, and the host gets
   // no team's. The host runs the room from the table in RoomView, which carries
   // presence and progress and no content.
-  if (team.decisions !== null) {
-    view.lastDecisions = team.decisions;
-    view.lastDecisionsYear = team.decisionsYear ?? undefined;
+  if (Object.keys(team.decisionsByYear).length > 0) {
+    view.decisionsByYear = { ...team.decisionsByYear };
   }
   if (team.result !== null) {
     view.lastResult = team.result;
@@ -464,8 +463,7 @@ export class LocalSessionTransport implements SessionTransport {
         token,
         joined: true,
         lockedYear: null,
-        decisions: null,
-        decisionsYear: null,
+        decisionsByYear: {},
         result: null,
         resultYear: null,
       };
@@ -496,8 +494,10 @@ export class LocalSessionTransport implements SessionTransport {
             `The room is on year ${room.currentYear}; those decisions are for year ${req.yearNumber}.`,
           );
         }
-        team.decisions = req.decisions;
-        team.decisionsYear = req.yearNumber;
+        // ⚠ RECORDED AGAINST ITS YEAR, NOT INTO A SLOT. Re-submitting the same
+        // year overwrites that year and leaves every other year alone, which is
+        // what makes a reload able to replay what was actually played.
+        team.decisionsByYear[String(req.yearNumber)] = req.decisions;
         team.lockedYear = req.yearNumber;
       }
 

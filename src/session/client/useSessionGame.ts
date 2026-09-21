@@ -195,7 +195,11 @@ export function useSessionGame(
         // up on and must play them in order rather than skipping to the front.
         while (state.currentYearNumber < room.currentYear && !state.isComplete) {
           const year = state.currentYearNumber;
-          const decisions = decisionsForYear(year, you.lastDecisions);
+          // ⚠ THE YEAR'S OWN SET, NOT THE LATEST ONE. This loop is the whole
+          // reason the room stores a history: it runs on a reload, replaying
+          // every year from the seed, and reading one slot for all of them
+          // produced results the team never played.
+          const decisions = decisionsForYear(year, you.decisionsByYear);
           const processed = processYear(state, decisions);
 
           // ⚠ AN UNRESOLVED LOAN OFFER IS DECLINED, AND THAT IS A REAL
