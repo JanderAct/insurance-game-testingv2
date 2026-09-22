@@ -176,6 +176,24 @@ export interface TeamYearFigures {
  * say "does not write GL" instead of showing a surplus of $0, and it is the
  * distinction the whole Teams tab turns on.
  */
+/**
+ * ⚠ THE DEVELOPED TRIANGLE'S CURRENT COLUMN: one accident year's NET ULTIMATE AT
+ * THIS VALUATION, keyed by accident year as a string. Posted afresh every year,
+ * because that is what makes it the current column rather than a frozen one.
+ *
+ * ⚠ AND IT IS NOT A RESULT_METRICS KEY, WHICH IS A STATEMENT AND NOT AN
+ * OVERSIGHT. A RESULT_METRICS entry maps ONE ResultSet to ONE value; this is a
+ * value per accident year per valuation, and it does not live on a ResultSet at
+ * all — it lives on LinePoolState.reserveDevelopment, the append-only ledger.
+ * Inventing a metric key for it would be the grossPremium mistake in reverse:
+ * not a figure published from outside the list, but a quantity forced into a
+ * list it does not fit. What this DOES reuse is the ledger's existing reader —
+ * actuarialMemo's exhibitRows/poolExhibitRows, the same functions the Actuarial
+ * memorandum's development exhibit is built from, clamping rule included. One
+ * field, one derivation, two readers.
+ */
+export type DevelopedUltimates = Record<string, number>;
+
 export interface TeamYearSummary {
   /**
    * ⚠ 0 IS A LEGITIMATE YEAR HERE, AND IT IS THE OPENING POSITION. The pre-game
@@ -191,6 +209,25 @@ export interface TeamYearSummary {
   /** The pooled row — the aggregate, meaning what it means everywhere else. */
   pool: TeamYearFigures;
   byLine: Partial<Record<CoverageLine, TeamYearFigures>>;
+  /**
+   * ⚠ EVERY ACCIDENT YEAR SO FAR, RE-REPORTED AT THIS YEAR'S VALUATION — a
+   * TRIANGLE COLUMN, not a line. pool.netUltimateLoss above is the accident
+   * year as BOOKED when it happened and is frozen forever; this says what every
+   * accident year is thought to cost NOW. Under forward booking those are very
+   * different numbers — measured on a ten-year WC game, an accident year's
+   * latest valuation runs 1.2x its booked figure at age 2 and 1.85x by age 12 —
+   * and a chart with only the first can never show the second happening.
+   *
+   * ⚠ IT IS THE ONLY PART OF THIS PAYLOAD THAT RESTATES THE PAST, and that is
+   * the cost of the thing: each post carries a number per accident year per
+   * scope rather than one number. Accident years BELOW 0 are dropped — the
+   * pre-game's own years and the seeded cohorts are off the chart's axis, and
+   * carrying fourteen of them in every post forever is a payload nothing reads.
+   */
+  developed?: {
+    pool: DevelopedUltimates;
+    byLine: Partial<Record<CoverageLine, DevelopedUltimates>>;
+  };
 }
 
 // ---------------------------------------------------------------- views

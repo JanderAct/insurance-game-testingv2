@@ -36,11 +36,26 @@ const figures = (surplus: number): TeamYearFigures => ({
   selectedFundingConfidenceLevel: 0.6,
   netUltimateLoss: 3_300_000,
 });
-const summaryFor = (year: number, surplus: number, lines: CoverageLine[] = ['WC']): TeamYearSummary => ({
+// ⚠ THE DEVELOPED COLUMN RESTATES EVERY ACCIDENT YEAR UP TO `year`, which is
+// what makes it a triangle column rather than a point. The fixture grows it the
+// way a real post does: every prior accident year, re-valued.
+const developedTo = (year: number, factor: number): Record<string, number> =>
+  Object.fromEntries(Array.from({ length: year + 1 }, (_, ay) => [String(ay), 1_000_000 * (ay + 1) * factor]));
+
+const summaryFor = (
+  year: number,
+  surplus: number,
+  lines: CoverageLine[] = ['WC'],
+  factor = 1,
+): TeamYearSummary => ({
   yearNumber: year,
   calendarYear: 2025 + year,
   pool: figures(surplus),
   byLine: Object.fromEntries(lines.map(l => [l, figures(surplus)])),
+  developed: {
+    pool: developedTo(year, factor),
+    byLine: Object.fromEntries(lines.map(l => [l, developedTo(year, factor)])),
+  },
 });
 
 // ---------------------------------------------------------------- shim
@@ -366,6 +381,39 @@ async function main(): Promise<void> {
     eq(Object.keys(played.room.teams[0].resultsByYear ?? {}).sort().join(','), '0,1',
        'and the opening position is still there, one point to the left of it');
     eq(played.you.lastResult?.pool.endingSurplus, 1500, "the caller's last result is the played year, not the opening");
+  }
+
+  // ---- the developed column --------------------------------------------
+  //
+  // ⚠ IT IS THE ONE PART OF A SUMMARY THAT RESTATES THE PAST, and the transport
+  // must carry it verbatim rather than merging it. Each post is a WHOLE column:
+  // the accident years as at THAT valuation. Merging two posts would produce a
+  // valuation that never existed.
+  {
+    const t = transport();
+    const { code, hostToken } = await freshRoom(t);
+    const p = await t.join({ code, teamName: TEAMS[0], role: 'player', lines: WC });
+
+    await t.submit({ code, token: p.teamToken, yearNumber: 0, result: summaryFor(0, 500, WC, 1) });
+    await t.submit({ code, token: p.teamToken, yearNumber: 1, decisions: decisionsFor(1, 'y1') });
+    await t.advance({ code, token: hostToken });
+    // Year 1's valuation restates accident year 0 at 1.5x what year 0 said.
+    await t.submit({ code, token: p.teamToken, yearNumber: 1, result: summaryFor(1, 1500, WC, 1.5) });
+
+    const seen = await t.read({ code, token: hostToken });
+    const at = (y: number) => seen.room.teams[0].resultsByYear?.[String(y)]?.developed;
+    eq(Object.keys(at(0)?.pool ?? {}).join(','), '0', 'the opening valuation holds accident year 0 alone');
+    eq(Object.keys(at(1)?.pool ?? {}).sort().join(','), '0,1',
+       'the next valuation restates accident year 0 AND adds accident year 1');
+    eq(at(0)?.pool['0'], 1_000_000, 'accident year 0 as it was valued at year 0');
+    eq(at(1)?.pool['0'], 1_500_000,
+       'and the SAME accident year, higher, as it is valued a year later — the point of the chart');
+    eq(at(1)?.byLine.WC?.['1'], 3_000_000, 'the per-line column is carried too, so a line view has one');
+    eq(at(1)?.byLine.GL, undefined, 'and a line the team does not write has none — absent, not zero');
+
+    // The frozen series is untouched by the restatement beside it.
+    eq(seen.room.teams[0].resultsByYear?.['0']?.pool.endingSurplus, 500,
+       'the as-booked figures are not revised by a later valuation');
   }
 
   // ---- a result history, not a slot ------------------------------------

@@ -27,6 +27,25 @@
 //            draw a value nobody played.
 //   REPORTED a point, joined to its neighbours.
 //
+// ⚠ LOSSES ARE TWO CHARTS, BECAUSE ONE OF THEM CANNOT SHOW WHAT HAPPENS TO A
+// LOSS. netUltimateLoss is the accident year AS BOOKED — measured, it is bit-for
+// -bit the reserve ledger's opening column — and under forward booking a year is
+// booked far below the register it will develop into. Plotting only that draws a
+// line of FIRST ESTIMATES: on a ten-year WC game every one of those points was
+// later restated upwards, by 1.2x at age 2 and 1.85x by age 12, and none of that
+// appeared anywhere on the chart.
+//
+//   AS BOOKED     each accident year at the estimate it was posted with. Frozen.
+//                 What the team knew at the time, and what it priced off.
+//   AS DEVELOPED  the same accident years at the CURRENT valuation. Every point
+//                 moves each year as the prior years develop, which is forward
+//                 booking made visible.
+//
+// ⚠ AND THEY SHARE ONE y-DOMAIN, WHICH IS NOT A DETAIL. Two charts of the same
+// quantity, each scaled to its own box, look alike — the reader sees two similar
+// shapes rather than one sitting far above the other. The comparison IS the
+// height difference, so the domain is computed across both.
+//
 // ⚠ THE X-AXIS IS FIXED AT SETUP AND STARTS AT YEAR 0. A five-year game draws 0
 // through 5 from the moment the room exists, whatever has been played. Two
 // things follow, and both were wrong while the axis grew with the game: the
@@ -88,21 +107,41 @@ const TEAM_COLORS = [
 // ---------------------------------------------------------------- the metrics
 
 /**
- * ⚠ EVERY ONE IS A RESULT_METRICS KEY, READ OFF THE POSTED SUMMARY. The charts
- * do not compute anything: they plot what the teams published. Losses is
- * netUltimateLoss — "Net Ultimate Loss + LAE" in the list. See TeamYearFigures
- * for why it is that field and not netIncurredLoss, which is not in the list.
+ * ⚠ THE CHARTS COMPUTE NOTHING; THEY PLOT WHAT THE TEAMS PUBLISHED. Three of the
+ * four read a RESULT_METRICS key off the posted figures. The fourth —
+ * losses AS DEVELOPED — reads the posted developed column, which is deliberately
+ * NOT a metric key: see DevelopedUltimates in the contract for why forcing it
+ * into that list would be a worse mistake than leaving it out of it.
+ *
+ * ⚠ AND THE TWO LOSS CHARTS ARE ONE READING, WHICH IS WHY THEY SHARE A SCALE.
+ * As booked is the accident year frozen at what it was thought to cost when it
+ * happened; as developed is the same years at today's valuation. Given separate
+ * y-domains the two would look alike — both rescale to fill their own box — and
+ * the growth, which is the entire point, would be invisible. `scaleGroup` puts
+ * them on one domain computed over both.
  */
 interface Metric {
   id: string;
   title: string;
   note: string;
+  /** Where the value comes from: a year's own figures, or the developed column. */
+  source: 'figures' | 'developed';
   pick: (f: TeamYearFigures) => number;
   format: (v: number) => string;
   /** Money quantities anchor at zero; a member count does not. */
   anchorZero: boolean;
   /** Surplus is the one that can go negative, and the sign is the whole story. */
   zeroRule: boolean;
+  /** Charts sharing a group share one y-domain, computed across all of them. */
+  scaleGroup?: string;
+  /** A line under the title, when the chart needs a sentence rather than a label. */
+  subtitle?: string;
+  /**
+   * ⚠ THE LOSS CHARTS' x IS THE ACCIDENT YEAR, NOT THE GAME YEAR, and saying so
+   * matters most on the developed chart: its points are all valued NOW, so
+   * reading its x as "when" would suggest a year-by-year history of one figure.
+   */
+  xLabel?: string;
 }
 
 const METRICS: Metric[] = [
@@ -110,6 +149,7 @@ const METRICS: Metric[] = [
     id: 'surplus',
     title: 'Ending surplus',
     note: 'RESULT_METRICS · endingSurplus',
+    source: 'figures',
     pick: f => f.endingSurplus,
     format: v => formatCurrency(v, true),
     anchorZero: true,
@@ -119,6 +159,7 @@ const METRICS: Metric[] = [
     id: 'members',
     title: 'Active members',
     note: 'RESULT_METRICS · activeMembers',
+    source: 'figures',
     pick: f => f.activeMembers,
     format: v => String(Math.round(v)),
     // ⚠ NOT ANCHORED AT ZERO, DELIBERATELY. Every pool has dozens of members, so
@@ -129,12 +170,35 @@ const METRICS: Metric[] = [
   },
   {
     id: 'losses',
-    title: 'Net ultimate loss + LAE',
+    title: 'Losses — as booked',
     note: 'RESULT_METRICS · netUltimateLoss',
+    subtitle: 'What each accident year was estimated at when it was played. Frozen; never revised.',
+    xLabel: 'accident year',
+    source: 'figures',
     pick: f => f.netUltimateLoss,
     format: v => formatCurrency(v, true),
     anchorZero: true,
     zeroRule: false,
+    scaleGroup: 'loss',
+  },
+  {
+    // ⚠ THE ONE CHART WHOSE OLD POINTS MOVE. Every other line here is a record
+    // of what was posted; this one is re-reported in full every year, so year
+    // 3's point in year 8 is what year 3 is NOW thought to cost. That is forward
+    // booking made visible: claims are booked at an initial estimate well below
+    // the drawn register and develop up towards it, so a chart of first
+    // estimates alone shows none of it.
+    id: 'developed',
+    title: 'Losses — as developed',
+    note: 'reserveDevelopment · ultimateByValuation (NOT a RESULT_METRICS key)',
+    subtitle: 'The same accident years at their CURRENT valuation. Every point moves as prior years develop.',
+    xLabel: 'accident year',
+    source: 'developed',
+    pick: f => f.netUltimateLoss,   // unused on this source; the column is read directly
+    format: v => formatCurrency(v, true),
+    anchorZero: true,
+    zeroRule: false,
+    scaleGroup: 'loss',
   },
 ];
 
@@ -151,6 +215,13 @@ interface TeamSeries {
   state: TeamState;
   /** Year -> that year's figures, on the current view. Empty unless 'drawn'. */
   byYear: Map<number, TeamYearFigures>;
+  /**
+   * ⚠ ONE COLUMN, FROM THE NEWEST POST THAT HAS ONE — not a year-by-year read.
+   * Every post restates every accident year, so the newest post IS the current
+   * valuation of all of them; taking each year's own post instead would rebuild
+   * the frozen series and draw the as-booked chart twice.
+   */
+  developed: Map<number, number>;
 }
 
 /**
@@ -159,7 +230,7 @@ interface TeamSeries {
  */
 function seriesFor(team: TeamView, color: string, view: LineView, years: number[]): TeamSeries {
   if (view !== 'pool' && !team.lines.includes(view)) {
-    return { team, color, state: { kind: 'absent' }, byYear: new Map() };
+    return { team, color, state: { kind: 'absent' }, byYear: new Map(), developed: new Map() };
   }
   const byYear = new Map<number, TeamYearFigures>();
   for (const y of years) {
@@ -168,12 +239,28 @@ function seriesFor(team: TeamView, color: string, view: LineView, years: number[
     const figures = view === 'pool' ? posted.pool : posted.byLine[view];
     if (figures) byYear.set(y, figures);
   }
+
+  // The newest post carrying a developed column wins; a post written before the
+  // column existed has none, which is absence rather than an empty valuation.
+  const developed = new Map<number, number>();
+  for (let i = years.length - 1; i >= 0; i--) {
+    const posted = team.resultsByYear?.[String(years[i])];
+    const column = view === 'pool' ? posted?.developed?.pool : posted?.developed?.byLine[view];
+    if (!column) continue;
+    for (const [ay, v] of Object.entries(column)) {
+      const n = Number(ay);
+      if (Number.isFinite(n) && Number.isFinite(v)) developed.set(n, v);
+    }
+    break;
+  }
+
   const drawn = [...byYear.keys()].sort((a, b) => a - b);
   return {
     team,
     color,
     state: drawn.length === 0 ? { kind: 'silent' } : { kind: 'drawn', years: drawn },
     byYear,
+    developed,
   };
 }
 
@@ -208,19 +295,35 @@ const W = 760, H = 240, M = { top: 14, right: 118, bottom: 38, left: 74 };
 const PLOT_W = W - M.left - M.right;
 const PLOT_H = H - M.top - M.bottom;
 
+/**
+ * What a chart plots for one team: a year (or ACCIDENT year) to a value. Drawn
+ * from the year's own figures, or from the developed column, per the metric.
+ */
+function pointsOf(metric: Metric, s: TeamSeries): Map<number, number> {
+  if (metric.source === 'developed') return s.developed;
+  const out = new Map<number, number>();
+  for (const [yr, f] of s.byYear) out.set(yr, metric.pick(f));
+  return out;
+}
+
 interface ChartProps {
   metric: Metric;
   series: TeamSeries[];
   years: number[];
   /** Direct end labels are for a readable few; beyond that the legend carries it. */
   directLabels: boolean;
+  /** Imposed when this chart shares a scale with another; otherwise its own. */
+  domain?: { lo: number; hi: number; ticks: number[] };
 }
 
-function LineChart({ metric, series, years, directLabels }: ChartProps) {
+function LineChart({ metric, series, years, directLabels, domain }: ChartProps) {
   const [hoverYear, setHoverYear] = useState<number | null>(null);
 
-  const drawn = series.filter(s => s.state.kind === 'drawn');
-  const values = drawn.flatMap(s => [...s.byYear.values()].map(metric.pick));
+  const drawn = series
+    .filter(s => s.state.kind === 'drawn')
+    .map(s => ({ s, points: pointsOf(metric, s) }))
+    .filter(d => d.points.size > 0);
+  const values = drawn.flatMap(d => [...d.points.values()]);
 
   if (values.length === 0) {
     return (
@@ -233,7 +336,7 @@ function LineChart({ metric, series, years, directLabels }: ChartProps) {
     );
   }
 
-  const { lo, hi, ticks } = niceScale(Math.min(...values), Math.max(...values), metric.anchorZero);
+  const { lo, hi, ticks } = domain ?? niceScale(Math.min(...values), Math.max(...values), metric.anchorZero);
   const x = (year: number) =>
     M.left + (years.length === 1 ? PLOT_W / 2 : ((year - years[0]) / (years[years.length - 1] - years[0])) * PLOT_W);
   const y = (v: number) => M.top + PLOT_H - ((v - lo) / (hi - lo)) * PLOT_H;
@@ -241,11 +344,11 @@ function LineChart({ metric, series, years, directLabels }: ChartProps) {
   // ⚠ CONSECUTIVE RUNS, NOT ONE POLYLINE. A year missing in the middle ends the
   // run and starts a new one, so the gap stays a gap. Bridging it would draw a
   // straight line through a year the team never posted, which is a value.
-  const runsOf = (s: TeamSeries): number[][] => {
+  const runsOf = (points: Map<number, number>): number[][] => {
     const runs: number[][] = [];
     let run: number[] = [];
     for (const yr of years) {
-      if (s.byYear.has(yr)) run.push(yr);
+      if (points.has(yr)) run.push(yr);
       else if (run.length) { runs.push(run); run = []; }
     }
     if (run.length) runs.push(run);
@@ -259,9 +362,9 @@ function LineChart({ metric, series, years, directLabels }: ChartProps) {
   // once on top of itself.
   const GAP = 13;
   const labels = drawn
-    .map(s => {
-      const last = (s.state as { kind: 'drawn'; years: number[] }).years.slice(-1)[0];
-      return { name: s.team.name, color: s.color, anchor: y(metric.pick(s.byYear.get(last)!)) };
+    .map(({ s, points }) => {
+      const last = [...points.keys()].sort((a, b) => a - b).slice(-1)[0];
+      return { name: s.team.name, color: s.color, anchor: y(points.get(last)!) };
     })
     .sort((a, b) => a.anchor - b.anchor)
     .map(l => ({ ...l, at: l.anchor }));
@@ -274,14 +377,21 @@ function LineChart({ metric, series, years, directLabels }: ChartProps) {
   const hoverRows = hoverYear === null
     ? []
     : drawn
-        .filter(s => s.byYear.has(hoverYear))
-        .map(s => ({ name: s.team.name, color: s.color, value: metric.pick(s.byYear.get(hoverYear)!) }));
+        .filter(d => d.points.has(hoverYear))
+        .map(d => ({ name: d.s.team.name, color: d.s.color, value: d.points.get(hoverYear)! }));
 
   return (
     <figure className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-      <figcaption className="flex items-baseline justify-between">
-        <span className="text-sm font-medium text-slate-700">{metric.title}</span>
-        <span className="font-mono text-[11px] text-slate-300">{metric.note}</span>
+      <figcaption>
+        {/* Title and provenance on one line; the sentence gets its own, so a
+            long one cannot wrap around the note and interleave with it. */}
+        <span className="flex items-baseline justify-between gap-4">
+          <span className="text-sm font-medium text-slate-700">{metric.title}</span>
+          <span className="shrink-0 font-mono text-[11px] text-slate-300">{metric.note}</span>
+        </span>
+        {metric.subtitle && (
+          <span className="mt-0.5 block text-[11px] text-slate-400">{metric.subtitle}</span>
+        )}
       </figcaption>
 
       <div className="relative mt-2">
@@ -289,7 +399,7 @@ function LineChart({ metric, series, years, directLabels }: ChartProps) {
           viewBox={`0 0 ${W} ${H}`}
           className="w-full"
           role="img"
-          aria-label={`${metric.title} by year, one line per team`}
+          aria-label={`${metric.title} by ${metric.xLabel ?? 'year'}, one line per team`}
           data-testid={`chart-${metric.id}`}
           onMouseLeave={() => setHoverYear(null)}
           onMouseMove={e => {
@@ -326,16 +436,16 @@ function LineChart({ metric, series, years, directLabels }: ChartProps) {
             </text>
           ))}
           <text x={M.left + PLOT_W / 2} y={H - 6} textAnchor="middle" className="fill-slate-300" fontSize={10}>
-            year
+            {metric.xLabel ?? 'year'}
           </text>
 
           {hoverYear !== null && hoverRows.length > 0 && (
             <line x1={x(hoverYear)} x2={x(hoverYear)} y1={M.top} y2={M.top + PLOT_H} stroke="#cbd5e1" strokeWidth={1} />
           )}
 
-          {drawn.map(s => (
+          {drawn.map(({ s, points }) => (
             <g key={s.team.name}>
-              {runsOf(s).map((run, i) => (
+              {runsOf(points).map((run, i) => (
                 <polyline
                   key={i}
                   fill="none"
@@ -343,16 +453,16 @@ function LineChart({ metric, series, years, directLabels }: ChartProps) {
                   strokeWidth={2}
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  points={run.map(yr => `${x(yr)},${y(metric.pick(s.byYear.get(yr)!))}`).join(' ')}
+                  points={run.map(yr => `${x(yr)},${y(points.get(yr)!)}`).join(' ')}
                 />
               ))}
-              {[...s.byYear.keys()].map(yr => (
+              {[...points.keys()].map(yr => (
                 // A 2px surface ring keeps overlapping markers legible where two
                 // teams cross.
                 <circle
                   key={yr}
                   cx={x(yr)}
-                  cy={y(metric.pick(s.byYear.get(yr)!))}
+                  cy={y(points.get(yr)!)}
                   r={4}
                   fill={s.color}
                   stroke="#ffffff"
@@ -439,6 +549,21 @@ export default function HostChartsTab({ room }: Props) {
   const series = room.teams.map((t, i) => seriesFor(t, TEAM_COLORS[i % TEAM_COLORS.length], effectiveView, years));
   const directLabels = series.filter(s => s.state.kind === 'drawn').length <= 4;
 
+  // ⚠ ONE DOMAIN ACROSS A SCALE GROUP, COMPUTED BEFORE ANY OF ITS CHARTS DRAWS.
+  // The two loss charts are the same quantity at two valuations, so a reader
+  // compares them by height. Left to themselves each would fill its own box and
+  // the pair would look identical — the as-developed chart would show its own
+  // shape rather than its distance from the booked one.
+  const sharedDomains: Record<string, { lo: number; hi: number; ticks: number[] }> = {};
+  for (const group of new Set(METRICS.map(m => m.scaleGroup).filter((g): g is string => !!g))) {
+    const members = METRICS.filter(m => m.scaleGroup === group);
+    const values = series
+      .filter(s => s.state.kind === 'drawn')
+      .flatMap(s => members.flatMap(m => [...pointsOf(m, s).values()]));
+    if (values.length === 0) continue;
+    sharedDomains[group] = niceScale(Math.min(...values), Math.max(...values), members[0].anchorZero);
+  }
+
   return (
     <div className="space-y-4">
       {/* ⚠ ONE FILTER ROW ABOVE ALL THREE CHARTS, not one per chart. The three
@@ -492,7 +617,14 @@ export default function HostChartsTab({ room }: Props) {
       </div>
 
       {METRICS.map(m => (
-        <LineChart key={m.id} metric={m} series={series} years={years} directLabels={directLabels} />
+        <LineChart
+          key={m.id}
+          metric={m}
+          series={series}
+          years={years}
+          directLabels={directLabels}
+          domain={m.scaleGroup ? sharedDomains[m.scaleGroup] : undefined}
+        />
       ))}
 
       <p className="flex items-center gap-1.5 px-1 text-[11px] text-slate-400">

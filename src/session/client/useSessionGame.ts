@@ -150,7 +150,14 @@ export function useSessionGame(
     // surplus, the opening roster and the opening reserve come from. So the
     // chart's year-0 point is not assembled from three loose fields — it is the
     // same summarize() over the same shape, one year earlier.
-    return priorHistory.find(r => r.yearNumber === 0) ?? null;
+    //
+    // ⚠ THE POOL STATE COMES BACK WITH IT, because the summary needs BOTH: the
+    // ResultSet is the year's own news and the reserve ledger on the pool state
+    // is every prior accident year restated as at that year. At year 0 the
+    // ledger already exists — the pre-game wrote it — so the opening post
+    // carries a developed column like every other post.
+    const opening = priorHistory.find(r => r.yearNumber === 0) ?? null;
+    return opening ? { opening, poolState } : null;
   }, []);
 
   // ---- build once per room identity ---------------------------------------
@@ -163,7 +170,7 @@ export function useSessionGame(
     // the screen — runPriorHistory plays three years through the real engine.
     const id = window.setTimeout(() => {
       try {
-        const opening = build(room, myLines!);
+        const built = build(room, myLines!);
         setPhase('ready');
 
         // ⚠ POSTED ONCE, AT BUILD, BECAUSE THE HOST CANNOT DERIVE IT. The room
@@ -177,9 +184,9 @@ export function useSessionGame(
         // Best-effort, like the year posts: a game that is built and playable
         // must not fail because a scoreboard write did not land, and a reload
         // re-posts the identical entry over itself.
-        if (opening && token && you?.role === 'player') {
+        if (built && token && you?.role === 'player') {
           void sessionTransport()
-            .submit({ code, token, yearNumber: 0, result: summarize(opening, myLines!) })
+            .submit({ code, token, yearNumber: 0, result: summarize(built.opening, myLines!, built.poolState) })
             .catch(() => { /* the opening point is missing until the next build; the game is not */ });
         }
       } catch (e) {
@@ -271,7 +278,9 @@ export function useSessionGame(
               code,
               token,
               yearNumber: produced.yearNumber,
-              result: summarize(produced, state.setup.activeLines),
+              // state.poolState is the valuation AS AT the year being posted —
+              // the loop has just finished writing it.
+              result: summarize(produced, state.setup.activeLines, state.poolState),
             });
           }
         }
