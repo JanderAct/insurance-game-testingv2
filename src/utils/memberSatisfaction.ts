@@ -348,8 +348,80 @@ export type { SatisfactionMove };
  * of the FORM and is the same at any K, which is why it is the number worth
  * quoting.
  */
+// ============================================================================
+// THE SCALE RULING — THE FOUR POINTS-SCALE WEIGHTS CARRY A 3x SCALE, AND THE
+// RELATIVE WEIGHTS AMONG THEM ARE UNTOUCHED.
+//
+// priceWeight, levelWeight, lossLevelWeight and surplusWeight are the four
+// constants denominated in SATISFACTION POINTS. Each was multiplied by 3
+// together, so every ratio derived between them survives exactly — term 3's
+// spread against one funding stop, the surplus limb's quarter of the footprint,
+// the anchor limb against the change limb. Nothing else moved: gratitudeLambda,
+// lossSaturation, lossValueShare and lossAmplifierSlope are SHAPES,
+// anchorCentre is a LOCATION, levelHalfLifeYears is a TIME, surplusComfortable
+// is a boundary in ratio units, and floor/ceiling are BOUNDS. Scaling any of
+// those would change the model rather than its scale.
+//
+//     priceWeight        0.0019 -> 0.0057
+//     levelWeight        0.030  -> 0.090
+//     lossLevelWeight    0.75   -> 2.25
+//     surplusWeight      0.0516 -> 0.1548
+//     linearEquivalent   0.015  -> 0.045
+//
+// ⚠ THAT IS FIVE CONSTANTS AND THE RULING NAMED FOUR. linearEquivalent is the
+// retired linear form's weight, kept so section 4 can compare the two SHAPES,
+// and it is denominated in satisfaction points per pp exactly as the convex
+// form's effective weight is. It is not a shape, a location, a time or a bound,
+// so the ruling's exclusion list does not cover it; it was simply missed. The
+// crossover between the two forms is linearEquivalent / priceWeight and is a
+// GAP IN pp — a property of the game, which must not move when satisfaction is
+// merely denominated more loudly. Scaling four of five moved it 7.89pp ->
+// 2.63pp and failed two of section 4's assertions. Scaling all five holds it at
+// 7.89pp. THE RULE IS "EVERY CONSTANT IN POINTS", NOT "THE FOUR".
+//
+// ⚠ SCALE CHANGES LEGIBILITY AND CANNOT CHANGE DISCRIMINATION. The passive and
+// aggressive arms have ZERO overlap at every multiplier from 1x to 16x, so no
+// scale separates them better than another. What a larger scale buys is that
+// the separation can be read off the screen without a reference column; what it
+// costs is the 1-10 bounds consuming the unhappy arm. The ruling is only ever
+// about where those two cross.
+//
+// ============================================================================
+// ⚠ WHY 3x AND NOT 4x. 3x IS THE LAST MULTIPLIER AT WHICH MORE SCALE STILL BUYS
+// VISIBLE STRUCTURE AMONG UNHAPPY MEMBERS.
+//
+// The aggressive arm's pooled SD PEAKS at 3x, at 1.0677, and falls thereafter.
+// Past that peak a larger scale makes the unhappy arm TIGHTER rather than
+// louder, because the floor is compressing it. Measured, 10 games x 10 years x
+// 3 lines, both arms on identical seeds, pooled across every member-year:
+//
+//     W     med(pas)  med(agg)  separation   SD(agg)   % at the 1.00 floor
+//     1x      7.200     6.110       1.09      0.4640          0.00
+//     2x      7.200     5.020       2.18      0.8874          0.36
+//     3x      7.190     4.000       3.19      1.0677  <-peak  3.23
+//     4x      7.190     3.160       4.03      1.0048          6.58
+//     6x      7.180     1.880       5.30      0.8207         13.03
+//     8x      7.170     1.210       5.96      0.6094         30.51
+//    16x      7.120     1.010       6.11      0.3645         48.78
+//
+// At 4x the separation is a real 0.84 points better, and it is PAST THE TURN
+// rather than at it: the aggressive dispersion has already declined and floor
+// contact has doubled. 3x reads as sevens against fours, which needs no
+// reference column, at a third of 4x's floor cost.
+//
+// ⚠ AND THE MEASUREMENT THAT DECIDES IT IS THE POOLED ONE. WHOEVER REVISITS
+// THIS MUST POOL ACROSS EVERY MEMBER-YEAR OR THEY WILL GET 4x.
+//
+// The year-10 snapshot reports ZERO floor contact until 6x. Pooled reports
+// 3.23% already pinned at 3x and 6.58% at 4x. The snapshot is not wrong, it is
+// blind: members hit the floor mid-game and partially recover, so an end-state
+// reading cannot see a member whose opinion stopped responding in year 5. The
+// aggressive arm's own trough is the same story — 3.64 mid-game at 1x against
+// 6.2-6.8 at year 10. Read the end state alone and 4x looks free.
+// ============================================================================
 export const SATISFACTION = {
-  priceWeight: 0.0019,
+  // x3 — see THE SCALE RULING above.
+  priceWeight: 0.0057,
   /**
    * The LINEAR weight this replaced, kept as the anchor the coefficient above
    * was derived from and as the arm the gate compares against. It is
@@ -378,7 +450,18 @@ export const SATISFACTION = {
    * novelty — but it is NOT evidence, and the next person to reach for one of
    * these should know they are all the same number's cousins.
    */
-  linearEquivalent: 0.015,
+  // ⚠ x3 WITH THE OTHER FOUR, AND THE RULING'S LIST OF FOUR WAS ONE SHORT.
+  // This is a POINTS-SCALE weight — satisfaction points per pp of gap, the same
+  // units as priceWeight x reaction — not a shape, a location, a time or a
+  // bound. Leaving it at 0.015 while priceWeight tripled moved the CROSSOVER,
+  // which is defined as linearEquivalent / priceWeight and is supposed to be a
+  // GAP IN pp: a property of the game, invariant to how loudly satisfaction is
+  // denominated. It went 7.89pp -> 2.63pp, fell below two of the gaps section 4
+  // probes, and took the convexity comparison with it — the monotonicity check
+  // and the decision-share check both failed, because a 3x convex form was being
+  // compared against a 1x linear one. Scaled, the crossover is 7.89pp again,
+  // exactly as before. See THE SCALE RULING at the head of SATISFACTION.
+  linearEquivalent: 0.045,
   /**
    * How much less a rate CUT is worth than an equal rate RISE costs.
    *
@@ -498,7 +581,8 @@ export const SATISFACTION = {
    * goes -3.85 -> +9.88 and the anchor moves 0.41 points. On Property, whose
    * load climbs fastest, -7.34% -> +23.18% moves it 0.79.
    */
-  levelWeight: 0.030,
+  // x3 — see THE SCALE RULING at the head of SATISFACTION.
+  levelWeight: 0.090,
   /**
    * How long a member takes to come round to a new standing price.
    *
@@ -608,7 +692,8 @@ export const SATISFACTION = {
    * made to assert it, and this constant was wrong on the same day it was
    * written for exactly that reason.
    */
-  lossLevelWeight: 0.75,
+  // x3 — see THE SCALE RULING at the head of SATISFACTION.
+  lossLevelWeight: 2.25,
   /**
    * ⚠ JUDGEMENT, AND IT IS THE ONE CONSTANT THAT DECIDES THE SHAPE OF THE TERM.
    *
@@ -795,7 +880,8 @@ export const SATISFACTION = {
    * could be stated relatively (see lossLevelWeight) precisely because its
    * target is a continuous quantity both sides share.
    */
-  surplusWeight: 0.0516,
+  // x3 — see THE SCALE RULING at the head of SATISFACTION.
+  surplusWeight: 0.1548,
   /**
    * Where "comfortably above the requirement" sits, in units of
    * excessCapitalRatio = (availableSurplus - reserveRiskMarginNeeded) /
