@@ -348,6 +348,16 @@ export interface CallerView {
   // reads, so a team and the host are never looking at two shapes of one thing.
   lastResult?: TeamYearSummary;
   lastResultYear?: number;
+  /**
+   * ⚠ WHICH YEARS THE ROOM ALREADY HOLDS FOR THIS CALLER — the client's
+   * reconciliation input, and the reason it exists is a defect. A client used to
+   * post only the newest year it computed, so a tab that came back three years
+   * behind left the room holding years [0, 3] and the host's charts lost the two
+   * in between. Posting every year it produced fixes the common case; knowing
+   * what is ALREADY there is what lets a client repair a year whose post never
+   * landed, the opening position included. Sorted ascending, year 0 included.
+   */
+  postedYears?: number[];
 }
 
 // ---------------------------------------------------------------- requests

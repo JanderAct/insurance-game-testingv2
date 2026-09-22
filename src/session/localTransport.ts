@@ -253,6 +253,12 @@ function callerView(role: CallerRole, team: TeamRecord | null): CallerView {
   if (Object.keys(team.decisionsByYear).length > 0) {
     view.decisionsByYear = { ...team.decisionsByYear };
   }
+  const postedYears = Object.keys(team.resultsByYear)
+    .map(Number)
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
+  if (postedYears.length > 0) view.postedYears = postedYears;
+
   const played = highestPlayedYear(team);
   if (played !== null) {
     view.lastResult = team.resultsByYear[String(played)];

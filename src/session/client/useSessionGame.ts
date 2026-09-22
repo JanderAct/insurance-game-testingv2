@@ -32,7 +32,7 @@ import { generateGameInstance } from '../../utils/instanceGenerator';
 import { runPriorHistory } from '../../utils/priorHistoryEngine';
 import { applyLoanAuthorizations, processYear } from '../../utils/simulationEngine';
 import { defaultDecisionSet } from '../../utils/decisionDefaults';
-import type { CoverageLine, GameSetupSettings, GameState, Member, ResultSet, StartingFinancials } from '../../types/simulation';
+import type { CoverageLine, GameSetupSettings, GameState, Member, PoolState, ResultSet, StartingFinancials } from '../../types/simulation';
 import { sessionTransport, type CallerView, type RoomView } from '../index';
 import { decisionsForYear } from './decisions';
 import { summarize } from './results';
@@ -75,6 +75,12 @@ export function useSessionGame(
   const [startingFinancials, setStartingFinancials] = useState<StartingFinancials | null>(null);
   const [initialMembers, setInitialMembers] = useState<Member[]>([]);
   const busy = useRef(false);
+  // ⚠ HELD SO THE OPENING POST CAN BE RETRIED, WHICH A FIRE-ONCE POST AT BUILD
+  // CANNOT BE. The build effect runs once per room identity; if its post does
+  // not land — a transport blip, or a token that had not resolved at that
+  // instant — nothing ever tries again and the team is permanently missing its
+  // year-0 point while every later year arrives normally.
+  const opening = useRef<{ result: ResultSet; poolState: PoolState } | null>(null);
 
   // ⚠ THE TEAM'S OWN LINES, NOT THE ROOM'S MENU. Teams in one room now play
   // different books: the room offers a set and each team chose a subset of it at
@@ -156,8 +162,9 @@ export function useSessionGame(
     // is every prior accident year restated as at that year. At year 0 the
     // ledger already exists — the pre-game wrote it — so the opening post
     // carries a developed column like every other post.
-    const opening = priorHistory.find(r => r.yearNumber === 0) ?? null;
-    return opening ? { opening, poolState } : null;
+    const openingResult = priorHistory.find(r => r.yearNumber === 0) ?? null;
+    opening.current = openingResult ? { result: openingResult, poolState } : null;
+    return opening.current;
   }, []);
 
   // ---- build once per room identity ---------------------------------------
@@ -186,7 +193,7 @@ export function useSessionGame(
         // re-posts the identical entry over itself.
         if (built && token && you?.role === 'player') {
           void sessionTransport()
-            .submit({ code, token, yearNumber: 0, result: summarize(built.opening, myLines!, built.poolState) })
+            .submit({ code, token, yearNumber: 0, result: summarize(built.result, myLines!, built.poolState) })
             .catch(() => { /* the opening point is missing until the next build; the game is not */ });
         }
       } catch (e) {
@@ -220,7 +227,17 @@ export function useSessionGame(
     void (async () => {
       try {
         let state = gs;
-        let produced: ResultSet | null = null;
+        // ⚠ EVERY YEAR THE LOOP PRODUCES, NOT THE LAST ONE. This was a single
+        // `produced` slot, and that made the room's record depend on how far
+        // behind a tab happened to be: a tab catching up three years computed
+        // all three and posted only the third, so the host's charts lost the two
+        // in between FOREVER. Measured before the fix — a tab three years behind
+        // left the room holding years [0, 3] with 1 and 2 simply absent.
+        //
+        // ⚠ AND EACH CARRIES ITS OWN POOL STATE, because the developed column is
+        // a VALUATION. Posting three years against the newest pool state would
+        // back-date today's reserve estimates onto years that had not seen them.
+        const produced: Array<{ result: ResultSet; poolState: PoolState }> = [];
 
         // A loop rather than a single step: a tab that joined late, or was
         // asleep while the host advanced twice, has more than one year to catch
@@ -256,14 +273,15 @@ export function useSessionGame(
             lockedResults: [...state.lockedResults, settled.result],
             currentDecisions: defaultDecisionSet(nextYear),
           };
-          produced = settled.result;
+          produced.push({ result: settled.result, poolState: settled.updatedPoolState });
         }
 
         setGameState(state);
 
-        if (produced) {
-          setLastResult(produced);
-          setProcessedYear(produced.yearNumber);
+        if (produced.length > 0) {
+          const newest = produced[produced.length - 1].result;
+          setLastResult(newest);
+          setProcessedYear(newest.yearNumber);
           // ⚠ A VIEWER COMPUTES BUT DOES NOT POST, AND SUPPRESSING IT HERE IS
           // NOT BELT-AND-BRACES. The transport already refuses — submit requires
           // a player token and a viewer's raises BAD_TOKEN — so attempting the
@@ -271,17 +289,29 @@ export function useSessionGame(
           // year, for a write that was never wanted. The scoreboard belongs to
           // the team that drives it; a watcher adds nothing to it.
           if (you.role === 'player') {
-            // Posting is best-effort: the year is played and held locally whether
-            // or not the scoreboard entry lands, so a failed post must not roll
-            // back a computed year. It is retried by the next year's post.
-            await sessionTransport().submit({
-              code,
-              token,
-              yearNumber: produced.yearNumber,
-              // state.poolState is the valuation AS AT the year being posted —
-              // the loop has just finished writing it.
-              result: summarize(produced, state.setup.activeLines, state.poolState),
-            });
+            // ⚠ THE OPENING POSITION IS RE-POSTED IF THE ROOM IS MISSING IT, and
+            // this is the only retry it has. `you` is the last poll's view of the
+            // room, so the test is occasionally stale; a re-post writes the same
+            // year with the same values, which is why being wrong here is free
+            // and being right matters.
+            if (opening.current && !(you.postedYears ?? []).includes(0)) {
+              await sessionTransport().submit({
+                code, token, yearNumber: 0,
+                result: summarize(opening.current.result, state.setup.activeLines, opening.current.poolState),
+              });
+            }
+            // Posting is best-effort: the years are played and held locally
+            // whether or not the scoreboard entries land, so a failed post must
+            // not roll back a computed year. In order, oldest first, so a partial
+            // failure leaves a prefix rather than a hole.
+            for (const p of produced) {
+              await sessionTransport().submit({
+                code,
+                token,
+                yearNumber: p.result.yearNumber,
+                result: summarize(p.result, state.setup.activeLines, p.poolState),
+              });
+            }
           }
         }
         setError(null);

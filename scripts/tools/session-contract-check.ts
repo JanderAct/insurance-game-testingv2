@@ -381,6 +381,16 @@ async function main(): Promise<void> {
     eq(Object.keys(played.room.teams[0].resultsByYear ?? {}).sort().join(','), '0,1',
        'and the opening position is still there, one point to the left of it');
     eq(played.you.lastResult?.pool.endingSurplus, 1500, "the caller's last result is the played year, not the opening");
+
+    // ⚠ WHAT THE ROOM ALREADY HOLDS FOR YOU, WHICH IS HOW A CLIENT REPAIRS A
+    // POST THAT NEVER LANDED. It includes year 0 — the one year that has no
+    // later post to carry it in, so nothing else would ever notice its absence.
+    eq((played.you.postedYears ?? []).join(','), '0,1', 'the caller is told which years the room holds for it');
+    eq((opened.you.postedYears ?? []).join(','), '0', 'including when the only one is the opening position');
+    const fresh = await t.join({ code, teamName: TEAMS[1], role: 'player', lines: WC });
+    eq(fresh.room.teams[1].resultsByYear, undefined, 'a team that has posted nothing has no history');
+    const freshRead = await t.read({ code, token: fresh.teamToken });
+    eq(freshRead.you.postedYears, undefined, 'and is told so rather than being handed an empty list');
   }
 
   // ---- the developed column --------------------------------------------
