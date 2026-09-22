@@ -334,6 +334,40 @@ async function main(): Promise<void> {
     );
   }
 
+  // ---- the opening position -------------------------------------------
+  //
+  // ⚠ YEAR 0 IS A RESULT YEAR AND IS NOT A PLAYED YEAR, and holding both of
+  // those at once is the whole of this block. The pre-game is real engine years,
+  // so the opening position is a summary like any other and the charts' axis
+  // starts there; the team that posted it has still played nothing, so the
+  // host's Reported column must not tick for it.
+  {
+    const t = transport();
+    const { code, hostToken } = await freshRoom(t);
+    const p = await t.join({ code, teamName: TEAMS[0], role: 'player', lines: WC });
+
+    const opened = await t.submit({ code, token: p.teamToken, yearNumber: 0, result: summaryFor(0, 500) });
+    eq(opened.room.teams[0].resultsByYear?.['0']?.pool.endingSurplus, 500,
+       'the opening position is accepted for year 0, before anything is decided');
+    eq(opened.room.teams[0].resultYear, null,
+       'and it is NOT a reported year — a team that has played nothing has not reported');
+    eq(opened.you.lastResult, undefined, "nor is it the caller's last result");
+
+    await rejects(
+      t.submit({ code, token: p.teamToken, yearNumber: -1, result: summaryFor(-1, 0) }),
+      'WRONG_YEAR', 'a year before the opening position is refused — the earlier pre-game is not the session',
+    );
+
+    // Once a year is actually played, the opening stays put beside it.
+    await t.submit({ code, token: p.teamToken, yearNumber: 1, decisions: decisionsFor(1, 'y1') });
+    await t.advance({ code, token: hostToken });
+    const played = await t.submit({ code, token: p.teamToken, yearNumber: 1, result: summaryFor(1, 1500) });
+    eq(played.room.teams[0].resultYear, 1, 'the first PLAYED year is the first reported one');
+    eq(Object.keys(played.room.teams[0].resultsByYear ?? {}).sort().join(','), '0,1',
+       'and the opening position is still there, one point to the left of it');
+    eq(played.you.lastResult?.pool.endingSurplus, 1500, "the caller's last result is the played year, not the opening");
+  }
+
   // ---- a result history, not a slot ------------------------------------
   //
   // ⚠ THIS IS THE DECISIONS BLOCK ABOVE ASKED OF THE OTHER FIELD, AND THE

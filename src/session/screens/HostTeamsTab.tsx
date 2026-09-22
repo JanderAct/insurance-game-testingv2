@@ -63,6 +63,13 @@ type RowState =
 function rowState(team: TeamView, view: LineView, reportingYear: number): RowState {
   if (view !== 'pool' && !team.lines.includes(view)) return { kind: 'absent' };
 
+  // ⚠ YEAR 0 IS NOT A COMPLETED YEAR, AND THIS TABLE IS ABOUT COMPLETED YEARS.
+  // The opening position is posted the moment a team builds its game, so a
+  // lookup for "the last completed year" before the first advance would find it
+  // and fill five columns under a heading that says no year is completed. The
+  // charts want that point; this table does not.
+  if (reportingYear < 1) return { kind: 'pending' };
+
   // ⚠ THE EXACT YEAR, NOT "THE LATEST ONE, IF IT HAPPENS TO BE THIS YEAR". The
   // room keeps every year now, so this asks for the year the table is showing
   // and gets it or nothing. The old form could only ever answer for the newest

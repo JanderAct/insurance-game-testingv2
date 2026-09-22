@@ -27,6 +27,21 @@
 //            draw a value nobody played.
 //   REPORTED a point, joined to its neighbours.
 //
+// ⚠ THE X-AXIS IS FIXED AT SETUP AND STARTS AT YEAR 0. A five-year game draws 0
+// through 5 from the moment the room exists, whatever has been played. Two
+// things follow, and both were wrong while the axis grew with the game: the
+// lines stopped rescaling on every advance (a team's surplus used to move on
+// screen because ANOTHER team's year had landed), and how much game is left
+// became visible instead of implied.
+//
+// ⚠ YEAR 0 IS THE OPENING POSITION, AND IT IS A REAL ENGINE YEAR RATHER THAN A
+// ZERO. The pre-game runs through processYear and numbers its last year 0 —
+// which is why an opening surplus, an opening roster and an opening reserve
+// exist at all — so all three charts have a genuine value there, losses
+// included. It is POSTED like any other year (see useSessionGame): the host
+// holds a seed and never runs the engine, and each team's opening differs
+// anyway, because it is the sum over the lines that team chose.
+//
 // ⚠ COLOUR FOLLOWS THE TEAM, NOT ITS POSITION IN THE CHART. The hue is taken by
 // the team's index in the room's team list, so switching the line view — which
 // changes WHICH teams have a line — never repaints the survivors. A host who has
@@ -402,24 +417,21 @@ export default function HostChartsTab({ room }: Props) {
   const linesInPlay = LINE_ORDER.filter(l => room.teams.some(t => t.lines.includes(l)));
   const effectiveView: LineView = view !== 'pool' && !linesInPlay.includes(view) ? 'pool' : view;
 
-  // Results describe a year already played, so the newest one there can be is
-  // the year before the room's current one — the same year the Teams tab shows.
-  const lastYear = room.currentYear - 1;
+  // ⚠ THE AXIS IS THE GAME, NOT THE PROGRESS. A five-year game draws 0 through
+  // 5 from the moment the room is created. An axis that grew a year at a time
+  // rescaled every line on every advance — the same team's surplus moved on
+  // screen because somebody else's year had landed — and it hid how much game
+  // was left. Fixed at setup, a line that stops early leaves VISIBLE empty
+  // space, which is the honest rendering of a team that has not reported.
   const years: number[] = [];
-  for (let y = 1; y <= lastYear; y++) years.push(y);
+  for (let y = 0; y <= room.yearCount; y++) years.push(y);
+  // The last year anybody could have posted — what "behind" is measured against.
+  const lastPlayable = room.currentYear - 1;
 
   if (room.teams.length === 0) {
     return (
       <p data-testid="charts-empty" className="rounded-xl border border-slate-200 bg-white px-5 py-8 text-center text-sm text-slate-400">
         No teams have joined yet.
-      </p>
-    );
-  }
-
-  if (years.length === 0) {
-    return (
-      <p data-testid="charts-no-year" className="rounded-xl border border-slate-200 bg-white px-5 py-8 text-center text-sm text-slate-400">
-        No year has been completed yet. The charts start once the first year is reported.
       </p>
     );
   }
@@ -465,10 +477,14 @@ export default function HostChartsTab({ room }: Props) {
                 nothing reported yet
               </span>
             )}
-            {s.state.kind === 'drawn' && s.state.years[s.state.years.length - 1] !== lastYear && (
-              // PENDING, and the line stopping is only half of saying so.
+            {s.state.kind === 'drawn' && s.state.years[s.state.years.length - 1] < lastPlayable && (
+              // PENDING, and the line stopping is only half of saying so. "Through
+              // year 0" would be a strange way to say a team has played nothing,
+              // so the opening-only case says that instead.
               <span data-testid={`chart-pending-${s.team.name}`} className="text-amber-600">
-                through year {s.state.years[s.state.years.length - 1]}
+                {s.state.years[s.state.years.length - 1] === 0
+                  ? 'opening position only'
+                  : `through year ${s.state.years[s.state.years.length - 1]}`}
               </span>
             )}
           </span>

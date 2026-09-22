@@ -143,6 +143,14 @@ export function useSessionGame(
     // both callers at once, which is the only way to fix it without the session
     // assembling a GameState differently from solo.
     setInitialMembers(openingRoster(poolState, settings.activeLines));
+
+    // ⚠ THE OPENING POSITION IS A REAL ENGINE YEAR, WHICH IS WHY IT CAN BE
+    // POSTED AT ALL. runPriorHistory plays the pre-game through processYear and
+    // numbers its last year 0; that year's ResultSet is where the opening
+    // surplus, the opening roster and the opening reserve come from. So the
+    // chart's year-0 point is not assembled from three loose fields — it is the
+    // same summarize() over the same shape, one year earlier.
+    return priorHistory.find(r => r.yearNumber === 0) ?? null;
   }, []);
 
   // ---- build once per room identity ---------------------------------------
@@ -155,15 +163,32 @@ export function useSessionGame(
     // the screen — runPriorHistory plays three years through the real engine.
     const id = window.setTimeout(() => {
       try {
-        build(room, myLines!);
+        const opening = build(room, myLines!);
         setPhase('ready');
+
+        // ⚠ POSTED ONCE, AT BUILD, BECAUSE THE HOST CANNOT DERIVE IT. The room
+        // holds a seed and no engine; the host never runs the simulation, and
+        // the opening position is not even the same for every team, since each
+        // team's is the sum over the LINES IT CHOSE. Either the host runs a
+        // pre-game per team's line set — a second path computing what the teams
+        // already computed — or the teams post what they built. This is the
+        // second, and it is the same summarize() the played years use.
+        //
+        // Best-effort, like the year posts: a game that is built and playable
+        // must not fail because a scoreboard write did not land, and a reload
+        // re-posts the identical entry over itself.
+        if (opening && token && you?.role === 'player') {
+          void sessionTransport()
+            .submit({ code, token, yearNumber: 0, result: summarize(opening, myLines!) })
+            .catch(() => { /* the opening point is missing until the next build; the game is not */ });
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         setPhase('failed');
       }
     }, 0);
     return () => window.clearTimeout(id);
-  }, [room, buildKey, build, myLines]);
+  }, [room, buildKey, build, myLines, code, token, you?.role]);
 
   // ---- process when the room's year moves ahead of ours --------------------
   useEffect(() => {

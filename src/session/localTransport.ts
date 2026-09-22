@@ -157,11 +157,17 @@ function saveRoom(room: RoomRecord): void {
 
 const LINE_ORDER: CoverageLine[] = ['WC', 'GL', 'Property'];
 
-function highestReported(t: TeamRecord): number | null {
+/**
+ * ⚠ THE HIGHEST PLAYED YEAR, WHICH IS NOT THE HIGHEST KEY. Year 0 is the
+ * opening position, posted when a team builds its game and before it has
+ * decided anything; counting it would report a team that has played nothing as
+ * having reported.
+ */
+function highestPlayedYear(t: TeamRecord): number | null {
   let best: number | null = null;
   for (const k of Object.keys(t.resultsByYear)) {
     const y = Number(k);
-    if (Number.isFinite(y) && (best === null || y > best)) best = y;
+    if (Number.isFinite(y) && y >= 1 && (best === null || y > best)) best = y;
   }
   return best;
 }
@@ -186,7 +192,7 @@ function teamView(t: TeamRecord, currentYear: number): TeamView {
     joined: t.joined,
     lockedYear: t.lockedYear,
     locked: t.lockedYear === currentYear,
-    resultYear: highestReported(t),
+    resultYear: highestPlayedYear(t),
     // The scoreboard the host's Teams and Charts tabs read. A year with no entry
     // is a year not reported — which is a DIFFERENT state from a line the team
     // does not write, and the two must not be allowed to look alike.
@@ -247,9 +253,10 @@ function callerView(role: CallerRole, team: TeamRecord | null): CallerView {
   if (Object.keys(team.decisionsByYear).length > 0) {
     view.decisionsByYear = { ...team.decisionsByYear };
   }
-  if (Object.keys(team.resultsByYear).length > 0) {
-    view.lastResult = team.resultsByYear[String(highestReported(team))];
-    view.lastResultYear = highestReported(team) ?? undefined;
+  const played = highestPlayedYear(team);
+  if (played !== null) {
+    view.lastResult = team.resultsByYear[String(played)];
+    view.lastResultYear = played;
   }
   return view;
 }
@@ -519,6 +526,16 @@ export class LocalSessionTransport implements SessionTransport {
           throw new SessionError(
             'WRONG_YEAR',
             `Cannot post a result for year ${req.yearNumber}; the room is on year ${room.currentYear}.`,
+          );
+        }
+        // ⚠ YEAR 0 IS ALLOWED AND IS THE OPENING POSITION; BELOW IT IS NOT. The
+        // pre-game's earlier years built that position and are not part of the
+        // session — a room that accepted them would be holding scaffolding it
+        // has no screen for.
+        if (req.yearNumber < 0) {
+          throw new SessionError(
+            'WRONG_YEAR',
+            `Year ${req.yearNumber} is before the opening position; results start at year 0.`,
           );
         }
         // ⚠ RECORDED AGAINST ITS YEAR. A re-post of the same year (which a

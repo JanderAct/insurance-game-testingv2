@@ -177,6 +177,15 @@ export interface TeamYearFigures {
  * distinction the whole Teams tab turns on.
  */
 export interface TeamYearSummary {
+  /**
+   * ⚠ 0 IS A LEGITIMATE YEAR HERE, AND IT IS THE OPENING POSITION. The pre-game
+   * runs real engine years before year 1 — that is why an opening reserve, an
+   * opening roster and an opening surplus exist at all — and its last year is
+   * numbered 0. Posting it is what lets a chart start where the game starts
+   * rather than at the first decision. A negative year is refused: the earlier
+   * pre-game years are the scaffolding that built the opening position, not part
+   * of the session the host is running.
+   */
   yearNumber: number;
   calendarYear: number;
   /** The pooled row — the aggregate, meaning what it means everywhere else. */
@@ -209,8 +218,16 @@ export interface TeamView {
   // Locked for the room's CURRENT year specifically — what the host's table and
   // the advance control actually key on.
   locked: boolean;
-  // The HIGHEST year this team has posted a result for, or null. A convenience
-  // over resultsByYear for the Game Setup tab's Reported column.
+  /**
+   * The highest PLAYED year this team has posted a result for, or null — a
+   * convenience over resultsByYear for the Game Setup tab's Reported column.
+   *
+   * ⚠ IT IGNORES YEAR 0, AND THE ASYMMETRY IS THE POINT. The opening position
+   * is posted as year 0 the moment a team builds its game, before anybody has
+   * decided anything. It belongs on a chart's x-axis and it is NOT a year the
+   * team has played, so a host's "Reported: year 0" against a team that has done
+   * nothing yet would be a tick for turning up.
+   */
   resultYear: number | null;
   /**
    * ⚠ THE SCOREBOARD, AND THE HOST IS MEANT TO SEE IT. The redaction rule next
@@ -225,6 +242,8 @@ export interface TeamView {
    * different field: one slot per team can serve a table of the last completed
    * year and cannot serve a line over time, because the host's record only ever
    * held the most recent year. Keyed by year as a STRING, per JSON.
+   *
+   * ⚠ YEAR "0" IS THE OPENING POSITION, NOT A PLAYED YEAR. See TeamYearSummary.
    */
   resultsByYear?: Record<string, TeamYearSummary>;
 }
