@@ -133,6 +133,17 @@ export function isSessionError(e: unknown): e is SessionError {
  *   selectedFundingConfidenceLevel <- 'fundingConfidenceLevel' (the metric reads
  *                                     this field; the key is named for the
  *                                     decision, the field for what was selected)
+ *   netUltimateLoss                <- 'netUltimateLoss' ("Net Ultimate Loss +
+ *                                     LAE"), added for the Charts tab
+ *
+ * ⚠ netUltimateLoss AND NOT netIncurredLoss, AND THE NEAR MISS IS WORTH
+ * RECORDING. netIncurredLoss is a real ResultSet field and is NOT in
+ * RESULT_METRICS — picking it would have been grossPremium a second time, a
+ * figure published to a second party from a list nobody curated. Of the two,
+ * netUltimateLoss is also the one the chart wants: it is this year's losses
+ * after reinsurance recovery, which is what reaches surplus, where
+ * netIncurredLoss folds in prior-year reserve development and so moves for
+ * reasons that did not happen this year.
  *
  * ⚠ AND poolPremium REPLACES grossPremium, WHICH WAS NEVER IN THE LIST. The
  * first version of this summary posted grossPremium — a real ResultSet field,
@@ -146,6 +157,7 @@ export interface TeamYearFigures {
   poolPremium: number;
   activeMembers: number;
   selectedFundingConfidenceLevel: number;
+  netUltimateLoss: number;
 }
 
 /**
@@ -197,7 +209,8 @@ export interface TeamView {
   // Locked for the room's CURRENT year specifically — what the host's table and
   // the advance control actually key on.
   locked: boolean;
-  // The last year this team posted a result for, or null.
+  // The HIGHEST year this team has posted a result for, or null. A convenience
+  // over resultsByYear for the Game Setup tab's Reported column.
   resultYear: number | null;
   /**
    * ⚠ THE SCOREBOARD, AND THE HOST IS MEANT TO SEE IT. The redaction rule next
@@ -206,8 +219,14 @@ export interface TeamView {
    * processed is one render away from projecting it. A posted RESULT is the
    * opposite: it is the thing the room exists to compare, it describes a year
    * already played, and the host's Teams tab is where it is read.
+   *
+   * ⚠ EVERY YEAR, NOT THE LATEST ONE, AND IT WAS A SLOT UNTIL THE CHARTS TAB
+   * NEEDED OTHERWISE. This is the same defect the decision history fixed, in a
+   * different field: one slot per team can serve a table of the last completed
+   * year and cannot serve a line over time, because the host's record only ever
+   * held the most recent year. Keyed by year as a STRING, per JSON.
    */
-  lastResult?: TeamYearSummary;
+  resultsByYear?: Record<string, TeamYearSummary>;
 }
 
 export interface RoomView {

@@ -32,6 +32,7 @@ function figuresOf(r: LineResultSet): TeamYearFigures {
     poolPremium: r.poolPremium,
     activeMembers: r.activeMembers,
     selectedFundingConfidenceLevel: r.selectedFundingConfidenceLevel,
+    netUltimateLoss: r.netUltimateLoss,
   };
 }
 

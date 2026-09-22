@@ -14,6 +14,7 @@ import { type HostTabId } from './hostTabs';
 import HostCreateScreen from './HostCreateScreen';
 import HostRoomScreen from './HostRoomScreen';
 import HostTeamsTab from './HostTeamsTab';
+import HostChartsTab from './HostChartsTab';
 import { useRoom } from '../client/useRoom';
 import { loadActive, loadHeld } from '../client/identity';
 
@@ -43,6 +44,11 @@ export default function HostScreen({ code }: Props) {
       {activeTab === 'teams' && (
         room
           ? <HostTeamsTab room={room} />
+          : <p className="text-sm text-slate-400">Loading room…</p>
+      )}
+      {activeTab === 'charts' && (
+        room
+          ? <HostChartsTab room={room} />
           : <p className="text-sm text-slate-400">Loading room…</p>
       )}
     </HostShell>

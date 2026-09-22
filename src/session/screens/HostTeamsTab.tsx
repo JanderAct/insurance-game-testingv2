@@ -63,8 +63,12 @@ type RowState =
 function rowState(team: TeamView, view: LineView, reportingYear: number): RowState {
   if (view !== 'pool' && !team.lines.includes(view)) return { kind: 'absent' };
 
-  const posted = team.lastResult;
-  if (!posted || posted.yearNumber !== reportingYear) return { kind: 'pending' };
+  // ⚠ THE EXACT YEAR, NOT "THE LATEST ONE, IF IT HAPPENS TO BE THIS YEAR". The
+  // room keeps every year now, so this asks for the year the table is showing
+  // and gets it or nothing. The old form could only ever answer for the newest
+  // year, which was the same question only while the record held one slot.
+  const posted = team.resultsByYear?.[String(reportingYear)];
+  if (!posted) return { kind: 'pending' };
 
   const figures = view === 'pool' ? posted.pool : posted.byLine[view];
   // A team that writes the line but whose posted summary has no slice for it is

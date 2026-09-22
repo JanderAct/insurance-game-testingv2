@@ -24,7 +24,7 @@ import { LocalSessionTransport } from '../../src/session/localTransport';
 import { isSessionError, type SessionErrorCode, type JsonValue } from '../../src/session/contract';
 import type { CoverageLine } from '../../src/types/simulation';
 import { decisionsForYear, governingYear } from '../../src/session/client/decisions';
-import type { TeamYearFigures, TeamYearSummary } from '../../src/session/contract';
+import type { RoomView, TeamYearFigures, TeamYearSummary } from '../../src/session/contract';
 
 // A posted scoreboard row. Every field is a RESULT_METRICS key — see
 // TeamYearFigures in the contract.
@@ -34,6 +34,7 @@ const figures = (surplus: number): TeamYearFigures => ({
   poolPremium: 4_000_000,
   activeMembers: 41,
   selectedFundingConfidenceLevel: 0.6,
+  netUltimateLoss: 3_300_000,
 });
 const summaryFor = (year: number, surplus: number, lines: CoverageLine[] = ['WC']): TeamYearSummary => ({
   yearNumber: year,
@@ -317,9 +318,10 @@ async function main(): Promise<void> {
     // redacted from the host (asserted below); a posted result is the thing the
     // room exists to compare, and the Teams tab is where it is read.
     const asHost = await t.read({ code, token: hostToken });
-    eq(asHost.room.teams[0].lastResult?.pool.endingSurplus, 1234, "the host's table carries a posted result");
-    eq(asHost.room.teams[0].lastResult?.byLine.WC?.endingSurplus, 1234, 'and carries the per-line slice it needs');
-    eq(asHost.room.teams[0].lastResult?.byLine.GL, undefined,
+    const held = (r: RoomView, y: number) => r.teams[0].resultsByYear?.[String(y)];
+    eq(held(asHost.room, 1)?.pool.endingSurplus, 1234, "the host's table carries a posted result");
+    eq(held(asHost.room, 1)?.byLine.WC?.endingSurplus, 1234, 'and carries the per-line slice it needs');
+    eq(held(asHost.room, 1)?.byLine.GL, undefined,
        'a line the team does not write has NO entry — absent, not zero');
 
     await rejects(
@@ -330,6 +332,50 @@ async function main(): Promise<void> {
       t.submit({ code, token: p.teamToken, yearNumber: 2 }),
       'INVALID_REQUEST', 'a submit carrying neither decisions nor a result is refused',
     );
+  }
+
+  // ---- a result history, not a slot ------------------------------------
+  //
+  // ⚠ THIS IS THE DECISIONS BLOCK ABOVE ASKED OF THE OTHER FIELD, AND THE
+  // ANSWER FOR A SKIPPED YEAR IS THE OPPOSITE ONE. Decisions carry forward
+  // because a team that does not lock still plays the year on its last choices.
+  // A result does NOT: a year nobody posted has no result, and inventing one by
+  // carrying the previous year forward would draw a flat line on the chart
+  // where a gap belongs. Absent must stay absent.
+  {
+    const t = transport();
+    // Its own room again: four played years, and the shared fixture is three.
+    const { code, hostToken } = await t.createRoom({
+      seed: 'MAMC6EA4', yearCount: 6, startingYear: 2026,
+      eventName: 'Results', expectedTeams: 1, shocks: [],
+    });
+    const p = await t.join({ code, teamName: TEAMS[0], role: 'player', lines: WC });
+
+    // Play through four years, posting a DIFFERENT surplus for 1, 2 and 4.
+    for (const y of [1, 2, 3, 4]) {
+      await t.submit({ code, token: p.teamToken, yearNumber: y, decisions: decisionsFor(y, `y${y}`) });
+      await t.advance({ code, token: hostToken });
+      if (y !== 3) {
+        await t.submit({ code, token: p.teamToken, yearNumber: y, result: summaryFor(y, y * 1000) });
+      }
+    }
+
+    const seen = await t.read({ code, token: hostToken });
+    const byYear = seen.room.teams[0].resultsByYear;
+    eq(Object.keys(byYear ?? {}).sort().join(','), '1,2,4', 'every posted year is kept, and only those');
+    eq(byYear?.['1']?.pool.endingSurplus, 1000, 'year 1 holds year 1, not the newest value');
+    eq(byYear?.['2']?.pool.endingSurplus, 2000, 'year 2 holds its own');
+    eq(byYear?.['3'], undefined, 'a year nobody posted stays ABSENT — it does not carry forward');
+    eq(byYear?.['4']?.pool.endingSurplus, 4000, 'year 4 holds its own');
+    eq(seen.room.teams[0].resultYear, 4, 'resultYear is the HIGHEST posted year');
+
+    // A re-post of an earlier year — which is exactly what a reloaded tab does —
+    // replaces that year and disturbs nothing else.
+    await t.submit({ code, token: p.teamToken, yearNumber: 2, result: summaryFor(2, 2222) });
+    const after = await t.read({ code, token: hostToken });
+    eq(after.room.teams[0].resultsByYear?.['2']?.pool.endingSurplus, 2222, 'a re-post replaces that year');
+    eq(after.room.teams[0].resultsByYear?.['4']?.pool.endingSurplus, 4000, 'and leaves the later year alone');
+    eq(after.room.teams[0].resultYear, 4, 'and does not move the highest posted year backwards');
   }
 
   // ---- redaction -------------------------------------------------------

@@ -79,8 +79,8 @@ interface TeamRecord {
   lockedYear: number | null;
   // Year number (as a string key, per JSON) -> that year's submitted decisions.
   decisionsByYear: Record<string, JsonValue>;
-  result: TeamYearSummary | null;
-  resultYear: number | null;
+  // Year number (as a string key, per JSON) -> that year's posted summary.
+  resultsByYear: Record<string, TeamYearSummary>;
 }
 
 interface ViewerRecord {
@@ -157,6 +157,15 @@ function saveRoom(room: RoomRecord): void {
 
 const LINE_ORDER: CoverageLine[] = ['WC', 'GL', 'Property'];
 
+function highestReported(t: TeamRecord): number | null {
+  let best: number | null = null;
+  for (const k of Object.keys(t.resultsByYear)) {
+    const y = Number(k);
+    if (Number.isFinite(y) && (best === null || y > best)) best = y;
+  }
+  return best;
+}
+
 function sameLines(a: CoverageLine[], b: CoverageLine[]): boolean {
   if (a.length !== b.length) return false;
   const sa = [...a].sort(), sb = [...b].sort();
@@ -177,10 +186,11 @@ function teamView(t: TeamRecord, currentYear: number): TeamView {
     joined: t.joined,
     lockedYear: t.lockedYear,
     locked: t.lockedYear === currentYear,
-    resultYear: t.resultYear,
-    // The scoreboard the host's Teams tab reads. Undefined until the team has
-    // posted a year — which is a DIFFERENT state from a line it does not write.
-    lastResult: t.result ?? undefined,
+    resultYear: highestReported(t),
+    // The scoreboard the host's Teams and Charts tabs read. A year with no entry
+    // is a year not reported — which is a DIFFERENT state from a line the team
+    // does not write, and the two must not be allowed to look alike.
+    resultsByYear: Object.keys(t.resultsByYear).length > 0 ? { ...t.resultsByYear } : undefined,
   };
 }
 
@@ -237,9 +247,9 @@ function callerView(role: CallerRole, team: TeamRecord | null): CallerView {
   if (Object.keys(team.decisionsByYear).length > 0) {
     view.decisionsByYear = { ...team.decisionsByYear };
   }
-  if (team.result !== null) {
-    view.lastResult = team.result;
-    view.lastResultYear = team.resultYear ?? undefined;
+  if (Object.keys(team.resultsByYear).length > 0) {
+    view.lastResult = team.resultsByYear[String(highestReported(team))];
+    view.lastResultYear = highestReported(team) ?? undefined;
   }
   return view;
 }
@@ -464,8 +474,7 @@ export class LocalSessionTransport implements SessionTransport {
         joined: true,
         lockedYear: null,
         decisionsByYear: {},
-        result: null,
-        resultYear: null,
+        resultsByYear: {},
       };
       room.teams.push(created);
       saveRoom(room);
@@ -512,8 +521,9 @@ export class LocalSessionTransport implements SessionTransport {
             `Cannot post a result for year ${req.yearNumber}; the room is on year ${room.currentYear}.`,
           );
         }
-        team.result = req.result;
-        team.resultYear = req.yearNumber;
+        // ⚠ RECORDED AGAINST ITS YEAR. A re-post of the same year (which a
+        // reloaded tab does) replaces that year and leaves every other alone.
+        team.resultsByYear[String(req.yearNumber)] = req.result;
       }
 
       saveRoom(room);
