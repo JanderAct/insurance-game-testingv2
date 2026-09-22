@@ -138,15 +138,121 @@ const MIN_MOVED_SHARE = 0.50;
  */
 const MAX_NULL_SHARE = 0.02;
 /**
- * Satisfaction points per member-year.
+ * THE DRIFT BOUND, AS A SHARE OF WHAT ONE FUNDING STOP IS WORTH.
  *
- * ⚠ AND IT NEEDS SAMPLE, WHICH IS WHY GAMES DEFAULTS TO 16. Under the convex
- * form this mean is dominated by rare large-gap years, so the estimate is far
- * noisier than the linear one was: WC read -0.0364 at 4 games and -0.0115 at 12
- * on the same seed family. A gate run thin here reports a drift the model does
- * not have.
+ * ⚠ THIS REPLACES MAX_DEFAULTS_DRIFT = 0.020 POINTS PER MEMBER-YEAR, AND THE
+ * OLD SHAPE WAS WRONG IN TWO SEPARATE WAYS.
+ *
+ * (1) It was per YEAR when what a player experiences is the total movement over
+ *     a GAME. The same 0.020 permits 0.04 over a 3-year game and 0.18 over a
+ *     10-year one — one constant, five times the consequence, and the game
+ *     length is a slider (SetupPage: min 3, max 10, ships at 5).
+ * (2) It was an absolute number of points, so it went stale the moment the
+ *     points scale moved. It did: at 1x GL read +0.0070/yr and PASSED, at 3x
+ *     the same defect read +0.0225/yr and FAILED. The verdict tracked the
+ *     display scale, not the model. That is the relative-versus-absolute rule
+ *     in docs/WORKING_PRACTICES.md, and this was the fourth constant in three
+ *     commits to go stale in exactly that shape.
+ *
+ * SO THE BOUND IS NOW A RATIO, AND BOTH SIDES ARE MEASURED IN THE SAME RUN.
+ * Drift carries no information — it is the scoreboard moving while the player
+ * does nothing. The thing it must never be mistakable for is a decision, and
+ * the finest decision available is ONE STOP on the funding slider. So:
+ *
+ *     |total movement over a game|  <=  SHARE  x  (one funding stop)
+ *
+ * WHERE 0.25 COMES FROM, AND IT IS NOT A ROUND NUMBER PICKED FOR BEING ROUND.
+ * At a quarter, you would need four games' worth of drift to fabricate the
+ * smallest choice a player can make, so drift stays visually subordinate to any
+ * real decision. Measured, the threshold sits in a wide empty gap rather than on
+ * a knife edge — the worst PASSING reading across both scales and all three
+ * horizons is 19.7% (WC at 1x, H=5) and the worst FAILING one is 30.7% (GL at
+ * 1x, H=5). Anything from about 0.21 to 0.30 gives the same verdicts.
+ *
+ * AND THE RATIO IS SCALE-INVARIANT, WHICH IS THE WHOLE POINT: both sides scale
+ * together, so GL now fails at 1x AND 3x alike and WC passes at both. Under the
+ * old constant GL's verdict flipped with the scale.
+ *
+ * ⚠ IT STILL NEEDS SAMPLE, WHICH IS WHY GAMES DEFAULTS TO 24. Under the convex
+ * form the per-year mean is dominated by rare large-gap years: WC read -0.0364
+ * at 4 games and -0.0115 at 12 on the same seed family. The per-game total is
+ * better behaved than the per-year mean, but the denominator is a difference of
+ * two arms and carries its own noise. A gate run thin here reports a drift the
+ * model does not have.
  */
-const MAX_DEFAULTS_DRIFT = 0.020;
+const MAX_GAME_DRIFT_SHARE = 0.25;
+/**
+ * THE HORIZONS, AND THE BOUND CHECKS ALL OF THEM RATHER THAN PICKING ONE.
+ *
+ * Game length is a player setting (3 to 10, ships at 5), so a per-game bound has
+ * to say which game. Neither obvious answer survives measurement:
+ *
+ *   - READING THE CONFIGURED LENGTH makes the verdict depend on an env var. A
+ *     green run at YEARS=5 would say nothing about the 10-year game, and the
+ *     failure would be silent.
+ *   - FIXING THE MAXIMUM looks conservative and is not. The share GROWS with
+ *     horizon for a slide (GL: 16.3% -> 34.0% -> 83.0%) but SHRINKS for a
+ *     transient (WC: 16.9% -> 17.2% -> 6.7%). Checking only H=10 systematically
+ *     under-weights defects that peak early and decay.
+ *
+ * These are nested inside one run, so checking all three is free. Horizons above
+ * YEARS are skipped rather than extrapolated: drift is not linear in the year
+ * (WC's is a decaying transient), so scaling a short run up would invent a
+ * number.
+ */
+const GAME_LENGTH_HORIZONS = [3, 5, 10];
+/**
+ * THE DENOMINATOR'S ARMS. One stop is taken as the 0.70-to-0.85 span divided by
+ * the three stops between them, rather than by measuring a single adjacent pair.
+ * Two reasons: the span uses all the band's information and is far less noisy
+ * than one pair, and the per-stop value is strongly convex in the funding level
+ * (at 3x, H=10: 0.70->0.75 is worth 0.208 points, 0.80->0.85 is worth 0.376), so
+ * any single pair would be an arbitrary choice among values differing by 1.8x.
+ *
+ * ⚠ THE BAND IS 70-85 BECAUSE THAT IS WHERE PLAYERS ACTUALLY FUND, AND THE
+ * EARLIER SWEEP'S ARMS WERE BOTH OUTSIDE IT. Expected sits ten points below the
+ * band and the old aggressive arm sat above it, so a separation measured between
+ * them was between two players who do not exist. Note these are the SELECTABLE
+ * stops: SLIDER_RANGES.fundingConfidenceLevel steps by 0.05 and WC's own range
+ * has stops at the same places, so 0.72 and 0.83 are not reachable on any line.
+ */
+const BAND_LOW = 0.70;
+const BAND_HIGH = 0.85;
+const BAND_STOPS = 3;
+/**
+ * THE DENOMINATOR RUNS ON LESS SAMPLE THAN THE DRIFT, AND THE FIGURE IS MEASURED
+ * RATHER THAN GUESSED. The two band arms are PAIRED — same seed, same instance,
+ * differing only in the funding level — so nearly all the game-to-game variance
+ * cancels. Measured per-game SD of the one-stop value at 3x is 0.017 to 0.093
+ * against values of 0.245 to 0.458, and the 8-game estimate lands within about
+ * 2% of the 24-game one on every row that decides a verdict (GL at H=5: 0.2735
+ * against 0.2795; at H=10: 0.2432 against 0.2451).
+ *
+ * That is comfortably enough, because no verdict is near the bound. The closest
+ * readings on either side are WC at 1x H=5 (19.7%, passing) and GL at 1x H=5
+ * (30.7%, failing), both about 25% clear of the 25% threshold, against a
+ * denominator whose 95% half-width at 8 games is 4.7% to 14.1%.
+ *
+ * ⚠ AND THE REASON TO CARE IS RUNTIME, NOT TASTE. Measured on one machine, same
+ * session, back to back: this gate WITHOUT the band arms runs 77s; with them at
+ * the full 24 games it runs 103s, past the 88s FAST tier threshold; with them at
+ * 8 it runs 83s. So the full sample would cost this gate its place in the
+ * every-commit tier to buy precision no verdict here needs.
+ *
+ * ⚠ AND WHILE MEASURING THAT, A SEPARATE PROBLEM SURFACED THAT THIS COMMIT DID
+ * NOT CAUSE AND DOES NOT FIX. scripts/gate-timings.json records this gate at
+ * 56s. It was ALREADY 77s before the band arms existed — 21s stale, and 11s from
+ * the threshold, with nothing in the tree saying so. The manifest check reads the
+ * RECORDED figure, so it has been passing on a number that stopped being true.
+ * At 83s the margin is now 5s: the next addition here pushes it out of FAST, and
+ * the manifest check will not be the thing that notices. Re-recording needs
+ * `--all --record-timings`, i.e. a full sweep, which was not run for this commit.
+ *
+ * If a future change makes the denominator noisy (a wider band, an unpaired arm,
+ * a per-stop value that is no longer convex-but-smooth), re-measure before
+ * raising this rather than raising it on suspicion.
+ */
+const DENOM_GAMES = Math.min(8, GAMES);
 /** The priced-up arm: fundingAtExpected off, confidence climbing to the cap. */
 const RAMP_START = 0.60;
 const RAMP_STEP = 0.035;
@@ -267,6 +373,36 @@ function playDecision(g: number, from: number): LineYear[] {
     if (y >= from) {
       for (const l of LINES) { d.byLine[l].fundingAtExpected = false; d.byLine[l].fundingConfidenceLevel = ONE_STOP; }
     }
+    const p = processYear(gs, d);
+    gs = { ...gs, currentYearNumber: y + 1, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result] };
+    for (const lr of p.lineResults) {
+      const x = lr.result as never as Record<string, unknown>;
+      out.push({
+        line: lr.line as string, year: y,
+        members: x.memberList as Member[],
+        moves: (x.memberSatisfactionMoves as SatisfactionMove[]) ?? [],
+      });
+    }
+  }
+  return out;
+}
+
+/** A funding level HELD from year 1. The two band arms the drift bound divides
+ *  by — see MAX_GAME_DRIFT_SHARE. Held rather than ramped because the quantity
+ *  wanted is what a settled choice is worth, not what changing one costs. */
+function playHeld(g: number, conf: number): LineYear[] {
+  const id = `MS${g}`;
+  const instance = generateGameInstance(id, 61_000_000 + g * 6779);
+  const setup = { poolName: 'S', gameLength: YEARS, startingYear: 2026, instanceId: id, activeLines: LINES };
+  const { poolState, priorHistory } = runPriorHistory(instance, setup as never);
+  let gs: GameState = {
+    setup: setup as never, instance, currentYearNumber: 1, isStarted: true, isComplete: false,
+    poolState, lockedResults: [], currentDecisions: defaultDecisionSet(1), priorHistory,
+  };
+  const out: LineYear[] = [];
+  for (let y = 1; y <= YEARS; y++) {
+    const d = defaultDecisionSet(y) as DecisionSet;
+    for (const l of LINES) { d.byLine[l].fundingAtExpected = false; d.byLine[l].fundingConfidenceLevel = conf; }
     const p = processYear(gs, d);
     gs = { ...gs, currentYearNumber: y + 1, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result] };
     for (const lr of p.lineResults) {
@@ -527,36 +663,88 @@ console.log('\n--- 2. nothing reads it (static) ---');
   console.log(`  ${hits.length} files, ${unexpected.length} unexpected  ${unexpected.length === 0 && missing.length === 0 ? 'OK' : 'FAIL'}`);
 }
 
-// --- 3. drift at defaults ---------------------------------------------------
-console.log('\n--- 3. drift at defaults ---');
-console.log('  MEASURED ON THE SHIPPED SERIES: each member\'s year-over-year change in the');
-console.log('  stored field, on members present in both years. The engine\'s own per-member');
-console.log('  moves are read off the result for the decomposition, so nothing here is');
-console.log('  re-derived and nothing carries a caveat.');
-for (const line of LINES) {
-  const deltas: number[] = [];
-  for (const run of baseline) {
-    const prev = new Map<string, number>();
-    for (const ly of run.filter(r => r.line === line)) {
-      for (const m of ly.members) {
-        const was = prev.get(m.id);
-        if (was !== undefined) deltas.push(m.satisfaction - was);
-        prev.set(m.id, m.satisfaction);
+// --- 3. drift at defaults, per game, against what one funding stop is worth --
+console.log('\n--- 3. drift at defaults, over a GAME, as a share of one funding stop ---');
+console.log('  MEASURED ON THE SHIPPED SERIES: each member\'s movement from year 1 to the');
+console.log('  horizon in the stored field, on members present in both years. The engine\'s');
+console.log('  own per-member moves are read off the result for the decomposition, so');
+console.log('  nothing here is re-derived and nothing carries a caveat.');
+console.log('');
+console.log('  ⚠ MEASURED AT DEFAULTS, AND THAT IS THE RIGHT CONFIGURATION, NOT AN OVERSIGHT.');
+console.log('  Defaults is the only state with no repricing step, so it is the only one where');
+console.log('  this estimator is clean. Held INSIDE the band the same estimator reads WC at');
+console.log('  53% of a stop over five years and 139% over ten — all of it recovery from a');
+console.log('  one-time step the player CHOSE, which a 16-year run shows decaying to +0.0146');
+console.log('  a year by years 11-16. Re-pointing the bound into the band would fail a line');
+console.log('  that is fine, and would fail the game as shipped at 1x.');
+{
+  const held = new Map<number, LineYear[][]>();
+  for (const conf of [BAND_LOW, BAND_HIGH]) {
+    held.set(conf, Array.from({ length: DENOM_GAMES }, (_, g) => playHeld(g, conf)));
+  }
+  /** Mean satisfaction at year H — the level the two band arms are separated on. */
+  const levelAt = (runs: LineYear[][], line: string, H: number) => {
+    const v: number[] = [];
+    for (const run of runs) {
+      for (const r of run.filter(x => x.line === line && x.year === H)) v.push(...r.members.map(m => m.satisfaction));
+    }
+    return mean(v);
+  };
+  /** Mean over members of sat[H] - sat[1]. The total movement a player sees. */
+  const totalMove = (runs: LineYear[][], line: string, H: number) => {
+    const v: number[] = [];
+    for (const run of runs) {
+      const rows = run.filter(r => r.line === line);
+      const first = new Map(rows.filter(r => r.year === 1)
+        .flatMap(r => r.members.map(m => [m.id, m.satisfaction] as const)));
+      for (const r of rows.filter(r => r.year === H)) {
+        for (const m of r.members) { const f = first.get(m.id); if (f !== undefined) v.push(m.satisfaction - f); }
+      }
+    }
+    return { m: mean(v), se: sd(v) / Math.sqrt(v.length) };
+  };
+
+  const horizons = GAME_LENGTH_HORIZONS.filter(H => H <= YEARS);
+  if (horizons.length < GAME_LENGTH_HORIZONS.length) {
+    console.log(`  ⚠ YEARS=${YEARS} so only horizons ${horizons.join(', ')} are checked. The rest are `
+      + `SKIPPED, not extrapolated — drift is not linear in the year.`);
+  }
+  console.log(`\n  one funding stop = (${BAND_LOW} arm - ${BAND_HIGH} arm) / ${BAND_STOPS}, `
+    + `measured in this run at this scale, ${DENOM_GAMES} paired games`);
+  console.log('  line      horizon   total move   one stop    share   bound   verdict');
+  for (const line of LINES) {
+    for (const H of horizons) {
+      const oneStop = (levelAt(held.get(BAND_LOW)!, line, H) - levelAt(held.get(BAND_HIGH)!, line, H)) / BAND_STOPS;
+      const t = totalMove(baseline, line, H);
+      const share = Math.abs(t.m) / oneStop;
+      const ok = share <= MAX_GAME_DRIFT_SHARE;
+      console.log(`  ${line.padEnd(9)} ${String(H).padStart(4)}yr  `
+        + `${((t.m >= 0 ? '+' : '') + t.m.toFixed(3)).padStart(10)}  ${oneStop.toFixed(3).padStart(9)}  `
+        + `${(share * 100).toFixed(1).padStart(6)}%  ${(MAX_GAME_DRIFT_SHARE * 100).toFixed(0).padStart(4)}%   ${ok ? 'OK' : 'FAIL'}`);
+      if (!ok) {
+        failures.push(`${line}: over a ${H}-year game at defaults the scoreboard moves `
+          + `${t.m.toFixed(3)} points by itself, which is ${(share * 100).toFixed(0)}% of the `
+          + `${oneStop.toFixed(3)} points one funding stop is worth — past the `
+          + `${(MAX_GAME_DRIFT_SHARE * 100).toFixed(0)}% bound. All-defaults is this model's neutral `
+          + `point; a scoreboard that slides there is reporting its own calibration error as a `
+          + `player's result, and it is precondition 3 against ever promoting this field into `
+          + `departure. Check the sample first — noisy below about 12 games.`);
       }
     }
   }
-  const m = mean(deltas);
-  const se = sd(deltas) / Math.sqrt(deltas.length);
-  const ok = Math.abs(m) <= MAX_DEFAULTS_DRIFT;
-  console.log(`  ${line.padEnd(9)} observed drift ${m >= 0 ? '+' : ''}${m.toFixed(4)} +/- ${se.toFixed(4)} pts/member-yr   `
-    + `over ${YEARS} years ${(m * YEARS >= 0 ? '+' : '')}${(m * YEARS).toFixed(3)} pts   ${ok ? 'OK' : 'FAIL'}`);
-  if (!ok) {
-    failures.push(`${line}: satisfaction drifts ${m.toFixed(4)} points per member-year AT DEFAULTS, `
-      + `past the ${MAX_DEFAULTS_DRIFT} bound. All-defaults is this model's neutral point; a scoreboard `
-      + `that slides there is reporting its own calibration error as a player's result, and it is `
-      + `precondition 3 against ever promoting this field into departure. Check the sample first — `
-      + `this mean is tail-dominated under a convex reaction and is noisy below about 12 games.`);
-  }
+  // ⚠ WHAT A GREEN VERDICT HERE DOES NOT MEAN, AND THIS IS NOT A FORMALITY.
+  // GL's reading is not a satisfaction defect. GL's price level slides against
+  // the modelled market by about 0.30pp a year at defaults (level gap -4.4pp in
+  // year 1 to -7.1pp by year 10) and about 0.38pp a year inside the band, and it
+  // does NOT decay: measured over a 16-year run the per-year drift reads +0.0237
+  // (yrs 2-5), +0.0216 (6-10), +0.0263 (11-16). Ablating the level limb collapses
+  // GL's whole reading from +0.0225 to +0.0017 a year, so satisfaction is the
+  // messenger and GL's pricing is the defect. Reshaping THIS bound cannot reach
+  // it. If a future reader finds this section green, check whether GL's gap
+  // stopped widening or whether something here stopped looking.
+  console.log('\n  ⚠ GL: a pass here would not mean GL is fine. GL\'s price level slides ~0.30pp/yr');
+  console.log('    against the modelled market at defaults and does not decay over 16 years.');
+  console.log('    That is a PRICING defect this scoreboard reports; no bound reshaping reaches it.');
 }
 console.log('  the gap the drift is built from, exact:');
 for (const line of LINES) {
