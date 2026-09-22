@@ -44,19 +44,18 @@ import type {
   AdvanceRequest, AdvanceResponse,
   CallerRole, CallerView,
   CreateRoomRequest, CreateRoomResponse,
-  FaultController,
   JoinRequest, JoinResponse,
   JsonValue,
   ReadRequest, ReadResponse,
   RoomStatus, RoomView,
   ScheduledShockSpec,
-  SessionErrorCode,
   SessionTransport,
   TeamYearSummary,
   SubmitRequest, SubmitResponse,
   TeamView,
 } from './contract';
 import { SessionError } from './contract';
+import { Faults } from './faults';
 import type { CoverageLine } from '../types/simulation';
 
 const KEY_PREFIX = 'ripple.session.v1.room.';
@@ -288,50 +287,6 @@ async function withRoomLock<T>(work: () => T): Promise<T> {
   return locks.request(LOCK_NAME, work);
 }
 
-// ---------------------------------------------------------------- faults
-
-interface PendingFault {
-  code: SessionErrorCode;
-  message: string;
-}
-
-class LocalFaults implements FaultController {
-  next: PendingFault | null = null;
-  all: PendingFault | null = null;
-  latencyMs: number;
-
-  constructor(latencyMs: number) {
-    this.latencyMs = latencyMs;
-  }
-
-  failNext(code: SessionErrorCode = 'TRANSPORT_FAILURE', message = 'Injected failure.'): void {
-    this.next = { code, message };
-  }
-
-  failAll(code: SessionErrorCode = 'TRANSPORT_FAILURE', message = 'Injected failure.'): void {
-    this.all = { code, message };
-  }
-
-  setLatency(ms: number): void {
-    this.latencyMs = ms;
-  }
-
-  clear(): void {
-    this.next = null;
-    this.all = null;
-  }
-
-  // Consumed once per call, before the call does anything.
-  take(): PendingFault | null {
-    if (this.next) {
-      const f = this.next;
-      this.next = null;
-      return f;
-    }
-    return this.all;
-  }
-}
-
 // ---------------------------------------------------------------- transport
 
 export interface LocalTransportOptions {
@@ -341,10 +296,10 @@ export interface LocalTransportOptions {
 }
 
 export class LocalSessionTransport implements SessionTransport {
-  readonly faults: LocalFaults;
+  readonly faults: Faults;
 
   constructor(opts: LocalTransportOptions = {}) {
-    this.faults = new LocalFaults(opts.latencyMs ?? 120);
+    this.faults = new Faults(opts.latencyMs ?? 120);
   }
 
   // The one place latency and injected failure are applied.

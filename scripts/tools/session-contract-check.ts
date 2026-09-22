@@ -16,11 +16,23 @@
 // because it missed a deadline, and one team's decisions visible to another.
 // Each of those is an assertion below.
 //
-// It drives the localStorage implementation behind a memory shim, so it tests
-// the contract, not the browser.
+// ⚠ IT RUNS TWICE: ONCE AGAINST EACH IMPLEMENTATION, AND THE ASSERTIONS ARE THE
+// SAME OBJECT CODE BOTH TIMES. The localStorage one runs behind a memory shim;
+// the HTTP one runs against the throwaway stub server over a real socket on
+// 127.0.0.1. Nothing below the fixture line knows which is underneath — the only
+// thing that changed to add the second pass was `transport()` returning a
+// different object, which is the claim the contract was written to make. If a
+// single assertion had needed weakening for one of them, THAT would have been
+// the finding; none did.
+//
+// So it tests the contract, not the browser, and now demonstrably not the
+// storage either.
 // ============================================================================
 
+import type { Server } from 'node:http';
 import { LocalSessionTransport } from '../../src/session/localTransport';
+import { HttpSessionTransport } from '../../src/session/httpTransport';
+import type { SessionTransport } from '../../src/session/contract';
 import { isSessionError, type SessionErrorCode, type JsonValue } from '../../src/session/contract';
 import type { CoverageLine } from '../../src/types/simulation';
 import { decisionsForYear, governingYear } from '../../src/session/client/decisions';
@@ -104,11 +116,15 @@ async function rejects(p: Promise<unknown>, code: SessionErrorCode, what: string
 
 const TEAMS = ['Harbour Mutual', 'Cedar Valley', 'Tri-County'];
 
+// ⚠ THE ONE SEAM BETWEEN THE TWO PASSES. Everything else in this file is
+// written against the interface and cannot tell the difference.
+let makeTransport: () => SessionTransport & { faults: { failNext(code?: SessionErrorCode, m?: string): void; failAll(code?: SessionErrorCode, m?: string): void; setLatency(ms: number): void; clear(): void } };
+
 function transport() {
-  return new LocalSessionTransport({ latencyMs: 0 });
+  return makeTransport();
 }
 
-async function freshRoom(t: LocalSessionTransport) {
+async function freshRoom(t: SessionTransport) {
   return t.createRoom({
     seed: 'MAMC6EA4',
     yearCount: 3,
@@ -647,17 +663,45 @@ async function main(): Promise<void> {
     eq(r2.room.rev, r0.room.rev + 2, 'the revision counts writes exactly, so a poller can trust it');
   }
 
-  // ---- report ----------------------------------------------------------
-  console.log(`session-contract-check: ${checks - failures.length}/${checks} assertions passed`);
-  if (failures.length > 0) {
-    console.log('');
-    for (const f of failures) console.log(`  FAIL  ${f}`);
-    process.exit(1);
-  }
-  console.log('PASS — five endpoints, token authority, redaction, carry-forward and the failure path.');
 }
 
-main().catch(e => {
+// ---------------------------------------------------------------- the passes
+
+async function runPass(label: string, make: typeof makeTransport): Promise<number> {
+  makeTransport = make;
+  failures.length = 0;
+  checks = 0;
+  await main();
+  console.log(`  ${label.padEnd(22)} ${checks - failures.length}/${checks} assertions passed`);
+  for (const f of failures) console.log(`    FAIL  ${f}`);
+  return failures.length;
+}
+
+async function all(): Promise<void> {
+  console.log('session-contract-check — the SAME assertions against each implementation\n');
+
+  let bad = await runPass('localStorage', () => new LocalSessionTransport({ latencyMs: 0 }));
+
+  // The stub is started here rather than assumed: the harness is the thing that
+  // must not need a running environment to be useful.
+  const { createStubServer } = await import('./session-stub-server');
+  const server: Server = createStubServer();
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  const addr = server.address();
+  const port = typeof addr === 'object' && addr ? addr.port : 0;
+  bad += await runPass('HTTP + stub server', () => new HttpSessionTransport({ baseUrl: `http://127.0.0.1:${port}` }));
+  await new Promise<void>(r => { server.close(() => r()); });
+
+  console.log('');
+  if (bad > 0) {
+    console.log(`FAIL — ${bad} assertion(s) failed.`);
+    process.exit(1);
+  }
+  console.log('PASS — five endpoints, token authority, redaction, carry-forward and the failure path,');
+  console.log('       identically over localStorage and over the wire.');
+}
+
+all().catch(e => {
   console.error('session-contract-check threw:', e);
   process.exit(1);
 });
