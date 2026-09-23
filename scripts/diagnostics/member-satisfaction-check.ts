@@ -119,6 +119,7 @@ import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { processYear } from '../../src/utils/simulationEngine';
 import { SATISFACTION, satisfactionReaction } from '../../src/utils/memberSatisfaction';
+import { MARKET_CYCLE, marketCycleLoadFactor } from '../../src/utils/marketConditions';
 import { OPENING_SATISFACTION } from '../../src/data/memberCatalog';
 import type {
   CoverageLine, DecisionSet, GameState, Member, SatisfactionMove,
@@ -315,6 +316,61 @@ interface LineYear {
 }
 
 /**
+ * ⚠ THIS GATE RUNS WITH GL'S MARKET CYCLE ABLATED, AND THE EVIDENCE FOR THAT IS
+ * THE REASON IT IS NOT MERELY STRATIFIED.
+ *
+ * Phase stratification was built first, on the argument that a per-game drawn
+ * phase adds sampling NOISE to the drift numerator. It does, and the
+ * stratification removes it: `stratifyPhase` gives each game a uniform offset of
+ * g/GAMES of a period on top of its own drawn phase, which is a Riemann sum of a
+ * sine over exactly one period and therefore cancels to machine precision.
+ *
+ * MEASURED, THAT WAS THE WRONG PROBLEM. The cycle's damage to this gate is not
+ * noise, it is BIAS, and stratification cannot touch a bias. GL's share of a
+ * funding stop, same seeds, same everything:
+ *
+ *     horizon   cycle OFF      cycle ON, raw    cycle ON, stratified
+ *      3yr        17.1%            10.0%              14.7%
+ *      5yr        34.7% FAIL       26.3% FAIL         22.9% OK   <-- masked
+ *     10yr        83.5% FAIL       69.5% FAIL         72.2% FAIL
+ *
+ * Every with-cycle reading is DEPRESSED, and at five years the cycle hid a real
+ * failure completely. The cause is in the constant at marketConditions.ts: the
+ * level reaction is kinked at zero, so a cycle that is mean-neutral in PRICE is
+ * not mean-neutral in SATISFACTION — the soft half hurts more than the hard half
+ * helps, leaving about -0.05 points of systematic negative drift that partly
+ * cancels GL's genuine upward slide. A mechanism that makes a defect harder to
+ * see is not something a gate should average over. It is something a gate should
+ * switch off.
+ *
+ * SO THE DIVISION OF LABOUR IS ONE GATE PER MECHANISM. This gate measures the
+ * POOL'S OWN scoreboard at its neutral point, with exogenous market movement
+ * removed. market-conditions-check section 4b owns the cycle and asserts its
+ * mean, positivity, line isolation and purity there. Neither gate measures
+ * through the other's subject.
+ *
+ * ⚠ AND THE ABLATION IS EXACT, WHICH IS WHY IT IS SAFE. With amplitude 0 the
+ * factor takes an early return of literal 1 and this gate reproduces its
+ * pre-cycle output bit for bit — asserted below rather than assumed, because an
+ * ablation that quietly changed the numbers would be worse than no ablation.
+ *
+ * ⚠ WHAT THIS DELIBERATELY DOES NOT CHECK. Nothing here now sees drift as a
+ * player experiences it, cycle included. That is a real gap and it is the right
+ * one to leave: the with-cycle figures above are the record, and a bound on them
+ * would be a bound on the market's oscillation rather than on the pool's
+ * calibration. If it is ever wanted it needs its own section and its own arm,
+ * which costs a full baseline run this gate has no runtime budget for.
+ */
+const CYCLE_IN_GATE = false;
+
+function setCyclePosition(g: number): void {
+  if (!CYCLE_IN_GATE) { MARKET_CYCLE.amplitude = 0; return; }
+  // Stratified rather than raw — see the note above for why that is necessary
+  // but not sufficient, and why CYCLE_IN_GATE is false.
+  MARKET_CYCLE.phaseOffset = g / GAMES;
+}
+
+/**
  * ⚠ THE MOVES ARE READ OFF THE RESULT, NOT RECOMPUTED, AND THE FIRST VERSION OF
  * THIS GATE RECOMPUTED THEM. processLineYear now carries
  * `memberSatisfactionMoves` — in-memory, stripped on save — precisely so this
@@ -326,6 +382,7 @@ interface LineYear {
  */
 function play(g: number, ramp: boolean): LineYear[] {
   const id = `MS${g}`;
+  setCyclePosition(g);
   const instance = generateGameInstance(id, 61_000_000 + g * 6779);
   const setup = { poolName: 'S', gameLength: YEARS, startingYear: 2026, instanceId: id, activeLines: LINES };
   const { poolState, priorHistory } = runPriorHistory(instance, setup as never);
@@ -360,6 +417,7 @@ function play(g: number, ramp: boolean): LineYear[] {
  *  scoreboard exists to make visible. */
 function playDecision(g: number, from: number): LineYear[] {
   const id = `MS${g}`;
+  setCyclePosition(g);
   const instance = generateGameInstance(id, 61_000_000 + g * 6779);
   const setup = { poolName: 'S', gameLength: YEARS, startingYear: 2026, instanceId: id, activeLines: LINES };
   const { poolState, priorHistory } = runPriorHistory(instance, setup as never);
@@ -392,6 +450,7 @@ function playDecision(g: number, from: number): LineYear[] {
  *  wanted is what a settled choice is worth, not what changing one costs. */
 function playHeld(g: number, conf: number): LineYear[] {
   const id = `MS${g}`;
+  setCyclePosition(g);
   const instance = generateGameInstance(id, 61_000_000 + g * 6779);
   const setup = { poolName: 'S', gameLength: YEARS, startingYear: 2026, instanceId: id, activeLines: LINES };
   const { poolState, priorHistory } = runPriorHistory(instance, setup as never);
@@ -703,6 +762,22 @@ console.log('  that is fine, and would fail the game as shipped at 1x.');
     }
     return { m: mean(v), se: sd(v) / Math.sqrt(v.length) };
   };
+
+  // ⚠ THE ABLATION, ASSERTED. If CYCLE_IN_GATE is false this section's numbers
+  // are only comparable with the pre-cycle record while the cycle is genuinely
+  // off. A silent partial ablation would be worse than none, so the factor is
+  // read back on the cycle's own line rather than the config being trusted.
+  if (!CYCLE_IN_GATE) {
+    const live = marketCycleLoadFactor(MARKET_CYCLE.line, 4,
+      { seed: 61_000_000, gameId: 'MS0' });
+    console.log(`  cycle ablated for this gate: ${MARKET_CYCLE.line} load factor reads ${live} `
+      + `(must be exactly 1)  ${live === 1 ? 'OK' : 'FAIL'}`);
+    if (live !== 1) {
+      failures.push(`this gate ablates GL's market cycle, but marketCycleLoadFactor still returns `
+        + `${live}. Every drift figure below is then measured through an oscillation that is known to `
+        + `MASK a real slide — it hid GL's five-year failure entirely when it was left on.`);
+    }
+  }
 
   const horizons = GAME_LENGTH_HORIZONS.filter(H => H <= YEARS);
   if (horizons.length < GAME_LENGTH_HORIZONS.length) {

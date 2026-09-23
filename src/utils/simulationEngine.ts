@@ -1133,7 +1133,8 @@ export function processLineYear(
     // would want for the same expected loss. Both per $100 of the same exposure
     // and both over the GROSS pure premium, which is the basis that makes the
     // pool's explicit admin and tower comparable with a carrier's implicit load.
-    marketLevelGapPct(totalMemberRatePer100, pricedPurePremiumPer100),
+    marketLevelGapPct(totalMemberRatePer100, pricedPurePremiumPer100,
+      { line, yearNumber, ctx: { seed: instance.seed, gameId: instance.instanceId } }),
     // TERM 4's input. LAST year's capital position — the balance sheet a member
     // can actually see when this year's bill arrives, and the only one that
     // exists at this point in the function anyway. See memberSatisfaction.ts.

@@ -71,7 +71,8 @@ import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { processYear, reserveStepSigma } from '../../src/utils/simulationEngine';
 import {
   MARKET_COMPONENTS, MARKET_COMPONENTS_UNBUILT, MARKET_RATING_WINDOW,
-  MARKET_TARGET_LOSS_RATIO, marketBreakdown, marketCostIndex, marketLevelGapPct,
+  MARKET_TARGET_LOSS_RATIO, MARKET_CYCLE, marketBreakdown, marketCostIndex, marketCycleLoadFactor,
+  marketLevelGapPct,
   marketLoadOverExpectedLoss, marketRateChangePct, type MarketComponent,
 } from '../../src/utils/marketConditions';
 import {
@@ -226,6 +227,100 @@ for (const u of MARKET_COMPONENTS_UNBUILT) {
     console.log(`    ${line.padEnd(9)} sqrt(rho) x stepSigma ${s.toFixed(4)}   window open share ${open.toFixed(4)}   `
       + `implied SD on the window ${(100 * open * Math.sqrt(Math.exp(s * s) - 1)).toFixed(1)}%`);
   }
+}
+
+// --- 4b. the GL underwriting cycle ------------------------------------------
+//
+// The cycle is NOT a MARKET_COMPONENTS entry, so section 2's mean-1 law does not
+// reach it — it multiplies the market's LOAD (the level), not its cost index
+// (the change). It therefore needs its own four assertions, and they are the
+// same four: mean one, strictly positive, only where it is declared, and pure.
+console.log('\n--- 4b. the GL underwriting cycle ---');
+{
+  const A = MARKET_CYCLE.amplitude;
+  console.log(`  ${MARKET_CYCLE.line} only, amplitude ${A}, period `
+    + `${MARKET_CYCLE.periodMin}-${MARKET_CYCLE.periodMax}yr, phase drawn per game`);
+
+  // (a) MEAN ONE ON THE LOAD, integrated over a period at a fixed phase. This is
+  //     the assertion that stops the cycle being a level shift wearing a wiggle,
+  //     and it is declared on the LOAD rather than the target because the market
+  //     rate is purePremium/target and E[1/x] != 1/E[x].
+  //     Integrated finely so the residual is the sine's, not the sampling grid's.
+  //     Integrated over a LONG span rather than over one recovered period. The
+  //     game's drawn period is not exposed, and RE-DERIVING IT HERE WOULD BE A
+  //     SECOND COPY OF THE DRAW — the duplicate that drifts. Over a span S the
+  //     residual of a sine is bounded by A.P/(pi.S), which at S = 2000 years is
+  //     under 1.5e-4, comfortably inside the threshold below.
+  const SPAN = 2000, STEP = 0.05;
+  let worstPhaseMean = 0;
+  for (let g = 0; g < 40; g++) {
+    const ctx = ctxFor(g);
+    let s = 0, n = 0;
+    for (let y = 0; y < SPAN; y += STEP) { s += marketCycleLoadFactor(MARKET_CYCLE.line, y, ctx); n++; }
+    worstPhaseMean = Math.max(worstPhaseMean, Math.abs(s / n - 1));
+  }
+  const meanOk = worstPhaseMean < 2e-3;
+  console.log(`  (a) mean over ${SPAN} years, worst of 40 drawn phases: 1 +/- ${worstPhaseMean.toExponential(2)}  ${meanOk ? 'OK' : 'FAIL'}`);
+  if (!meanOk) {
+    failures.push(`the GL cycle's load factor integrates to ${(1 + worstPhaseMean).toFixed(5)} over a period, `
+      + `not 1. A cycle off mean one is a permanent price level shift wearing a wiggle, and it would move `
+      + `the pool's competitiveness for good rather than cyclically.`);
+  }
+
+  // (b) STRICTLY POSITIVE. The factor divides the target loss ratio, so a zero
+  //     sends the market rate to infinity and a negative one flips its sign.
+  let lo = Infinity, hi = -Infinity;
+  for (let g = 0; g < 200; g++) for (let y = -12; y <= 40; y++) {
+    const v = marketCycleLoadFactor(MARKET_CYCLE.line, y, ctxFor(g));
+    lo = Math.min(lo, v); hi = Math.max(hi, v);
+  }
+  const posOk = lo > 0 && Number.isFinite(lo) && Number.isFinite(hi);
+  console.log(`  (b) range over 200 games x 52 years: [${lo.toFixed(4)}, ${hi.toFixed(4)}]  ${posOk ? 'OK' : 'FAIL'}`);
+  if (!posOk) failures.push(`the GL cycle's load factor reached ${lo}. It DIVIDES the target loss ratio.`);
+  const ampOk = Math.abs(hi - (1 + A)) < 0.02 && Math.abs(lo - (1 - A)) < 0.02;
+  if (!ampOk) {
+    failures.push(`the GL cycle's realised range [${lo.toFixed(4)}, ${hi.toFixed(4)}] does not match its `
+      + `declared amplitude ${A}. The constant and the behaviour have come apart.`);
+  }
+
+  // (c) ONLY WHERE IT IS DECLARED. The other two lines must be EXACTLY 1 — not
+  //     approximately, because they take a different code path entirely.
+  let offLine = 0;
+  for (const line of LINES) {
+    if (line === MARKET_CYCLE.line) continue;
+    for (let g = 0; g < 200; g++) for (let y = -12; y <= 40; y++) {
+      offLine = Math.max(offLine, Math.abs(marketCycleLoadFactor(line, y, ctxFor(g)) - 1));
+    }
+  }
+  console.log(`  (c) every line but ${MARKET_CYCLE.line}, worst |factor - 1|: ${offLine}  ${offLine === 0 ? 'OK' : 'FAIL'}`);
+  if (offLine !== 0) {
+    failures.push(`a line other than ${MARKET_CYCLE.line} carries the cycle (worst deviation ${offLine}). `
+      + `GL-only is a claim about market synchrony — property, WC and D&O soften while GL firms on social `
+      + `inflation — not a simplification to be relaxed quietly.`);
+  }
+
+  // (d) PURE, AND THE PHASE IS A PROPERTY OF THE GAME NOT OF THE READING YEAR.
+  //     Reading the factor from year 7 must give the same phase as from year 1,
+  //     or replaying a save would land in a different market.
+  let repeatable = true;
+  for (let g = 0; g < 50; g++) for (let y = -12; y <= 40; y++) {
+    if (marketCycleLoadFactor(MARKET_CYCLE.line, y, ctxFor(g))
+      !== marketCycleLoadFactor(MARKET_CYCLE.line, y, ctxFor(g))) repeatable = false;
+  }
+  const phases = Array.from({ length: 400 }, (_, g) =>
+    (marketCycleLoadFactor(MARKET_CYCLE.line, 1, ctxFor(g)) - 1) / A);
+  const phaseMean = phases.reduce((a, b) => a + b, 0) / phases.length;
+  const spreadOk = Math.abs(phaseMean) < 0.12;
+  console.log(`  (d) repeatable ${repeatable ? 'yes' : 'NO'};  year-1 sin() over 400 games mean `
+    + `${phaseMean.toFixed(4)} (0 = phases spread evenly)  ${repeatable && spreadOk ? 'OK' : 'FAIL'}`);
+  if (!repeatable) failures.push('the GL cycle is not repeatable for a fixed (seed, year). It must be pure.');
+  if (!spreadOk) {
+    failures.push(`the GL cycle's drawn phases are not spread: year-1 sin() averages ${phaseMean.toFixed(4)} `
+      + `over 400 games. A biased phase draw makes the cycle a level shift in disguise.`);
+  }
+  console.log('  ⚠ the STOCK sees under a third of this: satisfaction closes a 3-year half-life toward its');
+  console.log('    anchor, a first-order low-pass whose gain at an 8-9 year period is 29-32%. The cycle a');
+  console.log('    player feels is a third of the cycle priced here — see the constant.');
 }
 
 // --- 5. quieter than the rate it judges -------------------------------------

@@ -236,6 +236,7 @@
 // ============================================================================
 
 import { poolYearFactor } from './claimGeneration';
+import { deriveSubRng } from './random';
 import { RATE_NEUTRAL_CHANGE_PCT, TRIANGLE_HISTORY_YEARS } from '../data/defaultAssumptions';
 import type { CoverageLine } from '../types/simulation';
 
@@ -419,6 +420,180 @@ export const MARKET_COMPONENTS_UNBUILT: ReadonlyArray<{
  */
 export const MARKET_TARGET_LOSS_RATIO = 0.65;
 
+// ============================================================================
+// THE UNDERWRITING CYCLE — GL ONLY.
+//
+// The target loss ratio above is what a carrier INTENDS to charge for, and in
+// the real world it is not a constant: it is the initial accident-year loss
+// ratio, and it swings with the underwriting cycle. Milliman's US casualty
+// review puts initial AY loss ratios near 80% in the late-1990s soft market and
+// near 65% after the early-2000s hard market. As a PRICE that is a swing of
+//
+//     (1/0.65) / (1/0.80)  =  1.231,  i.e. +/-10.3% about the midpoint
+//
+// so the amplitude here is 0.10 and its provenance is that comparison. The
+// PERIOD is 8-9 years, from Hofmann and Sattarhoff's (2023) spectral estimate
+// for non-life underwriting cycles.
+//
+// ⚠ THE AMPLITUDE IS THE WHOLE BALLGAME AND IT WAS MEASURED BEFORE IT WAS
+// BUILT. Satisfaction's response to a market price shift was measured by
+// replaying the shipped anchor recursion over the engine's own move rows:
+//
+//     shift      GL satisfaction at year 10     in funding stops
+//     -20%             -1.597                        6.58
+//     -10%             -0.567                        2.34
+//      +10%            +0.299                        1.23
+//      +20%            +0.549                        2.26
+//
+// At +/-20% the swing is 8.8 stops against a whole funding slider worth 8.8 —
+// the market would have been exactly as large as the player's entire pricing
+// lever, and no weight anywhere could have changed that ratio, because both
+// enter as a multiplicative shift of the same (1 + gap). That is why +/-20% was
+// rejected.
+//
+// ⚠ BUT THAT TABLE IS A STATIC SHIFT AND A CYCLE IS NOT, AND THE DIFFERENCE IS
+// A FACTOR OF THREE. THIS IS THE ONE NUMBER TO READ BEFORE TOUCHING THE
+// AMPLITUDE. Satisfaction is a stock that closes levelHalfLifeYears toward its
+// anchor, which makes it a first-order low-pass filter on anything oscillating.
+// Its gain at the cycle's frequency is
+//
+//     |H(w)| = p / |1 - (1-p) e^(-iw)|,   p = 1 - 0.5^(1/3) = 0.2063/yr
+//
+//     period      8yr     8.5yr     9yr   |   3yr    5yr   10yr   20yr
+//     gain      29.0%     30.5%   32.1%   |  13.3%  19.3%  35.1%  59.5%
+//
+// So the stock tracks under a THIRD of an 8-9 year swing. The static table's
+// 2.3 stops on the soft side become a MEASURED 0.55 stops for a game that drew
+// the soft half, and 0.24 stops averaged over phases. The cycle a player feels
+// is a third of the cycle that is priced.
+//
+// That is not an argument to raise the amplitude — the amplitude is sourced and
+// the attenuation is a real property of how opinion lags price. It IS the reason
+// nobody should read the static sensitivity curve as this mechanism's size.
+//
+// ⚠ AND A CYCLE THAT IS MEAN-NEUTRAL IN PRICE IS NOT MEAN-NEUTRAL IN
+// SATISFACTION. The level reaction is kinked at zero, so the soft half hurts
+// more than the hard half helps and the cycle leaves a net -0.06 point (-0.24
+// stop) residue on GL at defaults. The mean-one declared below is on the LOAD,
+// which is the quantity that must not drift; this residue is a consequence of
+// the kink and is recorded rather than corrected, because correcting it would
+// mean un-kinking the reaction or centring a price cycle on a satisfaction
+// outcome, and both are worse than the residue.
+//
+// ⚠ AND THE RESPONSE IS 3:1 ASYMMETRIC, SO THE SOFT SIDE BINDS AND +/-10% IS
+// NOT HALF OF +/-20%. satisfactionLevelReaction damps NEGATIVE gaps (the pool
+// cheaper than the market) by gratitudeLambda and leaves positive ones whole,
+// and the resting gap is already about -4pp. A soft market pushes the gap
+// through the kink into the undamped half; a hard market stays inside the
+// damped one. Effective reaction at +/-20%: +21.78 soft against -7.11 hard, a
+// ratio of 3.06 — measured 3.05.
+//
+// ============================================================================
+// ⚠ GL ONLY, AND THAT IS SUPPORTED RATHER THAN A SIMPLIFICATION.
+//
+// The three lines are not in the same phase and currently not even in the same
+// direction: property, workers' compensation and D&O have been SOFTENING, while
+// general liability continues to FIRM on social inflation — rising severity from
+// litigation funding, nuclear verdicts and eroding tort reform. Putting one
+// shared cycle on all three would assert a synchrony the market does not have,
+// and it would also triple the phase variance every gate has to see through.
+//
+// So WC and Property return exactly 1 here, asserted by market-conditions-check
+// rather than left to inspection. A future line-specific cycle is a second entry
+// with its own amplitude and phase, not a widening of this one.
+//
+// ============================================================================
+// ⚠ MEAN-NEUTRAL ON THE LOAD, NOT ON THE TARGET, AND THE DIFFERENCE IS REAL.
+//
+// The market's rate is purePremium / target, so a cycle that is mean-1 in the
+// TARGET is not mean-1 in the RATE — E[1/x] != 1/E[x]. A cycle declared on the
+// target would therefore be a permanent price LEVEL shift wearing a wiggle,
+// which is the exact failure the mean-one requirement exists to prevent. It is
+// declared on the LOAD (1/target) instead, where the sine's mean over a full
+// period is 0 by construction and the multiplier's mean is exactly 1.
+//
+// This is the same distinction that made the cost index's window GEOMETRIC, and
+// it is asserted the same way: market-conditions-check integrates the factor
+// over a period and requires 1 to float, and separately over the drawn-phase
+// ensemble.
+//
+// ⚠ POSITIVITY. The multiplier is 1 + 0.10 sin(.), so it lives in [0.90, 1.10]
+// and can never reach 0. A zero would divide the target to infinity.
+//
+// ============================================================================
+// ⚠ THE PHASE IS DRAWN, ON ITS OWN LABEL, AND THAT IS WHAT MAKES IT A SCENARIO.
+//
+// A sine keyed on the year alone is not a cycle, it is a scripted backdrop:
+// every game ever played would see the same slice, and "which market did your
+// cohort get" would be a property of the calendar. The phase (and the period
+// within its 8-9 band) is drawn once per game from
+//
+//     deriveSubRng(seed, 0, 'gl_market_cycle')
+//
+// — its OWN purpose label, never the sequential bootstrap draw, so it cannot
+// re-roll an opening position or shift any existing stream. deriveSubRng hashes
+// the purpose, so a new label is independent of every old one by construction.
+//
+// AND IT IS THE SHARED SCENARIO FOR FREE. The app's seed is
+// seedFromInstanceId(instanceId), a pure function of the code a facilitator
+// hands out, so every team in a room draws the SAME phase and faces the same
+// market with no room record, no new field and nothing persisted. The factor is
+// recomputed from (seed, year) on every read and never stored.
+//
+// ⚠ A FIVE-YEAR GAME SEES ABOUT 60% OF ONE PERIOD, SO IT DOES NOT AVERAGE OUT.
+// That is intended: a cohort plays one market era together rather than a
+// sanitised mean. It is only defensible while the phase is VISIBLE — a team
+// that drew the soft half and cannot see that they did will read the model as
+// unfair rather than as a scenario. Nothing renders this yet. That is the
+// outstanding debt this constant carries and it should be paid before the cycle
+// is used in a scored session.
+// ============================================================================
+
+/**
+ * MUTABLE, AND DELIBERATELY SO — this is the gate's ablation seam.
+ *
+ * member-satisfaction-check has to measure drift with the cycle OFF, and it
+ * measures end-to-end through processYear, so it cannot pass an override down
+ * the call chain. Setting `amplitude` to 0 here is how it ablates, which is the
+ * same seam the null arm already uses on SATISFACTION's weights. `phaseOffset`
+ * exists for the same reason and for the phase sweep the gate prints.
+ *
+ * Nothing in src/ writes to this. A writer outside a diagnostic is a bug.
+ */
+export const MARKET_CYCLE = {
+  /** The one line that carries a cycle. See the header on why it is not three. */
+  line: 'GL' as CoverageLine,
+  /** +/-10.3% from Milliman's initial AY loss ratios, rounded to 0.10. */
+  amplitude: 0.10,
+  /** Hofmann and Sattarhoff (2023), non-life underwriting cycle. */
+  periodMin: 8,
+  periodMax: 9,
+  /** Gate seam only — shifts every game's phase together, in periods. */
+  phaseOffset: 0,
+};
+
+/**
+ * The cycle's multiplier on the market's LOAD for this line-year. Mean exactly 1
+ * over a period; 1 on every line but MARKET_CYCLE.line.
+ *
+ * Above 1 is a HARD market: the carrier's load is up, so the pool looks cheaper.
+ */
+export function marketCycleLoadFactor(
+  line: CoverageLine,
+  yearNumber: number,
+  ctx: MarketContext,
+  cycle: typeof MARKET_CYCLE = MARKET_CYCLE,
+): number {
+  if (line !== cycle.line || cycle.amplitude === 0) return 1;
+  // ONE draw of two uniforms, at a fixed sentinel year, so the phase is a
+  // property of the GAME and not of the year it is read at. Reading this from
+  // year 7 must give the same phase as reading it from year 1.
+  const r = deriveSubRng(ctx.seed, 0, 'gl_market_cycle');
+  const period = cycle.periodMin + r.next() * (cycle.periodMax - cycle.periodMin);
+  const phase = r.next();
+  return 1 + cycle.amplitude * Math.sin(2 * Math.PI * (yearNumber / period + phase + cycle.phaseOffset));
+}
+
 /** What a carrier charges per unit of gross expected loss. 1.538 at a 65% target. */
 export function marketLoadOverExpectedLoss(): number {
   return 1 / MARKET_TARGET_LOSS_RATIO;
@@ -443,9 +618,19 @@ export function marketLoadOverExpectedLoss(): number {
 export function marketLevelGapPct(
   poolTotalRatePer100: number,
   grossPurePremiumPer100: number,
+  cyclePos?: { line: CoverageLine; yearNumber: number; ctx: MarketContext },
 ): number {
   if (!(grossPurePremiumPer100 > 0) || !(poolTotalRatePer100 > 0)) return 0;
-  return ((poolTotalRatePer100 / grossPurePremiumPer100) * MARKET_TARGET_LOSS_RATIO - 1) * 100;
+  // ⚠ THE CYCLE ARGUMENT IS OPTIONAL AND OMITTING IT MEANS "NO CYCLE", NOT
+  // "TODAY'S CYCLE". A caller without a line-year has no cycle position to read,
+  // and defaulting to some other year's would be worse than leaving it flat.
+  // The ENGINE always passes it; market-conditions-check's section 5 aggregate
+  // deliberately does not, because it compares rate LEVELS across lines and a
+  // GL-only multiplier would make that comparison read the cycle instead.
+  const load = cyclePos
+    ? marketCycleLoadFactor(cyclePos.line, cyclePos.yearNumber, cyclePos.ctx)
+    : 1;
+  return ((poolTotalRatePer100 / grossPurePremiumPer100) * (MARKET_TARGET_LOSS_RATIO / load) - 1) * 100;
 }
 
 /** The ratemaker's experience window. The pool's own, deliberately. */
