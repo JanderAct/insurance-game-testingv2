@@ -25,6 +25,76 @@
 // lifted — a real API gateway authorizer reads headers, not bodies — and left in
 // place as well, so a server that has not been taught about the header still
 // works. Neither is a translation of the other: they carry the same string.
+//
+// ============================================================================
+// WHAT A DEPLOYMENT STILL NEEDS, BEYOND A BASE URL.
+//
+// ⚠ THESE ARE FINDINGS FROM MEASURING THIS TRANSPORT AGAINST THE STUB, AND THEY
+// ARE HERE BECAUSE THIS IS WHERE SOMEONE WRITING THE REAL SERVER WILL BE
+// STANDING. Two of them were already written down — in the stub server, whose
+// own header says nothing in it survives the real implementation — and the rest
+// existed only in a commit message. A finding nobody reading the code will see
+// is not recorded. None of this is a defect in the client below; it is the list
+// of things the client cannot fix from its side.
+//
+// 1. CORS, AND IT MUST COVER THE ERROR RESPONSES. The stub answers `*`; a
+//    deployment names its origins, and `*` stops being legal at all the moment
+//    a credentialed request is involved. ⚠ THE PART THAT BITES: the headers are
+//    needed on 4xx and 5xx too, including the ones API Gateway generates
+//    itself. Without them the browser reports a CORS failure where the server
+//    sent a perfectly good 403, and every error path in this file — the code
+//    mapping, `retryable`, every screen's catch block — reads the wrong thing.
+//
+// 2. HTTPS, NOT OPTIONALLY. A bearer token in a header over plaintext is
+//    readable by anything on the path, and a page served over https cannot call
+//    an http API at all: mixed content is blocked before the request is made.
+//
+// 3. THE TOKEN LIFECYCLE. A token today is a random 32-character string minted
+//    by the server and checked by equality. It never expires, cannot be
+//    revoked, and grants its holder that team (or the room) forever. A
+//    deployment needs a TTL, rotation and revocation, and ideally an authorizer
+//    in front so a dead token never reaches the handler.
+//
+// 4. `advance` IS NOT IDEMPOTENT, AND THIS ONE IS A CONTRACT-LEVEL GAP RATHER
+//    THAN AN OPERATIONAL ONE. It increments the year; a retried POST — which is
+//    exactly what a client does when a response is lost — SKIPS A YEAR, and
+//    every team then reports against a year nobody played. The fix is a request
+//    field carrying the expected current year and a compare-and-swap on it, so
+//    a retry is a no-op instead of a second advance. That changes
+//    AdvanceRequest, which is why it is recorded here rather than done.
+//
+// 5. `createRoom` IS NOT IDEMPOTENT EITHER, more cheaply: a retry makes a
+//    SECOND room and the caller keeps the code of whichever response arrived.
+//    It needs an idempotency key. Its room-code collision check is also a
+//    read-then-write (`store.getItem` then retry), which on DynamoDB is the
+//    racy pattern by definition — it wants a conditional put with
+//    `attribute_not_exists(code)`.
+//    `submit` is already idempotent per (team, year) and needs nothing.
+//
+// 6. THE ROOM IS ONE ITEM AND DYNAMODB CAPS AN ITEM AT 400 KB. Measured: 31 KB
+//    at 2 teams x 8 years, ~190 KB extrapolated at 10 teams x 10 years. That is
+//    two-times headroom on a record that grows with both dimensions, and the
+//    cap is not negotiable. Split it into a room header plus one item per team —
+//    which also removes most of the write contention in (7), because two teams
+//    posting simultaneously would no longer be writing the same item.
+//
+// 7. POLLING IS METERED NOW. Every client reads the WHOLE room on every poll;
+//    the back-off in pollSchedule.ts cuts the request count by ~60% and does
+//    nothing about the payload. It wants an ETag on `rev` with
+//    If-None-Match, or a `sinceRev` parameter — `rev` is already monotonic per
+//    write and was built to be exactly this token, and is the same token the
+//    conditional write in (8) needs.
+//
+// 8. navigator.locks IS UNNECESSARY HERE AND NECESSARY ON LAMBDA — the same
+//    lost-update bug in its third form. The first form was four browser tabs
+//    sharing one localStorage with no transaction, which cost a team's posted
+//    result before the lock landed. The second is this transport, where the
+//    client performs no read-modify-write at all and the lock has nothing to
+//    serialise. The third is Lambda: concurrent invocations are genuinely
+//    parallel processes, so the server's own read-modify-write must become a
+//    conditional write — `ConditionExpression` on `rev`, retry on failure — or
+//    per-item updates per (6). Single-threaded Node is what makes the stub safe
+//    without one, and nothing about Lambda inherits that.
 // ============================================================================
 
 import type {
