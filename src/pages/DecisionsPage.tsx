@@ -326,16 +326,23 @@ function PoolDecisionsView({ decisions, onChange, yearNumber, disabled }: {
             disabled={disabled}
           />
         </SectionCard>
-      </div>
 
-      {/* ⚠ STILL INERT, AND NOW THERE IS NO OTHER RISK-CONTROL CONTROL. These
-          boxes take no value and emit no change. With the slider retired above,
-          riskControlPct is pinned at its default of 0 for the whole game, so the
-          pool is spending nothing on risk control until the boxes are given the
-          field. That is the intended interim state, not an oversight. Do not
-          wire a box to riskControlPct as a half-step — see
-          src/components/RiskControlCategoryBoxes.tsx. */}
-      <RiskControlCategoryBoxes />
+        {/* ⚠ STILL INERT, AND IN THE SLIDER'S PLACE. Five compact tiles where
+            the retired intensity slider sat, carrying NAME and TERM only — the
+            full copy waits for a Risk Control department page, and what that
+            page needs for the move to be a move rather than a rewrite is
+            recorded at the component.
+
+            They are NOT mutually exclusive, unlike the underwriting rows whose
+            look they borrow: five independent programs, any mixture of which a
+            pool can run. PreviewBox is deliberately not reused because its
+            `selected` state would paint exactly one tile blue and make the
+            pick-one reading the default. See the component for the three things
+            that keep them apart. */}
+        <SectionCard title="Loss Prevention" icon={<TrendingUp size={16} />}>
+          <RiskControlCategoryBoxes />
+        </SectionCard>
+      </div>
     </div>
   );
 }

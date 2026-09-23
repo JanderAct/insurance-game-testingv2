@@ -23,9 +23,9 @@
 // A dial says "spend 4% of premium on safety" and cannot express the two things
 // that make risk control a real decision for a public-entity pool:
 //
-//   1. IT IS BOUGHT IN PROGRAMMES, NOT IN INTENSITY. A pool commits to a
-//      three-year return-to-work programme; it does not commit to 4%.
-//   2. THE BENEFIT ARRIVES ON THE PROGRAMME'S OWN CLOCK. WC safety pays back
+//   1. IT IS BOUGHT IN PROGRAMS, NOT IN INTENSITY. A pool commits to a
+//      three-year return-to-work program; it does not commit to 4%.
+//   2. THE BENEFIT ARRIVES ON THE PROGRAM'S OWN CLOCK. WC safety pays back
 //      quickly because WC losses report quickly. Liability losses emerge over
 //      years, so law-enforcement analytics cannot pay back in year one whatever
 //      is spent. A capital system pays back NOTHING until it is finished.
@@ -37,14 +37,14 @@
 // ============================================================================
 // ⚠ MULTI-YEAR COMMITMENTS DEFAULT TO CONTINUING, AND THAT IS THE POINT.
 //
-// A player chooses to STOP, not to continue. That is how a real programme
+// A player chooses to STOP, not to continue. That is how a real program
 // behaves — nobody re-signs a safety consultant every January — and it is the
-// only arrangement under which abandoning a programme part-way is a decision the
+// only arrangement under which abandoning a program partway is a decision the
 // player has to actually make rather than one they make by forgetting. The
-// opt-out is also where the teaching is: stopping a three-year programme in
+// opt-out is also where the teaching is: stopping a three-year program in
 // year two should cost the years already spent.
 //
-// NONE OF THAT BEHAVIOUR IS BUILT. `commitmentYears` and `benefit` below are
+// NONE OF THAT BEHAVIOR IS BUILT. `commitmentYears` and `benefit` below are
 // DESCRIPTIONS for the display, not a schedule the engine runs.
 // ============================================================================
 
@@ -88,8 +88,8 @@ export const RISK_CONTROL_CATEGORIES: readonly RiskControlCategory[] = [
     commitmentYears: 3,
     renewal: 'opt-out',
     benefit: 'immediate',
-    what: 'On-site safety programme and a managed return-to-work path for injured employees.',
-    why: 'WC losses report and close quickly, so a programme that shortens time away shows up '
+    what: 'On-site safety program and a managed return-to-work path for injured employees.',
+    why: 'WC losses report and close quickly, so a program that shortens time away shows up '
       + 'in the same years it runs.',
     status: 'scoped',
   },
@@ -125,7 +125,7 @@ export const RISK_CONTROL_CATEGORIES: readonly RiskControlCategory[] = [
     benefit: 'onCompletion',
     what: 'Capital build of a claims system: intake, adjuster workflow, and reserving discipline.',
     why: 'Capital spend across two to four years that returns NOTHING until it is finished — '
-      + 'abandoning it part-way wastes every year already paid.',
+      + 'abandoning it partway wastes every year already paid.',
     status: 'scoped',
   },
   {

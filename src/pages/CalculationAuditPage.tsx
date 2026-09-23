@@ -2669,13 +2669,13 @@ export function buildRevExpRows(
           {
             metric: 'Additional paid in capital',
             value: formatCurrency(additionalPaidInCapital),
-            formula: { kind: 'text' as const, text: 'Not modelled yet.' },
+            formula: { kind: 'text' as const, text: 'Not modeled yet.' },
             indent: 1 as const,
           },
           {
             metric: 'Restatements',
             value: formatCurrency(restatements),
-            formula: { kind: 'text' as const, text: 'Not modelled yet.' },
+            formula: { kind: 'text' as const, text: 'Not modeled yet.' },
             indent: 1 as const,
           },
           {
