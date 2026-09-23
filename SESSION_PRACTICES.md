@@ -21,10 +21,13 @@ The test is *where would someone be standing when they need this*, not *where am
 
 Three failures, all the same shape:
 
-- **The solo oracle** is cited in **fifteen commit messages on this branch alone** — 46/46 eighteen times,
-  and 42/46, 43/46 and 44/46 once each — and a file by that name was never added on any branch
-  (`git log --all --diff-filter=A` finds nothing). It is a tool run from outside the repository, so every
-  measurement it produced is unreproducible by anyone reading this.
+- **The solo oracle** — now shipped at `scripts/tools/session-drivers/solo-oracle.cjs`, with the other
+  seven, which is what closing this looks like. Before that it was cited in **fifteen commit messages on
+  this branch alone** — 46/46 eighteen times,
+  and 42/46, 43/46 and 44/46 once each — while a file by that name had never been added on any branch.
+  ⚠ **And shipping it did not make its 46/46 mean more than it did:** it plays WC-only, so that score
+  proves confinement rather than correctness. The instrument that plays five configurations is
+  `render-identity-check.ts` on `feature/member-satisfaction`.
 - **Five of eight AWS constraints** existed only in a commit message. Two of the three that were recorded
   sat in `scripts/tools/session-stub-server.ts`, whose own header says nothing in it survives the real
   implementation; the third was one clause on a field in `contract.ts`. All eight are now at

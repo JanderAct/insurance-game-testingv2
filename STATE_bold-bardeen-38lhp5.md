@@ -86,14 +86,18 @@ A new reader should open `docs/handoff/overview.md`, then this file, then `SESSI
   `baselines/SOLO_EXPORT_GUARD_v44.json`. Both have held bit-identical through all 22 commits.
 - `scripts/tools/poll-cost-report.ts` — the poll's request and byte cost, before and after the back-off.
 
-**NOT in the repo — and this is the branch's largest verification gap:**
+- `scripts/tools/session-drivers/` — **the eight browser drivers, runnable from the repo**:
+  `solo-oracle` 46, `host-charts` 46, `full-session` 33, `viewer` 19, `two-contexts` 16, `four-tabs` 15,
+  `host-teams` 13, `replay-fidelity` 8. They need a built app and a preview server and there is no npm
+  script for that reason; `_shared.cjs`'s header carries the invocation, what each driver is for, and
+  which of their assertions survive an engine change. `playwright` is a devDependency, pinned at 1.63.0;
+  Chromium is preinstalled and is never downloaded.
 
-- ⚠ **The browser drivers exist only in a session scratchpad.** `solo-oracle` (46 fingerprints),
-  `host-charts` (46), `full-session` (33), `viewer` (19), `two-contexts` (16), `four-tabs` (15),
-  `host-teams` (13), `replay-fidelity` (8), plus the storage and gap probes. Every count quoted in the 22
-  commit messages came from these, and **none of it is reproducible by anyone reading this repository.**
-  `playwright` is not in `package.json`. This is the solo-oracle failure that `SESSION_PRACTICES.md` §1
-  is about, still unfixed at the time of writing.
+**NOT in the repo:**
+
+- ⚠ **The measurement probes.** `storage-2x8`, the gap decomposition, the reproduction scripts. Every
+  storage figure quoted in the commit messages (26,233 → 30,947 chars, 480 per team) came from these and
+  is not reproducible here. The drivers landed; the probes did not.
 - ⚠ **No render baseline.** `RENDER_IDENTITY_v1.json` and `scripts/tools/render-identity-check.ts` are on
   `feature/member-satisfaction` only. The value baselines carry pool-level quantised `memberSatisfaction`
   with no per-member dimension, so **nothing on this branch can see a display change.** Display defects
@@ -161,8 +165,9 @@ of things that exist only in `git log` should not itself exist only in `git log`
 - **The line-independence proof.** `instanceGenerator.ts:72` asserts draws are independent of which lines
   are active; the verification — pre-game register, opening roster and every live-year register hashing
   identically across WC / WC+GL / tri-line — is only in `73d749d`.
-- **Every browser-driver count**, and the storage measurements (26,233 → 30,947 chars; 480 chars per team
-  for the opening position; 0.59% of the measured quota). The tools that produced them are not in the repo.
+- **The storage measurements** (26,233 → 30,947 chars; 480 chars per team for the opening position; 0.59%
+  of the measured quota). The probe that produced them is still not in the repo. The driver counts are no
+  longer on this list — the eight instruments now ship.
 - **The market-gap decomposition** — `load = 1.15 + c(L−1)`, and the no-cede arm flat at −25.25pp for all
   three lines. It belongs beside `marketLevelGapPct`, which is engine-side.
 - **Why there are three roles rather than two** — that a viewer is a flag on the player path rather than a
@@ -189,7 +194,8 @@ working branch and describes mechanisms removed months ago. It was not wrong whe
   merge-base.
 - The baselines are recaptured, here or there. The v44-versus-v47 fact is the one most likely to be quoted
   after it stops being true.
-- The drivers land in the repo, or the render baseline arrives here. Both would delete a section.
+- The probes land in the repo, or the render baseline arrives here. Either would delete a section. (The
+  drivers landing already did, at `9e4…`/this commit's parent — the pattern repeats.)
 - Any open question is ruled on.
 
 **Who updates it:** whoever makes the change that invalidates a line, in the same commit. A state document
