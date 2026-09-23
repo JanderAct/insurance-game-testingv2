@@ -91,12 +91,6 @@ const FAST: string[] = [
   'member-experience-mod-check',     //  11s   the mod is centred on the book it rates, cannot see the year it
                                      //         is pricing, and reaches neither the total, the rate nor the roster
   'member-loss-history-check',       //   2s
-  'member-satisfaction-check',       //  41s   the per-member stock MOVES, feeds nothing on a STATIC allow-list,
-                                     //         does not drift at defaults on the NET of its two limbs, is CONVEX
-                                     //         against the linear form it replaces, and the loss term modulates
-                                     //         the price term inside a controlled gap band. Traces one member
-                                     //         through one funding stop; null arm with BOTH weights at 0 and a
-                                     //         seed-matched priced-up control
   'member-value-check',              //  16s   the three pots are LAYERS and exhaustive, the member rows rebase to
                                      //         1 on the book, the tower is DISCLOSED and not RATED, and the
                                      //         REJECTED lower boundary is re-measured every run rather than
@@ -234,6 +228,30 @@ const SLOW: string[] = [
   // has run off and WC's horizon reaches twelve. Same cost, different shape —
   // fewer games, each carrying more than twice the history.
   'clf-label-backtest-check',        //  104s
+  // 90s — PROMOTED OUT OF FAST AT THIS COMMIT, and it is the only entry here that
+  // left FAST for cost rather than arriving already slow. It was 41s when it was
+  // tiered and 56s at the last recorded sweep; measured serially on one machine
+  // it now runs 90/90/91s, past the 88s threshold. The growth is real and not
+  // machine variance — four other FAST gates measured AT or UNDER their records
+  // on the same machine in the same session (3->2, 30->27, 29->29, 16->15).
+  //
+  // ⚠ WHAT DEFERRING IT COSTS, AND IT IS THE SHARPEST DEFERRAL IN THIS LIST
+  // AFTER pregame-acceptance. This gate holds the STATIC ALLOW-LIST that keeps
+  // Member.satisfaction a scoreboard — the check that catches a new consumer
+  // turning it into a mechanic. That check is now deferred to merge, so a commit
+  // that wires satisfaction into departure or pricing will ship and be caught
+  // later rather than at the commit that did it. It also carries the per-game
+  // drift bound and the convexity assertions.
+  //
+  // ⚠ IT IS EXPENSIVE FOR A REASON AND THE SAMPLE IS NOT PADDING. GAMES defaults
+  // to 24 because the drift mean is tail-dominated under a convex reaction and
+  // reads noise below about 12 games. The cost is ~139 game-runs across seven
+  // arms — baseline, two band arms for the drift denominator, a null arm, a
+  // decision arm, two surplus-ablation arms and a ramped arm — and none of them
+  // duplicates another: the two that look like repeats of `baseline` run under
+  // MUTATED SATISFACTION weights, so reusing it would silently change what is
+  // measured. Checked before this move, not assumed.
+  'member-satisfaction-check',       //   90s
 ];
 
 // ============================================================================
