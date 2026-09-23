@@ -1,24 +1,32 @@
 // ============================================================================
-// THE FIVE RISK-CONTROL CATEGORY BOXES — A PREVIEW, BESIDE THE LIVE SLIDER.
+// THE FIVE RISK-CONTROL CATEGORY BOXES — STILL INERT, AND NOW THE ONLY
+// RISK-CONTROL UI ON THE PAGE.
 //
 // ⚠ INERT. These boxes take no value, emit no change, and touch no decision
-// field. The LIVE control is the "Risk Control Investment" slider in the Loss
-// Prevention card on this same tab; that slider is what spends money and what
-// reaches the loss draw. Nothing here does anything yet.
+// field. Nothing here does anything yet.
 //
-// ⚠ DO NOT WIRE ONE TO THE OTHER. If you are here to make these work, the
-// intended path is ONE commit that moves the spend from the slider to the boxes
-// and deletes the slider in the same change — not a commit that makes a box set
-// riskControlPct. Two controls writing one field is the arrangement where a
-// player moves a box, the slider disagrees, and the engine takes whichever wrote
-// last. See src/data/riskControlCategories.ts for the scoping and the reasoning.
+// ⚠ AND THE SLIDER THEY SAT BESIDE IS GONE. Until the previous commit the Loss
+// Prevention card carried a live "Risk Control Investment" slider and this
+// header pointed at it. It is retired. `decisions.riskControlPct` REMAINS in the
+// decision set, is still read by the engine, and is now pinned at its default of
+// 0 — so the pool spends nothing on risk control until these boxes are given the
+// field. The control went, not the decision.
 //
-// ⚠ AND THE COPY HERE MUST NOT CONTAIN THE STRING "Risk Control Investment".
-// scripts/tools/session-drivers/full-session.cjs finds that slider by walking UP
-// from every range input looking for its label text in an ancestor within five
-// levels. These boxes sit in the same grid as that slider, so repeating its
-// label here could make the driver nudge a different input entirely. The card is
-// titled "Risk Control Programmes" for that reason and not for a nicer word.
+// ⚠ DO NOT WIRE A BOX TO riskControlPct AS A HALF-STEP. The intended path is ONE
+// commit that gives the boxes the field outright. A box that sets the old
+// percentage would reintroduce the arrangement the retirement just removed —
+// two representations of one spend, with the engine taking whichever wrote last.
+// See src/data/riskControlCategories.ts for the scoping and the reasoning.
+//
+// ⚠ THE COPY HERE STILL MUST NOT CONTAIN THE STRING "Risk Control Investment",
+// and the reason OUTLIVED the slider. Two drivers —
+// session-drivers/full-session.cjs and session-drivers/replay-fidelity.cjs —
+// find a slider by walking UP from every range input looking for its label text
+// in an ancestor within five levels. Both were repointed to "Funding Confidence
+// Level" when the slider went. Putting either label into this card's copy would
+// put matching text in an ancestor of a real range input and let a driver nudge
+// something it did not mean to, which is the collision the card's title was
+// chosen to avoid in the first place.
 // ============================================================================
 
 import { Layers } from 'lucide-react';
@@ -82,9 +90,10 @@ export default function RiskControlCategoryBoxes() {
       <div className="p-5 space-y-4">
         <p className="text-xs text-gray-500 leading-snug">
           A preview of how risk control is intended to be bought: as programmes with their own
-          commitment lengths, rather than as one intensity. These boxes do nothing yet — the
-          <span className="font-semibold text-gray-700"> Loss Prevention </span>
-          card is the live control and is what spends money this year.
+          commitment lengths, rather than as one intensity. These boxes do nothing yet, and the
+          intensity slider they replace has been retired — so the pool is
+          <span className="font-semibold text-gray-700"> spending nothing on risk control </span>
+          until these become active.
         </p>
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {RISK_CONTROL_CATEGORIES.map(c => <CategoryBox key={c.id} c={c} />)}

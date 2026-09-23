@@ -273,7 +273,6 @@ function PoolDecisionsView({ decisions, onChange, yearNumber, disabled }: {
   yearNumber: number;
   disabled: boolean;
 }) {
-  const pctDisplay = (v: number) => `${(v * 100).toFixed(1)}%`;
   const resetPool = () => onChange({
     ...decisions,
     assetAllocation: { ...ASSET_ALLOCATION_DEFAULT },
@@ -294,6 +293,31 @@ function PoolDecisionsView({ decisions, onChange, yearNumber, disabled }: {
         )}
       </div>
 
+      {/* ⚠ THE RISK CONTROL SLIDER IS RETIRED HERE, PENDING THE BOXES BELOW, AND
+          THE FIELD IS LIVE AND PINNED.
+
+          `decisions.riskControlPct` STAYS in the decision set. It is still read
+          by the engine and still reaches the loss draw through
+          riskControlEffectiveness — the CONTROL is gone, not the decision. It
+          now holds SLIDER_RANGES.riskControlPct.default for the whole game,
+          which is 0, so the default game is unchanged and both value baselines
+          hold. That was established before this commit was written rather than
+          discovered after: neither baseline arm sets the field (`def` runs
+          defaultDecisionSet, `sqz` overrides only the two funding fields), so
+          it reads 0 in all 28,800 captured values either way.
+
+          THE FIELD IS DELIBERATELY NOT DELETED. The category boxes are going to
+          drive it, and a field deleted and re-added is a worse path than one
+          that was never touched — it would move the save shape twice and put a
+          migration between the two halves of one change.
+
+          ⚠ ONE CONSEQUENCE NOT HANDLED HERE, DELIBERATELY. A game SAVED BEFORE
+          this commit with a non-zero riskControlPct restores that value, and
+          there is now no control to change it — the spend would continue for the
+          rest of that game. Nothing normalises it on load, because silently
+          rewriting a player's saved decisions is a worse failure than a stuck
+          lever on a pre-existing save, and the commit that gives the boxes the
+          field is where that normalisation belongs. New games are unaffected. */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <SectionCard title="Investment Allocation" icon={<BarChart2 size={16} />}>
           <AllocationBar
@@ -302,28 +326,14 @@ function PoolDecisionsView({ decisions, onChange, yearNumber, disabled }: {
             disabled={disabled}
           />
         </SectionCard>
-
-        <SectionCard title="Loss Prevention" icon={<TrendingUp size={16} />}>
-          <SliderInput
-            label="Risk Control Investment"
-            value={decisions.riskControlPct}
-            min={SLIDER_RANGES.riskControlPct.min} max={SLIDER_RANGES.riskControlPct.max} step={SLIDER_RANGES.riskControlPct.step}
-            onChange={v => onChange({ ...decisions, riskControlPct: v })}
-            formatValue={pctDisplay} leftLabel="Low" rightLabel="High"
-            valueColor={decisions.riskControlPct > 0.03 ? 'text-emerald-600' : 'text-gray-600'}
-            disabled={disabled}
-            helpText="Investment in member safety and training, as a percentage of premium. Each line spends this percentage of its own premium and earns the loss reduction on its own book."
-          />
-        </SectionCard>
       </div>
 
-      {/* ⚠ INERT PREVIEW, AND THE SLIDER ABOVE IS THE LIVE CONTROL. These boxes
-          take no value and emit no change; the Loss Prevention slider is what
-          spends money and what reaches the loss draw. They sit BESIDE it rather
-          than instead of it so the spend keeps working while the categories are
-          rearranged, and so no commit has to put a removed lever back. ONE later
-          commit moves the spend across and deletes the slider in the same
-          change. Do not wire a box to riskControlPct in the meantime — see
+      {/* ⚠ STILL INERT, AND NOW THERE IS NO OTHER RISK-CONTROL CONTROL. These
+          boxes take no value and emit no change. With the slider retired above,
+          riskControlPct is pinned at its default of 0 for the whole game, so the
+          pool is spending nothing on risk control until the boxes are given the
+          field. That is the intended interim state, not an oversight. Do not
+          wire a box to riskControlPct as a half-step — see
           src/components/RiskControlCategoryBoxes.tsx. */}
       <RiskControlCategoryBoxes />
     </div>

@@ -138,11 +138,23 @@ const roomRecord = (page, code) => page.evaluate(c =>
         // A deliberate, non-default choice made through the REAL decisions page.
         await p.getByRole('button', { name: 'Decisions', exact: true }).click();
         await p.waitForTimeout(400);
-        const pool = p.getByRole('button', { name: 'Pool', exact: true }).first();
-        if (await pool.count() > 0) { await pool.click(); await p.waitForTimeout(400); }
-        const moved = await nudgeSlider(p, 'Risk Control Investment', 3);
+        // ⚠ REPOINTED FROM 'Risk Control Investment' TO 'Funding Confidence Level'
+        // WHEN THE RISK CONTROL SLIDER WAS RETIRED. That slider was this driver's
+        // non-default choice, and it no longer exists — nudgeSlider would have
+        // returned null and this assertion would have gone red.
+        //
+        // AND THE TAB MOVED WITH IT, WHICH IS THE PART THAT MATTERS. The Pool tab
+        // now has NO range input at all: AllocationBar is not one, and the risk
+        // control slider was the only SliderInput on it. Leaving the 'Pool' click
+        // in place would have made nudgeSlider search a tab with nothing to find.
+        // The line tab is DETECTED rather than named, because the line tabs are
+        // full display names ("Workers' Compensation") and which lines a session
+        // carries is a property of its setup, not of this driver.
+        const lineBtn = p.getByRole('button', { name: /Workers' Compensation|General Liability|^Property$/ }).first();
+        if (await lineBtn.count() > 0) { await lineBtn.click(); await p.waitForTimeout(400); }
+        const moved = await nudgeSlider(p, 'Funding Confidence Level', 3);
         ok(moved !== null && moved.before !== moved.after,
-           `carry-forward setup: ${TEAMS[i]} moved Risk Control on the real page (${moved && moved.before} -> ${moved && moved.after})`);
+           `carry-forward setup: ${TEAMS[i]} moved Funding Confidence on the real page (${moved && moved.before} -> ${moved && moved.after})`);
       }
 
       await p.getByRole('button', { name: /Lock Year/ }).first().click();
@@ -190,11 +202,24 @@ const roomRecord = (page, code) => page.evaluate(c =>
     const years = Object.keys(hist).map(Number).sort((a, b) => a - b);
 
     ok(!years.includes(SKIP_YEAR), `carry-forward: year ${SKIP_YEAR} has NO stored set — it was skipped (${years.join(',')})`);
-    const rc1 = hist['1']?.riskControlPct;
-    const rc3 = hist[String(YEARS)]?.riskControlPct;
-    const rcOther = (other.decisionsByYear || {})['1']?.riskControlPct;
-    ok(rc1 !== rcOther, `carry-forward: ${TEAMS[SKIPPER]} kept its own risk control in year 1 (${rc1}) vs a default team (${rcOther})`);
-    ok(rc3 === rc1, `carry-forward: the value survived the skipped year into year ${YEARS} (${rc1} -> ${rc3})`);
+    // ⚠ REPOINTED WITH THE NUDGE ABOVE, AND THIS IS THE SECOND SITE — the first
+    // fix (the nudge) left these three reads on riskControlPct, where every team
+    // now reads the pinned 0, so `rc1 !== rcOther` compared 0 against 0 and went
+    // red. A carry-forward assertion has to read the field the deliberate choice
+    // actually moved.
+    //
+    // THE SIGNATURE IS PER-LINE AND NOT A SINGLE FIELD, because funding
+    // confidence lives at byLine[line].fundingConfidenceLevel and the nudge
+    // clicks whichever line tab the session happens to carry. Comparing the whole
+    // map is robust to that; naming a line here would make the driver depend on
+    // a setup it does not control.
+    const fcSig = d => JSON.stringify(Object.entries(d?.byLine || {})
+      .map(([l, v]) => [l, v.fundingConfidenceLevel, v.fundingAtExpected]).sort());
+    const fc1 = fcSig(hist['1']);
+    const fc3 = fcSig(hist[String(YEARS)]);
+    const fcOther = fcSig((other.decisionsByYear || {})['1']);
+    ok(fc1 !== fcOther, `carry-forward: ${TEAMS[SKIPPER]} kept its own funding choice in year 1 vs a default team`);
+    ok(fc3 === fc1, `carry-forward: the value survived the skipped year into year ${YEARS}`);
 
     // And the governing year for the skipped one is the lock BEFORE it, which is
     // what the replay will read.

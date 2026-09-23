@@ -56,21 +56,44 @@ const room = (page, code) => page.evaluate(c =>
   await player.waitForSelector('[data-testid="session-strip"]', { timeout: 120000 });
 
   const postedAt = {};
-  const rcValues = [];
+  const fcValues = [];
 
   for (let year = 1; year <= 3; year++) {
     await player.getByRole('button', { name: /Lock Year/ }).first().waitFor({ timeout: 120000 });
     // ⚠ A DIFFERENT SET EVERY YEAR. Without variation the two replay rules give
     // the same answer and the test proves nothing.
-    if (year > 1) {
+    {
       await player.getByRole('button', { name: 'Decisions', exact: true }).click();
       await player.waitForTimeout(400);
-      const pool = player.getByRole('button', { name: 'Pool', exact: true }).first();
-      if (await pool.count() > 0) { await pool.click(); await player.waitForTimeout(350); }
-      const v = await nudge(player, 'Risk Control Investment', 3);
-      rcValues.push(v);
-    } else {
-      rcValues.push('0');
+      // ⚠ REPOINTED FROM 'Risk Control Investment' TO 'Funding Confidence Level'
+      // WHEN THE RISK CONTROL SLIDER WAS RETIRED, AND FOR THIS DRIVER THAT WAS
+      // NOT OPTIONAL. The risk control slider was this driver's ONLY source of
+      // year-to-year variation, and the note above says why that matters:
+      // without variation the two replay rules give the same answer and the test
+      // proves nothing. Deleting the nudge would have left the driver green and
+      // empty — the exact failure mode the label collision was avoided to
+      // prevent — so it is repointed at another real decision rather than
+      // dropped.
+      //
+      // Funding confidence is the stronger choice anyway: it is the pool's only
+      // pricing lever, so it moves premium, surplus and loss ratio together,
+      // which is what the endingSurplus assertion below actually needs.
+      //
+      // THE TAB MOVED TOO. The Pool tab now carries NO range input — AllocationBar
+      // is not one, and the retired slider was its only SliderInput — so the old
+      // 'Pool' click would have searched a tab with nothing to find. The line tab
+      // is DETECTED by display name rather than assumed.
+      //
+      // ⚠ YEAR 1 NOW READS THE SLIDER INSTEAD OF ASSUMING IT. It used to push a
+      // literal '0', which was the RETIRED risk-control slider's default and is
+      // NOT funding confidence's (0.60). Left alone, the set-size assertion below
+      // would have compared a fabricated year-1 value against two real ones and
+      // passed on it. Reading with zero presses finds the same input and returns
+      // its value without moving it.
+      const lineBtn = player.getByRole('button', { name: /Workers' Compensation|General Liability|^Property$/ }).first();
+      if (await lineBtn.count() > 0) { await lineBtn.click(); await player.waitForTimeout(350); }
+      const v = await nudge(player, 'Funding Confidence Level', year > 1 ? 3 : 0);
+      fcValues.push(v);
     }
     await player.getByRole('button', { name: /Lock Year/ }).first().click();
     await player.waitForSelector('[data-testid="waiting"]', { timeout: 30000 });
@@ -88,10 +111,10 @@ const room = (page, code) => page.evaluate(c =>
 
     const rec = await room(host, code);
     postedAt[year] = JSON.parse(JSON.stringify(rec.teams[0].resultsByYear[String(year)]));
-    console.log(`  year ${year}: riskControl=${rcValues[year - 1]}  postedYear=${postedAt[year].yearNumber}  surplus=${postedAt[year].pool.endingSurplus.toFixed(2)}  lossRatio=${postedAt[year].pool.actualLossRatioPricingBasis.toFixed(4)}`);
+    console.log(`  year ${year}: fundingConfidence=${fcValues[year - 1]}  postedYear=${postedAt[year].yearNumber}  surplus=${postedAt[year].pool.endingSurplus.toFixed(2)}  lossRatio=${postedAt[year].pool.actualLossRatioPricingBasis.toFixed(4)}`);
   }
 
-  ok(new Set(rcValues).size === 3, `the three years used three DIFFERENT decision sets (${rcValues.join(', ')})`);
+  ok(new Set(fcValues).size === 3, `the three years used three DIFFERENT decision sets (${fcValues.join(', ')})`);
   ok(postedAt[1].pool.endingSurplus !== postedAt[3].pool.endingSurplus, 'and those choices moved the numbers');
 
   const histBefore = (await room(host, code)).teams[0].decisionsByYear;
