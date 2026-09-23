@@ -3,6 +3,7 @@ import { DollarSign, TrendingUp, BarChart2, Shield, RotateCcw, Info } from 'luci
 import type { DecisionSet, LineDecisionSet, CoverageLine, LineView, LineResultSet, Member, MemberLossHistory, MembershipHistory } from '../types/simulation';
 import SliderInput from '../components/SliderInput';
 import AllocationBar from '../components/AllocationBar';
+import RiskControlCategoryBoxes from '../components/RiskControlCategoryBoxes';
 import { SLIDER_RANGES, ASSET_ALLOCATION_DEFAULT } from '../data/defaultAssumptions';
 import { formatCurrency } from '../utils/formatters';
 import { defaultLineDecisionSet } from '../utils/decisionDefaults';
@@ -315,6 +316,16 @@ function PoolDecisionsView({ decisions, onChange, yearNumber, disabled }: {
           />
         </SectionCard>
       </div>
+
+      {/* ⚠ INERT PREVIEW, AND THE SLIDER ABOVE IS THE LIVE CONTROL. These boxes
+          take no value and emit no change; the Loss Prevention slider is what
+          spends money and what reaches the loss draw. They sit BESIDE it rather
+          than instead of it so the spend keeps working while the categories are
+          rearranged, and so no commit has to put a removed lever back. ONE later
+          commit moves the spend across and deletes the slider in the same
+          change. Do not wire a box to riskControlPct in the meantime — see
+          src/components/RiskControlCategoryBoxes.tsx. */}
+      <RiskControlCategoryBoxes />
     </div>
   );
 }
