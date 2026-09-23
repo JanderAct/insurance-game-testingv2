@@ -40,6 +40,8 @@ interface DecisionsPageProps {
   // 'pool' hosts the two pool-wide decisions (investment allocation, risk
   // control); each coverage line's tab edits that line's own decisions.
   lineView: LineView;
+  /** The lines the pool writes — gates the risk-control tiles. */
+  activeLines: readonly CoverageLine[];
   lineLoanInfo: Record<CoverageLine, LineLoanInfo>;
   // Last computed result for the line being edited — informational only
   // (excessCapitalRatio / capitalAdequacyStatus for the consequence panel).
@@ -99,12 +101,12 @@ function resetLineToDefaults(decisions: DecisionSet, line: CoverageLine): Decisi
   };
 }
 
-export default function DecisionsPage({ decisions, onChange, yearNumber, estimatedExpectedLoss, estimatedAggregateTermsRetained, disabled = false, lineView, lineLoanInfo, lastLineResult, fundingConsequence, activeMembers, memberLossHistory, allMarketMembers, membershipHistory }: DecisionsPageProps) {
+export default function DecisionsPage({ decisions, onChange, yearNumber, estimatedExpectedLoss, estimatedAggregateTermsRetained, disabled = false, lineView, lineLoanInfo, lastLineResult, fundingConsequence, activeLines, activeMembers, memberLossHistory, allMarketMembers, membershipHistory }: DecisionsPageProps) {
   // Pool tab: the two pool-wide decisions. One allocation policy and one
   // risk-control intensity for the whole pool — each line applies them to its
   // OWN base (own segregated portfolio / own premium).
   if (lineView === 'pool') {
-    return <PoolDecisionsView decisions={decisions} onChange={onChange} yearNumber={yearNumber} disabled={disabled} />;
+    return <PoolDecisionsView decisions={decisions} onChange={onChange} yearNumber={yearNumber} disabled={disabled} activeLines={activeLines} />;
   }
 
   // Stage 2.7: every active line's remaining decisions are edited on its own
@@ -267,11 +269,12 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
 // Pool tab: the two pool-wide decisions. Portfolios remain segregated per
 // line (Stage 2.9) — every line applies this one allocation policy to its own
 // invested assets, and the one risk-control intensity to its own premium.
-function PoolDecisionsView({ decisions, onChange, yearNumber, disabled }: {
+function PoolDecisionsView({ decisions, onChange, yearNumber, disabled, activeLines }: {
   decisions: DecisionSet;
   onChange: (d: DecisionSet) => void;
   yearNumber: number;
   disabled: boolean;
+  activeLines: readonly CoverageLine[];
 }) {
   const resetPool = () => onChange({
     ...decisions,
@@ -340,7 +343,7 @@ function PoolDecisionsView({ decisions, onChange, yearNumber, disabled }: {
             pick-one reading the default. See the component for the three things
             that keep them apart. */}
         <SectionCard title="Loss Prevention" icon={<TrendingUp size={16} />}>
-          <RiskControlCategoryBoxes />
+          <RiskControlCategoryBoxes activeLines={activeLines} />
         </SectionCard>
       </div>
     </div>

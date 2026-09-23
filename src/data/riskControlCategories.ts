@@ -66,8 +66,16 @@ export interface RiskControlCategory {
   id: string;
   name: string;
   scope: RiskControlScope;
-  /** Years the commitment runs. A range means the player picks the length. */
-  commitmentYears: number | readonly [number, number];
+  /**
+   * Years the commitment runs.
+   *
+   * ⚠ WAS `number | readonly [number, number]`, AND THE RANGE IS GONE BECAUSE
+   * NOTHING USES IT. Claims Management was the only range at 2-4 years and is
+   * now a fixed 3, so the tuple arm and commitmentLabel's Array.isArray branch
+   * were both dead. Removed with the data change rather than left as a shape
+   * waiting for a case that no longer exists.
+   */
+  commitmentYears: number;
   /** Whether it re-commits by default — see the opt-out note above. */
   renewal: 'opt-out' | 'yearly';
   benefit: BenefitShape;
@@ -120,7 +128,7 @@ export const RISK_CONTROL_CATEGORIES: readonly RiskControlCategory[] = [
     id: 'claims-management-system',
     name: 'Claims Management System',
     scope: 'Pool',
-    commitmentYears: [2, 4],
+    commitmentYears: 3,
     renewal: 'opt-out',
     benefit: 'onCompletion',
     what: 'Capital build of a claims system: intake, adjuster workflow, and reserving discipline.',
@@ -142,12 +150,31 @@ export const RISK_CONTROL_CATEGORIES: readonly RiskControlCategory[] = [
   },
 ];
 
-/** "3 years", "2-4 years", "Yearly". DISPLAY ONLY. */
+/**
+ * The programs a pool can actually be offered, given the lines it writes.
+ *
+ * ⚠ THIS IS A MECHANIC AND NOT COPY. The department page states that
+ * line-specific programs are only available if the pool provides that coverage.
+ * If the tiles did not gate, the page would say something the screen
+ * contradicts, so BOTH read this one function — a GL-only pool sees three
+ * programs, a three-line pool sees five.
+ *
+ * It is a filter over data that was already there: every entry has carried a
+ * `scope` since the catalog was written, so nothing new is stored to make this
+ * work and there is no second list to keep in step.
+ */
+export function availableCategories(
+  activeLines: readonly CoverageLine[],
+): readonly RiskControlCategory[] {
+  return RISK_CONTROL_CATEGORIES.filter(
+    c => c.scope === 'Pool' || activeLines.includes(c.scope),
+  );
+}
+
+/** "3 years", "1 year", "Yearly". DISPLAY ONLY. */
 export function commitmentLabel(c: RiskControlCategory): string {
   if (c.renewal === 'yearly') return 'Yearly';
-  return Array.isArray(c.commitmentYears)
-    ? `${c.commitmentYears[0]}-${c.commitmentYears[1]} years`
-    : `${c.commitmentYears as number} years`;
+  return `${c.commitmentYears} year${c.commitmentYears === 1 ? '' : 's'}`;
 }
 
 /** How the benefit arrives, in words. DISPLAY ONLY. */

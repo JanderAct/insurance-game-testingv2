@@ -228,6 +228,7 @@ export default function GameShell({
             lineLoanInfo={d.lineLoanInfo}
             lastLineResult={d.lastLineResult}
             fundingConsequence={d.fundingConsequence}
+            activeLines={gameState.setup.activeLines}
             activeMembers={d.decisionLineActiveMembers}
           />
         )}

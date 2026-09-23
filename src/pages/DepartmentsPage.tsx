@@ -4,6 +4,7 @@ import DocumentReader, { type DocumentEntry } from '../components/DocumentReader
 import investmentMemoRaw from '../data/documents/investmentMemo.md?raw';
 import { buildActuarialMemo } from '../utils/actuarialMemo';
 import { buildClaimsMemo } from '../utils/claimsMemo';
+import { buildRiskControlMemo } from '../utils/riskControlMemo';
 
 interface DepartmentsPageProps {
   gameState: GameState;
@@ -50,6 +51,15 @@ export default function DepartmentsPage({ gameState }: DepartmentsPageProps) {
       title: 'Claims',
       summary: 'Large loss listing by member and status',
       content: claimsMemo,
+    },
+    {
+      // ⚠ GATED BY activeLines, WHICH IS WHY IT IS BUILT AND NOT A STATIC .md.
+      // Its own second paragraph promises that line-specific programs appear
+      // only if the pool writes that coverage, so the list has to honour it.
+      id: 'riskControl',
+      title: 'Risk Control',
+      summary: 'Programs available for management consideration',
+      content: buildRiskControlMemo(gameState.setup.activeLines),
     },
     {
       id: 'underwriting',

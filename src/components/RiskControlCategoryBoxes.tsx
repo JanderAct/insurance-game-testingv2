@@ -78,9 +78,10 @@
 
 import { Layers } from 'lucide-react';
 import {
-  RISK_CONTROL_CATEGORIES, commitmentLabel,
+  availableCategories, commitmentLabel,
   type RiskControlCategory,
 } from '../data/riskControlCategories';
+import type { CoverageLine } from '../types/simulation';
 
 const SCOPE_STYLE: Record<string, string> = {
   WC: 'bg-sky-100 text-sky-700',
@@ -100,7 +101,13 @@ function CategoryTile({ c }: { c: RiskControlCategory }) {
   );
 }
 
-export default function RiskControlCategoryBoxes() {
+export default function RiskControlCategoryBoxes({ activeLines }: { activeLines: readonly CoverageLine[] }) {
+  // ⚠ THE SAME availableCategories THE DEPARTMENT PAGE CALLS, not a second
+  // filter written to match it. The page tells the player that line-specific
+  // programs appear only if the pool writes that coverage; two independent
+  // filters would be two things to keep in step, and the screen contradicting
+  // the page is exactly the failure the shared helper prevents.
+  const shown = availableCategories(activeLines);
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-3 space-y-2">
       <div className="flex items-center gap-1.5">
@@ -108,7 +115,7 @@ export default function RiskControlCategoryBoxes() {
         <span className="text-sm font-semibold text-gray-700">Risk Control Programs</span>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-1.5">
-        {RISK_CONTROL_CATEGORIES.map(c => <CategoryTile key={c.id} c={c} />)}
+        {shown.map(c => <CategoryTile key={c.id} c={c} />)}
       </div>
       <p className="text-[11px] text-gray-500 leading-relaxed">
         Five independent programs — a pool can run any, all or none of them.
