@@ -111,8 +111,7 @@ export default function RiskControlCategoryBoxes() {
         {RISK_CONTROL_CATEGORIES.map(c => <CategoryTile key={c.id} c={c} />)}
       </div>
       <p className="text-[11px] text-gray-500 leading-relaxed">
-        Five independent programs — a pool can run any, all or none of them. Not a single choice.
-        None is active yet, and the pool is spending nothing on risk control until they are.
+        Five independent programs — a pool can run any, all or none of them.
       </p>
     </div>
   );

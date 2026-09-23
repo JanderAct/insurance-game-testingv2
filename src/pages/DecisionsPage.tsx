@@ -18,7 +18,7 @@ import type { FundingConsequence } from '../utils/fundingConsequence';
 import { RENEWAL_THRESHOLDS, renewalDeclines } from '../utils/renewalUnderwriting';
 import { EXPERIENCE_MOD } from '../utils/memberExperienceMod';
 import {
-  NEW_BUSINESS_APPETITE_TIERS, NEW_BUSINESS_TIERS, NO_NEW_BUSINESS, appetiteEligible,
+  NEW_BUSINESS_APPETITE_TIERS, NO_NEW_BUSINESS, appetiteEligible,
 } from '../utils/newBusinessAppetite';
 import { APPLICATION_RATE, MAX_NEW_MEMBER_SHARE } from '../data/defaultAssumptions';
 import { canReenroll } from '../utils/membershipHistory';
@@ -762,14 +762,6 @@ function RenewalUnderwriting({
               member cannot rejoin for two years, so holding a level costs more than its yearly count.
             </span>
           </p>
-          <p className="flex items-start gap-1 text-[11px] text-gray-400 leading-relaxed">
-            <Info size={12} className="mt-0.5 flex-shrink-0" />
-            <span>
-              Renewal judges existing members more leniently than appetite judges applicants —{' '}
-              {Math.max(...RENEWAL_THRESHOLDS).toFixed(2)}x against{' '}
-              {Math.max(...NEW_BUSINESS_TIERS).toFixed(2)}x.
-            </span>
-          </p>
         </>
       ) : (
         <PropertyNoSignalNote />
@@ -942,23 +934,6 @@ function NewBusinessAppetite({
               </div>
             ))}
           </div>
-          <p className="flex items-start gap-1 text-[11px] text-gray-500 leading-relaxed">
-            <Info size={12} className="mt-0.5 flex-shrink-0" />
-            <span>
-              About {(100 * APPLICATION_RATE).toFixed(0)}% of the {joins.pool} entities not currently in
-              this line apply each year, and each hands over {EXPERIENCE_MOD.windowYears} years of its own
-              claims. This sets the standard that loss run has to clear. Those who clear it are written in
-              the order they come, not best first — the pool underwrites against a standard, it does not
-              rank the queue. There is room for {joins.intakeRoom} this year.
-            </span>
-          </p>
-          <p className="flex items-start gap-1 text-[11px] text-gray-400 leading-relaxed">
-            <Info size={12} className="mt-0.5 flex-shrink-0" />
-            <span>
-              An applicant&rsquo;s ratio carries no risk-control credit and no loss-mix correction. One
-              with under {EXPERIENCE_MOD.windowYears} years of record is accepted.
-            </span>
-          </p>
         </>
       ) : (
         <PropertyNoSignalNote />
@@ -1116,8 +1091,6 @@ function TowerControls({
         </div>
         <p className="text-xs text-gray-500 italic mt-2 leading-relaxed">
           Any combination is allowed — including buying a higher layer while declining a lower one.
-          A declined layer is simply retained. The cost multiple rises with attachment because the
-          reinsurer charges for capital, not claims.
         </p>
       </div>
 
@@ -1245,12 +1218,6 @@ function TowerControls({
               shown for consistency; the number just reads near-zero. */}
           <DataRow label="Retained Above Tower" value={`Above ${TOWER_TOP[line] / 1e6}M — unlimited`} />
         </div>
-        <p className="text-blue-700 mt-2 text-xs leading-relaxed border-t border-blue-200 pt-2">
-          Priced as expected ceded loss plus a risk load on its standard deviation, both computed from
-          <strong> your own book and this year's severity</strong> — not as a percentage of premium, so the
-          cost does not move when you change the funding confidence level. A smaller book is more volatile
-          per dollar of expected loss, so it pays a higher multiple for the same layer.
-        </p>
       </div>
     </div>
   );
