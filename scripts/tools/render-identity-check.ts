@@ -96,12 +96,67 @@ import { fileURLToPath } from 'url';
 import { chromium, type Browser, type Page } from 'playwright';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// ============================================================================
+// VERSION HISTORY — AND THE OTHER TWO BASELINES' RULE APPLIES HERE TOO: THE LIVE
+// PATH IS THE `BASELINE` CONSTANT BELOW, NEVER THIS COMMENT. solo-export-guard
+// carries a note about a header line left behind by six recaptures while the
+// code had moved on; this block starts in the shape that cannot do that.
+//
+// v2: THE FIRST RECAPTURE. v1 was taken at c28ec2c and carried 236 of 298 rows
+// red across fourteen commits, because every commit in between reported its own
+// movement and correctly declined to re-baseline. That is the rule working, but
+// a baseline is only an instrument while somebody reads it: by the end each
+// commit was running a CONTROL BUILD to separate its own movement from the
+// inherited, three times in four commits, and that is the step that gets skipped
+// first. 248 -> 298 keys.
+//
+// WHAT v2 ACCEPTS, attributed commit by commit by building each one and
+// capturing the RENDERED TEXT rather than the hash — 50 keys added, 54 moved:
+//
+//   f88fc71  18 moved  the 3x satisfaction scale         Membership, Result Spreadsheet
+//   3084262   9 moved  the GL underwriting cycle         GL and Pool views only
+//   33fb5bc  10 moved  risk-control category boxes       Decisions|Pool
+//   0fd6f03  10 moved  the slider retired                Decisions|Pool
+//   1a06723  10 moved  the tiles compacted               Decisions|Pool
+//   f338076  26 moved  five decision notes removed       Decisions, all views
+//   b6d6767  20 moved  the Risk Control department page  Departments, Decisions|Pool
+//   5cbdc2b  10 moved  descriptions and placeholder cost Decisions|Pool
+//   2adc80d  +50 keys  per-document Departments coverage 0 moved, keys gained
+//   56efd06  10 moved  the Underwriting document         Departments|doc:Underwriting
+//   1d640c6 168 moved  WC's opening band re-translated   WC-bearing configs only
+//
+// The per-commit counts exceed 54 because Decisions|Pool moved six times and
+// counts once. 120a94a, 3c3731e, 59e5c4b and 41aeb29 moved NOTHING.
+//
+// ⚠ EVERY CUMULATIVE FIGURE THOSE COMMITS CLAIMED WAS REPRODUCED, NOT TAKEN ON
+// TRUST — 28 at 0fd6f03, 44 at f338076, 54 at b6d6767 and 5cbdc2b, 104 at
+// 2adc80d and 56efd06, 236 at 1d640c6. The record is verified.
+//
+// ⚠ AND THE 18 FROM THE SCALE WERE RULED ON BEFORE THIS FILE WAS WRITTEN,
+// because a recapture accepts them silently otherwise. All 18 are at y2 and none
+// at y0 — satisfaction is flat at its opening value until a year is played.
+// Masking every two-decimal number makes all 18 rows BYTE-IDENTICAL, so nothing
+// reordered, no label moved and no screen restructured. Of 2,354 two-decimal
+// numbers on those rows 1,404 changed and 950 did not, every changed one inside
+// the 1-10 satisfaction scale. Solving each for the anchor it implies under an
+// exact 3x, A = (3*old - new)/2, puts all 1,404 inside [7.19, 7.23] — which is
+// OPENING_SATISFACTION's [7.20, 7.22] widened only by 2dp rounding, mean 7.2056.
+// It is the scale, and it is nothing else.
+//
+// ⚠ ONE THING FOUND WHILE RULING, PRE-EXISTING AND NOT ACCEPTED BY THIS FILE:
+// there are TWO satisfaction numbers on screen. MembershipPage renders the
+// four-limb member model at 2dp and moved; ResultsPage and DashboardPage render
+// `result.memberSatisfaction`, a separate pool-level scalar, at 1dp and did not.
+// 26 y2 rows mention satisfaction and did not move — Calculation Audit's are all
+// static labels and weights, but Results shows a real value that the scale never
+// reached. That predates v1 and is recorded here rather than fixed.
+// ============================================================================
 // RENDER_BASELINE overrides the file, which is what lets one build be compared
 // against another (an A/B across two commits) rather than only against the
 // committed baseline. The committed path is the default and is what a bare run
 // uses.
 const BASELINE = process.env.RENDER_BASELINE
-  ?? path.join(__dirname, '../../baselines/RENDER_IDENTITY_v1.json');
+  ?? path.join(__dirname, '../../baselines/RENDER_IDENTITY_v2.json');
 const WRITE = process.argv.includes('--write');
 const BASE_URL = process.env.RENDER_URL ?? 'http://127.0.0.1:4173';
 // The image ships chromium 1194; a newer `playwright` expects its own build and

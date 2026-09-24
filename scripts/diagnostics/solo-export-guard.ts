@@ -357,6 +357,21 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // reports the same thing in both cases. value-identity v37 is what separates
 // them, and its note records the confinement check: every changed field is
 // downstream of the roster, nothing roster-independent moved, no NaN.
+// v48: WC'S OPENING SURPLUS BAND RE-TRANSLATED ONTO ITS CURRENT J AND ITS PIN
+// RE-SOLVED WITH IT. EXACTLY 12 OF 24 MOVED — WC-solo on all three seeds and tri
+// on all three, in BOTH arms. GL-SOLO AND PR-SOLO ARE BYTE-IDENTICAL, all 12 of
+// them, and that is the leak check and the strongest available statement of
+// scope: the band, the pin and the frozen J are per-line literals, WC's were the
+// only ones touched, and nothing reached the other two lines. No column was
+// added or removed.
+//
+// ⚠ THE SPLIT NEEDED NO INTERPRETATION, which is the case for keeping a guard
+// whose unit is the whole export. The changed set is exactly {WC-solo, tri} and
+// the unchanged set is exactly {GL-solo, PR-solo} — a partition along the line
+// that was edited, with nothing on the wrong side of it. value-identity v48
+// reports the same change as 2,084 fields on the capital chain but is
+// POOL-LEVEL, so it cannot say which LINE moved; this one can, and does.
+//
 // v47: GL'S TRIANGLE CONTRACTION RE-SOLVED (A +6.44%, closing a 6%
 // mean-preservation failure). EXACTLY 6 OF 12 MOVED — GL-solo on all three seeds
 // and tri on all three. WC-SOLO AND PR-SOLO ARE BYTE-IDENTICAL. This is the
@@ -493,7 +508,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 //
 // So this capture carries its own negative control: a table change that reaches
 // two lines and provably does not reach the third.
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v47.json');
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v48.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

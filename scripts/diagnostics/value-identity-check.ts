@@ -443,6 +443,36 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // basis. The mechanism's own correctness is held by cohort-ledger-check (three
 // identities, both arms), martingale-equivalence-check (term by term) and
 // terminal-severity-check (phi on its anchor), all green at this commit.
+// v48: WC'S OPENING SURPLUS BAND RE-TRANSLATED ONTO ITS CURRENT J (0.3294 ->
+// 0.4730) AND ITS PIN RE-SOLVED WITH IT (0.3254 -> 0.4718). 2,084 of 31,200
+// fields moved across 19 fields, 0 added, 0 removed.
+//
+// ⚠ THE CONFINEMENT IS THE POINT AND IT IS READABLE OFF THE FIELD LIST ALONE.
+// Every one of the 19 is on the capital/investment chain: endingSurplus,
+// availableSurplus, availableFunding, beginingSurplus, surplusFromIncome, the
+// four funding-gap aliases (fundingGap, capitalFundingGap,
+// excessAvailableSurplus and its ratio), excessCapitalRatio,
+// capitalAdequacyRatio, beginning/endingInvestments, investedAssets,
+// totalAssets, investmentIncome, netIncome. NO loss, premium, reserve, rate or
+// membership field moved. That is what a starting-capital change must look
+// like: the pin adds surplus, surplus is the invested base, investment income
+// follows — and nothing reaches the underwriting side.
+//
+// THREE OF THE 19 MOVE IN THEIR LAST BITS ONLY and are not a value change:
+// surplusTieOutDifference (-3.7e-9 -> -1.9e-9), beginningCash (...422 -> ...424)
+// and investmentReturnRate (...695 -> ...6947). Those are re-association at a
+// different magnitude, not arithmetic that decided anything.
+//
+// A REPRESENTATIVE ROW, and the defect being fixed: excessCapitalRatio
+// -0.2100 -> +0.1166 — Deficient to Adequate. WC opened at 0.570..0.827 of its
+// own required margin on 100 of 100 seeds and now opens 0.813..1.188.
+//
+// ⚠ THE LEAK CHECK IS SOLO_EXPORT_GUARD v48'S, NOT THIS FILE'S, and it is the
+// stronger statement: all 6 GL-solo and all 6 PR-solo exports are BYTE-IDENTICAL
+// while all 6 WC-solo and all 6 tri moved. This baseline is pool-level and
+// cannot separate the lines that way, so read the two notes together — the same
+// pairing v46 and v47 record.
+//
 // v47: GL'S TRIANGLE CONTRACTION RE-SOLVED, A 2.156982 -> 2.295852 (+6.44%), to
 // close a 6% mean-preservation failure — a claim developed to its terminal was
 // averaging 0.9395 of the value drawn. 8,260 of 31,200 fields moved across 78
@@ -764,7 +794,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // capture is sufficient alone here: the hash guard cannot tell "different
 // members enrolled" from "the arithmetic broke", and this one says the
 // changed set is exactly the set a roster change explains.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v47.json');
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v48.json');
 
 function seedOf(id: string) {
   let h = 5381;
