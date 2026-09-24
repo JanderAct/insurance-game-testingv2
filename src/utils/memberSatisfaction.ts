@@ -856,6 +856,55 @@ export const SATISFACTION = {
    * The GL contraction re-solve moved GL's own median 0.4358 -> 0.4708 and its
    * p25 across zero, but WC's did not move, so the pooled median barely did.
    *
+   * ⚠ RE-MEASURED WHEN WC'S OPENING BAND WAS RE-TRANSLATED, AND TRIGGER 2 HAS
+   * FIRED. NOT RE-SOLVED HERE — READ THE LAST PARAGRAPH OF THIS BLOCK BEFORE
+   * DECIDING, BECAUSE THE REASON IT WAS LEFT IS THE SAME ONE RECORDED THERE.
+   *
+   *   1. surplusComfortable   pooled median 0.2288 against the 0.1385 boundary
+   *                           = 0.0903, against a 0.10 trigger. NOT FIRED, but
+   *                           90% of the way there, on a statistic this block
+   *                           already calls a knife edge. WC's own median moved
+   *                           -0.1895 -> +0.0870 and crossed zero.
+   *   2. cancellation         24.1% -> 18.5%. FIRED — below the 20% floor. The
+   *                           limb has lost weight the bound would allow it.
+   *   3. limb-off footprint   -0.2243 -> -0.2127, a 5.2% move. NOT FIRED.
+   *
+   * WHY IT FIRED: the surplus limb cancels part of a funding decision by moving
+   * DOWN the band ladder as the decision moves satisfaction up, and how much it
+   * can cancel depends on how many band steps the line has left to fall. WC used
+   * to open Deficient — the bottom step — on essentially every seed, so at
+   * defaults it was already at the floor and the limb had its full range below
+   * it. Re-centred, WC opens across all four bands (Deficient 55.3% -> 38.8%,
+   * Strong 36.0% -> 46.9% of member-years), so a given funding decision now
+   * crosses fewer steps and cancels less. The limb did not get weaker; the
+   * ladder got more room above the floor.
+   *
+   * ⚠ AND TRIGGER 3'S REFERENCE IS STALE BY EXACTLY THE 3x SCALE CHANGE, WHICH
+   * IS THE SAME DEFECT THIS BLOCK WARNS ABOUT FOUR PARAGRAPHS ABOVE. It names
+   * -0.0749. The live limb-off figure is -0.2243, and 0.0749 x 3 = 0.2247. The
+   * footprint did not move: the constants were re-denominated 3x (surplusWeight
+   * 0.0516 -> 0.1548, see the scale block) and this trigger's denominator was not
+   * carried with them. Read literally it says FIRED at a 199% move when nothing
+   * has moved at all — precisely the "trigger that names the wrong denominator"
+   * failure recorded above, committed a second time by a different change. The
+   * figures on this line are therefore quoted against -0.2247, the rescaled
+   * reference, and the 5.2% above is measured against that. WHOEVER RE-SOLVES
+   * NEXT SHOULD FIX THE LITERAL IN TRIGGER 3 RATHER THAN RE-DERIVING IT.
+   *
+   * ⚠ WHY NO RE-SOLVE HERE, AND IT IS THIS BLOCK'S OWN PRECEDENT. Trigger 1 says
+   * a new boundary makes surplusWeight stale BY CONSTRUCTION, and the order rule
+   * says the weight is solved ON the boundary. surplusComfortable has NOT fired,
+   * so the boundary stays at 0.1385 — and the SOLVE mode's 0.1984 was measured on
+   * a 0.2288 boundary, so it is NOT the value to paste for an unchanged one. Only
+   * trigger 2 has fired, and acting on it alone means re-weighting the limb on a
+   * boundary that is itself 90% of the way to moving. That is a ruling about the
+   * ladder, taken on the strength of a side effect of a capital change — which is
+   * the thing the Adequate-band note below says it declined to do, in the same
+   * words, for the same reason. Recorded so the next person sees it was noticed
+   * rather than missed. The gate is GREEN at 18.5%: it asserts at most a quarter,
+   * and 18.5% is inside that. It is the re-solve RULE that has fired, not the
+   * gate.
+   *
    * ⚠ ALL THREE OF THESE FIRED AT ONCE AT THE COMMIT AFTER THEY WERE WRITTEN,
    * WHICH IS THE ONLY EVIDENCE THAT THEY WORK. The CLF swap moved the boundary
    * 0.214 against trigger 1's 0.10, pushed the cancellation to 31.6% against

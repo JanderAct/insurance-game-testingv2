@@ -1576,7 +1576,40 @@ export const STARTING_CAPITAL_TO_PREMIUM: Record<string, number> = {
   // A future drift here means something else moved — the reserve model, the
   // payout patterns, or the starting-enrolment draw itself — and should not be
   // attributed to membership without measuring it.
-  WC: 0.3254,
+  //
+  // ==========================================================================
+  // ⚠ RE-SOLVED A FIFTH TIME, ON WC ALONE, AND THIS ONE IS NOT A DRIFT.
+  //
+  //   WC  0.3254 -> 0.4718  (+45.0%)    GL and Property untouched
+  //
+  // The four above were all the engine moving underneath a fixed band. This is
+  // the BAND MOVING DELIBERATELY: WC's opening band was re-translated onto its
+  // current J (0.3294 -> 0.4730) because every opening the old band could accept
+  // was Deficient. See FROZEN_CAPITAL_J for the defect and the chain that caused
+  // it. The pin is solved onto the band's midpoint, so a deliberate move of the
+  // midpoint obliges a re-solve exactly as an accidental drift does — and the
+  // arithmetic is the same size, +43.6% on the target and +45.0% on the pin.
+  //
+  // ⚠ SO DO NOT READ THIS ROW AS A FIFTH DRIFT WHEN COUNTING THEM. The freeze
+  // recorded above still holds: nothing about membership or the pre-game moved.
+  // Measured at the shipped pin against the NEW midpoint, the solver's pass 0
+  // read 0.3164 against 0.4730 — the old pin was still perfectly centred on the
+  // OLD band, which is why opening-centring-check passed at -0.7 SE immediately
+  // before this commit. The pin did not go stale; its target was replaced.
+  //
+  // Solved by scripts/diagnostics/opening-pin-solve.ts as before — bisection,
+  // 600 seeds per evaluation, through the gate's own estimator on seeds the gate
+  // never sees. Four passes, offset -0.0013 against a 0.0108 tolerance. GL and
+  // Property are NOT re-solved because their bands did not move and both were
+  // measured inside tolerance at this commit (-1.4 SE and -1.9 SE); they are the
+  // untouched control this file's own OPENING_SURPLUS_BAND header asks for.
+  //
+  // ⚠ AND THE TWO SEED BASES AGREED THIS TIME, so WC is NOT pooled. The pooled
+  // solve recorded above for WC and again for GL was needed when the solver's
+  // base and the gate's base disagreed by about 0.018 in K. Here the gate reads
+  // the shipped value inside its own tolerance on its own seeds, so there is
+  // nothing to pool away — see the run recorded in the commit.
+  WC: 0.4718,
   GL: 0.2027,
   Property: 0.5452,
 };
@@ -1811,7 +1844,13 @@ export const OPENING_SURPLUS_BAND: Record<string,
   // Each band keeps the RELATIVE half-width the premium band had — WC +/-19.02%,
   // GL +/-19.21% — so only the denominator and the centre change, and the
   // acceptance cost above is attributable to those two things alone.
-  WC: { basis: 'reserve', min: 0.2667, max: 0.3921 },
+  //
+  // ⚠ WC RE-TRANSLATED ONTO ITS CURRENT J. [0.2667, 0.3921] -> [0.3830, 0.5630],
+  // the SAME +/-19.03% half-width re-centred from 0.3294 onto 0.4730. Only the
+  // centre moves; the shape of the band is untouched, which is what makes this a
+  // translation rather than a re-tune. See FROZEN_CAPITAL_J for the defect that
+  // triggered it and for why the pin moved with it.
+  WC: { basis: 'reserve', min: 0.3830, max: 0.5630 },
   GL: { basis: 'reserve', min: 0.4056, max: 0.5984 },
   Property: { basis: 'premium', min: 1.13, max: 1.70 },
 };
@@ -1828,10 +1867,97 @@ export const OPENING_SURPLUS_BAND: Record<string,
 //
 // These are reserveRiskMarginNeeded/reserve, measured with ZERO dispersion
 // across seeds and across both payout-pattern arms.
+//
+// ============================================================================
+// ⚠ A CLF CHANGE MOVES BOTH ENDS OF THIS CHAIN, AND ONLY ONE END WAS FOLLOWED.
+// THAT IS THE DEFECT THIS RECORDS, AND IT IS WORTH MORE THAN THE NUMBER.
+//
+// The 90% stop feeds TWO things that must agree:
+//
+//   reserveRiskMarginNeeded  = reserve x (clf90 - 1)      <- what a line MUST hold
+//   OPENING_SURPLUS_BAND.WC  = J x (1 +/- 19.03%)         <- what it OPENS with
+//
+// and J is clf90 - 1, the same quantity. Move the table and both ends move —
+// one automatically, because the engine reads the table live, and one only if
+// somebody edits this literal. The freeze is what makes the second end MANUAL;
+// it is the price of the freeze and it was not paid.
+//
+// When WC took its supplied curve at ed8b582 the chain was traced in ONE
+// direction only. The satisfaction limb was followed — the rise moved the
+// surplus band ladder, surplusComfortable was re-solved onto the new boundary
+// and surplusWeight with it (see memberSatisfaction's "SECOND, 0.0469 ->
+// 0.0344, when WC took a supplied CLF curve"). The opening end of the same
+// chain was not looked at. A future CLF change must walk BOTH; there is no
+// gate that walks it for you, because the freeze is deliberately invisible to
+// the engine.
+//
+// ⚠ AND IT WAS THREE TABLE CHANGES, NOT ONE. Quoting only the supplied curve
+// overstates the step and understates how long this had been wrong. WC's 90%
+// stop, by commit:
+//
+//     eaf930a  2026-09-10  1.3294   J 0.3294   <- the band was calibrated HERE
+//     241ebc8^             1.2776   J 0.2776   (-15.7% on J)
+//     241ebc8  2026-09-17  1.3120   J 0.3120   (+12.4%)  re-derived at the small band
+//     ed8b582  2026-09-18  1.4730   J 0.4730   (+51.6%)  supplied curve
+//
+// The supplied curve is the dominant step and the brief's figures for it are
+// exact — +12.27% on the stop, +51.60% on the margin. But the band is anchored
+// to the FREEZE value, so the drift it actually carried is 1.3294 -> 1.4730,
+// +10.80% on the stop and +43.60% on J. Two of the three steps partly
+// cancelled. Quote the freeze-to-live figure when talking about the band and
+// the step figure when talking about the curve, and say which.
+//
+// ============================================================================
+// ⚠ THE TRIGGER WAS AN OBSERVED DEFECT IN THE OPENING, WHICH IS THE ONLY THING
+// THAT LICENSES A RE-TRANSLATION — see the rule beside OPENING_SURPLUS_BAND.
+// Measured, 100 seeds, WC solo, BEFORE:
+//
+//     WC opened at 0.570 .. 0.827 of its own required margin
+//     Deficient on 100 of 100 seeds; 0 opened Adequate or better
+//
+// ⚠ AND THAT IS ARITHMETIC, NOT SAMPLING. margin/reserve IS J exactly, so the
+// band in surplus/margin units is just band/J: [0.2667, 0.3921] / 0.4730 =
+// [0.5638, 0.8290]. The CEILING of the accepted window sat at 0.829, below even
+// the Thin floor of 0.90. Every opening the pre-game could ACCEPT was Deficient
+// by construction. The measured max of 0.827 is that ceiling, not a tail.
+//
+// ⚠ SO THIS IS THE OPPOSITE OF GL'S CASE, AND THE PRECEDENT'S OWN WARNING DOES
+// NOT APPLY HERE. GL's block records that MOST OF ITS TAIL WAS THE PIN, NOT THE
+// BAND — re-centring the pin alone took 28.7% below-margin to 4.0%, because the
+// pin sat outside the band and the band was only ever selecting a low-surplus
+// tail. That check was run here and comes back the other way: no pin placement
+// can help, because the band's whole window is inside Deficient and the pin only
+// chooses WHERE IN the window the mass sits. WC's defect is entirely structural.
+//
+// ⚠ BUT THE PIN STILL HAD TO MOVE WITH THE BAND, FOR THE OTHER REASON. The pin
+// is solved so the UNFILTERED candidate median lands on the band's midpoint. At
+// the old band that held — opening-centring-check read WC -0.7 SE. Re-centring
+// the band on 0.4730 without touching the pin would leave the unfiltered median
+// at 0.322 against a floor of 0.3830: outside the band entirely, -84% of band
+// width against a 25% tolerance, and acceptance off the cliff that gate's header
+// describes. Moving a band and leaving the pin is not a smaller change than
+// moving both; it is a different and worse one.
+// ============================================================================
 export const FROZEN_CAPITAL_J: Record<string, number> = {
-  WC: 0.3294,
+  WC: 0.4730,
   GL: 0.5020,
-  Property: 0.5923,   // recorded for completeness; Property's band is on premium
+  // ⚠ WAS 0.5923, AND THE CORRECTION IS TO THE RECORD ONLY — PROPERTY'S BAND IS
+  // DELIBERATELY NOT MOVED. Property's table drifted the same way WC's did and
+  // its live margin/reserve is 0.4414, -25.5% against the frozen figure. Nothing
+  // reads it (this declaration is the only occurrence in the tree), and
+  // Property's band is on PREMIUM, so the drift is inert: measured, Property
+  // opens at 2.0 .. 5.9x its required margin, 100 of 100 Adequate or better.
+  // There is no defect in its opening, so the narrow rule beside
+  // OPENING_SURPLUS_BAND forbids re-translating it. This literal is corrected
+  // because the header above claims these ARE the engine's margin/reserve and
+  // that claim was false for Property, not because anything downstream changed.
+  //
+  // ⚠ THE PROSE ABOVE STILL QUOTES 0.3294 / 0.5020 / 0.5923. Those are the
+  // values in force when that reasoning was written and they are left alone —
+  // the argument they support (that a flat "30% of reserves" rule would leave
+  // every line below its own margin) is unaffected, and rewriting historical
+  // measurements to match today's is how a record stops being one.
+  Property: 0.4414,
 };
 
 // ============================================================================
