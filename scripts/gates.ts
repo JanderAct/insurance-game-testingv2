@@ -85,7 +85,8 @@ const FAST: string[] = [
   'funding-basis-check',             //  10s
   'funding-expected-check',          //   2s
   'gl-claim-check',                  //  12s   PROMOTED at this commit — it always asserted; it could not exit
-  'gl-cutover-check',                //   6s   PROMOTED at this commit
+  'gl-cutover-check',
+  'gl-program-check',                //   6s   PROMOTED at this commit
   'member-experience-basis-check',   //   5s   expectedAtManual is the expectation at NEUTRAL risk quality and
                                      //         out-ranks expectedAtOwnRq in every measured game-year
   'member-experience-mod-check',     //  11s   the mod is centred on the book it rates, cannot see the year it
@@ -298,6 +299,7 @@ const PROBES: Record<string, string> = {
   'new-business-appetite-derive': 'the APPLICATION_RATE re-derivation after the membership target came out — trajectory per tier year by year, whether the capacity guard binds early or throughout, and whether a growing book understates incurred and so looks more profitable than it is [2400s]',
   'renewal-threshold-derive': 'the experience-ratio distribution the renewal threshold sits on, and what each candidate would decline per line-year. The record for why RENEWAL_THRESHOLDS is 2.50 on the ratio rather than 1.10 on the modifier [330s]',
   'development-cession-size': 'the cession rate by allocation rule; the calibration table [20s]',
+  'gl-program-value': "what the GL analytics program is worth against its $1,000,000 placeholder cost — paired on seeds, program on against program off. A READING with no pass condition: whether a program is worth buying is a judgement, and the confinement claims are asserted by gl-program-check instead [150s]",
   'open-share-derive': "derives TRIANGLE_OPEN_SHARE and asserts the identity that justifies it — cohort compounding against the per-claim mean-of-products, 0.9966 / 1.0000 / 1.0000. A GENERATOR, but one that exits non-zero if the curve stops reproducing the per-claim clock [25s]",
   'forward-booking-climb-report': "the climb against the development a cohort SHOULD have received by its age — the acceptance instrument for every forward-booking attempt, replacing a 3-observation statistic with an all-observation one. A READING with no threshold: the mechanism it measures is not built. Prints its own per-game sd and required sample every run. GAMES=112 resolves GL to +/-0.02 and costs ~4.5 min; the 24-game default costs 57s [57s]",
   'investment-dominance-report': 'underwriting against investment income, per line, with the implied return. A design reading with no threshold — see its header [12s]',

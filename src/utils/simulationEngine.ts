@@ -42,6 +42,7 @@ import { experienceRatePer100, type ExperienceBasis } from './experienceRating';
 import { projectPricingTriangle, windowRows } from './pricingTriangle';
 import { developmentDrift, initialEstimate } from './claimTriangle';
 import { poolYearFactor, wcGenerationInputs, glGenerationInputs, propertyGenerationInputs } from './claimGeneration';
+import { programFreqMultiplier } from './riskControlPrograms';
 import {
   aggregateRecovery,
   cedeOccurrences,
@@ -501,6 +502,16 @@ interface LineYearContext {
   // audit page reads — a compounded frequency multiplier no longer knows which
   // events produced it, so the narrative has to travel alongside it.
   shockFirings?: ShockFiring[];
+  // This line's RISK CONTROL PROGRAM frequency multiplier for the year, 1 when
+  // no committed program reaches it. Computed once in processYear from the
+  // decision history, because tenure is a property of the GAME rather than of
+  // the line-year, and a per-line recomputation would be three chances to
+  // disagree about how many years a program has run.
+  //
+  // ⚠ A SEPARATE FIELD FROM `shock`, NOT A MEMBER OF IT — see
+  // riskControlPrograms.ts. The marketplace draw takes `shock` and must not take
+  // this.
+  programFreqMultiplier: number;
   cash: number;
   investments: number;
   assetAllocation: AssetAllocation;
@@ -1262,6 +1273,7 @@ export function processLineYear(
     const generated = generateWcClaims(wcGenerationInputs({
       members: enrolledMembers, yearNumber, calendarYear, instanceSeed: instance.seed,
       k: kLine, riskControlEffectiveness: newRCEffectiveness, gPool: ctx.gPool, shock: ctx.shock,
+      programFreqMultiplier: ctx.programFreqMultiplier,
     }));
     // PROSPECTS: the rest of the 200-member marketplace, generated at kLine = 1
     // and rc = 0. See the marketplaceProspects note above for why those two are
@@ -1337,6 +1349,7 @@ export function processLineYear(
     const generated = generateGlClaims(glGenerationInputs({
       members: enrolledMembers, yearNumber, calendarYear, instanceSeed: instance.seed,
       k: kGl, riskControlEffectiveness: newRCEffectiveness, gPool: ctx.gPool, shock: ctx.shock,
+      programFreqMultiplier: ctx.programFreqMultiplier,
     }));
     // PROSPECTS at kGl = 1, rc = 0 — see the marketplaceProspects note above.
     const prospectGenerated = marketplaceProspects.length > 0
@@ -1407,6 +1420,7 @@ export function processLineYear(
     const generated = generatePropertyClaims(propertyGenerationInputs({
       members: enrolledMembers, yearNumber, calendarYear, instanceSeed: instance.seed,
       k: kPr, riskControlEffectiveness: newRCEffectiveness, gPool: ctx.gPool, shock: ctx.shock,
+      programFreqMultiplier: ctx.programFreqMultiplier,
     }));
     generatedClaims = generated.claims;
     generatedOccurrences = generated.occurrences;
@@ -2168,6 +2182,7 @@ export function processLineYear(
 
     kLineApplied,
     rcEffectivenessApplied: newRCEffectiveness,
+    programFreqApplied: ctx.programFreqMultiplier,
     memberLossResults,
     memberPremiumShares,
     aggregateMemberLoss,
@@ -2427,6 +2442,7 @@ export function processYear(
         ...rawDecisions.byLine[l],
         assetAllocation: { ...rawDecisions.assetAllocation },
         riskControlPct: rawDecisions.riskControlPct,
+        riskControlProgramIds: rawDecisions.riskControlProgramIds,
       }])
     ) as Record<CoverageLine, LineDecisionSet>,
   };
@@ -2439,6 +2455,17 @@ export function processYear(
   // sim itself, priorHistory is empty, so year -2 has no prior (correct).
   const priorPoolResult = gameState.lockedResults[gameState.lockedResults.length - 1]
     ?? gameState.priorHistory[gameState.priorHistory.length - 1];
+
+  // RISK CONTROL PROGRAM TENURE, from the played years in order.
+  //
+  // ⚠ lockedResults ONLY, NOT priorHistory. The pre-game runs on
+  // defaultDecisionSet, which commits nothing, so every pre-game year would
+  // contribute an empty list and break any run of consecutive years at the
+  // boundary anyway. Reading only the played years says that plainly instead of
+  // relying on the defaults to stay empty — if a future default ever committed a
+  // program, the pre-game must still not accrue tenure for it, because the
+  // player did not buy it.
+  const priorProgramIds = gameState.lockedResults.map(r => r.decisions?.riskControlProgramIds);
 
   const activeLines = setup.activeLines;
   const shares = computeContributionShares(poolState, activeLines);
@@ -2577,6 +2604,7 @@ export function processYear(
       gPool,
       shock: shocks?.byLine[line],
       shockFirings: shocks?.firings.filter(f => f.linesAffected.includes(line)),
+      programFreqMultiplier: programFreqMultiplier(line, decisions.riskControlProgramIds, priorProgramIds),
       cash: poolState.cash * share,
       investments: lineState.investedAssets,
       assetAllocation: lineDecisions.assetAllocation,

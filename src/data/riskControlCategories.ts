@@ -1,14 +1,32 @@
 // ============================================================================
 // RISK CONTROL, AS FIVE CATEGORIES INSTEAD OF ONE INTENSITY DIAL.
 //
-// ⚠ NOTHING READS THIS BUT THE DISPLAY. IT IS INERT AT THIS COMMIT.
+// ⚠ ONE OF THE FIVE NOW REACHES THE ENGINE. THIS FILE IS NO LONGER INERT.
 //
-// The live control is still SLIDER_RANGES.riskControlPct — one pool-wide
-// percentage of premium, in the decision set, reaching the loss draw through
-// riskControlEffectiveness. This file describes what is intended to REPLACE it
-// and is deliberately wired to nothing: no engine path reads it, no decision
-// field corresponds to it, and `grep riskControlCategories src/utils src/types`
-// returns nothing. If that stops being true, this header is wrong.
+// `gl-law-enforcement-analytics` reduces GL CLAIM FREQUENCY on a three-year
+// ramp. The mechanism, the magnitude and the rule for composing with a shock
+// live in src/utils/riskControlPrograms.ts; this file still holds only the
+// DESCRIPTION — id, name, scope, term, benefit shape — and the engine reads the
+// program by id rather than reading these fields.
+//
+// ⚠ SO `commitmentYears` AND `benefit` ARE STILL DESCRIPTIONS, NOT THE
+// SCHEDULE, AND THAT SPLIT IS DELIBERATE RATHER THAN UNFINISHED. The catalog
+// says the GL program is three years and `ramped`; riskControlPrograms.ts says
+// the ramp is [0, 0.5, 1] and the reduction is 5%. A reader changing
+// `benefit: 'ramped'` here changes what the department page SAYS and not what
+// the engine DOES. If that ever becomes confusing enough to matter, the fix is
+// to derive one from the other — not to duplicate the numbers into this file.
+//
+// THE OTHER FOUR ARE STILL DESCRIPTION ONLY. wc-safety-rtw, property-mitigation,
+// claims-management-system and member-services reach nothing;
+// WIRED_PROGRAM_IDS in riskControlPrograms.ts is the list that decides, and it
+// has one entry.
+//
+// The older pool-wide control, SLIDER_RANGES.riskControlPct, still exists and is
+// still pinned at 0 with no UI behind it. It reaches the draw by a DIFFERENT
+// path — riskControlEffectiveness, which scales every line at once — so the two
+// mechanisms are independent and both are live in the arithmetic. A future
+// commit that retires riskControlPct should say which programs replace it.
 //
 // WHY IT SHIPS INERT. Risk control reaches the DRAW. Deleting the slider and
 // replacing it with boxes that do nothing would remove a working lever and move
@@ -235,9 +253,19 @@ export function availableCategories(
  * programs, so its total is $3M, not $5M. Reading the ungated five would
  * overstate the number for every pool that is not writing all three lines.
  *
- * ⚠ AND IT IS WHAT SELECTING THEM WOULD COST, NOT A SPEND THAT HAPPENS. Nothing
- * here is bought: the tiles are inert and riskControlPct is pinned at 0, so the
- * pool's actual risk-control spend is zero. This is the price of the menu.
+ * ⚠ AND IT IS WHAT SELECTING THEM WOULD COST, NOT A SPEND THAT HAPPENS. STILL
+ * TRUE, AND NOW IT IS THE ASYMMETRY THAT MATTERS. The tiles are still inert and
+ * riskControlPct is still pinned at 0, so the pool's actual risk-control spend
+ * is zero — but the GL analytics program's BENEFIT is now live (see
+ * riskControlPrograms.ts). A committed program therefore delivers a real
+ * reduction and is charged nothing.
+ *
+ * ⚠ THAT MAKES IT A BUTTON RATHER THAN A DECISION UNTIL THE SPEND IS WIRED, and
+ * it is said here rather than left for someone to discover from a suspiciously
+ * good result. Nothing in the shipped game commits a program —
+ * defaultDecisionSet commits none and there is no control that sets one — so no
+ * played game can reach the free benefit today. The next commit in this area is
+ * the spend, not another program.
  */
 export function totalAnnualCost(activeLines: readonly CoverageLine[]): number {
   return availableCategories(activeLines).length * RISK_CONTROL_PLACEHOLDER_ANNUAL_COST;

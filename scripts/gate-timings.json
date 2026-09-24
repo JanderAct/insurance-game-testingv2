@@ -24,6 +24,7 @@
     "gl-claim-check": 9,
     "gl-clf-grid-derive": 556,
     "gl-cutover-check": 30,
+    "gl-program-check": 9,
     "gl-supplied-clf-check": 220,
     "ibner-null-check": 188,
     "market-conditions-check": 22,

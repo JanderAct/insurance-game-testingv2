@@ -522,6 +522,14 @@ export interface GlGenerationInputs {
   // DRAW-ONLY rule. Applied through trendedMuGl's log-location shift, so a
   // severity shock and the severity trend are one mechanism.
   sevMultipliers?: Record<string, number>;
+  /**
+   * RISK CONTROL PROGRAM frequency multiplier, whole-line, 1 when none applies.
+   * DRAW ONLY, for the same reason as the two above and as risk control: it has
+   * to move the loss ratio rather than cancel out of it. A SCALAR rather than
+   * the shock's Record — see riskControlPrograms.ts for why the two channels are
+   * deliberately not the same shape.
+   */
+  programFreqMultiplier?: number;
 }
 
 export interface GlGenerationResult {
@@ -538,6 +546,11 @@ export function generateGlClaims(inputs: GlGenerationInputs): GlGenerationResult
   const wholeLineMult = inputs.freqMultipliers?.[WHOLE_LINE] ?? 1;
   const severityShock = inputs.sevMultipliers?.[WHOLE_LINE] ?? 1;
   const rcFactor = Math.max(0, 1 - riskControlEffectiveness);
+  // A committed risk-control program's frequency effect. Composes with the
+  // shock multiplier MULTIPLICATIVELY and independently — a shock year is a year
+  // the program made less bad. Neither clamps the other; see
+  // riskControlPrograms.ts.
+  const programMult = Math.max(0, inputs.programFreqMultiplier ?? 1);
 
   const claims: Claim[] = [];
   const occurrences: Occurrence[] = [];
@@ -563,7 +576,8 @@ export function generateGlClaims(inputs: GlGenerationInputs): GlGenerationResult
       // One frequency-noise draw per member-year, mean 1. With no
       // sub-coverages left, this is simply the line's own noise term.
       const epsilon = freqRng.gamma(M.memberFrequencyNoise.shape, M.memberFrequencyNoise.scale);
-      const lambda = payroll * M.ratePer1M * theta * kGl * epsilon * gPool * rcFactor * wholeLineMult;
+      const lambda = payroll * M.ratePer1M * theta * kGl * epsilon * gPool * rcFactor
+        * wholeLineMult * programMult;
 
       if (lambda > 0) {
         const count = freqRng.poisson(lambda);

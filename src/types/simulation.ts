@@ -577,6 +577,16 @@ export interface LineDecisionSet {
   // membershipEngine.ts's note at the deleted screen. An older save may still
   // carry the key; nothing reads it, so it is simply ignored on load.
   riskControlPct: number;         // 0.00 to 0.08 of premium (projected from DecisionSet.riskControlPct)
+  // Risk-control programs committed for the year, PROJECTED from
+  // DecisionSet.riskControlProgramIds exactly as riskControlPct is. It lives
+  // here as well as at pool level because each locked result echoes a
+  // LineDecisionSet and nothing else, so this is the only place a played year's
+  // commitments are persisted — and programTenure reads them back from the
+  // played years rather than from a counter kept beside them.
+  //
+  // AN ARRAY OF STRINGS, so value-identity-check (numeric fields only) is blind
+  // to it by construction and no export hash moves for its presence alone.
+  riskControlProgramIds?: string[];
   // Per-occurrence tower placement, index-aligned to REINSURANCE_TOWER[line].
   // false = that band is RETAINED. ANY COMBINATION IS PERMITTED, including a
   // corridor retention (buying $15M xs $10M while declining $5M xs $5M) — that
@@ -636,6 +646,20 @@ export interface DecisionSet {
   byLine: Record<CoverageLine, LineDecisionSet>;
   assetAllocation: AssetAllocation;  // pool-wide investment policy
   riskControlPct: number;            // pool-wide risk-control intensity (0.00-0.08 of each line's own premium)
+  /**
+   * Risk-control programs committed for this year, by catalog id.
+   *
+   * ⚠ OPTIONAL ON PURPOSE, FOR TWO REASONS THAT ARE NOT STYLE. A game saved
+   * before this field existed restores without it, and `?? []` is what lets an
+   * old save load rather than throw. And every diagnostic that builds a
+   * DecisionSet by hand keeps compiling, so the field cannot silently acquire a
+   * wrong value in a harness nobody updated — absent reads as "no programs",
+   * which is what those harnesses mean.
+   *
+   * Only `gl-law-enforcement-analytics` reaches the engine; see
+   * riskControlPrograms.ts. Ids not in that list are inert.
+   */
+  riskControlProgramIds?: string[];
 }
 
 // ONE OCCURRENCE CARRYING AN ACCIDENT YEAR'S DEVELOPMENT.
@@ -1189,6 +1213,17 @@ export interface ResultSet {
   // results written before it existed; claimRegeneration THROWS on those rather
   // than guess.
   rcEffectivenessApplied?: number;
+  // The RISK CONTROL PROGRAM frequency multiplier this line-year was drawn with,
+  // 1 when no program applied. Same purpose as rcEffectivenessApplied: the value
+  // the generator saw, so a past year can be redrawn exactly.
+  //
+  // ⚠ AND ITS ABSENCE IS SAFE TO DEFAULT WHERE rcEffectivenessApplied'S IS NOT,
+  // which is why claimRegeneration reads this one with `?? 1` and throws on the
+  // other. A result written before programs existed was drawn with NO program,
+  // and 1 is not a guess about it — it is the only value it could have had.
+  // rcEffectiveness had a live slider behind it, so an absent value there could
+  // have been anything and defaulting would have fabricated a register.
+  programFreqApplied?: number;
   // ENROLLED MEMBERS ONLY. This is the pool-accounting list: aggregateMemberLoss,
   // grossUltimateLoss, reserves and reinsurance all derive from it.
   memberLossResults: MemberLossResult[];

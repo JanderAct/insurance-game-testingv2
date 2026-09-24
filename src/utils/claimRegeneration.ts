@@ -125,5 +125,13 @@ export function regenerateLineYearClaims(
     riskControlEffectiveness: lr.rcEffectivenessApplied,
     gPool: poolYearFactor(effectiveSeed, year),
     shock: resolveShocks(instance, year)?.byLine[line],
+    // ⚠ `?? 1` HERE AND A THROW ABOVE, AND THE ASYMMETRY IS DELIBERATE. An
+    // absent rcEffectivenessApplied could have been any slider value, so
+    // defaulting it would fabricate a register. An absent programFreqApplied has
+    // exactly one possible meaning — the result was written before any program
+    // could be committed, so it was drawn without one — and 1 reproduces it
+    // exactly. Defaulting a field whose absence is unambiguous is not the same
+    // act as defaulting one whose absence is not.
+    programFreqMultiplier: lr.programFreqApplied ?? 1,
   });
 }

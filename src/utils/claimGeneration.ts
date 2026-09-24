@@ -68,6 +68,15 @@ export interface LineYearGenerationBase {
   gPool: number;
   /** This line's shock effects for the year, or undefined when none is in force. */
   shock: LineShockEffects | undefined;
+  /**
+   * This line's RISK CONTROL PROGRAM frequency multiplier, 1 when none applies.
+   *
+   * ⚠ A SEPARATE CHANNEL FROM `shock`, NOT A FIELD OF IT. Both end up
+   * multiplying the same lambda, but the marketplace draw receives the shock
+   * effects and must NOT receive this — see riskControlPrograms.ts, which
+   * records the rule and the two ways sharing one record goes wrong.
+   */
+  programFreqMultiplier: number;
 }
 
 export interface LineYearGenerationOutput {
@@ -112,6 +121,7 @@ export function glGenerationInputs(b: LineYearGenerationBase): GlGenerationInput
     riskControlEffectiveness: b.riskControlEffectiveness,
     freqMultipliers: b.shock?.freqMultipliers,
     sevMultipliers: b.shock?.sevMultipliers,
+    programFreqMultiplier: b.programFreqMultiplier,
   };
 }
 

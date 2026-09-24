@@ -79,5 +79,10 @@ export function defaultDecisionSet(yearNumber: number): DecisionSet {
     // Pool-wide decisions (projected into every line at processYear entry).
     assetAllocation: { ...ASSET_ALLOCATION_DEFAULT },
     riskControlPct: SLIDER_RANGES.riskControlPct.default,
+    // ⚠ NO PROGRAM IS COMMITTED BY DEFAULT, AND THAT IS WHY THE BASELINES DO NOT
+    // MOVE. An opt-in program that changed the default game would be an uncaused
+    // change to every figure in the pool. The pre-game runs at these defaults
+    // too, so the opening book is untouched by the program's existence.
+    riskControlProgramIds: [],
   };
 }
