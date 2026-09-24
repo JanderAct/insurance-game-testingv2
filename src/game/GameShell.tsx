@@ -82,6 +82,12 @@ const SETUP_TAB = { id: 'setup' as TabId, label: 'Game Setup', icon: <Settings s
 const PLAY_TABS = [
   { id: 'introduction' as TabId, label: 'Introduction', icon: <BookOpen size={16} /> },
   { id: 'departments' as TabId, label: 'Departments', icon: <Landmark size={16} /> },
+  // Membership sits with the other things a player reads BEFORE deciding, rather
+  // than last behind the two reference tabs. ORDER ONLY — no tab is added,
+  // removed or renamed, and nothing keys off position: every driver and the
+  // render harness resolves a tab by NAME, and the only positional lookups in the
+  // tree are inside the Departments document list, which this does not touch.
+  { id: 'membership' as TabId, label: 'Membership', icon: <Users size={16} /> },
   { id: 'history' as TabId, label: 'Pool History', icon: <HistoryIcon size={16} /> },
   { id: 'dashboard' as TabId, label: 'Dashboard', icon: <LayoutDashboard size={16} /> },
   { id: 'decisions' as TabId, label: 'Decisions', icon: <ClipboardList size={16} /> },
@@ -90,7 +96,6 @@ const PLAY_TABS = [
   { id: 'results' as TabId, label: 'Results', icon: <BarChart2 size={16} /> },
   { id: SPREADSHEET_TAB, label: 'Result Spreadsheet', icon: <Table size={16} /> },
   { id: AUDIT_TAB, label: 'Calculation Audit', icon: <Calculator size={16} /> },
-  { id: 'membership' as TabId, label: 'Membership', icon: <Users size={16} /> },
 ];
 
 export interface GameShellProps {

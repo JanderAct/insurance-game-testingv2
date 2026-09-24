@@ -275,7 +275,17 @@ export default function App() {
     setCurrentDecisions(cd);
     setLineView('pool');
     persistState(gs, sf, initMembers, cd);
-    setActiveTab('history');
+    // ⚠ THIS USED TO BE 'history' AND THERE IS NO RECORDED REASON FOR IT. The line
+    // is in the first upload (116b96d), which PREDATES the Introduction tab
+    // (e4d060b) — so Pool History was the landing tab because it was the first
+    // thing worth landing on, not because anything chose it over an Introduction
+    // that did not yet exist. It is the last line of the start handler, after
+    // gameState is set, so it is not a first-run state and not a setup hand-off;
+    // IntroductionPage reads only gameState and priorHistory, both populated by
+    // now. RESTORING A SAVE IS A DIFFERENT PATH and still lands on 'dashboard' —
+    // see loadState below. Left alone deliberately: a player resuming has already
+    // read the introduction.
+    setActiveTab('introduction');
   }, []);
 
   // Commit a fully-resolved processed year (loan offers, if any, already handled).
