@@ -273,19 +273,27 @@ async function captureDocuments(page: Page, cfg: Cfg, year: string, out: Record<
   // tab bar is a nav of twelve buttons; the document list is a nav of five.
   // `nav button` matches all seventeen, which fails LOUDLY here only by luck —
   // it timed out on an index that existed at count time and not at click time.
-  // The discriminator is semantic rather than a CSS class: the tab bar is the
-  // nav carrying 'Game Setup', the document list is the one that does not.
+  //
+  // ⚠ THE DISCRIMINATOR IS THE DOCUMENT LIST'S OWN STRUCTURE, NOT A TAB LABEL.
+  // It used to be "the nav that does not carry 'Game Setup'", which assumed the
+  // tab bar always carries Game Setup. demo-video (03de3eb) hid it, the selector
+  // matched the TAB BAR, clicked tab buttons and timed out on document-body.
+  // DocumentReader renders its list and its `document-body` pane as siblings in
+  // one grid, and the tab bar sits outside DepartmentsPage entirely — so walking
+  // up from the pane, the first ancestor holding a nav holds the list and only
+  // the list. Exactly one is required; anything else throws rather than guesses.
   const navs = page.locator('nav');
-  const navCount = await navs.count();
-  let list = -1;
-  for (let i = 0; i < navCount; i++) {
-    const txt = await navs.nth(i).evaluate(el => el.textContent ?? '');
-    if (!txt.includes('Game Setup')) { list = i; break; }
-  }
+  const list = await page.getByTestId('document-body').evaluate(pane => {
+    const all = [...document.querySelectorAll('nav')];
+    for (let a = pane.parentElement; a; a = a.parentElement) {
+      const inside = all.filter(n => a.contains(n));
+      if (inside.length) return inside.length === 1 ? all.indexOf(inside[0]) : -1;
+    }
+    return -1;
+  });
   if (list < 0) {
-    throw new Error('render-identity-check: no document list <nav> on Departments. '
-      + 'DocumentReader\'s markup changed, or the tab bar is no longer the only other nav — '
-      + 'fix the discriminator rather than letting this capture the tab bar.');
+    throw new Error('render-identity-check: no single document list <nav> beside document-body on Departments. '
+      + 'DocumentReader\'s markup changed — fix the discriminator rather than letting this capture the tab bar.');
   }
   const buttons = navs.nth(list).locator('button');
   const n = await buttons.count();
