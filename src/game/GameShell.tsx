@@ -82,6 +82,8 @@ const SETUP_TAB = { id: 'setup' as TabId, label: 'Game Setup', icon: <Settings s
 const PLAY_TABS = [
   { id: 'introduction' as TabId, label: 'Introduction', icon: <BookOpen size={16} /> },
   { id: 'departments' as TabId, label: 'Departments', icon: <Landmark size={16} /> },
+  // DEMO-VIDEO-2 ONLY: Membership moved up to sit between Departments and Pool History.
+  { id: 'membership' as TabId, label: 'Membership', icon: <Users size={16} /> },
   { id: 'history' as TabId, label: 'Pool History', icon: <HistoryIcon size={16} /> },
   { id: 'dashboard' as TabId, label: 'Dashboard', icon: <LayoutDashboard size={16} /> },
   { id: 'decisions' as TabId, label: 'Decisions', icon: <ClipboardList size={16} /> },
@@ -90,7 +92,6 @@ const PLAY_TABS = [
   { id: 'results' as TabId, label: 'Results', icon: <BarChart2 size={16} /> },
   { id: SPREADSHEET_TAB, label: 'Result Spreadsheet', icon: <Table size={16} /> },
   { id: AUDIT_TAB, label: 'Calculation Audit', icon: <Calculator size={16} /> },
-  { id: 'membership' as TabId, label: 'Membership', icon: <Users size={16} /> },
 ];
 
 export interface GameShellProps {
