@@ -275,7 +275,8 @@ export default function App() {
     setCurrentDecisions(cd);
     setLineView('pool');
     persistState(gs, sf, initMembers, cd);
-    setActiveTab('history');
+    // DEMO-VIDEO-2 ONLY: land on Introduction rather than Pool History.
+    setActiveTab('introduction');
   }, []);
 
   // Commit a fully-resolved processed year (loan offers, if any, already handled).
