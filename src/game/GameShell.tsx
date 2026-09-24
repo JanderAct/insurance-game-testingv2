@@ -138,8 +138,22 @@ export default function GameShell({
 
   const d = useGameDerivations(gameState, lineView, currentDecisions);
 
+  // ==========================================================================
+  // ⚠ DEMO-VIDEO-2 BRANCH ONLY (supersedes demo-video). THREE TABS ARE HIDDEN FROM THE BAR AND THIS IS
+  // NOT MEANT TO MERGE.
+  //
+  // Game Setup disappears ONCE THE GAME HAS STARTED — it has to be there to
+  // start one, so it is dropped after rather than removed. Restarting is the
+  // New Game button in the header, which is unaffected.
+  // Result Spreadsheet and Calculation Audit are dropped always.
+  //
+  // ⚠ HIDDEN FROM THE BAR, NOT DELETED. The pages still exist and still render
+  // if activeTab lands on one — a restored save, say. Nothing routes there any
+  // more, which is all a recording needs, and it keeps this to one expression.
+  // ==========================================================================
   const tabs = React.useMemo(() => {
-    const list = setupPage !== undefined ? [SETUP_TAB, ...PLAY_TABS] : PLAY_TABS;
+    const play = PLAY_TABS.filter(t => t.id !== SPREADSHEET_TAB && t.id !== AUDIT_TAB);
+    const list = setupPage !== undefined && !isStarted ? [SETUP_TAB, ...play] : play;
     return list.map(t => ({ ...t, disabled: !isStarted && t.id !== 'setup' }));
   }, [isStarted, setupPage]);
 
