@@ -66,7 +66,12 @@ export default function DocumentReader({ documents, selectedId, onSelect, listHe
           </nav>
         </div>
 
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-8 min-h-[400px]">
+        {/* data-testid so render-identity-check can fingerprint THIS PANE rather
+            than the whole page. Capturing the page would fold the header chips,
+            the tab bar and the document list into every document's row, which
+            makes a static document's fingerprint vary by configuration and
+            hides whether the document's own body varies. */}
+        <div data-testid="document-body" className="bg-white rounded-xl border border-gray-200 shadow-sm p-8 min-h-[400px]">
           {selected?.content !== undefined ? (
             <div
               className="prose prose-sm sm:prose-base prose-slate max-w-none prose-headings:font-bold prose-a:text-blue-600"

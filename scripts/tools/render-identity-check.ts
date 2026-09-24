@@ -232,8 +232,102 @@ async function capture(page: Page, cfg: Cfg, year: string, out: Record<string, s
       const short = view === '-' ? '-' : (view === 'Pool' ? 'Pool'
         : Object.entries(LINE_LABEL).find(([, v]) => v === view)![0]);
       out[`${cfg.key}|${tab}|${short}|${year}`] = hash(await visibleText(page));
+      if (tab === 'Departments') await captureDocuments(page, cfg, year, out);
     }
   }
+}
+
+// ============================================================================
+// ⚠ THE DOCUMENT TABS WERE A HOLE THE SIZE OF FOUR DOCUMENTS, AND THE ROW ABOVE
+// COULD NOT SEE IT. DocumentReader opens on ONE document and renders only that
+// one's body, so a single capture of the Departments tab fingerprints the
+// document LIST plus whichever document happens to be the default. Everything
+// else on that page — four of the five documents — was uncovered. It was found
+// when ~900 words of player-facing risk-control copy landed and this harness
+// reported the Departments rows as unchanged.
+//
+// ⚠ ALL FIVE ARE CAPTURED, NOT JUST THE ONE THAT PROMPTED THIS. The gap is
+// structural — a default selection hides every non-default document — so fixing
+// it for the document that exposed it would leave the identical hole for the
+// other three and guarantee this is rediscovered. The two generated memos
+// (Actuarial, Claims) are the higher-value coverage anyway: they are built from
+// engine numbers by buildActuarialMemo/buildClaimsMemo, where the risk-control
+// copy is mostly static prose.
+//
+// ⚠ THE LIST IS DETECTED, NOT LISTED, which is the lesson the line bar already
+// taught this file. Hardcoding five titles would make the harness disagree with
+// the page the moment a sixth document is added — and it would disagree
+// SILENTLY, by capturing five of six. The buttons are DocumentReader's own
+// <nav>, and an unbuilt document renders DISABLED, so "locked" is read off the
+// control rather than guessed from a title.
+//
+// ⚠ AND THE EXISTING `-` ROW IS LEFT EXACTLY AS IT WAS. It is captured BEFORE
+// any document is selected, so it still fingerprints the page as it OPENS,
+// which is itself worth pinning — if the default document ever changes, that
+// row moves and says so. The per-document rows are additions. Investment is
+// therefore captured twice, once as the default and once by name; that is
+// deliberate, not redundancy to tidy away.
+// ============================================================================
+async function captureDocuments(page: Page, cfg: Cfg, year: string, out: Record<string, string>): Promise<void> {
+  // ⚠ THERE ARE TWO <nav>s AND THE OBVIOUS SELECTOR PICKS THE WRONG ONE. The
+  // tab bar is a nav of twelve buttons; the document list is a nav of five.
+  // `nav button` matches all seventeen, which fails LOUDLY here only by luck —
+  // it timed out on an index that existed at count time and not at click time.
+  // The discriminator is semantic rather than a CSS class: the tab bar is the
+  // nav carrying 'Game Setup', the document list is the one that does not.
+  const navs = page.locator('nav');
+  const navCount = await navs.count();
+  let list = -1;
+  for (let i = 0; i < navCount; i++) {
+    const txt = await navs.nth(i).evaluate(el => el.textContent ?? '');
+    if (!txt.includes('Game Setup')) { list = i; break; }
+  }
+  if (list < 0) {
+    throw new Error('render-identity-check: no document list <nav> on Departments. '
+      + 'DocumentReader\'s markup changed, or the tab bar is no longer the only other nav — '
+      + 'fix the discriminator rather than letting this capture the tab bar.');
+  }
+  const buttons = navs.nth(list).locator('button');
+  const n = await buttons.count();
+  // ⚠ WHICH ONE WAS OPEN ON ARRIVAL, READ OFF THE CONTROL. Restoring by
+  // clicking the FIRST button was the obvious move and it is wrong: the first
+  // document is not the default one, so it would leave a DIFFERENT document
+  // selected than the page opens with, and the next visit's `-` row would
+  // fingerprint that instead. The selected entry carries bg-blue-50.
+  let openAt = -1;
+  for (let i = 0; i < n; i++) {
+    if ((await buttons.nth(i).getAttribute('class') ?? '').includes('bg-blue-50')) { openAt = i; break; }
+  }
+  for (let i = 0; i < n; i++) {
+    const btn = buttons.nth(i);
+    // Read synchronously off the DOM rather than with a locator: a locator
+    // WAITS, so a button that does not carry the expected span hangs for the
+    // full timeout instead of saying so.
+    const title = NORMALISE(await btn.evaluate(el => {
+      const t = el.querySelector('span.font-semibold');
+      return (t?.textContent ?? el.textContent ?? '').trim();
+    }));
+    const key = `${cfg.key}|Departments|doc:${title}|${year}`;
+    // A document with no content is disabled in the list. Recorded as LOCKED
+    // rather than skipped: if one is ever BUILT, this row moves.
+    if (!(await btn.isEnabled())) { out[key] = 'LOCKED'; continue; }
+    await btn.click();
+    await settle(page);
+    // ⚠ THE PANE, NOT THE PAGE, AND THE DIFFERENCE IS LOAD-BEARING. A whole-page
+    // capture folds the header chips, the tab bar and the document list into
+    // every document's row. Measured, that made the INVESTMENT document — whose
+    // content is a static .md identical for every pool — produce five different
+    // fingerprints across five configurations. Any config-sensitivity in these
+    // rows would then be chrome, and the question these rows exist to answer
+    // (does the GATED program list differ by configuration?) would be
+    // unanswerable from them. Scoped to the pane, Investment is identical across
+    // configurations and Risk Control is not, which is the result that means
+    // something.
+    out[key] = hash(NORMALISE(await page.getByTestId('document-body').innerText()));
+  }
+  // Leave the tab as it was found, so the next visit's `-` row is the page as
+  // it opens rather than whatever this loop last clicked.
+  if (openAt >= 0) { await buttons.nth(openAt).click(); await settle(page); }
 }
 
 async function run(): Promise<Record<string, string>> {
