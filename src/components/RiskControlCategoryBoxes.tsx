@@ -78,9 +78,10 @@
 
 import { Layers } from 'lucide-react';
 import {
-  availableCategories, commitmentLabel,
+  RISK_CONTROL_PLACEHOLDER_ANNUAL_COST, availableCategories, commitmentLabel, totalAnnualCost,
   type RiskControlCategory,
 } from '../data/riskControlCategories';
+import { formatCurrency } from '../utils/formatters';
 import type { CoverageLine } from '../types/simulation';
 
 const SCOPE_STYLE: Record<string, string> = {
@@ -94,8 +95,13 @@ function CategoryTile({ c }: { c: RiskControlCategory }) {
   return (
     <div className="w-full h-full flex flex-col items-center p-2 rounded-lg border border-gray-200 bg-white text-center text-xs text-gray-600">
       <span className={`text-[10px] font-semibold px-1.5 rounded ${SCOPE_STYLE[c.scope]}`}>{c.scope}</span>
-      <span className="font-bold text-gray-800 mt-1 leading-tight">{c.name}</span>
+      {/* tileName, not name — the full name heads the department page and does
+          not fit a tile five-across. See the catalog's own note on the pair. */}
+      <span className="font-bold text-gray-800 mt-1 leading-tight">{c.tileName}</span>
       <span className="text-xs opacity-75 mt-0.5 leading-tight">{commitmentLabel(c)}</span>
+      <span className="text-xs font-semibold text-gray-700 mt-0.5">
+        {formatCurrency(RISK_CONTROL_PLACEHOLDER_ANNUAL_COST)}/yr
+      </span>
       <span className="text-[10px] text-gray-400 mt-1">Not active</span>
     </div>
   );
@@ -116,6 +122,18 @@ export default function RiskControlCategoryBoxes({ activeLines }: { activeLines:
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-1.5">
         {shown.map(c => <CategoryTile key={c.id} c={c} />)}
+      </div>
+      {/* ⚠ WHAT SELECTING THEM WOULD COST, NOT A SPEND. Nothing is bought:
+          the tiles are inert and riskControlPct is pinned at 0, so the pool's
+          actual risk-control spend this year is zero. GATED like the tiles —
+          a one-line pool is offered three programs, so its total is $3M. */}
+      <div className="flex items-baseline justify-between border-t border-gray-200 pt-2">
+        <span className="text-[11px] text-gray-500">
+          All {shown.length} available programs, if selected
+        </span>
+        <span className="text-sm font-bold text-gray-800">
+          {formatCurrency(totalAnnualCost(activeLines))}/yr
+        </span>
       </div>
       <p className="text-[11px] text-gray-500 leading-relaxed">
         Five independent programs — a pool can run any, all or none of them.

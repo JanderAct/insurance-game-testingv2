@@ -64,7 +64,23 @@ export type BenefitShape =
 
 export interface RiskControlCategory {
   id: string;
+  /**
+   * THE AUTHOR'S NAME FOR THE PROGRAM, as it heads the supplied description in
+   * riskControlProgramCopy.ts. Authoritative — the department page and this
+   * field must not disagree.
+   */
   name: string;
+  /**
+   * The same program, abbreviated for the compact tile.
+   *
+   * ⚠ TWO NAMES IS A COMPROMISE AND IT IS STATED RATHER THAN HIDDEN. The tiles
+   * sit five-across in half a card; "Workers' Compensation Safety &
+   * Return-to-Work Program" does not fit one at a readable size. The full name
+   * is what the department page shows and what a player reads when deciding;
+   * this is the label on the chip. If the tiles ever get more room, delete this
+   * field and render `name`.
+   */
+  tileName: string;
   scope: RiskControlScope;
   /**
    * Years the commitment runs.
@@ -79,73 +95,113 @@ export interface RiskControlCategory {
   /** Whether it re-commits by default — see the opt-out note above. */
   renewal: 'opt-out' | 'yearly';
   benefit: BenefitShape;
-  /** One line on what the money buys. */
-  what: string;
-  /** One line on WHY the timing is what it is. This is the teaching. */
-  why: string;
+  /**
+   * ⚠ `what` AND `why` ARE GONE. They were this session's own one-line
+   * summaries, written before the author's descriptions existed, and they
+   * described the same five programs in different words. Keeping them beside
+   * riskControlProgramCopy.ts would have been two sources for one thing, with
+   * the unused one free to drift. The supplied copy is the only description.
+   */
   /** ⚠ 'placeholder' means the scoping itself is not settled, not that the
    *  code is missing — every entry here is missing its code. */
   status: 'scoped' | 'placeholder';
 }
 
+/**
+ * ⚠ A PLACEHOLDER. NOBODY CHOSE THIS FIGURE AND IT IS NOT A COST ESTIMATE.
+ *
+ * $1,000,000 per program per year, IDENTICAL ACROSS ALL FIVE, and the sameness
+ * is the tell rather than a finding: a three-year law-enforcement analytics
+ * build, a two-year roof-hardening capital project and a yearly training and
+ * hotline service do not cost the same amount, and nothing here claims they do.
+ * One number was needed so the tiles could show a cost and a total at all.
+ *
+ * ⚠ AND IT QUIETLY ANSWERS A STRUCTURAL QUESTION THAT IS ACTUALLY OPEN. A flat
+ * per-program figure asserts that program cost does NOT scale with the book.
+ * That is a real modelling choice and it was made by default, not on purpose.
+ * Real costs would likely be mixed: some scaling on exposure — a safety program
+ * across a bigger payroll costs more to deliver — and some genuinely flat, like
+ * a software build whose price does not care how many members use it. Which
+ * programs fall on which side is undecided. Replacing this constant means
+ * deciding that, not just substituting five numbers.
+ *
+ * ⚠ IT SAYS SO HERE BECAUSE OF THIS REPOSITORY'S OWN HISTORY. Three constants
+ * once arrived in a single commit with no derivation recorded and were still
+ * being traced back months later. A placeholder that does not announce itself
+ * becomes one of those. This one announces itself.
+ *
+ * ⚠ AND THE FLAT CHOICE IS NOT NEUTRAL — MEASURED, THE BURDEN RUNS BACKWARDS.
+ * Because the figure does not scale with the book, the SMALLEST pool pays the
+ * MOST in relative terms. Year 1 at defaults, 8 games, the whole available menu
+ * against the pool's own premium:
+ *
+ *   config          programs   menu/yr   total member charge   pool premium
+ *   WC only              3       $3M        21.66M  13.8%       10.74M  27.9%
+ *   GL only              3       $3M        33.86M   8.9%       13.73M  21.8%
+ *   Property only        3       $3M        28.20M  10.6%       14.59M  20.6%
+ *   WC+GL                4       $4M        55.53M   7.2%       24.47M  16.3%
+ *   all three            5       $5M        83.73M   6.0%       39.06M  12.8%
+ *
+ * A one-line pool carries more than twice the relative cost of a three-line one
+ * for programs it has fewer of. That is the flat-versus-scaling question showing
+ * up as a number rather than as a caveat, and it is an artefact of the stand-in,
+ * not a designed property.
+ *
+ * WHAT REPLACES IT: per-program costs in dollars, with the flat-versus-scaling
+ * question settled per program and each figure's basis recorded at the entry.
+ * Until then, five identical numbers.
+ */
+export const RISK_CONTROL_PLACEHOLDER_ANNUAL_COST = 1_000_000;
+
 export const RISK_CONTROL_CATEGORIES: readonly RiskControlCategory[] = [
   {
     id: 'wc-safety-rtw',
-    name: 'Safety and Return to Work',
+    name: 'Workers\' Compensation Safety & Return-to-Work Program',
+    tileName: 'Safety & Return-to-Work',
     scope: 'WC',
     commitmentYears: 3,
     renewal: 'opt-out',
     benefit: 'immediate',
-    what: 'On-site safety program and a managed return-to-work path for injured employees.',
-    why: 'WC losses report and close quickly, so a program that shortens time away shows up '
-      + 'in the same years it runs.',
     status: 'scoped',
   },
   {
     id: 'gl-law-enforcement-analytics',
-    name: 'Law Enforcement Analytics',
+    name: 'Law Enforcement Early Intervention & Analytics',
+    tileName: 'Law Enforcement Analytics',
     scope: 'GL',
     commitmentYears: 3,
     renewal: 'opt-out',
     benefit: 'ramped',
-    what: 'Early-warning analytics on use-of-force and complaint patterns, with intervention.',
-    why: 'Liability losses emerge over years, so the benefit builds across years one to three '
-      + 'rather than arriving with the first invoice.',
     status: 'scoped',
   },
   {
     id: 'property-mitigation',
-    name: 'Property Mitigation',
+    name: 'Property Loss Prevention & Mitigation',
+    tileName: 'Property Mitigation',
     scope: 'Property',
     commitmentYears: 2,
     renewal: 'opt-out',
     benefit: 'immediate',
-    what: 'Roof, water and wind hardening on the highest-value locations.',
-    why: 'Scoping not settled — the two-year term and the benefit shape are both placeholders.',
     status: 'placeholder',
   },
   {
     id: 'claims-management-system',
-    name: 'Claims Management System',
+    name: 'Claims Management Modernization',
+    tileName: 'Claims Management',
     scope: 'Pool',
     commitmentYears: 3,
     renewal: 'opt-out',
     benefit: 'onCompletion',
-    what: 'Capital build of a claims system: intake, adjuster workflow, and reserving discipline.',
-    why: 'Capital spend across two to four years that returns NOTHING until it is finished — '
-      + 'abandoning it partway wastes every year already paid.',
     status: 'scoped',
   },
   {
     id: 'member-services',
-    name: 'Member Services',
+    name: 'Member Services & Risk Education',
+    tileName: 'Member Services',
     scope: 'Pool',
     commitmentYears: 1,
     renewal: 'yearly',
     benefit: 'immediate',
-    what: 'Training, hotlines and advisory hours available to every member.',
-    why: 'Bought and consumed within the year, so it carries no commitment and is decided afresh '
-      + 'each year.',
     status: 'scoped',
   },
 ];
@@ -169,6 +225,22 @@ export function availableCategories(
   return RISK_CONTROL_CATEGORIES.filter(
     c => c.scope === 'Pool' || activeLines.includes(c.scope),
   );
+}
+
+/**
+ * What running every AVAILABLE program would cost for one year.
+ *
+ * ⚠ GATED LIKE THE TILES, which is the whole reason this is a function and not
+ * five times the constant. A pool that writes one line is offered three
+ * programs, so its total is $3M, not $5M. Reading the ungated five would
+ * overstate the number for every pool that is not writing all three lines.
+ *
+ * ⚠ AND IT IS WHAT SELECTING THEM WOULD COST, NOT A SPEND THAT HAPPENS. Nothing
+ * here is bought: the tiles are inert and riskControlPct is pinned at 0, so the
+ * pool's actual risk-control spend is zero. This is the price of the menu.
+ */
+export function totalAnnualCost(activeLines: readonly CoverageLine[]): number {
+  return availableCategories(activeLines).length * RISK_CONTROL_PLACEHOLDER_ANNUAL_COST;
 }
 
 /** "3 years", "1 year", "Yearly". DISPLAY ONLY. */
