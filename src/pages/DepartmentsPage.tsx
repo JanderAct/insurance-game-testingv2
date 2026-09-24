@@ -5,6 +5,7 @@ import investmentMemoRaw from '../data/documents/investmentMemo.md?raw';
 import { buildActuarialMemo } from '../utils/actuarialMemo';
 import { buildClaimsMemo } from '../utils/claimsMemo';
 import { buildRiskControlMemo } from '../utils/riskControlMemo';
+import { buildUnderwritingMemo } from '../utils/underwritingMemo';
 
 interface DepartmentsPageProps {
   gameState: GameState;
@@ -34,6 +35,13 @@ export default function DepartmentsPage({ gameState }: DepartmentsPageProps) {
   // be closed at year 9. It rebuilds the whole book to split paid per accident
   // year, which is 41 ms on a reloaded game, so it is memoised rather than
   // recomputed on an unrelated re-render.
+  // Memoised on the same rule as the other two: it walks the whole marketplace
+  // and every member's stored history for each active line.
+  const underwritingMemo = useMemo(
+    () => buildUnderwritingMemo(gameState),
+    [gameState],
+  );
+
   const claimsMemo = useMemo(
     () => buildClaimsMemo({ gameState, asAtYear: selectedYear }),
     [gameState, selectedYear],
@@ -62,10 +70,15 @@ export default function DepartmentsPage({ gameState }: DepartmentsPageProps) {
       content: buildRiskControlMemo(gameState.setup.activeLines),
     },
     {
+      // ⚠ THE ONLY DOCUMENT WHOSE CONTENT IS A FUNCTION OF THE YEAR. Risk
+      // Control is prose; Actuarial and Claims are generated but describe the
+      // pool. This lists a SET that turns over every year — different
+      // candidates, different members over the bar — so its fingerprint differs
+      // between year points by design, where the others mostly do not.
       id: 'underwriting',
       title: 'Underwriting',
       summary: 'Membership, applicants, and risk profile',
-      notBuiltNote: 'The Underwriting Department has not filed a memorandum yet.',
+      content: underwritingMemo,
     },
     {
       id: 'investment',
