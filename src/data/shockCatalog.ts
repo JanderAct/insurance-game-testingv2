@@ -28,22 +28,31 @@ export const SHOCK_CATALOG: Record<string, ShockDefinition> = {
   //
   // Two independent blockers, both structural:
   //
-  //   1. THERE IS NO CAT GENERATOR. propertyClaimEngine has an attritional band
-  //      and a weather band, both unwired; PROPERTY_CAT_MODEL is inert. There is
-  //      no quake peril, no region-span logic, and no intensity draw to force.
-  //      A live game still runs Property through the legacy aggregate
-  //      member-Gamma path.
+  //   1. THERE IS NO CAT GENERATOR. There is no quake peril, no region-span
+  //      logic, and no intensity draw to force.
   //
-  //   2. THERE IS NO OCCURRENCE TOWER. The event's intended meaning — "the pool
-  //      pays the $5M retention plus everything above the limit, which is
-  //      solvency-threatening without protection" — describes a treaty the
-  //      engine does not implement. The live reinsurance engine is an AGGREGATE
-  //      QUOTA SHARE: attachment at 125% of expected gross loss, a flat recovery
-  //      percentage of the excess, UNCAPPED (limitPctOfPremium is Infinity at
-  //      every paid level). Its own header says occurrence-basis layering is
-  //      deferred until a claim-level model exists. The occurrenceAttachment and
-  //      occurrenceLimit constants sit in the inert cat block and nothing reads
-  //      them.
+  //      ⚠ CORRECTED: this used to claim propertyClaimEngine "has an
+  //      attritional band and a weather band, both unwired" and cited an inert
+  //      PROPERTY_CAT_MODEL, and that "a live game still runs Property through
+  //      the legacy aggregate member-Gamma path." All three claims are false as
+  //      of Property's rebuild (645c15e): propertyClaimEngine has ONE fitted
+  //      severity mixture, not a separate attritional/weather split;
+  //      PROPERTY_CAT_MODEL is not in `src/` at all; and Property draws
+  //      individual claims through its own per-occurrence generator, the same
+  //      family as WC and GL, not the retired aggregate-Gamma path. What is
+  //      still true, and the actual blocker: no cat generator exists.
+  //
+  //   2. THERE IS NO OCCURRENCE TOWER FOR A CAT EVENT TO PIERCE IN THE WAY THIS
+  //      EVENT'S DESCRIPTION ASSUMES.
+  //
+  //      ⚠ ALSO CORRECTED: this used to say Property's reinsurance was "an
+  //      AGGREGATE QUOTA SHARE... UNCAPPED," which was true before dbd9138 and
+  //      is not now — Property has had its own one-layer occurrence tower
+  //      ($5M retention) and an aggregate stop-loss since that commit. The
+  //      remaining blocker is narrower than "no tower": the tower cedes
+  //      whatever occurrence a generator hands it, and there is still no CAT
+  //      generator to hand it a multi-claim catastrophe occurrence (see #1) —
+  //      today's tower ceded a single ordinary claim, not an event.
   //
   // So the occurrence tower is a PREREQUISITE for #2 having its intended meaning
   // at all, not merely for it running. Against an uncapped aggregate quota share

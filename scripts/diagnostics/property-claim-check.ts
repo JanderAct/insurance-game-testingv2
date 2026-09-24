@@ -115,17 +115,29 @@ console.log('\n--- 2. THE HELD PURE PREMIUM RECONCILES FROM ITS PARTS ---');
   console.log('  returns WITH the cat band, in the same commit, or the two disagree again.');
 }
 
-console.log('\n--- 3. EXPECTED LOSS IS EXACTLY PROPORTIONAL TO TIV ---');
-console.log('  The identity that replaced the retired design\'s location-count cancellation.');
+console.log('\n--- 3. EXPECTED LOSS IS APPROXIMATELY PROPORTIONAL TO TIV ---');
+console.log('  ⚠ WAS EXACT (1e-12), NOT ANY MORE, AND THAT IS EXPECTED. Every member drew the');
+console.log('  same severityMoment at neutral RQ before the frequency/severity shape fix, so the');
+console.log('  ratio cancelled algebraically to machine precision. The fix reintroduces a REAL');
+console.log('  per-member factor — locations (2-33), NOT the retired per-location severity cap —');
+console.log('  scaling frequency up and severity down per member. That cancels EXACTLY without');
+console.log('  the $75M severityCap (linear in scale, uncapped), but the cap has real curvature:');
+console.log('  a subset weighted toward high-location members draws severity at a smaller scale');
+console.log('  (further from the cap) than one weighted toward low-location members, so the two');
+console.log('  recover very slightly different amounts of the cap-suppressed mean. Measured across');
+console.log('  five arbitrary subsets: 7e-5 to 3.6e-4 relative. 1e-3 gives a 3x margin over the');
+console.log('  worst observed case while still catching a real break (e.g. locations undone or');
+console.log('  applied to only one of frequency/severity, which would be off by orders of magnitude,');
+console.log('  not parts in ten-thousand).');
 {
   const half = roster.slice(0, 100), whole = roster;
   const eHalf = expectedPropertyGrossLoss(half, { riskQualityOverride: 5, kPr: 1 });
   const tHalf = half.reduce((s, m) => s + (m.exposureByLine.Property ?? 0), 0);
   const eWhole = expectedPropertyGrossLoss(whole, { riskQualityOverride: 5, kPr: 1 });
   const perTivHalf = eHalf / tHalf, perTivWhole = eWhole / fullTiv;
-  check(Math.abs(perTivHalf / perTivWhole - 1) < 1e-12,
-    'loss per $1M TIV is identical on any subset at neutral RQ',
-    `${perTivHalf.toFixed(4)} vs ${perTivWhole.toFixed(4)}`);
+  check(Math.abs(perTivHalf / perTivWhole - 1) < 1e-3,
+    'loss per $1M TIV is close, not identical, on any subset at neutral RQ (cap curvature)',
+    `${perTivHalf.toFixed(4)} vs ${perTivWhole.toFixed(4)}, rel dev ${Math.abs(perTivHalf / perTivWhole - 1).toExponential(2)}`);
 }
 
 console.log('\n--- 4. INVARIANT 1: THE DRAW REPRODUCES THE ANALYTIC EXPECTATION ---');

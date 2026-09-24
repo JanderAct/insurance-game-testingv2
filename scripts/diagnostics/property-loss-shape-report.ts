@@ -1,8 +1,10 @@
-// PLANNING MEASUREMENT — feature/property-program, off feature/risk-control.
-// No source changes; nothing built. Measures what Property's losses actually
-// look like (frequency, severity, concentration, tower interaction) to inform
-// sizing the Property Mitigation program. See the chat report for the
-// analysis this feeds.
+// Property loss shape — a reading, not an assertion. Measures frequency,
+// severity, annual concentration, and the split of loss dollars above vs
+// below the $5M per-risk retention, on the CURRENT (post frequency-fix)
+// model. Originally written to size the Property Mitigation program and to
+// ground the frequency correction that shipped alongside it; kept as a
+// standing report since both will need re-checking against future changes to
+// PROPERTY_LOSS_MODEL or the roster.
 import { writeFileSync } from 'fs';
 import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
 import { generatePropertyClaims, expectedPropertyGrossLoss } from '../../src/utils/propertyClaimEngine';
@@ -22,7 +24,13 @@ const expectedGross = expectedPropertyGrossLoss(propertyMembers, { kPr: 1 });
 
 console.log('=== PROPERTY LOSS MEASUREMENT (full market roster, kPr=1, no risk control) ===\n');
 console.log(`full-market Property members: ${propertyMembers.length} of ${FULL_ROSTER.length}`);
-console.log(`full-market TIV: ${fmt$(totalTiv)}   analytic E[gross]: ${fmt$(expectedGross)}\n`);
+// exposureByLine.Property is stored in $M already (matches the WC/GL exposure
+// convention) — totalTiv is therefore already dollars-of-millions, not
+// dollars; fmt$ (built for dollar quantities like losses) would divide by 1e6
+// a second time here. Format directly instead.
+console.log(`full-market TIV: $${(totalTiv / 1000).toFixed(1)}B (mean $${(totalTiv / propertyMembers.length).toFixed(1)}M/member)   analytic E[gross]: ${fmt$(expectedGross)}\n`);
+console.log(`mean locations/member: ${(propertyMembers.reduce((s, m) => s + m.locations, 0) / propertyMembers.length).toFixed(2)}   ` +
+  `range [${Math.min(...propertyMembers.map(m => m.locations))}, ${Math.max(...propertyMembers.map(m => m.locations))}]\n`);
 
 const N_DRAWS = 20_000;
 const annualGross: number[] = [];
@@ -71,14 +79,23 @@ const meanFreq = mean(annualClaimCount);
 console.log(`  claims/year, full market: mean ${meanFreq.toFixed(2)}   ${sortNum(annualClaimCount)[0]}-${sortNum(annualClaimCount)[annualClaimCount.length - 1]} range`);
 console.log(`  claims per member-year: ${(meanFreq / propertyMembers.length).toFixed(4)}`);
 console.log(`  fraction of years with ZERO claims (full market): ${pct(zeroClaimYears / N_DRAWS)}`);
-// Per-member-year frequency directly from the model's own lambda (no draw noise).
+// Per-member-year frequency directly from the model's own lambda (no draw noise),
+// theta(rq)~1 near neutral, locations included since that is now what sets the
+// count.
 const perMemberLambdas = propertyMembers.map(m => {
   const tiv = m.exposureByLine.Property ?? 0;
-  return tiv * PROPERTY_LOSS_MODEL.frequencyPer1mTiv; // theta(rq)~1 near neutral, ignored for this summary stat
+  return tiv * PROPERTY_LOSS_MODEL.frequencyPer1mTiv * Math.max(1, m.locations);
 });
-console.log(`  analytic mean per-member lambda (frequencyPer1mTiv x TIV, theta~1): ${mean(perMemberLambdas).toFixed(4)}`);
-console.log(`  member TIV: mean ${fmt$(mean(propertyMembers.map(m => m.exposureByLine.Property ?? 0)))}   ` +
-  `median ${fmt$(q(sortNum(propertyMembers.map(m => m.exposureByLine.Property ?? 0)), 0.5))}`);
+console.log(`  analytic mean per-member lambda (frequencyPer1mTiv x TIV x locations, theta~1): ${mean(perMemberLambdas).toFixed(4)}`);
+
+console.log('\n  by entity type: mean locations, mean claims/member-year');
+const byType = new Map<string, typeof propertyMembers>();
+for (const m of propertyMembers) { const arr = byType.get(m.type) ?? []; arr.push(m); byType.set(m.type, arr); }
+for (const [type, members] of byType) {
+  const locs = mean(members.map(m => m.locations));
+  const lambdas = members.map(m => (m.exposureByLine.Property ?? 0) * PROPERTY_LOSS_MODEL.frequencyPer1mTiv * Math.max(1, m.locations));
+  console.log(`    ${type.padEnd(20)} n=${String(members.length).padStart(3)}  locations=${locs.toFixed(1).padStart(5)}  claims/member-yr=${mean(lambdas).toFixed(2).padStart(6)}`);
+}
 
 console.log('\n=== SEVERITY (individual claim sizes, full market, all draws pooled) ===');
 const sortedClaims = sortNum(allClaimSizes);

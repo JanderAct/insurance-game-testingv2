@@ -61,6 +61,55 @@ function severityFactor(riskQuality: number): number {
   return 1 + M.rqSeverityBeta * (NEUTRAL_RQ - rq);
 }
 
+// ============================================================================
+// FREQUENCY/SEVERITY SHAPE CORRECTION — same product, redistributed.
+//
+// MEASURED: the model's mean annual gross loss (drawn, 20,000 full-market
+// years) agrees with its own analytic expectation to 0.2% ($58.34M vs
+// $58.21M) — the TOTAL was already right. What was wrong was the shape: 0.66
+// claims/member-year at a $0.442M mean, against a grounded target of 5-20
+// claims/member-year (confirmed against real public-entity experience, PER
+// MEMBER, counting only claims with an incurred value). That is 8-30x too few
+// claims, each roughly 8-30x too large, holding the product — and therefore
+// the pure premium — fixed. This is option B from the open item (redistribute,
+// not add), not option A (add small claims on top).
+//
+// `locations` IS THE WEIGHT, NOT AN EXTRA TUNED CONSTANT. It is already on
+// Member (`types/simulation.ts:40-49`, "the attritional frequency base... a
+// physical fact about the member, NOT derived from insured value") and was
+// unused by this generator until now. Applying it directly —
+// count scaled by locations, severity divided by the same locations — lands
+// the pool-wide mean at 7.68 claims/member-year (11.6x today's, inside 8-30x)
+// and $38.0K mean severity (inside $15K-$55K), with NO additional free
+// parameter: a 23-location Transit Authority draws roughly 7x the claims of a
+// 3-location Fire District at roughly 1/7th the severity each, which is
+// exactly the "should not draw the same count" requirement. Measured
+// per-type, this also produces real heterogeneity RIGHT OF the stated 5-20
+// band at the top (County mean ~29/yr) and LEFT of it at the bottom (Fire
+// District mean ~0.5/yr) — expected for a population whose entities range
+// from a 3-site fire district to a 33-site transit authority, and consistent
+// with "5-20" describing the book's central tendency rather than a per-entity
+// clamp.
+//
+// WHAT THIS IS NOT: a per-location severity model. `primaryAssetShare` (the
+// fraction of TIV in the member's designated primary site) is NOT used here —
+// wiring it in would let a claim's severity be capped by the ACTUAL dollar
+// value of the site it hit, which is the fuller architecture
+// `types/simulation.ts`'s comment on `locations`/`primaryAssetShare` gestures
+// toward ("chop member TIV into per-location values, which is what caps each
+// claim's severity"). That is a real, separate, larger change — this commit
+// only rescales the EXISTING fitted mixture's shape by a per-member factor;
+// it does not touch the mixture's relative shape (weights, sigmas) or give
+// individual claims a location-specific ceiling.
+//
+// APPLIED IN BOTH PLACES THAT COMPUTE EXPECTED OR DRAWN LOSS
+// (generatePropertyClaims below AND expectedPropertyGrossLoss), identically,
+// so the analytic and drawn distributions stay reconcilable exactly as they
+// were before this change — see property-claim-check's k_Pr invariant.
+function attritionalLocationCount(member: Member): number {
+  return Math.max(1, member.locations);
+}
+
 // ⚠ PROPERTY DOES NOT APPLY AN ACCIDENT-YEAR -> SETTLEMENT TREND, and it is
 // the only line that does not. This is a property of the FIT, not a
 // simplification.
@@ -231,8 +280,9 @@ export function expectedPropertyGrossLoss(
     const tiv = member.exposureByLine.Property ?? 0;
     if (!(tiv > 0)) continue;
     const rq = options.riskQualityOverride ?? member.riskQuality;
-    const lambda = tiv * M.frequencyPer1mTiv * thetaFrequency(rq) * kPr;
-    total += lambda * propertySeverityMoment(1, severityFactor(rq));
+    const locationCount = attritionalLocationCount(member);
+    const lambda = tiv * M.frequencyPer1mTiv * thetaFrequency(rq) * kPr * locationCount;
+    total += lambda * propertySeverityMoment(1, severityFactor(rq) / locationCount);
   }
   return total;
 }
@@ -340,9 +390,10 @@ export function generatePropertyClaims(inputs: PropertyGenerationInputs): Proper
       // deliberate: a compound-Poisson book's year-to-year variation comes from
       // its own frequency and tail, and layering a shared multiplier on top
       // would double-count volatility the mixture already carries.
-      const lambda = tiv * M.frequencyPer1mTiv * thetaFrequency(member.riskQuality) * eps * kPr * rcFactor;
+      const locationCount = attritionalLocationCount(member);
+      const lambda = tiv * M.frequencyPer1mTiv * thetaFrequency(member.riskQuality) * eps * kPr * rcFactor * locationCount;
       const count = freqRng.poisson(Math.max(0, lambda));
-      const sevScale = severityFactor(member.riskQuality);
+      const sevScale = severityFactor(member.riskQuality) / locationCount;
 
       for (let i = 0; i < count; i++) {
         // Component, then a lognormal draw from it, then the cap.

@@ -46,11 +46,19 @@ export type ShockBand = 'moderate' | 'high' | 'severe';
 export type ShockEffect =
   // --- CURRENT ---
   //
-  // NOT IMPLEMENTED — and cannot be until the Property cat band exists. There
-  // is no cat generator: propertyClaimEngine carries an attritional band and a
-  // weather band, both unwired, and PROPERTY_CAT_MODEL is inert constants.
-  // There is no quake peril to force. Kept in the vocabulary because event #2
-  // is in the catalog as data (see shockCatalog.ts).
+  // NOT IMPLEMENTED — and cannot be until a Property cat band exists. There is
+  // no cat generator and no quake peril to force.
+  //
+  // ⚠ CORRECTED: this used to say propertyClaimEngine "carries an attritional
+  // band and a weather band, both unwired" and cited an inert PROPERTY_CAT_MODEL.
+  // Neither exists. propertyClaimEngine has ONE fitted severity mixture (no
+  // separate attritional/weather split — see that file's own header on why the
+  // weather band was folded in rather than kept apart), and PROPERTY_CAT_MODEL
+  // is not in `src/` at all. The claim survived propertyClaimEngine's rebuild
+  // (645c15e) and one later touch of this file uncorrected. If those two
+  // mechanisms are ever built, they are a cat-generator project, not a
+  // reactivation of anything already sitting here. Kept in the vocabulary
+  // because event #2 is in the catalog as data (see shockCatalog.ts).
   | { kind: 'forceEvent'; line: 'Property'; peril: string; region: Region; intensity: number; span?: boolean }
   // IMPLEMENTED for WC. Injects `count` claims through that line's own
   // generator, so the claims are real: they carry ids, join the occurrence

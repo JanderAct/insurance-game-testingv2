@@ -5138,13 +5138,30 @@ export const PROPERTY_LOSS_MODEL = {
 //   ⚠ IT RETURNS WITH THE CAT BAND, IN THE SAME COMMIT AS THE CAT BAND, so the
 //   price and the losses can never disagree again. Adding the load back on its
 //   own would recreate exactly the defect that removed it.
-export const PROPERTY_HELD_PURE_PREMIUM_PER_100 = 0.0962;
+//
+// ⚠ MOVED 0.0962 -> 0.0980, RECALIBRATED WITH THE FREQUENCY/SEVERITY SHAPE FIX
+// (frequency 8-30x up via `locations`, severity down by the same per-member
+// factor, holding each member's own expected loss fixed — see
+// attritionalLocationCount's header in propertyClaimEngine.ts). The move is
+// NOT the redistribution itself: per member, the algebra cancels exactly
+// without the $75M severityCap. It is the CAP. Before this fix, severity was
+// drawn near scale 1, where the fitted mixture's heaviest component (sigma
+// 1.7417) already has some real mass beyond $75M and the cap measurably
+// suppresses the mean. After the fix, each member's severity is drawn at a
+// much smaller scale (divided by that member's own location count, up to 33),
+// where the cap almost never binds — so scaling back up by the same factor
+// recovers close to the TRUE uncapped mean rather than the old, cap-suppressed
+// one. Measured: deriveNeutralPropertyPurePremiumPer100 moved from 0.0962 to
+// 0.098007429215148, a +1.9% change property-claim-check's check 2 caught
+// directly. This constant must keep tracking that function's output — it is
+// not a coincidence they used to match, and check 2 is what enforces it.
+export const PROPERTY_HELD_PURE_PREMIUM_PER_100 = 0.098;
 
 // The retired load, kept as data rather than prose so the restoring commit has
 // a value to reinstate and property-claim-check has something to assert the
 // held constant is NOT carrying. `catAssertedRetired` is deliberately NOT summed
 // into the held constant anywhere.
-export const PROPERTY_PURE_PREMIUM_SPLIT = { nonCatDerived: 0.0962, catAssertedRetired: 0.0247 };
+export const PROPERTY_PURE_PREMIUM_SPLIT = { nonCatDerived: 0.098, catAssertedRetired: 0.0247 };
 
 // ===========================================================================
 // THE OPEN-SHARE CURVE — the share of a cohort's VALUE still able to develop,
