@@ -5030,24 +5030,25 @@ export const PROPERTY_LOSS_MODEL = {
   // Per $1M of TIV, not per location and not per member. The location basis
   // went with the damage-ratio severity it existed to serve.
   //
-  // ⚠ RE-CALIBRATED against real data the earlier fit did not have: three
-  // developed and trended years, buildings only with vehicles removed, 120
-  // members on $85B of building TIV — 249/228/239 claims (mean 239, a 4%
-  // spread — frequency is the STABLE half of this fit). 239/$85,000M =
-  // 0.0028118, rounded to 0.00281. Ratio to the prior 0.00221: 1.27x.
+  // ⚠ RE-CALIBRATED AGAIN — VEHICLES ARE FOLDED IN. Property is not a
+  // buildings-only line: it covers the fleet too, and there is no separate
+  // line for it. The prior recalibration (buildings only, vehicles removed)
+  // was a real, correct reading of a different scope, not a wrong number —
+  // this is a SCOPE change, not a correction of that one.
   //
-  // The 5-20-claims-per-member-year figure this basis replaced was never
-  // sourced and, checked against the same real data, was wrong by more than
-  // an order of magnitude (1.99 claims per member-year here, not 5-20) — see
-  // the commit that reverted the location-count wiring built on it.
+  // Three developed and trended years, VEHICLES INCLUDED this time: 120
+  // members on $85B of building TIV — 416/437/426 claims (mean 426, a 5%
+  // spread). 426/$85,000M = 0.0050157, rounded to 0.00502. Ratio to the
+  // buildings-only 0.00281: 1.78x.
   //
-  // PER MEMBER, the model reads ~3x light against the real book (real 1.99
-  // claims/member-yr vs the roster's own members, which carry ~$298M average
-  // TIV against the real book's ~$708M) — but that gap is the roster's TIV-
-  // per-member being smaller than the real book's, not a frequency defect.
-  // PER TIV, the basis this field is actually denominated in, the model was
-  // only 1.27x light. Confirms the field was fine; the target was not.
-  frequencyPer1mTiv: 0.00281,
+  // ⚠ ACCEPTED SIMPLIFICATION, RECORDED HERE RATHER THAN GLOSSED: vehicles are
+  // not driven by TIV. A pool with more buildings does not have proportionally
+  // more cars — this field now drives auto frequency off building value
+  // because that is the only exposure base Property has, not because it is
+  // physically the right one. If a vehicle count or fleet-value field is ever
+  // added to Member, this is the field that should stop reading TIV for the
+  // auto share of the loss.
+  frequencyPer1mTiv: 0.00502,
 
   // FLAT. There is no frequency trend in the fit, and inventing one from nine
   // years of a book whose TIV basis moved would be reading noise.
@@ -5057,39 +5058,50 @@ export const PROPERTY_LOSS_MODEL = {
   // 6775 BOTH select k=4 — no conflict between them, unlike GL, where the two
   // criteria disagreed and the choice had to be argued.
   //
-  // Original component means (mu's below before re-calibration): $11,414 /
-  // $29,664 / $85,725 / $913,762. The top component carries 45% of the weight
-  // at sigma 1.7417 and is what makes this line's annual result a question of
-  // whether a large claim happened.
+  // Original component means (mu's below before either re-calibration):
+  // $11,414 / $29,664 / $85,725 / $913,762. The top component carries 45% of
+  // the weight at sigma 1.7417 and is what makes this line's annual result a
+  // question of whether a large claim happened.
   //
-  // ⚠ RE-CALIBRATED, mu's ONLY — every mu shifted by the SAME +0.4642 (the
-  // uniform multiplicative scale the RQ channel already uses: mu + log(factor)
-  // moves the whole mixture and leaves weights and sigmas, i.e. shape and CV,
-  // untouched). Weights and sigmas below are the ORIGINAL fit, unchanged.
+  // ⚠ RE-CALIBRATED A SECOND TIME, mu's ONLY, SAME MECHANISM AS BEFORE: every
+  // mu shifted by the SAME amount (mu + log(factor), weights and sigmas
+  // untouched). This shift is NEGATIVE — vehicles are folded in, and at $418k
+  // average they pull the blended severity DOWN even though total claim count
+  // rises 1.78x. The prior +0.4642 (buildings-only) is fully superseded, not
+  // composed with — this shift is solved fresh against the vehicle-inclusive
+  // target, landing at -0.5050 net vs the ORIGINAL (pre-any-recalibration)
+  // fit.
   //
-  // WHY UNIFORM SCALE, NOT A REFIT OR A SINGLE-COMPONENT MOVE: three annual
-  // aggregates (claim count and total dollars, not individual claim sizes)
-  // cannot identify a 4-component mixture's 12 parameters — there is no
-  // claim-level data to refit against. And the observed year-to-year severity
-  // swing ($435k-$900k over three years, more than 2x) does not by itself
-  // argue for a FATTER tail than this mixture already has: at CV 4.78 (pre-
-  // recalibration) or 4.39 (post), a ~230-250-claim annual sample from a
-  // mixture this heavy-tailed already produces swings of this size from
-  // ordinary tail-sampling noise, with only 3 points to check it against.
-  // Moving one component's weight or mu to chase a 2-year-visible pattern
-  // would be fitting noise this project has repeatedly ruled against doing.
+  // WHY STILL A UNIFORM SCALE: the same reasoning as the buildings-only
+  // recalibration applies with the same force — three annual aggregates
+  // (count and total dollars, not individual claim sizes, and now for a
+  // building+vehicle MIX rather than a single population) cannot identify a
+  // 4-component mixture's 12 parameters, let alone separate an auto severity
+  // distribution from a building one within it. Vehicles are collapsed into
+  // the same mixture as buildings — there is no separate auto severity
+  // component — which is itself an accepted simplification: the real
+  // population is two different loss processes (collision/theft vs fire/
+  // wind/water), blended here into one scale change on a shape fit to
+  // buildings alone.
   //
-  // The +0.4642 shift is solved (not guessed) against the $75M cap: it lands
-  // propertySeverityMoment(1) — the CAPPED mean, the quantity that actually
-  // prices — at $681,564, the real book's own claim-weighted 3-year average
-  // ($488M / 716 claims). The naive uncapped ratio is 1.566x; the capped
-  // solve needed 1.591x, because scaling every component up also pushes more
-  // of the top component's mass above the cap, which a naive scalar ignores.
+  // The shift is solved (not guessed) against the $75M cap, via
+  // propertySeverityMoment(1): lands the CAPPED mean at $418,296, the real
+  // book's vehicle-inclusive claim-weighted 3-year average ($535M / 1,279
+  // claims). At this lower scale the cap binds far less than it did post-
+  // buildings-only-recalibration — capped severity CV RISES to 4.81 (was
+  // 4.385), closer to the original fit's uncapped 6.22, because less of the
+  // top component's mass now reaches $75M.
+  //
+  // ⚠ NOTABLE, NOT ACTED ON: this lands within 4% of the ORIGINAL fit's own
+  // mu's (each -0.0408 from original, i.e. 96% of the original scale) — the
+  // vehicle-inclusive target is close to what was fitted before EITHER
+  // recalibration, which was apparently already closer to a mixed building+
+  // vehicle population than to buildings alone.
   severityMixture: [
-    { weight: 0.1562, mu: 9.7208, sigma: 0.4147 },
-    { weight: 0.0714, mu: 10.7575, sigma: 0.0937 },
-    { weight: 0.3210, mu: 11.6228, sigma: 0.6330 },
-    { weight: 0.4514, mu: 12.6728, sigma: 1.7417 },
+    { weight: 0.1562, mu: 9.2158, sigma: 0.4147 },
+    { weight: 0.0714, mu: 10.2525, sigma: 0.0937 },
+    { weight: 0.3210, mu: 11.1178, sigma: 0.6330 },
+    { weight: 0.4514, mu: 12.1678, sigma: 1.7417 },
   ],
 
   // ⚠ THE CAP IS NOT OPTIONAL, and the evidence is better than GL's was.
@@ -5099,13 +5111,15 @@ export const PROPERTY_LOSS_MODEL = {
   // level fit, which the re-calibration does not touch): uncapped CV 6.22
   // against a SAMPLE CV of 4.46, capped down to 4.78.
   //
-  // AT THE RE-CALIBRATED SCALE (measured directly by property-claim-check.ts,
-  // which DOES read this constant): uncapped mean $706,140, capped mean
-  // $681,582 — the cap now removes 3.48% of the mean (was 1.9%) and binds
-  // once in 2,630 claims (was 1 in 6,610), because scaling the whole mixture
-  // up pushes more of the top component's mass past a cap that did not move.
-  // Capped severity CV is now 4.385 (was 4.78) for the same reason — still
-  // disciplining the second moment, not acting as a loss limit.
+  // AT THE VEHICLES-FOLDED-IN SCALE (measured directly by property-claim-
+  // check.ts, which DOES read this constant): uncapped mean $426,159, capped
+  // mean $418,289 — the cap now removes only 1.85% of the mean (was 3.48% at
+  // the buildings-only recalibration, 1.9% at the original fit) and binds
+  // once in 7,204 claims (was 1 in 2,630), because shrinking the whole mixture
+  // pulls the top component's mass back below a cap that did not move. Capped
+  // severity CV is now 4.81 (was 4.385) for the same reason, closer to the
+  // original fit's uncapped 6.22 — still disciplining the second moment, not
+  // acting as a loss limit.
   severityCap: 75_000_000,
 
   // RQ channels, unchanged in structure from the retired design and
@@ -5146,15 +5160,33 @@ export const PROPERTY_LOSS_MODEL = {
 // analytic expectation. Asserted against the generator by
 // property-claim-check.ts ALONE, so the price and the draw cannot drift apart.
 //
-// ⚠ RE-CALIBRATED alongside frequencyPer1mTiv and severityMixture (see those
-// comments): 0.00281 x $681,582 = $1,915.25 of loss per $1M TIV = 0.1915 per
-// $100, up from 0.0962. THE TOTAL MOVES HERE — every prior Property change in
-// this project held the product of frequency and severity fixed by
-// construction (redistributing shape, not the total); this one does not,
-// because the total itself was what the earlier, unsourced 5-20-per-member
-// target got wrong. 0.1915 matches the real book's own loss-per-$100-TIV
-// (0.191) by construction, since it is frequencyPer1mTiv x severity mean
-// computed from the same real-data target both were solved against.
+// ⚠ RE-CALIBRATED TWICE. First alongside the buildings-only frequencyPer1mTiv
+// and severityMixture (see those comments): 0.00281 x $681,582 = 0.1915 per
+// $100, up from 0.0962, because the total itself was what the earlier,
+// unsourced 5-20-per-member target got wrong (option A, not a redistribution).
+//
+// ⚠ SECOND: VEHICLES FOLDED IN. 0.00502 x $418,289 = $2,099.81 of loss per $1M
+// TIV = 0.2100 per $100, up from 0.1915 — a much smaller move (1.10x) than
+// either input alone (frequency 1.78x, severity down to 0.61x), because the
+// two roughly offset. 0.2100 matches the real book's own vehicle-inclusive
+// loss-per-$100-TIV (0.210) by construction, same as before.
+//
+// ⚠ OPEN, UNRESOLVED — FLAGGED RATHER THAN CHASED: the real book's CHARGED
+// rate is $110.367 per $100,000 of TIV excess of a $25,000 deductible, i.e.
+// 0.1104 per $100 — the model's 0.2100 (ground-up) is 1.84x that. THE $5M
+// QUESTION IS STILL OPEN, AND MEASURED HERE DIFFERENTLY THAN GUESSED: if the
+// real rate is itself capped at $5M (unconfirmed — being chased separately),
+// this model's own expected loss BELOW $5M, computed directly
+// (frequencyPer1mTiv x E[min(severity,5M)] / 10,000, E[min] from
+// propertyAggregateInternals.limitedExpectedValue), is 0.1595 — not the ~0.113
+// that made the comparison look near-exact. The gap is real: roughly a
+// quarter of this mixture's mean comes from claims over $5M (the building
+// component's tail, not vehicles, which the retention comment below notes
+// never reach it), so "below $5M" removes far less of the ground-up rate than
+// a rough estimate suggests. So the severity target above may be right and
+// this comparison still wrong, or both may need revisiting — this constant is
+// built against the figures given in this commit either way, and the $5M
+// question stays open.
 //
 // ⚠ THIS ALSO NAMED property-fit-check, WHICH ASSERTS NOTHING (now
 // property-fit-report — it prints the scale analysis and exits 0 either way).
@@ -5186,16 +5218,17 @@ export const PROPERTY_LOSS_MODEL = {
 //   ⚠ IT RETURNS WITH THE CAT BAND, IN THE SAME COMMIT AS THE CAT BAND, so the
 //   price and the losses can never disagree again. Adding the load back on its
 //   own would recreate exactly the defect that removed it.
-export const PROPERTY_HELD_PURE_PREMIUM_PER_100 = 0.1915;
+export const PROPERTY_HELD_PURE_PREMIUM_PER_100 = 0.2100;
 
 // The retired load, kept as data rather than prose so the restoring commit has
 // a value to reinstate and property-claim-check has something to assert the
 // held constant is NOT carrying. `catAssertedRetired` is deliberately NOT summed
 // into the held constant anywhere. Left at its pre-recalibration value (0.0247,
-// against the pre-recalibration 0.0962) — it was a single observed cat event
-// priced at a chosen return period, unrelated to the frequency/severity
-// recalibration above, and restoring it is a separate, later decision.
-export const PROPERTY_PURE_PREMIUM_SPLIT = { nonCatDerived: 0.1915, catAssertedRetired: 0.0247 };
+// against the original pre-recalibration 0.0962) — it was a single observed
+// cat event priced at a chosen return period, unrelated to either frequency/
+// severity recalibration above, and restoring it is a separate, later
+// decision.
+export const PROPERTY_PURE_PREMIUM_SPLIT = { nonCatDerived: 0.2100, catAssertedRetired: 0.0247 };
 
 // ===========================================================================
 // THE OPEN-SHARE CURVE — the share of a cohort's VALUE still able to develop,

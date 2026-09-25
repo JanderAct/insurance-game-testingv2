@@ -291,6 +291,21 @@ export function generatePropertyClaims(inputs: PropertyGenerationInputs): Proper
   const { members, yearNumber, calendarYear, instanceSeed, kPr, riskControlEffectiveness } = inputs;
   const rcFactor = Math.max(0, 1 - riskControlEffectiveness);
 
+  // ⚠ ACCEPTED SIMPLIFICATION, RECORDED SINCE VEHICLES WERE FOLDED IN: rcFactor
+  // discounts ONE frequency lambda that now generates both building and
+  // vehicle claims indiscriminately. Property Mitigation (roofs, water
+  // detection, wind bracing) cannot reduce a fleet's collision or theft
+  // frequency — physically, it targets none of the auto share of this line —
+  // but there is no separate auto/building split in this generator for the
+  // discount to respect, so it applies uniformly today regardless. IF the
+  // buildings-only frequency (2.81/$1B TIV) is still the building component
+  // inside the vehicle-inclusive 5.01, vehicles are ~44% of frequency
+  // ((5.01-2.81)/5.01) — a bigger share than "roughly a third", though both
+  // are the same qualitative point: a substantial share of what this line now
+  // generates is immune to the only program built to reduce it. Not fixed
+  // here — fixing it needs a real auto/building split this generator does not
+  // have.
+
   const claims: Claim[] = [];
   const occurrences: Occurrence[] = [];
   const memberLossResults: MemberLossResult[] = [];

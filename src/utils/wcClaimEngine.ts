@@ -473,8 +473,8 @@ export function computeKLine(members: Member[]): number {
 // ⚠ GL AND PROPERTY STAY FLAT, AND THE NEXT READER SHOULD NOT "FINISH THE JOB".
 // There is no job. Measured on the same basis, expected loss per $100 at
 // neutral RQ by member type: every one of GL's nine types reads 5.6319 and
-// every one of Property's reads 0.1915 (was 0.0962, before Property's real-
-// data recalibration) — SPREAD 1.00x on both, CV 0.0% within
+// every one of Property's reads 0.2100 (was 0.1915 buildings-only, 0.0962
+// originally) — SPREAD 1.00x on both, CV 0.0% within
 // every category. GL is flat by an explicit decision (GL_LOSS_MODEL's note,
 // and GL_RELATIVITIES retired by name) and Property is TIV-proportional. A
 // class rate on either would have to be INVENTED rather than derived, which is
