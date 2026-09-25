@@ -903,96 +903,80 @@ export const GL_DERIVED: ClfTable = {
 };
 
 // ============================================================================
-// PROPERTY — DERIVED from this engine, on the NET basis. RE-DERIVED at the
-// frequency/severity fix (d2e1dbd) and the opening pin re-solve that had to
-// come before it (f7047e0) -- REPLACES THE TABLE BELOW THIS HEADER, NOT
-// PATCHES IT: the fix dropped Property's annual aggregate CV from 0.427 to
-// ~0.18 (many small claims diversify where a few large ones do not), so the
-// whole shape needed re-measuring, not just the level.
+// PROPERTY — DERIVED from this engine, on the NET basis.
 //
-// 25,071 line-years in the small~64 band of 100,000 across 10,000 games and
-// four new-business appetite arms, via scripts/diagnostics/clf-table-derive.ts
-// (BAND_DERIVE=0 LINES=Property GAMES=2000). Same statistic, same block
-// bootstrap over whole games, same script as every prior derivation on this
-// line. Book within the band: p10 52, median 63, p90 70. CI half-widths run
-// 0.0025 at the 25th stop to 0.0166 at the 99th -- tighter than the previous
-// derivation's at every stop, because the lower-variance draw needs fewer
-// line-years to pin down the same precision.
+// 10,942 line-years in the 88+ member band of 16,000 across 1,600 solo games
+// and four new-business appetite arms, via
+// scripts/diagnostics/clf-table-derive.ts (BAND_DERIVE=2 GAMES=400). Same
+// statistic, same block bootstrap over whole games, same script that produced
+// WC's. Book within the band: p10 89, median 95, p90 103. CI half-widths run
+// 0.0062 at the 25th stop to 0.0402 at the 99th.
 //
-// ⚠ RE-DERIVED AT A DIFFERENT BAND FROM THE ONE ABOVE, AND THAT IS THE ACTUAL
-// FIX, NOT A SIDE EFFECT OF THE FREQUENCY WORK. The previous derivation
-// (kept, struck through in spirit, replaced in fact) sat at the large~97 band
-// because Property's median book then was ~91-95. The frequency/severity fix
-// did not by itself move the book -- membership dynamics did, separately, and
-// the default book measured here is p10 52 / median 63 / p90 70, squarely in
-// the small~64 band and nowhere near large~97. That is the two-band mismatch:
-// flagged when it was one band's difference and left alone, now confirmed
-// worth fixing before the frequency work could even be measured honestly
-// against a sane opening (hence the pin first, this second).
+// ⚠ A DIFFERENT BAND FROM WC's AND GL's, AND THE RULE IS THE SAME ONE. Each line
+// is derived at the band that CONTAINS ITS OWN MEDIAN BOOK. Measured on the
+// played game — all three lines active, four appetite arms, ten years:
 //
-// ⚠ WHAT THIS COSTS THE LARGER-BOOK PLAYER, STATED RATHER THAN AVERAGED AWAY
-// -- the same measurement WC's mid-band cost got, at the same three bands:
+//     line       book p10   median   p90      band derived at
+//     WC              61       78     93      mid   (72-88)
+//     GL              62       79     94      mid   (72-88)
+//     Property        70       91    101      large (88+)
 //
-//   delivered error by band (pp), this table:
-//     evaluated on        25%     50%     60%     75%     90%     95%    worst
-//     small ~64  (this)   +0.0    +0.0    +0.0    -0.0    +0.0    -0.0    +0.0
-//     mid ~80             -0.3    +1.9    +2.8    +2.7    +2.0    +1.4    +2.8
-//     large ~97           -3.0    +1.2    +3.1    +5.2    +4.0    +2.5   !+5.2
+// Property's book runs about eleven members above the other two, so the middle
+// band is its LOWER TAIL rather than its middle: 63% of its line-years fall in
+// the large band and only 26% in the mid one. Deriving it at the mid band was
+// tried first, on the reasoning that the middle of the range is the safe place
+// to sit, and it put the table away from most of Property's own exposure —
+// clf-label-backtest-check read -5.2pp at the mid band and -7.9pp at the large
+// one, both outside tolerance, on the 89% of line-years those two bands hold.
 //
-// A player who grows into the mid band (21% of all Property line-years played
-// across the appetite range) reads +2.8pp worst-case -- inside the 5pp
-// tolerance this project has used everywhere else. A player who grows into
-// the large band (54% of all line-years -- most Property play, over a full
-// game, actually happens there) reads +5.2pp at the 75% stop, JUST outside
-// that tolerance. This is the WC pattern repeating: fixing the default's
-// label costs the grown book something, and here the grown-book population is
-// the majority of play, not a minority the way WC's mid-band cost was framed.
-// Stated and not smoothed over, matching the ruling made for WC.
+// ⚠ WHAT THIS COSTS, STATED RATHER THAN AVERAGED AWAY. On a SMALL Property book
+// this curve over-funds by up to +10.2pp at the 25% stop. That band is 7% of the
+// derivation sample and 11% of the gate's, and reaching it needs sustained
+// strict underwriting on a line whose book otherwise grows — but it is a real
+// player choice and the error is real. It is the largest single cost of having
+// no book-size dimension anywhere in this file.
 //
-// ⚠ A GROSS-BASIS TABLE FOR PROPERTY WAS OFFERED AND REJECTED BEFORE THE
-// FREQUENCY FIX, and the reason still applies: Property funds NET (the
-// occurrence layer removes the top of every large claim), so a gross-basis
-// curve re-creates the exact basis error a derived table exists to remove.
-// Not re-measured against the new draw, because the basis argument does not
-// depend on the draw's shape.
+// ⚠ A GROSS-BASIS TABLE FOR PROPERTY WAS OFFERED AND REJECTED, and the reason
+// is the whole point of deriving this one. That candidate curve (crossing
+// 65.5%, median 0.7774, CV 0.809) was checked against four candidate bases on
+// this engine and reproduces `grossUltimateLoss / grossExpectedLoss` to within
+// 2.0% at every stop — matching its mean (1.0053 v 1.0009), CV (0.805 v 0.809),
+// median (0.7808 v 0.7774) and skew (1.287 v 1.288). It is a GROSS curve.
+// Property funds NET, so installing it would have re-created the very basis
+// error a derived table exists to remove, just with different numbers than
+// FUNDING_CLF_TABLE's. The net distribution is far tighter — CV 0.434 against
+// 0.809 — because the occurrence layer removes the top of every large claim,
+// and that is exactly the difference a net-basis table has to capture.
 //
-// CROSSING 55.4%, up from 52.8% at the large~97 band before this re-derivation
-// (and from 54.0% at the original single-band derivation before that). So
-// "Expected" on Property is now a ~55% stop at the book size the default
-// decisions actually produce -- still not the 60% the generic
-// FUNDING_CLF_TABLE would have labelled it, and now measured at the book size
-// where a player actually starts rather than one they may never reach.
+// CROSSING 52.8%, down from 54.0%. So "Expected" on Property is a ~53% stop, not
+// the 60% the generic FUNDING_CLF_TABLE labelled it — the mislabelling
+// measured in scripts/diagnostics/property-clf-basis-report.ts, corrected at
+// source and still corrected.
 //
-// ⚠ THE OLD "UNEXPLAINED NON-MONOTONE" NOTE IS CORRECTED, NOT JUST STALE. The
-// PREVIOUS table's 50% stop ran 0.9705 (small) -> 0.9469 (mid) -> 1.0157
-// (large) -- non-monotone, unexplained, attributed there to "Property's loss
-// model concentrating a year's outcome in a few large events" as an
-// unmeasured hypothesis. That hypothesis is now falsified by the mechanism
-// that made it moot: the frequency fix made Property MORE frequency-driven
-// (locations wired into the generator, many more and much smaller claims),
-// and the new 50% stop runs 0.9737 (small) -> 0.9631 (mid) -> 0.9685 (large)
-// -- a range of 0.0106 against the old 0.0688, a roughly 6.5x tighter spread
-// across the exact same three bands. A small dip-then-rise remains at the
-// median specifically (visible above; every other stop is closer to
-// monotone), so the shape is not fully resolved -- reported as measured,
-// smaller and still not perfectly monotone, rather than declared fixed.
+// ⚠ PROPERTY IS THE ONE LINE WHOSE CURVE MOVED UP WITH BOOK SIZE, WHICH IS THE
+// OPPOSITE OF WC AND GL. Measured across the bands, Property's 50% stop runs
+// 0.9705 (small ~64) -> 0.9469 (mid ~80) -> 1.0157 (large ~97), so it is not
+// even monotone; WC's and GL's fall steadily as the book grows. Nothing here
+// explains that, and it is recorded as unexplained rather than smoothed over.
+// Property's loss model is the one that concentrates a year's outcome in a few
+// large events, so a bigger book need not diversify it the way frequency-driven
+// WC does — but that is a hypothesis with no measurement behind it yet.
 //
-// VALIDATED OUT OF SAMPLE, which the derivation alone cannot do: a derived
-// table is by construction the percentiles of its own sample.
-// property-clf-basis-report draws a different population (all-defaults,
-// mixed book ages, not band-restricted) and was last run against the table
-// this replaces (worst |error| 11.9pp at the 30% stop, systematic rather than
-// noise -- the finding that triggered this re-derivation). ⚠ NOT RE-RUN
-// against the table below in this commit; clf-label-backtest-check (below)
-// is the out-of-sample check that was run.
+// VALIDATED OUT OF SAMPLE, which the derivation alone cannot do: a derived table
+// is by construction the percentiles of its own sample. property-clf-basis-report
+// draws a different population; it was last run against the table this replaces,
+// where it found every labelled stop within 0.9pp of what it delivers, +0.1pp at
+// the default. ⚠ THAT FIGURE IS NOT RE-MEASURED HERE and should not be read as
+// validating the curve below.
 // ============================================================================
 // ⚠ ALSO CALENDAR-YEAR BASIS, AND ALSO STAYING — for a simpler reason than WC's.
 //
-// clf-label-backtest-check gates this line on CALENDAR-YEAR. Not re-measured
-// on the accident-year basis for this re-derivation -- Property has zero
-// report lag (reportLagYears: 0), so accident-year and calendar-year ultimate
-// coincide for this line by construction, and the basis question that
-// mattered for GL and WC does not arise here at all, not merely "barely."
+// clf-label-backtest-check gates this line on CALENDAR-YEAR, the basis it was
+// derived on, where it reads +7.5 (thin, ungated) / +3.6 / +1.2 and PASSES. On
+// the accident-year basis it reads +7.9 (thin) / -4.4 / -1.7, and its indicated
+// accident-year curve sits between -2.6% and +4.0% of what ships. Property is
+// close enough on BOTH bases that re-deriving buys almost nothing, so the basis
+// question that decided WC barely arises here.
 //
 // Property is also the line least exposed to the objection that sank a WC
 // re-derivation: 71.0% of its accident years written in a ten-year game reach
@@ -1002,8 +986,8 @@ const PROPERTY_DERIVED: ClfTable = {
   source: 'derived',
   stops: [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 97.5, 99],
   clf: [
-    0.7580, 0.7950, 0.8254, 0.8525, 0.8771, 0.9024, 0.9268, 0.9501, 0.9737, 0.9979,
-    1.0248, 1.0533, 1.0834, 1.1177, 1.1559, 1.2041, 1.2666, 1.3683, 1.4645, 1.5938,
+    0.6398, 0.6974, 0.7442, 0.7883, 0.8260, 0.8641, 0.9043, 0.9417, 0.9781, 1.0157,
+    1.0587, 1.0993, 1.1471, 1.1996, 1.2603, 1.3378, 1.4414, 1.6040, 1.7555, 1.9477,
   ],
 };
 

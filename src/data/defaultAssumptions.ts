@@ -1609,45 +1609,9 @@ export const STARTING_CAPITAL_TO_PREMIUM: Record<string, number> = {
   // base and the gate's base disagreed by about 0.018 in K. Here the gate reads
   // the shipped value inside its own tolerance on its own seeds, so there is
   // nothing to pool away — see the run recorded in the commit.
-  //
-  // ==========================================================================
-  // ⚠ RE-SOLVED A SIXTH TIME, ON PROPERTY ALONE, AND THIS IS NEITHER A DRIFT NOR
-  // A BAND MOVE — IT IS THE ENGINE UNDERNEATH THE PIN CHANGING SHAPE.
-  //
-  //   Property  0.5452 -> 0.6542  (+20.0%)    WC and GL untouched
-  //
-  // Property's frequency/severity redistribution fix (locations wired into the
-  // generator: frequency up 8-30x, severity down by the same factor, holding
-  // expected loss — see attritionalLocationCount in propertyClaimEngine.ts)
-  // dropped Property's annual aggregate CV from 0.427 to ~0.18. opening-
-  // centring-check caught it: -37% of band width, -16.7 SE, where it had read
-  // -9% (-1.9 SE) immediately before that commit. Confirmed by stashing —
-  // this is a regression the fix introduced, not a pre-existing drift.
-  //
-  // WHY THE PIN MOVES WHEN THE VARIANCE DOES, ON A PREMIUM-BASIS BAND. The pin
-  // adds a FIXED multiple of premium to starting capital; the pre-game then
-  // runs ten years of claims on top of it, so the median ending surplus/premium
-  // ratio the pin lands on is [pin, scaled to a Year-(-2) basis] plus ten years
-  // of accumulated underwriting and investment result. A lower-variance loss
-  // draw is a TIGHTER distribution of that accumulated result around its mean,
-  // not a different mean (option B holds expected loss fixed by construction)
-  // — so the shift is not "the book got richer or poorer," it is the same
-  // median-of-many-draws landing at a different point once the draws
-  // themselves are reshaped, exactly as GL and Property moved in opposite
-  // directions from one membership change above. Solved through the same
-  // premium-basis openingBandRatio the shipped pin already used — Property's
-  // band was on premium before this fix and stays on premium after it, so
-  // this is NOT WC's reserve-anchored operation with the lines swapped; it is
-  // the same operation, on the same basis, against a different draw.
-  //
-  // Solved by scripts/diagnostics/opening-pin-solve.ts, LINES=Property —
-  // bisection, 600 seeds per evaluation, through the gate's own estimator on
-  // seeds the gate never sees. Two passes: 0.5452 -> 0.7633 (offset +0.1966)
-  // -> 0.6542 (offset -0.0196, inside the 0.06-band-width tolerance). WC and
-  // GL are NOT re-solved — nothing about their own generators moved.
   WC: 0.4718,
   GL: 0.2027,
-  Property: 0.6542,
+  Property: 0.5452,
 };
 
 // Pre-game acceptance band: the line's Year-1 opening surplus must land within
@@ -5174,30 +5138,13 @@ export const PROPERTY_LOSS_MODEL = {
 //   ⚠ IT RETURNS WITH THE CAT BAND, IN THE SAME COMMIT AS THE CAT BAND, so the
 //   price and the losses can never disagree again. Adding the load back on its
 //   own would recreate exactly the defect that removed it.
-//
-// ⚠ MOVED 0.0962 -> 0.0980, RECALIBRATED WITH THE FREQUENCY/SEVERITY SHAPE FIX
-// (frequency 8-30x up via `locations`, severity down by the same per-member
-// factor, holding each member's own expected loss fixed — see
-// attritionalLocationCount's header in propertyClaimEngine.ts). The move is
-// NOT the redistribution itself: per member, the algebra cancels exactly
-// without the $75M severityCap. It is the CAP. Before this fix, severity was
-// drawn near scale 1, where the fitted mixture's heaviest component (sigma
-// 1.7417) already has some real mass beyond $75M and the cap measurably
-// suppresses the mean. After the fix, each member's severity is drawn at a
-// much smaller scale (divided by that member's own location count, up to 33),
-// where the cap almost never binds — so scaling back up by the same factor
-// recovers close to the TRUE uncapped mean rather than the old, cap-suppressed
-// one. Measured: deriveNeutralPropertyPurePremiumPer100 moved from 0.0962 to
-// 0.098007429215148, a +1.9% change property-claim-check's check 2 caught
-// directly. This constant must keep tracking that function's output — it is
-// not a coincidence they used to match, and check 2 is what enforces it.
-export const PROPERTY_HELD_PURE_PREMIUM_PER_100 = 0.098;
+export const PROPERTY_HELD_PURE_PREMIUM_PER_100 = 0.0962;
 
 // The retired load, kept as data rather than prose so the restoring commit has
 // a value to reinstate and property-claim-check has something to assert the
 // held constant is NOT carrying. `catAssertedRetired` is deliberately NOT summed
 // into the held constant anywhere.
-export const PROPERTY_PURE_PREMIUM_SPLIT = { nonCatDerived: 0.098, catAssertedRetired: 0.0247 };
+export const PROPERTY_PURE_PREMIUM_SPLIT = { nonCatDerived: 0.0962, catAssertedRetired: 0.0247 };
 
 // ===========================================================================
 // THE OPEN-SHARE CURVE — the share of a cohort's VALUE still able to develop,

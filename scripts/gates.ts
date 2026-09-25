@@ -314,7 +314,7 @@ const PROBES: Record<string, string> = {
   'property-clf-basis-report': 'Property CLF basis report [21s]',
   'revision-total-sd-report': "the per-claim law's TOTAL development against IBNER_TOTAL_SD's own basis, flag ON against OFF. No threshold, deliberately: nothing ships on the ON arm, so a bar would be invented rather than measured — pregame-acceptance-check's reasoning [32s]",
   'property-fit-report': 'Property fit reading; asserts nothing. Renamed from -check — and three engine comments claimed it ASSERTED the fit, now corrected [4s]',
-  'property-loss-shape-report': 'Property frequency/severity/concentration reading, and the retention split; no threshold. Written for the frequency-fix commit, kept standing [~5s]',
+  'property-loss-shape-report': 'Property frequency/severity/concentration reading, and the retention split; no threshold [~5s]',
   'reinsurance-layer-report': 'layer reading; asserts nothing. Renamed from -check [41s]',
   'tower-downside-report': 'tower downside reading; asserts nothing. Renamed from -check [8s]',
   'wc-above-tower-report': 'WC above-tower report [109s]',
