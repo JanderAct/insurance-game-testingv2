@@ -4757,6 +4757,92 @@ export const TRIANGLE_HISTORY_YEARS = 10;
 // change. Property is effectively exact at 0.9971 (implied +0.29%). This commit
 // re-solves GL because that is what was ruled; WC's number is recorded so the
 // next person does not have to re-derive it.
+// ============================================================================
+// ⚠ k WAS ASKED TO BE FLATTENED AND IT IS NOT FLATTENED. THE MEASUREMENT SAID
+// SOMETHING WORSE THAN THE DEFECT IT WAS SENT TO FIX. NOTHING BELOW MOVED.
+//
+// THE REQUEST, AND IT IS A FAIR ONE. Because booked = A x drawn^k with k < 1,
+// the contraction is size-dependent: at the shipped constants a $50k claim
+// books at 48.3% of drawn and a $125M claim at 15.7%, a 3.08x spread. Nothing
+// in reserving says a larger claim should be recognised proportionally less —
+// an adjuster reserves a catastrophic case high and early, because the
+// reinsurer needs to know. (The ratio SPREAD is a function of k alone: the A
+// cancels in ratio(d1)/ratio(d2) = (d1/d2)^(k-1). So 3.08x is exact whichever A
+// is in force.)
+//
+// ⚠ AND LARGE CLAIMS REALLY ARE PERMANENTLY UNDER-BOOKED. MEASURED, 396,373 GL
+// claims over 16 seed families, followed to their own closure age, at the
+// SHIPPED constants — value-weighted terminal/drawn:
+//
+//     band            claims    booked/drawn    TERMINAL/DRAWN   closure age
+//     under $10k      301292         85.5%          1.564            2.4
+//     $10k - $100k     64466         52.7%          0.969            2.4
+//     $100k - $1M      25779         38.6%          1.450            5.3
+//     $1M - $5M         3986         28.8%          1.083            5.3
+//     $5M - $25M         741         23.0%          0.822            5.2
+//     over $25M          109         18.1%          0.627            5.2
+//
+//     under $1M   1.286      $1M and over   0.858      over $25M   0.617
+//
+// The whole book reads 1.000 and the mean-preservation assertion passes. It
+// passes because the small claims are over-booked by $2,775M and the large ones
+// under-booked by $3,351M and the two nearly cancel. The mean IS being carried
+// by the small claims, exactly as suspected. A claim over $25M terminates at
+// about three-fifths of what it was drawn at, and it closes at age 5.2 — it does
+// not close late, so it never gets the development that would rescue it.
+//
+// ⚠ AND k = 1 FIXES THAT COMPLETELY, WHICH IS THE PART THAT MAKES THIS HARD.
+// Re-solving A at each k (A alone, one exact pass — see below):
+//
+//     k        A solved     all    <$1M    $1M+   >$25M   sd(ln terminal)
+//     0.855989  2.338254   1.000   1.286   0.858   0.617      2.1380   <- shipped
+//     0.880000  1.658415   0.999   1.222   0.889   0.673      2.1859
+//     0.900000  1.242915   0.999   1.169   0.914   0.722      2.2259
+//     0.950000  0.599381   0.998   1.042   0.976   0.853      2.3265
+//     1.000000  0.285646   0.997   0.922   1.035   0.996      2.4275
+//
+// At k = 1 every band lands on its drawn value — over $25M goes 0.617 -> 0.996.
+// The simplest law is also the unbiased one, on that criterion.
+//
+// ⚠ BUT IT BREAKS THE SPREAD ASSERTION AND A CANNOT ABSORB IT. triangle-check
+// asserts sd(ln terminal) within 0.08 of 2.140, and sd(ln(A x)) = sd(ln x), so
+// A is invariant to it BY CONSTRUCTION. The spread is k's alone. k = 0.88 is the
+// largest value that still passes (off by 0.046, 58% of the tolerance, and it
+// only takes the booking spread 3.08x -> 2.56x). k >= 0.90 fails. So the
+// flattening that would be worth having is exactly the flattening the gate
+// forbids, and the gate is not wrong — see the next paragraph.
+//
+// ⚠ WHY: k IS NOT A BOOKING LAW, IT IS VARIANCE MATCHING, AND THAT IS THE REAL
+// FINDING. sd(ln DRAWN) measures 2.1632 on the same sample, so the 2.140 target
+// is the drawn distribution's own log-spread and asserting it is right. The
+// development walk injects its own noise: sd(ln(terminal/drawn)) = 0.82 — a
+// factor of 2.28 either way at ONE standard deviation — and that figure is the
+// SAME at k = 0.856 and at k = 1, so it is the walk's, not the contraction's.
+// The arithmetic closes: sqrt((0.856 x 2.1632)^2 + 0.82^2) = 2.03 against a
+// measured 2.14, and at k = 1, sqrt(2.1632^2 + 0.82^2) = 2.31 against 2.43.
+// k is compressing the true signal to make room for the walk's noise so that
+// the TOTAL lands on the drawn spread. The size-dependent under-booking is the
+// price of that compression.
+//
+// ⚠ SO THE TERMINAL IS NOT THE CLAIM'S ULTIMATE. IT IS A RANDOM MULTIPLE OF IT.
+// At the shipped k the per-claim ratio runs p10 0.449, p50 1.195, p90 3.639; at
+// k = 1 it runs p10 0.179, p50 0.461, p90 1.422. Both gates pass in both
+// configurations because both are AGGREGATE statistics and the per-claim errors
+// offset. Neither configuration tracks an individual claim at all.
+//
+// ⚠ THE ORDER, SINCE IT WAS ASKED: k LEADS AND A FOLLOWS, IN ONE EXACT PASS.
+// They cannot be solved together and do not need to be. The terminal is exactly
+// proportional to A, so A_solved = A / ratio is closed-form given k, and the
+// spread is invariant to A. k changes the shape; A rescales it. Solving them
+// jointly would be solving a triangular system as though it were coupled.
+//
+// WHAT WOULD ACTUALLY FIX IT, in order: reduce the walk's residual dispersion so
+// the terminal converges on the drawn value instead of scattering by a factor of
+// 2.3, THEN set k = 1 and re-solve A. At that point the booking law is flat, the
+// per-band bias is gone and the spread lands without compensation. Moving k
+// first buys 3.08x -> 2.56x, spends most of the spread tolerance, leaves the
+// >$25M band at 0.673 instead of 0.617, and has to move again afterwards.
+// ============================================================================
 export const TRIANGLE_INITIAL_CONTRACTION: Record<string, { k: number; A: number }> = {
   WC: { k: 0.901934, A: 1.506467 },
   GL: { k: 0.855989, A: 2.295852 },
