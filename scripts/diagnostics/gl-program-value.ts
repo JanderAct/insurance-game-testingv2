@@ -8,10 +8,12 @@
 // `gl-law-enforcement-analytics` is committed. Everything the program does not
 // touch therefore cancels exactly, and the difference is the program.
 //
-// ⚠ THE COST IS NOT CHARGED. Nothing in the engine spends a program's money —
-// RISK_CONTROL_PLACEHOLDER_ANNUAL_COST is display only. So the benefit below is
-// GROSS OF COST, and the comparison against $1,000,000 a year is arithmetic
-// done here rather than by the engine. That is stated at every total.
+// ⚠ THE COST IS NOW CHARGED BY THE ENGINE, so every surplus figure below is NET
+// of it. $1M a year for the three build years, then $100k a year to maintain —
+// see riskControlPrograms.ts. The paired surplus delta is therefore the whole
+// answer: benefit, cost, development timing and premium feedback together.
+//
+// The loss figures are still gross of cost, because a loss is not a cost.
 // ============================================================================
 import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
@@ -20,7 +22,9 @@ import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import {
   GL_ANALYTICS_FREQUENCY_REDUCTION, PROGRAM_RAMP, rampFraction, programFreqMultiplier,
 } from '../../src/utils/riskControlPrograms';
-import { RISK_CONTROL_PLACEHOLDER_ANNUAL_COST } from '../../src/data/riskControlCategories';
+import {
+  GL_ANALYTICS_BUILD_ANNUAL_COST, GL_ANALYTICS_BUILD_YEARS, GL_ANALYTICS_MAINTENANCE_ANNUAL_COST,
+} from '../../src/utils/riskControlPrograms';
 import type { CoverageLine, DecisionSet, GameState } from '../../src/types/simulation';
 
 const GAMES = Number(process.env.GAMES ?? 24);
@@ -123,8 +127,8 @@ const dNet = mean(fullYears.map(y => mean(off.byYear[y].net) - mean(on.byYear[y]
 console.log(`  gross loss avoided per year   $${(dGross / M).toFixed(3)}M`);
 console.log(`  NET retained loss avoided     $${(dNet / M).toFixed(3)}M   <- what the pool keeps`);
 console.log(`  the tower absorbs             ${(100 * (1 - dNet / dGross)).toFixed(1)}% of the gross saving`);
-console.log(`  placeholder cost              $${(RISK_CONTROL_PLACEHOLDER_ANNUAL_COST / M).toFixed(3)}M per year`);
-const ratio = dNet / RISK_CONTROL_PLACEHOLDER_ANNUAL_COST;
+console.log(`  placeholder cost              $${(GL_ANALYTICS_BUILD_ANNUAL_COST / M).toFixed(3)}M per year`);
+const ratio = dNet / GL_ANALYTICS_BUILD_ANNUAL_COST;
 console.log(`  NET BENEFIT / COST            ${ratio.toFixed(2)}x`);
 console.log(`  break-even full-ramp cut      `
   + `${(100 * GL_ANALYTICS_FREQUENCY_REDUCTION / Math.max(ratio, 1e-9)).toFixed(2)}%  `
@@ -140,8 +144,8 @@ function fullYearsTotal(a: typeof off, b: typeof on, key: 'gross' | 'net') {
 }
 console.log(`  gross loss avoided over ${YEARS} years   $${(tGross / M).toFixed(3)}M`);
 console.log(`  net loss avoided over ${YEARS} years     $${(tNet / M).toFixed(3)}M`);
-console.log(`  cost over ${YEARS} years at the placeholder  $${(YEARS * RISK_CONTROL_PLACEHOLDER_ANNUAL_COST / M).toFixed(3)}M`);
-console.log(`  net of cost                        $${((tNet - YEARS * RISK_CONTROL_PLACEHOLDER_ANNUAL_COST) / M).toFixed(3)}M`);
+console.log(`  cost over ${YEARS} years at the placeholder  $${(YEARS * GL_ANALYTICS_BUILD_ANNUAL_COST / M).toFixed(3)}M`);
+console.log(`  net of cost                        $${((tNet - YEARS * GL_ANALYTICS_BUILD_ANNUAL_COST) / M).toFixed(3)}M`);
 
 console.log('\n--- 4. LOSS RATIO, RESERVES AND ENDING SURPLUS ---');
 console.log('  yr    loss ratio off/on      reserve off/on        surplus off/on');
@@ -161,3 +165,15 @@ const se = sd(diffs) / Math.sqrt(diffs.length);
 console.log(`  paired mean surplus difference $${(mean(diffs) / M).toFixed(3)}M, SE $${(se / M).toFixed(3)}M, `
   + `t = ${(mean(diffs) / Math.max(se, 1e-9)).toFixed(2)} over ${diffs.length} games`);
 console.log('\nREADING ONLY — no pass condition.');
+
+console.log('\n--- 6. NET OF THE REAL COST SHAPE — the engine charged it, so this is the answer ---');
+const cumCost = (n: number) => Math.min(n, GL_ANALYTICS_BUILD_YEARS) * GL_ANALYTICS_BUILD_ANNUAL_COST
+  + Math.max(0, n - GL_ANALYTICS_BUILD_YEARS) * GL_ANALYTICS_MAINTENANCE_ANNUAL_COST;
+console.log('  yr   cumulative charge   GL ending-surplus delta (NET)   paired t');
+for (let y = 1; y <= YEARS; y++) {
+  const d = off.byYear[y].sur.map((v, i) => (on.byYear[y].sur[i] ?? v) - v);
+  const se = sd(d) / Math.sqrt(Math.max(1, d.length));
+  console.log(`  ${String(y).padStart(2)}   $${(cumCost(y) / M).toFixed(2).padStart(6)}M            `
+    + `$${(mean(d) / M).toFixed(3).padStart(7)}M                    ${(mean(d) / Math.max(se, 1e-9)).toFixed(1)}`);
+}
+console.log('\n  (negative = the program has cost more than it has returned so far)');

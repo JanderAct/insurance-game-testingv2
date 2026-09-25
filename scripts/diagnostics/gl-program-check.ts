@@ -44,6 +44,8 @@ import { processYear } from '../../src/utils/simulationEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import {
   GL_ANALYTICS_FREQUENCY_REDUCTION, programFreqMultiplier, programTenure,
+  GL_ANALYTICS_BUILD_ANNUAL_COST, GL_ANALYTICS_MAINTENANCE_ANNUAL_COST,
+  BENEFIT_DECAY_PER_LAPSED_YEAR, glAnalyticsStanding,
 } from '../../src/utils/riskControlPrograms';
 import type { CoverageLine, DecisionSet, GameState } from '../../src/types/simulation';
 
@@ -67,20 +69,26 @@ function play(g: number, lines: CoverageLine[], ids: (y: number) => string[]) {
     setup: setup as never, instance: inst, currentYearNumber: 1, isStarted: true, isComplete: false,
     poolState, lockedResults: [], currentDecisions: defaultDecisionSet(1), priorHistory,
   };
-  const out: { gross: Record<string, number>; claims: number; market: number }[] = [];
+  const out: { gross: Record<string, number>; claims: number; charge: number; surplus: number; market: number }[] = [];
   for (let y = 1; y <= YEARS; y++) {
     const d: DecisionSet = { ...defaultDecisionSet(y), riskControlProgramIds: ids(y) };
     const p = processYear(gs, d);
     const r = p.result as never as {
       byLine: Record<string, {
-        grossUltimateLoss: number; claimCount?: number;
+        grossUltimateLoss: number; claimCount?: number; riskControlInvestment: number;
+        endingSurplus: number;
         marketMemberLossResults?: { actual: number }[];
       }>;
     };
     const gross: Record<string, number> = {};
     for (const l of lines) gross[l] = r.byLine[l]?.grossUltimateLoss ?? 0;
     const mk = r.byLine.GL?.marketMemberLossResults ?? [];
-    out.push({ gross, claims: r.byLine.GL?.claimCount ?? 0, market: mk.reduce((s, m) => s + (m.actual ?? 0), 0) });
+    out.push({
+      gross, claims: r.byLine.GL?.claimCount ?? 0,
+      charge: r.byLine.GL?.riskControlInvestment ?? 0,
+      surplus: r.byLine.GL?.endingSurplus ?? 0,
+      market: mk.reduce((s, m) => s + (m.actual ?? 0), 0),
+    });
     gs = {
       ...gs, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result],
       currentYearNumber: y + 1, currentDecisions: defaultDecisionSet(y + 1), isComplete: y >= YEARS,
@@ -188,6 +196,76 @@ ok(realised > 0, 'GL claim count did not fall at full ramp');
 ok(realised > GL_ANALYTICS_FREQUENCY_REDUCTION * 0.6 && realised < GL_ANALYTICS_FREQUENCY_REDUCTION * 1.4,
   `realised claim-count cut ${(100 * realised).toFixed(2)}% is not within 0.6x-1.4x of the nominal `
   + `${(100 * GL_ANALYTICS_FREQUENCY_REDUCTION).toFixed(2)}%`);
+
+// --- 6. THE COST SCHEDULE, FROM THE FUNCTION THE ENGINE CALLS ----------------
+console.log('\n--- 6. the cost schedule and the ramp, by tenure ---');
+console.log('   tenure   committed   cost        benefit fraction   label');
+const B = GL_ANALYTICS_BUILD_ANNUAL_COST, MNT = GL_ANALYTICS_MAINTENANCE_ANNUAL_COST;
+const expectCost = [B, B, B, MNT, MNT];
+const expectLevel = [0, 0.5, 1, 1, 1];
+for (let t = 1; t <= 5; t++) {
+  const prior = Array.from({ length: t - 1 }, () => [PROGRAM]);
+  const st = glAnalyticsStanding([PROGRAM], prior);
+  console.log(`      ${t}      ${String(st.committed).padEnd(9)}   $${(st.annualCost / 1e6).toFixed(2)}M       `
+    + `${st.benefitFraction.toFixed(2)}             ${st.maintaining ? 'maintained' : 'build'}`);
+  ok(st.annualCost === expectCost[t - 1], `tenure ${t}: cost $${st.annualCost} != $${expectCost[t - 1]}`);
+  ok(Math.abs(st.benefitFraction - expectLevel[t - 1]) < 1e-12,
+    `tenure ${t}: benefit ${st.benefitFraction} != ${expectLevel[t - 1]}`);
+}
+ok(glAnalyticsStanding([], []).annualCost === 0, 'an uncommitted year was charged');
+// ⚠ THE ONE THE BRIEF NAMES: after the build the charge DROPS to maintenance,
+// it does not stop. A program that fell to zero cost would be a free benefit
+// forever, which is the button this commit exists to remove.
+ok(glAnalyticsStanding([PROGRAM], Array.from({ length: 3 }, () => [PROGRAM])).annualCost === MNT,
+  'year 4 did not fall to the maintenance charge');
+ok(MNT > 0, 'the maintenance charge is zero — declining it would cost nothing');
+console.log(`   after the build the charge falls $${(B / 1e6).toFixed(1)}M -> $${(MNT / 1e3).toFixed(0)}k, not to zero: OK`);
+
+// --- 7. LAPSE DECAYS, IT DOES NOT CLIFF -------------------------------------
+console.log('\n--- 7. declining the maintenance ends the benefit, by halves ---');
+const built = Array.from({ length: 3 }, () => [PROGRAM]);
+let lapsePrior = [...built];
+for (let gap = 1; gap <= 4; gap++) {
+  const st = glAnalyticsStanding([], lapsePrior);
+  // half each year, zeroed once below an eighth — so 0.5 / 0.25 / 0.125 / 0
+  const raw = Math.pow(BENEFIT_DECAY_PER_LAPSED_YEAR, gap);
+  const expected = raw < 0.125 ? 0 : raw;
+  console.log(`   ${gap} year(s) after stopping: benefit ${st.benefitFraction.toFixed(3)}, charged $${st.annualCost}`);
+  ok(Math.abs(st.benefitFraction - expected) < 1e-9,
+    `gap ${gap}: benefit ${st.benefitFraction} != ${expected}`);
+  ok(st.annualCost === 0, `gap ${gap}: a stopped program was still charged`);
+  lapsePrior = [...lapsePrior, []];
+}
+ok(glAnalyticsStanding([], built).benefitFraction < 1,
+  'stopping left the benefit at full strength — the maintenance decides nothing');
+ok(glAnalyticsStanding([], built).benefitFraction > 0,
+  'stopping zeroed the benefit immediately — that is the cliff the ruling rejects');
+
+// --- 8. THE MONEY ACTUALLY LEAVES -------------------------------------------
+console.log('\n--- 8. paired games: the charge reaches the books, and year 1 costs without paying ---');
+let chargeChecked = 0;
+for (let g = 0; g < GAMES; g++) {
+  const off = play(g, ['GL'], never);
+  const on = play(g, ['GL'], always);
+  for (let y = 0; y < YEARS; y++) {
+    chargeChecked++;
+    const expected = y < 3 ? B : MNT;
+    const delta = on[y].charge - off[y].charge;
+    if (Math.abs(delta - expected) > CENT) {
+      fail(`g${g} y${y + 1}: risk-control charge moved by ${delta}, expected ${expected}`);
+    }
+  }
+  // Year 1 buys NOTHING and costs $1M, so surplus must be LOWER by about the
+  // charge. This is the assertion that says the spend is real rather than
+  // recorded: a cost that did not reach cash would leave surplus untouched.
+  const d1 = on[0].surplus - off[0].surplus;
+  if (!(d1 < -0.5 * B)) {
+    fail(`g${g}: year-1 GL surplus moved ${d1.toFixed(0)} — a $${(B / 1e6).toFixed(0)}M charge with no benefit `
+      + 'must reduce surplus, so the spend is not reaching the books');
+  }
+}
+console.log(`   line-years with the charge compared: ${chargeChecked}, all exact`);
+console.log('   year-1 surplus falls by about the charge in every game: OK');
 
 console.log(`\n${'='.repeat(72)}`);
 if (failed.length) {

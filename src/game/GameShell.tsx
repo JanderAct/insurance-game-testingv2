@@ -220,6 +220,10 @@ export default function GameShell({
 
         {activeTab === 'decisions' && gameState && (
           <DecisionsPage
+            /* DERIVED, NOT STORED. Each locked result echoes the decisions it
+               was played with, so the commitment history is already persisted
+               and replays with the game. See riskControlPrograms.ts. */
+            priorProgramIds={gameState.lockedResults.map(r => r.decisions?.riskControlProgramIds)}
             memberLossHistory={gameState.poolState.memberLossHistory ?? {}}
             allMarketMembers={gameState.poolState.allMarketMembers}
             membershipHistory={gameState.poolState.membershipHistory}

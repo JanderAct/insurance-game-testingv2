@@ -292,7 +292,28 @@ export default function App() {
   const commitYear = useCallback((baseGs: GameState, updatedPoolState: GameState['poolState'], result: GameState['lockedResults'][number]) => {
     const nextYearNumber = baseGs.currentYearNumber + 1;
     const isComplete = nextYearNumber > baseGs.setup.gameLength;
-    const nextDecisions = defaultDecisionSet(nextYearNumber);
+    // ⚠ RISK-CONTROL PROGRAMS ARE OPT-OUT: a program that ran this year arrives
+    // NEXT year already committed, and the player unticks it to stop. Every
+    // other decision resets to its default, which is right for a yearly choice
+    // and wrong for a multi-year commitment — nobody re-signs a safety
+    // consultant each January, and a commitment a player can end by forgetting
+    // is not a commitment.
+    //
+    // ⚠ CARRIED FROM `result.decisions`, THE ENGINE'S OWN ECHO OF WHAT WAS
+    // PLAYED, not from `currentDecisions`. This function is handed the state it
+    // committed; reading the live editing buffer instead would carry forward
+    // whatever the player had half-typed when the year locked. The echo is what
+    // the engine actually charged and benefited, so the carry-forward and the
+    // derived tenure read the same source.
+    //
+    // ⚠ THIS IS THE ONLY PLACE THE OPT-OUT LIVES. The engine has no notion of
+    // continuing — it reads the list it is given. That keeps the default a UI
+    // policy rather than a rule buried in the loss draw, and it is why the
+    // pre-game (which runs on defaultDecisionSet) commits nothing.
+    const nextDecisions: DecisionSet = {
+      ...defaultDecisionSet(nextYearNumber),
+      riskControlProgramIds: [...(result.decisions?.riskControlProgramIds ?? [])],
+    };
 
     const newGs: GameState = {
       ...baseGs,

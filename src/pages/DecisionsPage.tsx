@@ -42,6 +42,10 @@ interface DecisionsPageProps {
   lineView: LineView;
   /** The lines the pool writes — gates the risk-control tiles. */
   activeLines: readonly CoverageLine[];
+  /** Committed risk-control programs of every PLAYED year, oldest first.
+   *  DERIVED by the shell from lockedResults — see riskControlPrograms.ts on
+   *  why no counter is stored. */
+  priorProgramIds?: readonly (readonly string[] | undefined)[];
   lineLoanInfo: Record<CoverageLine, LineLoanInfo>;
   // Last computed result for the line being edited — informational only
   // (excessCapitalRatio / capitalAdequacyStatus for the consequence panel).
@@ -101,12 +105,12 @@ function resetLineToDefaults(decisions: DecisionSet, line: CoverageLine): Decisi
   };
 }
 
-export default function DecisionsPage({ decisions, onChange, yearNumber, estimatedExpectedLoss, estimatedAggregateTermsRetained, disabled = false, lineView, lineLoanInfo, lastLineResult, fundingConsequence, activeLines, activeMembers, memberLossHistory, allMarketMembers, membershipHistory }: DecisionsPageProps) {
+export default function DecisionsPage({ decisions, onChange, yearNumber, estimatedExpectedLoss, estimatedAggregateTermsRetained, disabled = false, lineView, lineLoanInfo, lastLineResult, fundingConsequence, activeLines, priorProgramIds, activeMembers, memberLossHistory, allMarketMembers, membershipHistory }: DecisionsPageProps) {
   // Pool tab: the two pool-wide decisions. One allocation policy and one
   // risk-control intensity for the whole pool — each line applies them to its
   // OWN base (own segregated portfolio / own premium).
   if (lineView === 'pool') {
-    return <PoolDecisionsView decisions={decisions} onChange={onChange} yearNumber={yearNumber} disabled={disabled} activeLines={activeLines} />;
+    return <PoolDecisionsView decisions={decisions} onChange={onChange} yearNumber={yearNumber} disabled={disabled} activeLines={activeLines} priorProgramIds={priorProgramIds} />;
   }
 
   // Stage 2.7: every active line's remaining decisions are edited on its own
@@ -269,13 +273,20 @@ export default function DecisionsPage({ decisions, onChange, yearNumber, estimat
 // Pool tab: the two pool-wide decisions. Portfolios remain segregated per
 // line (Stage 2.9) — every line applies this one allocation policy to its own
 // invested assets, and the one risk-control intensity to its own premium.
-function PoolDecisionsView({ decisions, onChange, yearNumber, disabled, activeLines }: {
+function PoolDecisionsView({ decisions, onChange, yearNumber, disabled, activeLines, priorProgramIds }: {
   decisions: DecisionSet;
   onChange: (d: DecisionSet) => void;
   yearNumber: number;
   disabled: boolean;
   activeLines: readonly CoverageLine[];
+  priorProgramIds?: readonly (readonly string[] | undefined)[];
 }) {
+  // ⚠ RESET DOES NOT CANCEL A PROGRAM, AND THAT IS DELIBERATE. This button
+  // returns the year's POLICIES to their defaults. A risk-control program is a
+  // three-year commitment, not a policy for the year, and dropping it silently
+  // through a control labelled "reset" would end a commitment by accident —
+  // the exact failure the opt-out default exists to prevent. Stopping is the
+  // tile, which says what it is doing.
   const resetPool = () => onChange({
     ...decisions,
     assetAllocation: { ...ASSET_ALLOCATION_DEFAULT },
@@ -343,7 +354,13 @@ function PoolDecisionsView({ decisions, onChange, yearNumber, disabled, activeLi
             pick-one reading the default. See the component for the three things
             that keep them apart. */}
         <SectionCard title="Loss Prevention" icon={<TrendingUp size={16} />}>
-          <RiskControlCategoryBoxes activeLines={activeLines} />
+          <RiskControlCategoryBoxes
+            activeLines={activeLines}
+            programIds={decisions.riskControlProgramIds ?? []}
+            priorProgramIds={priorProgramIds ?? []}
+            onProgramsChange={ids => onChange({ ...decisions, riskControlProgramIds: ids })}
+            disabled={disabled}
+          />
         </SectionCard>
       </div>
     </div>

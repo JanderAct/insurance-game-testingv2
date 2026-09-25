@@ -42,7 +42,7 @@ import { experienceRatePer100, type ExperienceBasis } from './experienceRating';
 import { projectPricingTriangle, windowRows } from './pricingTriangle';
 import { developmentDrift, initialEstimate } from './claimTriangle';
 import { poolYearFactor, wcGenerationInputs, glGenerationInputs, propertyGenerationInputs } from './claimGeneration';
-import { programFreqMultiplier } from './riskControlPrograms';
+import { programFreqMultiplier, programAnnualCost } from './riskControlPrograms';
 import {
   aggregateRecovery,
   cedeOccurrences,
@@ -512,6 +512,11 @@ interface LineYearContext {
   // riskControlPrograms.ts. The marketplace draw takes `shock` and must not take
   // this.
   programFreqMultiplier: number;
+  // Dollars this line is charged for committed risk-control programs this year.
+  // Derived in processYear from the SAME decision history as the multiplier
+  // above, so the benefit and the charge cannot disagree about whether a
+  // program is running or which year of its commitment it is in.
+  programAnnualCost: number;
   cash: number;
   investments: number;
   assetAllocation: AssetAllocation;
@@ -1163,7 +1168,16 @@ export function processLineYear(
   // Legacy names remain populated for compatibility with older screens and exports.
   const grossPremium = totalMemberCharge;
   const operatingExpense = adminExpense;
-  const riskControlInvestment = poolPremium * lineDecisions.riskControlPct;
+  // ⚠ THE PROGRAM'S COST JOINS THE EXISTING RISK-CONTROL EXPENSE LINE RATHER
+  // THAN OPENING A NEW ONE. riskControlInvestment already flows into BOTH
+  // underwritingIncome and newCash, and is already reported, exported and
+  // aggregated to pool level. A program IS risk-control spend, so a separate
+  // line would be a second name for one thing — and the one that did not reach
+  // cash would be the bug nobody saw.
+  //
+  // ⚠ PER LINE, AND THE PROGRAM IS SCOPED GL, so programAnnualCost is 0 on WC
+  // and Property. The charge lands on the book that gets the benefit.
+  const riskControlInvestment = poolPremium * lineDecisions.riskControlPct + ctx.programAnnualCost;
 
   // --- Loss Simulation ---
   // WC and GL generate individual claims (design doc Parts A and B); Property
@@ -2605,6 +2619,7 @@ export function processYear(
       shock: shocks?.byLine[line],
       shockFirings: shocks?.firings.filter(f => f.linesAffected.includes(line)),
       programFreqMultiplier: programFreqMultiplier(line, decisions.riskControlProgramIds, priorProgramIds),
+      programAnnualCost: programAnnualCost(line, decisions.riskControlProgramIds, priorProgramIds),
       cash: poolState.cash * share,
       investments: lineState.investedAssets,
       assetAllocation: lineDecisions.assetAllocation,
