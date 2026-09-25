@@ -1609,9 +1609,45 @@ export const STARTING_CAPITAL_TO_PREMIUM: Record<string, number> = {
   // base and the gate's base disagreed by about 0.018 in K. Here the gate reads
   // the shipped value inside its own tolerance on its own seeds, so there is
   // nothing to pool away — see the run recorded in the commit.
+  //
+  // ==========================================================================
+  // ⚠ RE-SOLVED A SIXTH TIME, ON PROPERTY ALONE, AND THIS IS NEITHER A DRIFT NOR
+  // A BAND MOVE — IT IS THE ENGINE UNDERNEATH THE PIN CHANGING SHAPE.
+  //
+  //   Property  0.5452 -> 0.6542  (+20.0%)    WC and GL untouched
+  //
+  // Property's frequency/severity redistribution fix (locations wired into the
+  // generator: frequency up 8-30x, severity down by the same factor, holding
+  // expected loss — see attritionalLocationCount in propertyClaimEngine.ts)
+  // dropped Property's annual aggregate CV from 0.427 to ~0.18. opening-
+  // centring-check caught it: -37% of band width, -16.7 SE, where it had read
+  // -9% (-1.9 SE) immediately before that commit. Confirmed by stashing —
+  // this is a regression the fix introduced, not a pre-existing drift.
+  //
+  // WHY THE PIN MOVES WHEN THE VARIANCE DOES, ON A PREMIUM-BASIS BAND. The pin
+  // adds a FIXED multiple of premium to starting capital; the pre-game then
+  // runs ten years of claims on top of it, so the median ending surplus/premium
+  // ratio the pin lands on is [pin, scaled to a Year-(-2) basis] plus ten years
+  // of accumulated underwriting and investment result. A lower-variance loss
+  // draw is a TIGHTER distribution of that accumulated result around its mean,
+  // not a different mean (option B holds expected loss fixed by construction)
+  // — so the shift is not "the book got richer or poorer," it is the same
+  // median-of-many-draws landing at a different point once the draws
+  // themselves are reshaped, exactly as GL and Property moved in opposite
+  // directions from one membership change above. Solved through the same
+  // premium-basis openingBandRatio the shipped pin already used — Property's
+  // band was on premium before this fix and stays on premium after it, so
+  // this is NOT WC's reserve-anchored operation with the lines swapped; it is
+  // the same operation, on the same basis, against a different draw.
+  //
+  // Solved by scripts/diagnostics/opening-pin-solve.ts, LINES=Property —
+  // bisection, 600 seeds per evaluation, through the gate's own estimator on
+  // seeds the gate never sees. Two passes: 0.5452 -> 0.7633 (offset +0.1966)
+  // -> 0.6542 (offset -0.0196, inside the 0.06-band-width tolerance). WC and
+  // GL are NOT re-solved — nothing about their own generators moved.
   WC: 0.4718,
   GL: 0.2027,
-  Property: 0.5452,
+  Property: 0.6542,
 };
 
 // Pre-game acceptance band: the line's Year-1 opening surplus must land within
