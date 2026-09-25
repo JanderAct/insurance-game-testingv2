@@ -46,7 +46,8 @@
 //              highSafety 5.8757, against a 3.7391 blend.  SPREAD 4.45x,
 //              and the CV WITHIN each rating group is EXACTLY 0.0%.
 //   GL         every one of the nine member types reads 5.6319.  SPREAD 1.00x.
-//   Property   every one of the nine member types reads 0.0962.  SPREAD 1.00x.
+//   Property   every one of the nine member types reads 0.1915 (was 0.0962,
+//              before Property's real-data recalibration).  SPREAD 1.00x.
 //
 // So WC's four rates fully describe its class structure — nothing is left
 // inside a group — while GL and Property have no class structure to describe.

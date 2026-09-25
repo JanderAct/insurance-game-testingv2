@@ -10,9 +10,12 @@
 // while both factors were wrong.
 //
 // WHAT IS ASSERTED (hard, fails the run):
-//   1. The capped mixture's mean reproduces the fit's $435,254.
-//   2. Held pure premium = frequency x mean severity x trend + the asserted cat
-//      load, i.e. 0.0962 + 0.0247 = 0.1209, reconciled from the parameters.
+//   1. The capped mixture's mean reproduces the re-calibrated fit's $681,582
+//      (was $435,254 before the real-data recalibration — see
+//      PROPERTY_LOSS_MODEL.severityMixture's own comment).
+//   2. Held pure premium = frequency x mean severity, i.e. 0.1915 (was 0.0962),
+//      reconciled from the parameters. The retired 0.0247 cat load is tracked
+//      separately and still not summed in.
 //   3. The draw reproduces the analytic expectation (invariant 1).
 //   4. Severity never exceeds the cap, and the cap binds rarely.
 //   5. Expected loss is exactly proportional to TIV — the identity that
@@ -59,12 +62,12 @@ const fullTiv = roster.reduce((s, m) => s + (m.exposureByLine.Property ?? 0), 0)
 console.log('=== PROPERTY FITTED GENERATOR ===\n');
 
 console.log('--- 1. THE SEVERITY MIXTURE ---');
-check(Math.abs(PROPERTY_MEAN_SEVERITY - 435_254) < 500,
-  'capped mixture mean reproduces the fit', `$${PROPERTY_MEAN_SEVERITY.toFixed(0)} vs $435,254`);
+check(Math.abs(PROPERTY_MEAN_SEVERITY - 681_582) < 500,
+  'capped mixture mean reproduces the re-calibrated fit', `$${PROPERTY_MEAN_SEVERITY.toFixed(0)} vs $681,582`);
 {
   const m1 = propertySeverityMoment(1), m2 = propertySeverityMoment(2);
   const cv = Math.sqrt(m2 - m1 * m1) / m1;
-  check(Math.abs(cv - 4.78) < 0.02, 'capped severity CV is 4.78', cv.toFixed(3));
+  check(Math.abs(cv - 4.385) < 0.02, 'capped severity CV is 4.385', cv.toFixed(3));
   const w = M.severityMixture.reduce((a, c) => a + c.weight, 0);
   check(Math.abs(w - 1) < 1e-9, 'mixture weights sum to 1', w.toFixed(6));
 }
@@ -101,7 +104,7 @@ console.log('\n--- 2. THE HELD PURE PREMIUM RECONCILES FROM ITS PARTS ---');
 {
   const derived = deriveNeutralPropertyPurePremiumPer100(roster);
   check(Math.abs(derived - PROPERTY_PURE_PREMIUM_SPLIT.nonCatDerived) < 0.0005,
-    'generator analytic == the derived non-cat figure (0.0962)', derived.toFixed(4));
+    'generator analytic == the derived non-cat figure (0.1915)', derived.toFixed(4));
   // THE INVARIANT THAT REPLACED THE OLD SPLIT: price and draw are now the same
   // number, so there is nothing in the premium the generator does not produce.
   check(Math.abs(derived - PROPERTY_HELD_PURE_PREMIUM_PER_100) < 0.0005,
