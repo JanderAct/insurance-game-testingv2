@@ -297,9 +297,35 @@ export function currentPurePremiumPer100(
   // actually wants — a pool that prices off its own developing experience
   // rather than off a constant.
   //
-  // ⚠ WHAT STANDS IN FOR THE PROTECTION IS MEASUREMENT 3 AT PRICING_TRIANGLE,
-  // AND IT IS NOT MEASURED YET. That is why the flag is off. Do not turn it on
-  // until experience-pricing-check's loop-stability arm exists and passes.
+  // ⚠ WHAT STANDS IN FOR THE PROTECTION IS MEASUREMENT 3 AT PRICING_TRIANGLE.
+  // THE FLAG IS ON — PRICING_TRIANGLE.enabled = true at defaultAssumptions.ts —
+  // and this paragraph used to say it was off and must stay off until
+  // experience-pricing-check's loop-stability arm existed. BOTH HALVES WERE
+  // STALE: the arm is arm 3 of that gate, it was built, and it passes; the flag
+  // was turned on. The prose simply never followed. gates.ts's tier comment said
+  // the same thing and is corrected with it.
+  //
+  // ⚠ ARM 3 MEASURES LOOP GAIN, NOT DRIFT, AND THE DIFFERENCE IS WORTH KNOWING
+  // BEFORE READING ITS PASS AS A GENERAL ONE. It is a perturbation experiment —
+  // twin games, one shocked — asserting A x B < 1, and it declines the ambient
+  // measurement on purpose: "watching an already-stable system settle proves
+  // nothing". Twin-differencing cancels anything common to both twins, so an
+  // exogenous ramp in the pricing basis would be invisible to it by
+  // construction, and loop gain below 1 does not by itself exclude one.
+  //
+  // THERE IS NO SUCH RAMP. experience-pricing-drift-check measures it directly —
+  // Property is the clean instrument, its held path being a constant with no
+  // trend and no wage divisor — and reads -0.03% +/- 1.96% over 24 games on a
+  // roster that moves 0.000%. It is GREEN and it is a guard, not an open item.
+  //
+  // ⚠ THE OBVIOUS STORY FOR A RAMP WAS MEASURED AND IS FALSE, recorded here so
+  // nobody re-derives it: that this path prices off the pool's own BOOKED
+  // triangle, FORWARD_BOOKING contracts every occurrence before the triangle
+  // sees it, and so each year another under-booked cohort ramps the rate down.
+  // Steepening Property's contraction moves the charged rate's LEVEL hard — k
+  // 0.9245 -> 0.80 more than halves it — and moves its TREND not at all, which
+  // is what a ROLLING window of fixed length must do once it has filled. The
+  // contraction is a level effect on the price, not a ramp.
   //
   // ⚠ THE EXPERIENCE RATE IS RETAINED AND THIS FUNCTION RETURNS GROSS, SO IT IS
   // GROSSED UP HERE — see grossUpRetainedPurePremium's header for the whole

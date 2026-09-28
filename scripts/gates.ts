@@ -81,6 +81,12 @@ const FAST: string[] = [
   'development-cession-check',       //  14s
   'ending-position-check',           //   6s
   'enrolment-independence-check',    //   2s
+  'experience-pricing-drift-check',   //  45s   the charged rate must not move on a still book. GREEN — it was
+                                     //         commissioned as a red on a single-seed -18.1% that does not
+                                     //         replicate (-0.03% +/- 1.96% over 24 games). Kept as a guard:
+                                     //         arm 3 of experience-pricing-check measures LOOP GAIN and
+                                     //         twin-differencing cancels an ambient ramp by construction, so
+                                     //         nothing else pins this. Positive control in its header.
   'export-number-format-check',      //  12s
   'funding-basis-check',             //  10s
   'funding-expected-check',          //   2s
@@ -202,8 +208,12 @@ const SLOW: string[] = [
   // cohort law's constants and the per-claim law does not read them), so what
   // defers is the detection of a NEW failure inside a file already known red.
   'ibner-null-check',                //  230s
-  // 162s — PRICING_TRIANGLE's retirement condition. Green, and it guards a flag
-  // that is off; the deferral costs least of the nine.
+  // 162s — PRICING_TRIANGLE's retirement condition, all three arms green. ⚠ THIS
+  // ENTRY USED TO READ "it guards a flag that is off". THE FLAG IS ON. What the
+  // deferral now costs is a live pricing path, not a dormant one — and arm 3's
+  // stability measurement is a LOOP-GAIN measurement, blind to drift by
+  // construction. The drift is experience-pricing-drift-check, in FAST at 45s,
+  // which is where the cheap half of this subject now lives.
   'experience-pricing-check',        //  162s
   // 149s — 200 seeds, and the sample size IS the claim. Marketplace generation
   // is upstream of every roster, so this is a wide subject cheaply deferred

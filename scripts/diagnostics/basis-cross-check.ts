@@ -244,20 +244,32 @@ for (const line of LINES) {
     : Array.isArray(r.memberLossResults)
       ? r.memberLossResults.reduce((a: number, m: { exposure?: number }) => a + (m.exposure ?? 0), 0) : null;
   family('PURE PREMIUM per $100 of exposure', '', [
-    { basis: 'purePremiumPer100 (held)', value: r.purePremiumPer100 ?? null },
+    { basis: 'purePremiumPer100 (PRICED)', value: r.purePremiumPer100 ?? null,
+      note: 'the rate the pool CHARGES — experience path when PRICING_TRIANGLE is on, held only as fallback' },
     { basis: 'purePremium (compat alias)', value: r.purePremium ?? null },
+    { basis: 'expectedLoss / exposure x100', value: exposure && r.expectedLoss
+      ? 100 * r.expectedLoss / (exposure * 1e6) : null,
+    note: 'REPRODUCES THE ROW ABOVE TO THE DIGIT — the identity, and the control for this family' },
     { basis: 'grossUltimate / exposure x100', value: exposure && r.grossUltimateLoss
       ? 100 * r.grossUltimateLoss / (exposure * 1e6) : null, note: 'DRAWN, one year — heavy tail' },
-    { basis: 'held x kLineApplied', value: r.purePremiumPer100 !== undefined && r.kLineApplied !== undefined
+    { basis: 'priced x kLineApplied', value: r.purePremiumPer100 !== undefined && r.kLineApplied !== undefined
       ? r.purePremiumPer100 * r.kLineApplied : null,
-    note: 'the held rate AS APPLIED — k_line is the roster-mix correction' },
-    { basis: 'expectedLoss / exposure x100', value: exposure && Array.isArray(r.memberLossResults)
+    note: '⚠ NO REFERENT. Kept labelled wrong — see the note. Nothing in the engine computes this' },
+    { basis: 'generator expectation / exposure x100', value: exposure && Array.isArray(r.memberLossResults)
       ? 100 * r.memberLossResults.reduce((a: number, m: { expectedLoss?: number }) => a + (m.expectedLoss ?? 0), 0) / (exposure * 1e6)
-      : null, note: 'the generator\'s own expectation, same members' },
-  ], 'the held rate is an EXPECTATION; the drawn figure is one year of a Pareto tail. They are not '
-   + 'expected to agree in a single year and the gap is not evidence of anything on its own. '
-   + 'The HELD rate is frozen at calibration and k_line is the per-year roster-mix correction, so '
-   + '`held x k` is the comparable figure and `held` alone is not.');
+      : null, note: 'what the CLAIM GENERATOR expects, same members — a different quantity from the price' },
+  ], '⚠ TWO LABELS HERE WERE WRONG AND THE CORRECTION IS THE POINT OF THE ROW ORDER. '
+   + '`purePremiumPer100` was labelled "(held)". It is not the held rate: PRICING_TRIANGLE is ON, so '
+   + 'the held constant is the FALLBACK and what this field carries is the rate derived from the pool\'s '
+   + 'own booked triangle. And `held x kLineApplied` was offered as "the comparable figure". IT HAS NO '
+   + 'REFERENT — `priced x exposure / 100` reproduces `expectedLoss` EXACTLY, so the rate as reported is '
+   + 'already the pricing expectation and multiplying by k double-counts a correction the engine never '
+   + 'applies. The row is KEPT and labelled wrong, beside the identity that disproves it, because it is '
+   + 'the construction the author of this file wrote first and then published a 14% "gap" from. '
+   + 'The generator row is a genuinely different quantity — what the CLAIM GENERATOR expects against what '
+   + 'the pool CHARGES — and IS expected to differ. Nothing here says which is right, and a single year '
+   + 'of a heavy tail cannot: experience-pricing-check arm 1 is where that comparison is graded, over a '
+   + 'sample, against realised cost rather than against the other expectation.');
 
   // ---------------------------------------------------------------- surplus tie-out
   family('SURPLUS', '$M', [
