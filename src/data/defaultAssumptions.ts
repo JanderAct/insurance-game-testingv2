@@ -601,14 +601,21 @@ export const GL_HEAVY_COMPONENT_INDEX = 0;
 // an artifact of extrapolating a lognormal tail far past the claims it was
 // fitted to. The pool has seen nothing near $100M.
 //
-// WHAT THE CAP COSTS AND BUYS (derived, and asserted in gl-claim-check.ts):
-//   ground-up loss cost   5.886 -> 5.632 per $100   (-4.33%)
-//   mean claim            $74,714 -> $71,480
-//   severity CV           29.55 -> 13.68
-//   above-$25M share      12.0% -> 8.0% of loss
-//   binds                 1 per ~137 years at the enrolled book
-// The POINT IS THE VARIANCE, not the mean: it removes 4.3% of expected loss
-// and MORE THAN HALF the annual CV.
+// WHAT THE CAP COSTS AND BUYS AT $84M (derived, and asserted in gl-claim-
+// check.ts — re-measured here after the $100M-to-$84M re-pin, not restated):
+//   ground-up loss cost   5.886 -> 5.593 per $100   (-4.99%)
+//   mean claim            $74,714 -> $70,987.62
+//   severity CV           29.55 -> 13.11
+//   above-$25M share      12.0% -> 7.3% of loss
+//   binds                 1 per 27 years full-market, 1 per 103 years at the
+//                         enrolled book, 0.3557 per 10,000 claims
+// The POINT IS THE VARIANCE, not the mean: it removes 5.0% of expected loss
+// and MORE THAN HALF the annual CV. The bind rate is the acceptance test —
+// not more than once in a long run — and 103 years clears it the same way
+// $100M's 137 did; a five-year game has roughly a 4.8% chance of ever seeing
+// one bind. Property's own binding cap looks like a claim landing at exactly
+// $75,000,000.00; GL's looks the same way, 11 of 310,431 sampled claims
+// sitting exactly at $84,000,000.00.
 //
 // ⚠ THE ANCHOR IS UNTOUCHED, AND THAT IS CHECKED. GL's frequency was derived
 // from the 0-$1M loss cost of 2.83 per $100, and E[min(X,$1M)] cannot see a
@@ -622,17 +629,57 @@ export const GL_HEAVY_COMPONENT_INDEX = 0;
 // -year claim at $71.2M and the absence of a cap recorded as an open item at
 // WC_SEVERITY_COMPONENTS.large. This was the FIRST severity cap in the live
 // model and for a while left WC and GL on different footings; WC is bounded
-// too now, and both ceilings trend.
+// too now and its own ceiling still trends (wcSeverityCap) — GL's stopped
+// (below), so the two are no longer on the same footing again, and that is
+// this file's decision, not an oversight.
 //
 // WHAT WOULD DISPLACE IT: a public-entity liability claim distribution with
 // observed maxima, or a verdict study establishing a realistic ceiling. A
 // different number is a one-line change here — every consumer routes through
 // expectedClaimSeverity (analytic) and the single draw site in glClaimEngine.
-// ⚠ THIS IS THE YEAR-1 CEILING, NOT A FIXED ONE — glSeverityCap(year) trends it
-// at GL's own severity trend. GL is the largest case of the erosion that change
-// fixes: at 5.7026%/yr a stationary $100M was worth $60.7M in year-1 terms by
-// year 10, a 39% real-terms tightening. By year 10 the live ceiling is $164.7M.
-export const GL_SEVERITY_CAP = 100_000_000;
+//
+// ⚠ $84M, FLAT — REVERSED FROM A TRENDING $100M, DELIBERATELY, AND THE PRIOR
+// REASONING STILL HOLDS. This was $100M trending at GL's own severity trend
+// (5.7026%/yr) specifically because a stationary ceiling was worth $60.7M in
+// year-1 terms by year 10 (a 39% real-terms tightening) and broke the
+// severity-scale invariance glClfGrid's interpolation axis depends on — see
+// glClaimEngine.ts's expectedClaimSeverity for that argument in full. Neither
+// cost is refuted here. It is reversed because a claims export showed a
+// $124,836,814.95 claim in accident year 5, under a ceiling that had already
+// grown from $100M to $127.6M by then — a worst case that grows every year is
+// one nobody can state, which is a real requirement the trending version
+// could not meet no matter how well-justified its trend was.
+//
+// $84M IS NOT $100M RE-DERIVED; IT IS SIZED TO THE TOWER. GL retains $1M and
+// the tower tops at $25M (the real programme's own figure), so the pool nets
+// gross-minus-$24M above $25M. At $84M gross the pool retains exactly $60M —
+// the largest GL claim the real book has seen. The tower is unchanged; this
+// is the cap alone.
+//
+// THE SHAPE-DRIFT COST, MEASURED RATHER THAN LEFT IMPLICIT (gl-claim-check.ts
+// section 2c has the full table): the capped year factor falls below the raw
+// severity trend again — a 0.24% gap by year 2, 2.52% by year 10, 6.50% by
+// year 20 (was exactly 0 under the trending cap). k_GL's trend-invariance
+// tolerance is loosened back from 1e-12 to 1e-4 for the same reason it was
+// loosened the first time this cap was fixed. The capped per-claim CV, no
+// longer asserted invariant, drifts -11.97% by year 10 and -24.20% by year 20
+// (REPORTED, not gated — same treatment it had before the trending fix).
+// glClfGrid's own interpolation AXIS (claim count, not CV) is unaffected by
+// any of this, per its header; what is not fully insulated is the grid's
+// STORED RATIOS, measured once by single-year draws on a premise that no
+// longer holds exactly. Whether that gap matters over a played game (not the
+// 20-year table above) is a pure-premium/CLF-table question, reported
+// separately rather than re-derived here.
+//
+// THE WORST POSSIBLE GL CLAIM IS NOW A STATABLE NUMBER: $84,000,000 gross, the
+// pool retains $60,000,000 on it. Measured against 50 ten-year games (default
+// three-line configuration): typical ending surplus median $94.28M, mean
+// $96.62M, p10 $59.09M. A single worst-case GL claim's retained cost is 63.6%
+// of a typical game's ENTIRE ending surplus, and would exceed it outright in
+// the worst-performing tenth of games (p10 $59.09M < $60M). This is not a
+// number the trending cap could ever have produced — the equivalent year-10
+// figure under $100M-trending was a moving target by construction.
+export const GL_SEVERITY_CAP = 84_000_000;
 
 export const GL_LOSS_MODEL = {
   // --- frequency -------------------------------------------------------------

@@ -94,7 +94,7 @@ let ANALYTIC_GROUND_MEAN = 0, ANALYTIC_1M_LIMITED_MEAN = 0;
   // expectedClaimSeverity, so this is a genuine independent cross-check.
   //
   // ⚠ "GROUND-UP" HERE MEANS CAPPED AT GL_SEVERITY_CAP, NOT UNCAPPED. Every GL
-  // claim is clamped to $100M at the draw, so the uncapped mixture mean
+  // claim is clamped to $84M at the draw, so the uncapped mixture mean
   // ($74,714) is no longer a quantity the model contains anywhere and must not
   // be a target. The UNCAPPED mean is still computed below, but only to measure
   // what the cap removes.
@@ -105,11 +105,11 @@ let ANALYTIC_GROUND_MEAN = 0, ANALYTIC_1M_LIMITED_MEAN = 0;
     ANALYTIC_1M_LIMITED_MEAN += c.weight * limitedExpectedValue(c.mu, c.sigma, 1_000_000);
   }
   console.log(`  uncapped mixture mean (NOT a model quantity, shown to size the cap): replica $${UNCAPPED_MEAN.toFixed(2)} vs $74,714  ${note(Math.abs(UNCAPPED_MEAN - 74_714) < 1, `uncapped mean $${UNCAPPED_MEAN.toFixed(2)} vs $74,714`)}`);
-  console.log(`  CAPPED mean at $${(GL_SEVERITY_CAP / 1e6).toFixed(0)}M: replica $${ANALYTIC_GROUND_MEAN.toFixed(2)} vs target $71,480  ${note(Math.abs(ANALYTIC_GROUND_MEAN - 71_480) < 1, `capped mean $${ANALYTIC_GROUND_MEAN.toFixed(2)} vs $71,480`)}`);
-  console.log(`    the cap removes ${((1 - ANALYTIC_GROUND_MEAN / UNCAPPED_MEAN) * 100).toFixed(2)}% of expected loss (target -4.33%)  ${note(Math.abs((1 - ANALYTIC_GROUND_MEAN / UNCAPPED_MEAN) - 0.0433) < 0.0005, 'the cap does not remove 4.33% of expected loss')}`);
+  console.log(`  CAPPED mean at $${(GL_SEVERITY_CAP / 1e6).toFixed(0)}M: replica $${ANALYTIC_GROUND_MEAN.toFixed(2)} vs target $70,987.62  ${note(Math.abs(ANALYTIC_GROUND_MEAN - 70_987.62) < 1, `capped mean $${ANALYTIC_GROUND_MEAN.toFixed(2)} vs $70,987.62`)}`);
+  console.log(`    the cap removes ${((1 - ANALYTIC_GROUND_MEAN / UNCAPPED_MEAN) * 100).toFixed(2)}% of expected loss (target -4.99%)  ${note(Math.abs((1 - ANALYTIC_GROUND_MEAN / UNCAPPED_MEAN) - 0.0499) < 0.0005, 'the cap does not remove 4.99% of expected loss')}`);
 
-  // ⚠ THE ANCHOR SURVIVES THE CAP, AND THIS IS THE PROOF. min(min(X,100M),1M)
-  // === min(X,1M) identically, so a $100M ceiling CANNOT move the $1M-limited
+  // ⚠ THE ANCHOR SURVIVES THE CAP, AND THIS IS THE PROOF. min(min(X,84M),1M)
+  // === min(X,1M) identically, so an $84M ceiling CANNOT move the $1M-limited
   // mean — and the $1M-limited mean is the only severity quantity GL's
   // frequency was derived from. If this line ever moves, the cap has leaked into
   // the priced layer and ratePer1M is no longer the number 2.83 implies.
@@ -129,7 +129,7 @@ let ANALYTIC_GROUND_MEAN = 0, ANALYTIC_1M_LIMITED_MEAN = 0;
   }
   const cvCapped = Math.sqrt(capSecond - ANALYTIC_GROUND_MEAN ** 2) / ANALYTIC_GROUND_MEAN;
   const cvUncapped = Math.sqrt(unSecond - UNCAPPED_MEAN ** 2) / UNCAPPED_MEAN;
-  console.log(`  severity CV: uncapped ${cvUncapped.toFixed(2)} (target 29.55) -> capped ${cvCapped.toFixed(2)} (target 13.68)  ${note(Math.abs(cvUncapped - 29.55) < 0.05 && Math.abs(cvCapped - 13.68) < 0.05, `severity CV ${cvUncapped.toFixed(2)} -> ${cvCapped.toFixed(2)} vs targets 29.55 -> 13.68`)}`);
+  console.log(`  severity CV: uncapped ${cvUncapped.toFixed(2)} (target 29.55) -> capped ${cvCapped.toFixed(2)} (target 13.11)  ${note(Math.abs(cvUncapped - 29.55) < 0.05 && Math.abs(cvCapped - 13.11) < 0.05, `severity CV ${cvUncapped.toFixed(2)} -> ${cvCapped.toFixed(2)} vs targets 29.55 -> 13.11`)}`);
 
   // Validate the replica against the real exported expectedClaimSeverity
   // (untilted weights — the pricing basis) before trusting anything downstream.
@@ -176,7 +176,7 @@ console.log('\n--- 2. the frequency anchor: DERIVED, and checked BY SIMULATION n
   // Ground-up loss cost stays an ANALYTIC assertion: its drawn counterpart has a
   // ~3% CI at 4,000 years (CV 29.55), so nothing tight is assertable there.
   const groundUpLossCost = M.ratePer1M * ANALYTIC_GROUND_MEAN / 10_000;
-  console.log(`  [ANALYTIC] CAPPED ground-up loss cost: ${groundUpLossCost.toFixed(4)} vs 5.6319 (was 5.8864 uncapped, -4.33%)  ${note(Math.abs(groundUpLossCost - 5.6319) < 0.001, `capped ground-up loss cost ${groundUpLossCost.toFixed(4)} vs 5.6319`)}`);
+  console.log(`  [ANALYTIC] CAPPED ground-up loss cost: ${groundUpLossCost.toFixed(4)} vs 5.5931 (was 5.8864 uncapped, -4.99%)  ${note(Math.abs(groundUpLossCost - 5.5931) < 0.001, `capped ground-up loss cost ${groundUpLossCost.toFixed(4)} vs 5.5931`)}`);
 }
 
 console.log('\n--- 2b. k_GL NEUTRALISES BOTH RQ CHANNELS (the held-pure-premium identity) ---');
@@ -258,45 +258,47 @@ console.log('\n--- 2c. THE TREND PAIR: severity and payroll growth, and the four
     worstFactor = Math.max(worstFactor, Math.abs(measured / glCappedSeverityTrend(y) - 1));
   }
   console.log(`  [ANALYTIC] priced expectation grows as glCappedSeverityTrend, years 1-20: worst |rel diff| ${worstFactor.toExponential(2)}  ${note(worstFactor < 1e-12, 'the priced expectation does not grow at glCappedSeverityTrend — the pricing year factor and the capped analytic disagree')}`);
-  // ⚠ THIS ASSERTION WAS REVERSED WHEN THE CEILING STARTED TRENDING. It used to
-  // require capped < raw ("the cap bites harder as severity inflates past a
-  // FIXED ceiling") and it printed the over-charge the raw trend would cause:
-  //   year  2 +0.21%   year  5 +0.90%   year 10 +2.24%   year 20 +5.82%
-  // With glSeverityCap trending, min(s X, s L) = s min(X, L), so the capped
-  // year factor IS the raw trend and every one of those gaps is zero. Keeping
-  // the old inequality would now fail on correct code; keeping no assertion at
-  // all would let the ceiling be re-pinned silently. So it is asserted as an
-  // EQUALITY, which is the strong form: it fails if the ceiling stops trending
-  // AND it fails if the ratio ever stops being computed from the analytic.
-  console.log('  raw vs capped year factor (must now agree exactly — the ceiling trends):');
-  let worstTrendGap = 0;
+  // ⚠ THIS ASSERTION WAS AN EQUALITY WHILE THE CEILING TRENDED, AND IS AN
+  // INEQUALITY AGAIN NOW THAT IT DOES NOT. With glSeverityCap flat at $84M,
+  // min(s X, L) != s min(X, L/s) for L fixed and s > 1 — the capped year
+  // factor is STRICTLY BELOW the raw trend, and the gap widens every year
+  // (see glClaimEngine.ts's expectedClaimSeverity header for the algebra).
+  // Asserting equality would now fail on correct code; asserting nothing would
+  // let the ceiling silently start trending again without anything noticing.
+  // So this is the same shape it was before the ceiling ever trended: require
+  // capped < raw and PRINT the gap, which is the over-charge a caller using
+  // the raw trend instead of glCappedSeverityTrend would collect.
+  console.log('  raw vs capped year factor (must now DISAGREE — the ceiling is flat):');
+  let minRatio = 1;
   for (const y of [2, 5, 10, 20]) {
     const raw = glSeverityTrend(y), cap = glCappedSeverityTrend(y);
-    worstTrendGap = Math.max(worstTrendGap, Math.abs(cap / raw - 1));
-    console.log(`    year ${String(y).padStart(2)}: raw ${raw.toFixed(10)}  capped ${cap.toFixed(10)}  rel diff ${Math.abs(cap / raw - 1).toExponential(2)}`);
+    const ratio = cap / raw;
+    minRatio = Math.min(minRatio, ratio);
+    console.log(`    year ${String(y).padStart(2)}: raw ${raw.toFixed(10)}  capped ${cap.toFixed(10)}  raw/capped over-charge ${((raw / cap - 1) * 100).toFixed(2)}%`);
   }
   console.log(`    ${note(glCappedSeverityTrend(1) === 1, 'glCappedSeverityTrend does not equal exactly 1 at year 1')} year 1 is exactly 1.0`);
-  console.log(`    ${note(worstTrendGap < 1e-12, `the capped year factor differs from the raw trend by ${worstTrendGap.toExponential(2)} — the ceiling is not trending with the distribution`)} capped === raw to ${worstTrendGap.toExponential(2)} (the ceiling trends WITH the severity, so it never bites harder)`);
+  console.log(`    ${note(minRatio < 1 - 1e-6, `the capped year factor tracks the raw trend to ${minRatio.toExponential(2)} — the ceiling looks like it is trending again`)} capped/raw falls below 1 by year 20 (ratio ${minRatio.toFixed(6)}) — the flat ceiling bites harder every year, as it must`);
 
-  // (iii) k_GL IS TREND-INVARIANT, AND EXACTLY SO AGAIN.
+  // (iii) k_GL IS TREND-INVARIANT ONLY TO A TOLERANCE AGAIN.
   //
-  // ⚠ THIS ASSERTION HAS BEEN EXACT, THEN A TOLERANCE, AND IS NOW EXACT AGAIN.
-  // The history is the point. Uncapped, glSeverityTrend was a pure scalar on
-  // both the numerator and denominator of k_GL and cancelled identically (1e-12).
-  // Under a FIXED cap it stopped cancelling: the two sides carry DIFFERENT
-  // weight vectors (neutral vs the book's tilted mix), the cap bit hardest on
-  // component 1, and the tilt moves component 1's weight — so the ceiling
-  // interacted differently with each side and a ~1e-5 residual appeared over a
-  // 20-year span. The bar was loosened to 1e-4 to accommodate it.
+  // ⚠ THIS ASSERTION HAS BEEN EXACT, THEN A TOLERANCE, THEN EXACT, AND IS NOW
+  // A TOLERANCE AGAIN. The history is the point, not the current value. Under a
+  // FIXED cap the exact cancellation breaks: the two sides carry DIFFERENT
+  // weight vectors (neutral vs the book's tilted mix), the cap bites hardest on
+  // component 1, and the tilt moves component 1's weight — so a flat ceiling
+  // interacts differently with each side and a residual reappears over a
+  // 20-year span, the same mechanism measured at ~1e-5 for the earlier $100M
+  // fixed ceiling. The bar is loosened back to 1e-4 to accommodate it — the
+  // same bar used before, not a fresh one picked for this specific cap.
   //
-  // A TRENDING ceiling restores the exact cancellation, because now BOTH sides
-  // scale by the same s and the truncation point moves with them. The bar goes
-  // back to 1e-12 rather than being left at the loose value: a tolerance that
-  // outlives the reason for it is how a real drift gets waved through later.
+  // A TRENDING ceiling would restore exact cancellation (both sides scale by
+  // the same s, so the truncation point moves with them) — that is no longer
+  // what this line does, deliberately, and the drift measured below is what a
+  // future re-tightening of this tolerance would need to explain away first.
   const kAt1 = computeKGl(roster, 1), kAt10 = computeKGl(roster, 10), kAt20 = computeKGl(roster, 20);
   const kDrift = Math.max(Math.abs(kAt10 / kAt1 - 1), Math.abs(kAt20 / kAt1 - 1));
   console.log(`  [ANALYTIC] k_GL year 1 ${kAt1.toFixed(10)} / year 10 ${kAt10.toFixed(10)} / year 20 ${kAt20.toFixed(10)}`);
-  console.log(`    drift ${kDrift.toExponential(2)} relative — EXACT again now the ceiling trends  ${note(kDrift < 1e-12, `k_GL drifted ${kDrift.toExponential(2)} with the year — the trend is no longer cancelling out of the ratio`)}`);
+  console.log(`    drift ${kDrift.toExponential(2)} relative — a flat ceiling reintroduces the drift  ${note(kDrift < 1e-4, `k_GL drifted ${kDrift.toExponential(2)} with the year, past the 1e-4 tolerance the fixed-ceiling era used`)}`);
 
   // (iv) THE UNCAPPED CV IS TREND-INVARIANT; THE CAPPED CV IS NOT.
   //
@@ -322,30 +324,35 @@ console.log('\n--- 2c. THE TREND PAIR: severity and payroll growth, and the four
   };
   console.log(`  [ANALYTIC] UNCAPPED per-claim CV year 1 ${cvAt(1).toFixed(6)} vs year 10 ${cvAt(10).toFixed(6)}  ${note(Math.abs(cvAt(1) - cvAt(10)) < 1e-9, 'uncapped CV moved with the trend — the log-location shift is not a clean scale')}`);
 
-  // ⚠ NOW ASSERTED, AND IT CLOSES AN OPEN CONCERN ABOUT THE GL CLF GRID.
+  // ⚠ BACK TO REPORTED, NOT ASSERTED, AND THE OPEN CONCERN ABOUT THE GL CLF
+  // GRID IS OPEN AGAIN — THOUGH LESS DANGEROUS THAN IT LOOKS.
   //
-  // This block used to be REPORTED, NOT ASSERTED, and said: "The CAPPED
+  // This block was originally REPORTED, NOT ASSERTED, and said: "The CAPPED
   // per-claim CV DOES move with the year, because a FIXED ceiling is a
   // shrinking share of an inflating distribution... a CV-indexed GL grid WOULD
   // slide as the book inflates, handing an inflating pool a margin discount for
   // nothing. Any GL CLF grid must either index on something trend-invariant...
-  // or carry the year explicitly. Not resolved here."
+  // or carry the year explicitly." It was then asserted as an invariant while
+  // the ceiling trended. With the ceiling flat again, the drift is back by the
+  // same mechanism, measured below rather than assumed away.
   //
-  // It is resolved. With the ceiling trending, the capped CV is trend-invariant
-  // for the same reason the uncapped one is — every moment scales by s^k — so
-  // the objection to a CV-indexed GL grid is GONE. That does NOT retroactively
-  // make CV the right axis for GL: glClfGrid indexes on expected claim COUNT
-  // for its own reasons (see its header), and this only removes one argument
-  // against CV, it does not supply an argument for it. Do not re-index the grid
-  // on the strength of this line alone.
-  //
-  // Asserted rather than reported because it is now an invariant with a
-  // mechanism, and because the drift returning would mean the ceiling had been
-  // re-pinned — which is precisely the regression worth failing on.
+  // THE GRID ITSELF IS LESS EXPOSED THAN THE ORIGINAL WORRY SUGGESTS:
+  // glClfGrid indexes on expected claim COUNT, not CV (see its header) — GL
+  // frequency is flat and reads real payroll, so the grid's own interpolation
+  // AXIS does not move with a fixed cap at all. What is NOT insulated is the
+  // grid's stored RATIOS: they were measured once, by single-year draws, on
+  // the premise that "drawn/expected is year-invariant" (glClfGrid.ts's own
+  // header) — a premise that held automatically under a trending cap and does
+  // NOT hold in general under a flat one, because the SHAPE behind each ratio
+  // now drifts with year even though the axis it's stored against does not.
+  // Whether that drift is large enough to matter over a played game (not the
+  // 20-year table below) is exactly the "if the pure premium moves materially,
+  // stop and report" question — see the chat report, not this file, for the
+  // measured answer and whether it changes the CLF-table decision.
   const capCv1 = cvAt(1, glSeverityCap(1)), capCv10 = cvAt(10, glSeverityCap(10)), capCv20 = cvAt(20, glSeverityCap(20));
-  const capCvDrift = Math.max(Math.abs(capCv10 / capCv1 - 1), Math.abs(capCv20 / capCv1 - 1));
-  console.log(`  [ANALYTIC] CAPPED per-claim CV year 1 ${capCv1.toFixed(6)} / year 10 ${capCv10.toFixed(6)} / year 20 ${capCv20.toFixed(6)}`);
-  console.log(`    drift ${capCvDrift.toExponential(2)}  ${note(capCvDrift < 1e-9, `the capped per-claim CV drifted ${capCvDrift.toExponential(2)} with the year — the ceiling is not trending with the distribution`)} (was 3.31% by year 10 under a fixed ceiling)`);
+  const capCvDrift10 = capCv10 / capCv1 - 1, capCvDrift20 = capCv20 / capCv1 - 1;
+  console.log(`  [ANALYTIC, REPORTED NOT ASSERTED] CAPPED per-claim CV year 1 ${capCv1.toFixed(6)} / year 10 ${capCv10.toFixed(6)} / year 20 ${capCv20.toFixed(6)}`);
+  console.log(`    drift year 10: ${(capCvDrift10 * 100).toFixed(2)}%   year 20: ${(capCvDrift20 * 100).toFixed(2)}%   (was 3.31% by year 10 under the earlier $100M fixed ceiling)`);
 
   // (v) FREQUENCY READS REAL PAYROLL: the wage switch must not move claim COUNTS.
   //
@@ -384,7 +391,7 @@ console.log('\n--- 3. [ANALYTIC] full-market claims, gross, loss by band, occurr
   const fullMarketClaims = M.ratePer1M * TOTAL_PAYROLL_M;
   const fullMarketGross = fullMarketClaims * ANALYTIC_GROUND_MEAN;
   console.log(`  full-market claims: ${fullMarketClaims.toFixed(1)}/yr vs target 1,024/yr  ${note(Math.abs(fullMarketClaims - 1024) < 1, `full-market claims ${fullMarketClaims.toFixed(1)} vs 1,024`)}`);
-  console.log(`  full-market gross: ${fmt$(fullMarketGross)}/yr vs target $73.2M/yr (was $76.5M uncapped)  ${note(Math.abs(fullMarketGross - 73.2e6) < 0.05e6, `full-market gross ${fmt$(fullMarketGross)} vs $73.2M`)}`);
+  console.log(`  full-market gross: ${fmt$(fullMarketGross)}/yr vs target $72.71M/yr (was $76.5M uncapped)  ${note(Math.abs(fullMarketGross - 72.710e6) < 0.05e6, `full-market gross ${fmt$(fullMarketGross)} vs $72.71M`)}`);
 
   // Validate against the real exported expectedGlGrossLossForPricing (neutral RQ, kGl=1
   // — the exact pricing basis deriveNeutralGlPurePremiumPer100 uses).
@@ -400,13 +407,13 @@ console.log('\n--- 3. [ANALYTIC] full-market claims, gross, loss by band, occurr
   const oneMto25M = bandMean(1_000_000, 25_000_000) / ANALYTIC_GROUND_MEAN;
   const above25M = bandMean(25_000_000, Infinity) / ANALYTIC_GROUND_MEAN;
   // ⚠ TARGETS ARE THE CAPPED SHARES. Uncapped they were 48.1 / 40.0 / 12.0; the
-  // cap removes 36.2% of the above-$25M band (everything over $100M) and nothing
+  // cap removes everything over $84M from the above-$25M band and nothing
   // else, so the bottom two bands rise only because the DENOMINATOR shrank.
   // BY LAYER, not by claim size — see the gl-lev-verify note on the two
   // partitions; a tower cedes layers.
-  console.log(`  loss by band: below $1M ${(below1M * 100).toFixed(1)}% (target 50.3%)  ${note(Math.abs(below1M - 0.5025) < 0.002, `below-$1M share ${(below1M * 100).toFixed(1)}% vs 50.3%`)}`);
-  console.log(`                $1M-$25M ${(oneMto25M * 100).toFixed(1)}% (target 41.8%)  ${note(Math.abs(oneMto25M - 0.4176) < 0.002, `$1M-$25M share ${(oneMto25M * 100).toFixed(1)}% vs 41.8%`)}`);
-  console.log(`                above $25M ${(above25M * 100).toFixed(1)}% (target 8.0%, was 12.0% uncapped)  ${note(Math.abs(above25M - 0.0798) < 0.002, `above-$25M share ${(above25M * 100).toFixed(1)}% vs 8.0%`)}`);
+  console.log(`  loss by band: below $1M ${(below1M * 100).toFixed(1)}% (target 50.6%)  ${note(Math.abs(below1M - 0.5060) < 0.002, `below-$1M share ${(below1M * 100).toFixed(1)}% vs 50.6%`)}`);
+  console.log(`                $1M-$25M ${(oneMto25M * 100).toFixed(1)}% (target 42.1%)  ${note(Math.abs(oneMto25M - 0.4206) < 0.002, `$1M-$25M share ${(oneMto25M * 100).toFixed(1)}% vs 42.1%`)}`);
+  console.log(`                above $25M ${(above25M * 100).toFixed(1)}% (target 7.3%, was 12.0% uncapped)  ${note(Math.abs(above25M - 0.0734) < 0.002, `above-$25M share ${(above25M * 100).toFixed(1)}% vs 7.3%`)}`);
   console.log(`                bands sum to 1: ${note(Math.abs(below1M + oneMto25M + above25M - 1) < 1e-9, 'loss bands do not sum to 1')}`);
 
   const occ1M = M.ratePer1M * TOTAL_PAYROLL_M * survivalAt(1_000_000);
@@ -553,9 +560,9 @@ console.log('\n--- 5. [DRAWN] every section-3 target measured from the generator
   row('0-$1M cost /$100', nCapped.map(x => x / (TOTAL_PAYROLL_M * 10_000)), 2.8300, true, 5);
   console.log('    --- below here the CI is NOT trustworthy: heavy-tailed ground-up quantities ---');
   row('mean claim $', claimSample, ANALYTIC_GROUND_MEAN, false, 2);
-  row('ground-up cost /$100', nGround.map(x => x / (TOTAL_PAYROLL_M * 10_000)), 5.6319, false, 4);
+  row('ground-up cost /$100', nGround.map(x => x / (TOTAL_PAYROLL_M * 10_000)), 5.5931, false, 4);
   const bTot = mean(bBelow1) + mean(b1to25) + mean(bAbove25);
-  console.log(`    band shares: below $1M ${(mean(bBelow1) / bTot * 100).toFixed(2)}% (target 50.25) | $1M-$25M ${(mean(b1to25) / bTot * 100).toFixed(2)}% (41.76) | above $25M ${(mean(bAbove25) / bTot * 100).toFixed(2)}% (7.98)`);
+  console.log(`    band shares: below $1M ${(mean(bBelow1) / bTot * 100).toFixed(2)}% (target 50.60) | $1M-$25M ${(mean(b1to25) / bTot * 100).toFixed(2)}% (42.06) | above $25M ${(mean(bAbove25) / bTot * 100).toFixed(2)}% (7.34)`);
   console.log(`      REPORTED ONLY — a ratio of dollar sums, so the >$25M share inherits the full tail.`);
 
   const compCounts = { component1: 0, component2: 0, component3: 0 } as Record<string, number>;
@@ -605,7 +612,16 @@ console.log('\n--- 6. determinism, integrity, shock signal, held pure premium --
   const bindRate = survivalAtUncapped(GL_SEVERITY_CAP) * M.ratePer1M * TOTAL_PAYROLL_M;
   console.log(`  [ANALYTIC] cap binds ${bindRate.toFixed(4)}/yr full-market = 1 per ${(1 / bindRate).toFixed(0)} years;`);
   const enrolledBind = survivalAtUncapped(GL_SEVERITY_CAP) * M.ratePer1M * 347;
-  console.log(`    at a $347M enrolled book, 1 per ${(1 / enrolledBind).toFixed(0)} years (target 137)  ${note(Math.abs(1 / enrolledBind - 137) < 3, `cap binds 1 per ${(1 / enrolledBind).toFixed(0)} years at the enrolled book vs target 137`)}`);
+  console.log(`    at a $347M enrolled book, 1 per ${(1 / enrolledBind).toFixed(0)} years (target 103)  ${note(Math.abs(1 / enrolledBind - 103) < 3, `cap binds 1 per ${(1 / enrolledBind).toFixed(0)} years at the enrolled book vs target 103`)}`);
+  // ⚠ THE ACCEPTANCE TEST FOR $84M: NOT MORE THAN ONCE IN A LONG RUN. 1 per 103
+  // years at the enrolled book, ~1 per 27 full-market, is comfortably rare — a
+  // five-year game has roughly a 4.8% chance of ever drawing a claim that binds
+  // it (1 - (1 - 1/103)^5), and per 10,000 claims the bind rate is
+  // survivalAtUncapped(cap) x 10,000 regardless of book size (the two book-size
+  // factors cancel). Compare Property's own binding cap, a claim landing at
+  // exactly $75,000,000.00 — the same shape of evidence, not a coincidence:
+  // both are point masses a hard clamp creates, and both are rare by design.
+  console.log(`    bind rate per 10,000 claims: ${(survivalAtUncapped(GL_SEVERITY_CAP) * 10_000).toFixed(4)}`);
 
   const pp = deriveNeutralGlPurePremiumPer100(roster);
   console.log(`  held neutral GL purePremiumPer100 = ${pp.toFixed(4)} ($ per $100 payroll)  ${note(pp > 0 && Number.isFinite(pp), 'pure premium not finite')}`);
