@@ -5,6 +5,7 @@
   "seconds": {
     "actuarial-memo-check": 11,
     "audit-formula-check": 44,
+    "basis-cross-check": 4,
     "cession-path-independence": 902,
     "cession-uplift-basis": 84,
     "claims-memo-check": 5,
