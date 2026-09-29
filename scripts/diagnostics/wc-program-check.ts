@@ -15,7 +15,13 @@
 //               calls: safety 0.9875 / 0.97 / 0.95 / 0.95, RTW 0.75c / c / c / c.
 //               Other lines read 1 and 0; nothing committed reads 1 and 0; each
 //               program leaves the other's line alone.
-//   RESET       dropping the program restarts BOTH ramps.
+//   LAPSE       the two halves lapse DIFFERENTLY, and each is asserted alone:
+//               safety HALVES each unfunded year (0.5 / 0.25 / 0.125 / 0 of its
+//               level), RTW goes to ZERO in the first. A restart resumes safety
+//               from its residual and starts RTW's ramp again at 75%.
+//   CHARGE      $1M in every committed year and 0 otherwise, flat — no
+//               maintenance tier. The engine's riskControlInvestment on WC is
+//               exactly that, and GL's and Property's are unmoved by it.
 //   NULL INPUT  the generator given multiplier 1 and conversion 0 returns a
 //               register bit-identical to one given neither.
 //               ⚠ THIS HAS A RESOLUTION FLOOR. It compares the REGISTER, not
@@ -58,21 +64,22 @@ import { cedeOccurrences, occurrenceTotals } from '../../src/utils/reinsuranceTo
 import { DEFAULT_LAYERS_PLACED } from '../../src/data/reinsuranceTower';
 import {
   WC_RTW_CONVERSION_CEILING, WC_RTW_CONVERSION_RATE, WC_RTW_LOST_TIME_COMPONENTS,
-  WC_SAFETY_FREQUENCY_REDUCTION, programFreqMultiplier, programRtwConversion, programTenure,
+  WC_SAFETY_FREQUENCY_REDUCTION, WC_SAFETY_RTW_ANNUAL_COST, programAnnualCost,
+  programFreqMultiplier, programRtwConversion, programTenure, wcSafetyRtwStanding,
 } from '../../src/utils/riskControlPrograms';
 import type { CoverageLine, DecisionSet, GameState, Member } from '../../src/types/simulation';
 
 const PROGRAM = 'wc-safety-rtw';
 const GL_PROGRAM = 'gl-law-enforcement-analytics';
 const GAMES = Number(process.env.GAMES ?? 6);
-const YEARS = Number(process.env.YEARS ?? 4);
+const YEARS = Number(process.env.YEARS ?? 5);
 const ALL: CoverageLine[] = ['WC', 'GL', 'Property'];
 const FIELDS = ['grossUltimateLoss', 'netUltimateLoss', 'reinsuranceRecovery', 'endingNetReserve',
-  'endingSurplus', 'poolPremium', 'activeMembers'] as const;
+  'endingSurplus', 'poolPremium', 'activeMembers', 'riskControlInvestment'] as const;
 // The LOSS-SIDE fields: what the program could reach by leaking into another
 // line's draw, pricing or roster. These must be === on the other lines.
 const LOSS_FIELDS = ['grossUltimateLoss', 'netUltimateLoss', 'reinsuranceRecovery', 'endingNetReserve',
-  'poolPremium', 'activeMembers'] as const;
+  'poolPremium', 'activeMembers', 'riskControlInvestment'] as const;
 const CENT = 0.01;
 
 const failed: string[] = [];
@@ -80,7 +87,12 @@ const fail = (s: string) => { if (failed.length < 30) failed.push(s); };
 const ok = (cond: boolean, msg: string) => { if (!cond) fail(msg); };
 const close = (a: number, b: number) => Math.abs(a - b) < 1e-12;
 
-type LineRow = Record<(typeof FIELDS)[number], number> & { claims: number; lostTime: number; market: number };
+type LineRow = Record<(typeof FIELDS)[number], number> & {
+  claims: number; lostTime: number; market: number;
+  freqApplied: number; rtwApplied: number;
+  /** Claims whose id names a lost-time component but whose tier is `small` — i.e. converted. */
+  converted: number;
+};
 
 function play(g: number, lines: CoverageLine[], ids: (y: number) => string[]) {
   const id = `WPC${g}`;
@@ -109,8 +121,14 @@ function play(g: number, lines: CoverageLine[], ids: (y: number) => string[]) {
       type Mlr = { memberId: string; simulatedLoss: number };
       const enrolled = new Set(((r.memberLossResults as Mlr[] | undefined) ?? []).map(m => m.memberId));
       const mk = ((r.marketMemberLossResults as Mlr[] | undefined) ?? []).filter(m => !enrolled.has(m.memberId));
+      const converted = (claims as { id: string; tier: string }[]).filter(c => {
+        const parts = c.id.split('-');
+        return c.tier === 'small' && parts[parts.length - 2] !== 'small';
+      }).length;
       const rec = { claims: claims.length, lostTime: claims.filter(c => c.tier !== 'small').length,
-        market: mk.reduce((s, m) => s + m.simulatedLoss, 0) } as LineRow;
+        market: mk.reduce((s, m) => s + m.simulatedLoss, 0),
+        freqApplied: (r.programFreqApplied as number | undefined) ?? 1,
+        rtwApplied: (r.programRtwApplied as number | undefined) ?? 0, converted } as LineRow;
       for (const f of FIELDS) rec[f] = r[f] as number;
       row[l] = rec;
     }
@@ -165,12 +183,41 @@ ok(programRtwConversion('WC', [GL_PROGRAM], [[GL_PROGRAM]]) === 0, 'the GL progr
 ok(programFreqMultiplier('WC', [], []) === 1 && programRtwConversion('WC', [], []) === 0, 'WC moved with nothing committed');
 console.log('   other lines, the other program and nothing committed read 1 and 0: OK');
 
-// --- 2. RESET ----------------------------------------------------------------
-console.log('\n--- 2. dropping the program resets both ramps ---');
-ok(programTenure(PROGRAM, [PROGRAM], [[PROGRAM], [], [PROGRAM]]) === 2, 'a gap did not reset the WC run');
-ok(close(programFreqMultiplier('WC', [PROGRAM], [[PROGRAM], [PROGRAM], []]), eF[0]), 'safety did not restart at tenure 1');
-ok(close(programRtwConversion('WC', [PROGRAM], [[PROGRAM], [PROGRAM], []]), eC[0]), 'RTW did not restart at tenure 1');
-console.log('   a gap restarts safety and RTW at their tenure-1 values: OK');
+// --- 2. THE LAPSE RULE, EACH HALF ON ITS OWN ---------------------------------
+console.log('\n--- 2. stopping: safety decays, RTW is a cliff — each asserted alone ---');
+ok(programTenure(PROGRAM, [PROGRAM], [[PROGRAM], [], [PROGRAM]]) === 2, 'a gap did not reset the WC tenure');
+const built = [[PROGRAM], [PROGRAM], [PROGRAM]];
+const expectSafety = [0.5, 0.25, 0.125, 0];
+for (let k = 1; k <= 4; k++) {
+  const prior = [...built, ...Array.from({ length: k - 1 }, () => [] as string[])];
+  const st = wcSafetyRtwStanding([], prior);
+  const f = programFreqMultiplier('WC', [], prior), c = programRtwConversion('WC', [], prior);
+  console.log(`   lapsed year ${k}: safety level ${st.safetyLevel.toFixed(3)} (x${f.toFixed(4)})   RTW level ${st.rtwLevel.toFixed(3)} (c ${c.toFixed(4)})   charge $${st.annualCost}`);
+  ok(close(st.safetyLevel, expectSafety[k - 1]), `lapsed year ${k}: safety level ${st.safetyLevel} != ${expectSafety[k - 1]}`);
+  ok(close(f, 1 - WC_SAFETY_FREQUENCY_REDUCTION * expectSafety[k - 1]), `lapsed year ${k}: safety multiplier ${f} does not follow its level`);
+  ok(st.rtwLevel === 0 && c === 0, `lapsed year ${k}: RTW is ${c}, not the cliff`);
+  ok(st.annualCost === 0, `lapsed year ${k}: charged ${st.annualCost} while not committed`);
+}
+// A restart after one lapsed year: safety resumes from its residual (0.5, above
+// the ramp's 0.25), RTW starts again at its tenure-1 value (0.75c).
+const back = wcSafetyRtwStanding([PROGRAM], [...built, []]);
+ok(close(back.safetyLevel, 0.5), `restart: safety ${back.safetyLevel} did not resume from its residual 0.5`);
+ok(close(programRtwConversion('WC', [PROGRAM], [...built, []]), eC[0]), 'restart: RTW did not start again at 0.75c');
+// And a restart after safety has fully decayed starts it from its ramp.
+ok(close(wcSafetyRtwStanding([PROGRAM], [...built, [], [], [], []]).safetyLevel, 0.25), 'restart after full decay: safety not at 0.25');
+console.log('   restart: safety resumes from its residual, RTW restarts at 75%: OK');
+
+// --- 2b. THE CHARGE, FLAT --------------------------------------------------
+console.log('\n--- 2b. the charge: $1M every committed year, nothing otherwise ---');
+for (let t = 1; t <= 6; t++) {
+  const prior = Array.from({ length: t - 1 }, () => [PROGRAM]);
+  ok(programAnnualCost('WC', [PROGRAM], prior) === WC_SAFETY_RTW_ANNUAL_COST, `tenure ${t}: WC charged ${programAnnualCost('WC', [PROGRAM], prior)}`);
+}
+ok(programAnnualCost('WC', [], [[PROGRAM], [PROGRAM]]) === 0, 'an unfunded year was charged');
+ok(programAnnualCost('GL', [PROGRAM], [[PROGRAM]]) === 0, 'GL was charged for the WC program');
+ok(programAnnualCost('Property', [PROGRAM], [[PROGRAM]]) === 0, 'Property was charged for the WC program');
+ok(programAnnualCost('WC', [GL_PROGRAM], [[GL_PROGRAM]]) === 0, 'WC was charged for the GL program');
+console.log(`   $${WC_SAFETY_RTW_ANNUAL_COST / 1e6}M at tenure 1-6 (no maintenance tier), 0 unfunded, 0 on GL/Property: OK`);
 
 // --- 3. THE GENERATOR: null input, no re-phase, no tower -------------------
 console.log('\n--- 3. the generator: null input, no re-phase, no tower ---');
@@ -221,7 +268,7 @@ ok(share > 0.8 * WC_RTW_CONVERSION_RATE && share < 1.2 * WC_RTW_CONVERSION_RATE,
 
 // --- 4. YEAR ONE, OTHER LINES, MARKETPLACE ---------------------------------
 console.log('\n--- 4. paired games, three lines ---');
-let y1 = 0, other = 0, mk = 0, prospectLoss = 0;
+let y1 = 0, other = 0, mk = 0, prospectLoss = 0, chargeYears = 0;
 for (let g = 0; g < GAMES; g++) {
   const off = play(g, ALL, () => []);
   const from2 = play(g, ALL, y => (y >= 2 ? [PROGRAM] : []));
@@ -245,13 +292,48 @@ for (let g = 0; g < GAMES; g++) {
     }
   }
   ok(on[0].WC.grossUltimateLoss !== off[0].WC.grossUltimateLoss, `g${g}: WC did not move in year 1 of commitment`);
+  // THE MONEY LEAVES: WC's risk-control expense is the flat charge in every
+  // committed year, and exactly what it was otherwise in every year of `off`.
+  for (let y = 0; y < YEARS; y++) {
+    ok(on[y].WC.riskControlInvestment - off[y].WC.riskControlInvestment === WC_SAFETY_RTW_ANNUAL_COST,
+      `g${g} y${y + 1}: WC risk-control expense moved by ${on[y].WC.riskControlInvestment - off[y].WC.riskControlInvestment}, not the charge`);
+  }
+  chargeYears += YEARS;
 }
 console.log(`   year 1 at tenure 0: ${y1} line-rows x ${FIELDS.length + 2} fields, all ===`);
 console.log(`   GL/Property line-years with the WC program on: ${other} — claims, gross, net, recovery, `
   + `reserve, premium, members all ===; surplus within a cent (max drift $${maxSurplusDrift.toExponential(2)}, float)`);
+console.log(`   WC risk-control expense = off + $${WC_SAFETY_RTW_ANNUAL_COST / 1e6}M exactly in ${chargeYears} committed line-years`);
 console.log(`   WC marketplace ledger (prospects only) unchanged at ${mk} line-years; `
   + `non-empty: ${prospectLoss > 0 ? 'yes' : 'NO'}`);
 ok(prospectLoss > 0, 'the prospect ledger summed to zero — the marketplace assertion would be vacuous');
+
+// --- 4b. LAPSE IN A PLAYED GAME: funded years 1-3, unfunded 4 onward --------
+console.log('\n--- 4b. stopping in a played game: funded 1-3, unfunded 4+ ---');
+if (YEARS >= 5) {
+  let lapseYears = 0, convertedWhileLapsed = 0, convertedWhileFunded = 0;
+  for (let g = 0; g < GAMES; g++) {
+    const stop = play(g, ['WC'], y => (y <= 3 ? [PROGRAM] : []));
+    for (let y = 0; y < YEARS; y++) {
+      const r = stop[y].WC;
+      const lapsedK = y + 1 - 3;     // 1 in year 4, 2 in year 5
+      if (lapsedK <= 0) { convertedWhileFunded += r.converted; continue; }
+      lapseYears++;
+      const lvl = [0.5, 0.25, 0.125, 0][Math.min(lapsedK, 4) - 1];
+      ok(close(r.freqApplied, 1 - WC_SAFETY_FREQUENCY_REDUCTION * lvl),
+        `g${g} y${y + 1}: safety applied ${r.freqApplied}, expected the decayed ${1 - WC_SAFETY_FREQUENCY_REDUCTION * lvl}`);
+      ok(r.rtwApplied === 0, `g${g} y${y + 1}: RTW applied ${r.rtwApplied} after it lapsed`);
+      ok(r.riskControlInvestment === 0, `g${g} y${y + 1}: charged ${r.riskControlInvestment} while unfunded`);
+      convertedWhileLapsed += r.converted;
+    }
+  }
+  ok(convertedWhileLapsed === 0, `${convertedWhileLapsed} claims converted after RTW lapsed — the cliff is not a cliff`);
+  ok(convertedWhileFunded > 0, 'no claim converted while funded — the converted-claim count is not measuring anything');
+  console.log(`   ${lapseYears} lapsed line-years: safety at its decayed level (x0.975, then x0.9875), `
+    + `RTW 0, charge 0; claims converted while funded ${convertedWhileFunded}, after the lapse ${convertedWhileLapsed}`);
+} else {
+  console.log(`   skipped: needs YEARS >= 5 (running ${YEARS})`);
+}
 
 // --- 5. DIRECTION AT FULL EFFECT, ON COUNTS ---------------------------------
 console.log('\n--- 5. at full effect: counts fall by about the safety cut ---');

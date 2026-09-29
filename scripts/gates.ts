@@ -143,7 +143,7 @@ const FAST: string[] = [
   'value-identity-check',            //   3s
   'wc-cap-check',                    //   4s
   'wc-cutover-check',                //   6s   PROMOTED at this commit
-  'wc-program-check',                //  12s   the WC safety & RTW program reaches WC's draw and nothing else
+  'wc-program-check',                //  15s   the WC safety & RTW program reaches WC's draw and nothing else
   'wc-severity-rebuild-check',       //   3s
 ];
 

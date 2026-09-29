@@ -112,11 +112,12 @@ export const WIRED_PROGRAM_IDS = ['gl-law-enforcement-analytics', 'wc-safety-rtw
  * nothing — a free program under another program's label. Git merged it
  * cleanly; nothing flagged it.
  *
- * WC joins this list with its own cost shape and standing, which is the spend
- * commit — not before. Until then it is reachable only through the decision
- * set (the gates and the value probe), exactly as its own commit describes.
+ * WC JOINED IT AT THE SPEND COMMIT, with its own standing (wcSafetyRtwStanding)
+ * and charge — see standingFor, which is what the tiles read now instead of
+ * GL's standing for every tile. A program may be added here only once it has
+ * both.
  */
-export const BUYABLE_PROGRAM_IDS: readonly string[] = ['gl-law-enforcement-analytics'];
+export const BUYABLE_PROGRAM_IDS: readonly string[] = ['gl-law-enforcement-analytics', 'wc-safety-rtw'];
 
 // ============================================================================
 // ⚠ THE MAGNITUDE. SIZED AGAINST THE $1,000,000 PLACEHOLDER COST, DELIBERATELY
@@ -266,6 +267,8 @@ export interface ProgramStanding {
   annualCost: number;
   /** True once the build is paid for and the charge is the maintenance. */
   maintaining: boolean;
+  /** The commitment term the tile counts against ("Year 2 of 3"). DISPLAY. */
+  termYears: number;
 }
 
 /**
@@ -302,6 +305,7 @@ export function programStanding(
     tenure,
     benefitFraction: level,
     maintaining,
+    termYears: GL_ANALYTICS_BUILD_YEARS,
     annualCost: !committed ? 0
       : maintaining ? GL_ANALYTICS_MAINTENANCE_ANNUAL_COST : GL_ANALYTICS_BUILD_ANNUAL_COST,
   };
@@ -319,8 +323,33 @@ export function programAnnualCost(
   currentIds: readonly string[] | undefined,
   priorIds: readonly (readonly string[] | undefined)[],
 ): number {
+  if (line === 'WC') return wcSafetyRtwStanding(currentIds, priorIds).annualCost;
   if (line !== 'GL') return 0;
   return glAnalyticsStanding(currentIds, priorIds).annualCost;
+}
+
+/**
+ * A buyable program's standing, by id — what a tile shows. Each program's own
+ * standing function; there is no generic one, because the cost shape and the
+ * lapse rule are each program's own decision.
+ */
+export function standingFor(
+  programId: string,
+  currentIds: readonly string[] | undefined,
+  priorIds: readonly (readonly string[] | undefined)[],
+): ProgramStanding | undefined {
+  if (programId === 'gl-law-enforcement-analytics') return glAnalyticsStanding(currentIds, priorIds);
+  if (programId === 'wc-safety-rtw') {
+    const st = wcSafetyRtwStanding(currentIds, priorIds);
+    return {
+      committed: st.committed, tenure: st.tenure, annualCost: st.annualCost, maintaining: false,
+      termYears: WC_SAFETY_RTW_TERM_YEARS,
+      // A lapsed WC program is "Lapsing" while SAFETY still carries a residual;
+      // RTW has none by rule, so the safety level is the one that says so.
+      benefitFraction: Math.max(st.safetyLevel, st.rtwLevel),
+    };
+  }
+  return undefined;
 }
 
 /**
@@ -336,9 +365,11 @@ export function programFreqMultiplier(
   priorIds: readonly (readonly string[] | undefined)[],
 ): number {
   if (line === 'WC') {
-    const tenure = programTenure('wc-safety-rtw', currentIds, priorIds);
-    if (tenure === 0) return 1;
-    return 1 - WC_SAFETY_FREQUENCY_REDUCTION * rampAt(WC_SAFETY_RAMP, tenure);
+    // THE LEVEL, NOT THE TENURE — for GL's reason: a lapsed safety program
+    // carries a decaying residual, which tenure 0 would throw away.
+    const level = wcSafetyRtwStanding(currentIds, priorIds).safetyLevel;
+    if (level <= 0) return 1;
+    return 1 - WC_SAFETY_FREQUENCY_REDUCTION * level;
   }
   if (line !== 'GL') return 1;
   // ⚠ THE LEVEL, NOT THE TENURE. A lapsed program still carries a decaying
@@ -472,6 +503,28 @@ export const WC_RTW_RAMP: readonly number[] = [0.75, 1, 1];
  * weighs rather than an obvious yes or no. What would change it: RTW near 11%,
  * or a cost near $0.9M/yr, breaks even at year 5 (estimated by scaling, not
  * re-run). The cost is the softer of the two numbers — see the placeholder.
+ *
+ * ⚠ AND ONCE THE ENGINE CHARGES, IT IS FURTHER BEHIND THAN THAT ARITHMETIC SAID.
+ * The table above is GROSS OF COST with $5M subtracted by hand. With the charge
+ * wired (WC_SAFETY_RTW_ANNUAL_COST through riskControlInvestment), same 96 games,
+ * the engine's own paired surplus is NET:
+ *
+ *   year                      1      2      3      4      5
+ *   NET surplus, cum       -0.46  -0.65  -0.66  -0.67  -1.01   ($M)
+ *
+ *   year-5 net -$1.01M, SE $0.20M, t = -5.1 — against the arithmetic's -$0.47M
+ *
+ * The -$0.54M gap is the investment income the spent money stops earning (about
+ * 5.3% on a balance that averages $2.5M over the game) — the same omission that
+ * cost GL's arithmetic ~$80k a year. Losses, keep, premium and reserves are
+ * IDENTICAL to the uncharged run: the charge moves cash and nothing else.
+ *
+ * ⚠ SO AT THESE SIZES IT IS CLEARLY BEHIND AT YEAR 5, NOT "ROUGHLY EVEN". The
+ * decision-point argument above was made on the gross arithmetic. On the charged
+ * figure, break-even at year 5 needs a cost near $0.8M/yr, or RTW near 12.5-13%
+ * — BOTH ESTIMATED by scaling the measured figures, NOT re-run. Whether to move
+ * a size or the cost is not settled here; this commit wires the charge the
+ * program was sized against and reports what it does.
  */
 export const WC_RTW_TARGET_REDUCTION = 0.10;
 
@@ -541,7 +594,113 @@ export function programRtwConversion(
   priorIds: readonly (readonly string[] | undefined)[],
 ): number {
   if (line !== 'WC') return 0;
-  const tenure = programTenure('wc-safety-rtw', currentIds, priorIds);
-  if (tenure === 0) return 0;
-  return WC_RTW_CONVERSION_RATE * rampAt(WC_RTW_RAMP, tenure);
+  const level = wcSafetyRtwStanding(currentIds, priorIds).rtwLevel;
+  if (level <= 0) return 0;
+  return WC_RTW_CONVERSION_RATE * level;
+}
+
+// ============================================================================
+// THE WC PROGRAM'S COST AND ITS LAPSE RULE — WHERE IT DIFFERS FROM GL, AND WHY.
+//
+// ⚠ THE COST IS FLAT: $1M A YEAR FOR AS LONG AS IT RUNS. NOT GL'S BUILD-THEN-
+// MAINTAIN. GL's program is a platform — bought once, then kept running at a
+// tenth of the price. WC's is PEOPLE: safety consultants, a return-to-work
+// coordinator, training, a safety committee's time. That is a salary line, and
+// it does not get cheaper in year four. So there is no maintenance tier and no
+// maintenance decision: the pool funds it or it does not.
+//
+// ⚠ AND $1M IS A PLACEHOLDER WITH NO BASIS. It is RISK_CONTROL_PLACEHOLDER_ANNUAL
+// _COST, the same number every tile showed before any program was costed, and
+// nobody chose it for WC. It was kept because the program was SIZED against it
+// (see WC_RTW_TARGET_REDUCTION): at $1M the program is a real decision, and a
+// different figure is a different game. A real number would be a coordinator's
+// loaded salary plus consultant and training spend, scaled to the book — the
+// flat-versus-scaling question the placeholder's own note leaves open.
+//
+// ============================================================================
+// ⚠ THE TWO LEVERS LAPSE DIFFERENTLY. THIS IS ONE MORE DECISION THAN GL NEEDED,
+// AND THE NEXT READER WILL ASSUME THEY MATCH. THEY DO NOT.
+//
+// The rule: A THING THAT RAMPS FAST LAPSES FAST. Each lever's lapse mirrors the
+// mechanism that built it.
+//
+//   SAFETY decays, on GL's curve: HALF each unfunded year, gone below an eighth
+//     (0.500 / 0.250 / 0.125 / 0.000 from full). It ramps 25/60/100 because
+//     habits build slowly — committees, training, the reflex to fix a hazard
+//     before it hurts someone. Stop funding it and those habits persist, then
+//     erode as people turn over and the committee stops meeting. Slow in, slow
+//     out. GL's curve is reused rather than a new one invented, because it
+//     expresses the same thing — practice that outlives its funding for a while
+//     — and a second decay constant with no better basis would be a number
+//     wearing a distinction.
+//
+//   RETURN TO WORK is a CLIFF: ZERO in the first unfunded year. It ramps
+//     75/100/100 because it is a policy — adopt modified duty and the next
+//     injured worker is back in weeks. It lapses the same way. Stop paying the
+//     coordinator and nobody finds the next worker a light-duty placement; the
+//     claim goes lost-time exactly as it would have without the program. There
+//     is no residual habit to decay, because the mechanism is a person doing a
+//     job each time, not a practice that persists.
+//
+// A RESTART follows from the same rule. Safety resumes from whatever residual
+// is left (the level cannot fall while funded, exactly as GL's). RTW starts its
+// ramp again at 75%, because there is nothing left to resume from.
+//
+// The cliff is the stronger claim of the two and the one to revisit if anyone
+// has data: a supervisor who learned to offer modified duty may keep doing it
+// for a while. If so, RTW takes a short tail — one year at a quarter, say — and
+// WC_RTW_LAPSE_RESIDUAL is where it goes. Today it is 0.
+// ============================================================================
+
+/** The WC program's annual cost, every committed year. A PLACEHOLDER — see above. */
+export const WC_SAFETY_RTW_ANNUAL_COST = 1_000_000;
+
+/** The commitment term the tile counts ("Year 2 of 3"); matches the catalog. DISPLAY. */
+export const WC_SAFETY_RTW_TERM_YEARS = 3;
+
+/** RTW's share of its level that survives one unfunded year. 0 is the cliff. */
+export const WC_RTW_LAPSE_RESIDUAL = 0;
+
+export interface WcSafetyRtwStanding {
+  committed: boolean;
+  /** Consecutive committed years including this one; 0 when not committed. */
+  tenure: number;
+  /** 0..1 — the safety lever's share of full effect this year. */
+  safetyLevel: number;
+  /** 0..1 — the RTW lever's share of full effect this year. */
+  rtwLevel: number;
+  /** Dollars charged this year: WC_SAFETY_RTW_ANNUAL_COST when committed, else 0. */
+  annualCost: number;
+}
+
+/**
+ * Walk the committed/not sequence and return the WC program's standing in the
+ * FINAL year. Derived from the decision history, like GL's — there is no
+ * counter. Safety rises along its ramp while funded and halves each unfunded
+ * year; RTW follows its ramp while funded and falls by WC_RTW_LAPSE_RESIDUAL
+ * (to zero) when not.
+ */
+export function wcSafetyRtwStanding(
+  currentIds: readonly string[] | undefined,
+  priorIds: readonly (readonly string[] | undefined)[],
+): WcSafetyRtwStanding {
+  const seq = [...priorIds, currentIds];
+  let tenure = 0, safety = 0, rtw = 0;
+  for (const ids of seq) {
+    if (ids?.includes('wc-safety-rtw')) {
+      tenure += 1;
+      safety = Math.max(safety, rampAt(WC_SAFETY_RAMP, tenure));
+      rtw = Math.max(rtw, rampAt(WC_RTW_RAMP, tenure));
+    } else {
+      tenure = 0;
+      safety *= BENEFIT_DECAY_PER_LAPSED_YEAR;
+      if (safety < BENEFIT_FLOOR) safety = 0;
+      rtw *= WC_RTW_LAPSE_RESIDUAL;
+    }
+  }
+  const committed = tenure > 0;
+  return {
+    committed, tenure, safetyLevel: safety, rtwLevel: rtw,
+    annualCost: committed ? WC_SAFETY_RTW_ANNUAL_COST : 0,
+  };
 }

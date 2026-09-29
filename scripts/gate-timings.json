@@ -74,7 +74,7 @@
     "wc-cap-check": 3,
     "wc-clf-grid-derive": 158,
     "wc-cutover-check": 26,
-    "wc-program-check": 12,
+    "wc-program-check": 15,
     "wc-severity-rebuild-check": 3
   }
 }

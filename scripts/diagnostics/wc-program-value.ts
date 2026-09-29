@@ -22,10 +22,13 @@
 //   the tower attaches to the booked occurrence, and comparing that against drawn
 //   gross roughly doubles the apparent tower share.
 //
-// ⚠ THE WC COST IS NOT CHARGED. programAnnualCost is 0 for WC (only GL's program
-//   has a cost shape in the engine), so
-//   every figure is GROSS OF COST and the $1,000,000/yr placeholder comparison is
-//   arithmetic done here. The spend is the next commit.
+// ⚠ THE COST IS CHARGED NOW — $1M every committed year (WC_SAFETY_RTW_ANNUAL_COST),
+//   through riskControlInvestment — so the paired surplus in part 2 is NET: the
+//   benefit, the charge, development timing, premium feedback and the investment
+//   income the spent money no longer earns, all together. Before the spend was
+//   wired this probe read +$4.53M GROSS OF COST against $5M as arithmetic; the
+//   gap between that arithmetic (-$0.47M) and the engine's own net figure is
+//   printed below, and is mostly the forgone investment income.
 // ============================================================================
 import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
@@ -34,10 +37,9 @@ import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { regenerateLineYearClaims } from '../../src/utils/claimRegeneration';
 import { cedeOccurrences, occurrenceTotals } from '../../src/utils/reinsuranceTower';
 import { DEFAULT_LAYERS_PLACED } from '../../src/data/reinsuranceTower';
-import { RISK_CONTROL_PLACEHOLDER_ANNUAL_COST } from '../../src/data/riskControlCategories';
 import {
   WC_RTW_CONVERSION_CEILING, WC_RTW_CONVERSION_RATE, WC_RTW_RAMP, WC_RTW_TARGET_REDUCTION,
-  WC_SAFETY_FREQUENCY_REDUCTION, WC_SAFETY_RAMP,
+  WC_SAFETY_FREQUENCY_REDUCTION, WC_SAFETY_RAMP, WC_SAFETY_RTW_ANNUAL_COST,
 } from '../../src/utils/riskControlPrograms';
 import type { Claim, GameInstance, GameState, Occurrence, ResultSet } from '../../src/types/simulation';
 
@@ -50,7 +52,7 @@ const sd = (a: number[]) => { const m = mean(a); return Math.sqrt(a.reduce((s, x
 const ceded = (claims: Claim[], occ: Occurrence[]) =>
   cedeOccurrences('WC', occurrenceTotals(claims, occ), DEFAULT_LAYERS_PLACED.WC).totalCeded;
 
-interface Row { gross: number; keep: number; prem: number; lr: number; res: number; sur: number }
+interface Row { gross: number; keep: number; prem: number; lr: number; res: number; sur: number; charge: number }
 
 function play(on: boolean) {
   const games: { inst: GameInstance; results: ResultSet[]; rows: Row[] }[] = [];
@@ -70,7 +72,7 @@ function play(on: boolean) {
       if ((r.aggregateRecovery ?? 0) !== 0) throw new Error('the aggregate fired; the ultimate basis would need it');
       const gross = r.grossUltimateLoss;
       rows.push({ gross, keep: gross - ceded(r.claims ?? [], r.occurrences ?? []), prem: r.poolPremium,
-        lr: r.actualLossRatio, res: r.endingNetReserve, sur: r.endingSurplus });
+        lr: r.actualLossRatio, res: r.endingNetReserve, sur: r.endingSurplus, charge: r.riskControlInvestment });
       results.push(p.result);
       gs = { ...gs, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result],
         currentYearNumber: y + 1, currentDecisions: defaultDecisionSet(y + 1), isComplete: y >= YEARS };
@@ -119,25 +121,31 @@ lever('safety + RTW', lr => { lr.programFreqApplied = 1 - WC_SAFETY_FREQUENCY_RE
 // --- 2. the program as committed, paired ------------------------------------
 const on = play(true);
 console.log('\n--- 2. THE PROGRAM AS COMMITTED, both ramps, paired on seeds ($M, ON minus OFF) ---');
-console.log('  yr   gross avoided   pool keeps   tower%   premium back   loss ratio   reserve    surplus');
-const tot = { g: 0, k: 0, p: 0 };
+console.log('  yr   gross avoided   pool keeps   tower%   premium back   loss ratio   reserve   charge   NET surplus   cum charge');
+const tot = { g: 0, k: 0, p: 0, c: 0 };
 for (let y = 0; y < YEARS; y++) {
   const d = (f: (r: Row) => number) => mean(on.map((g, i) => f(g.rows[y]) - f(off[i].rows[y])));
   const dG = -d(r => r.gross), dK = -d(r => r.keep), dP = -d(r => r.prem);
-  tot.g += dG; tot.k += dK; tot.p += dP;
+  const dC = d(r => r.charge);
+  tot.g += dG; tot.k += dK; tot.p += dP; tot.c += dC;
   console.log(`  ${y + 1}    ${(dG / M).toFixed(3).padStart(8)}      ${(dK / M).toFixed(3).padStart(7)}    `
     + `${(100 * (1 - dK / dG)).toFixed(1).padStart(5)}    ${(dP / M).toFixed(3).padStart(8)}      `
-    + `${(100 * d(r => r.lr)).toFixed(2).padStart(6)}pp  ${(d(r => r.res) / M).toFixed(3).padStart(7)}  ${(d(r => r.sur) / M).toFixed(3).padStart(8)}`);
+    + `${(100 * d(r => r.lr)).toFixed(2).padStart(6)}pp  ${(d(r => r.res) / M).toFixed(3).padStart(7)}  `
+    + `${(dC / M).toFixed(3).padStart(6)}  ${(d(r => r.sur) / M).toFixed(3).padStart(10)}   ${(tot.c / M).toFixed(3).padStart(8)}`);
 }
 const dSur = on.map((g, i) => g.rows[YEARS - 1].sur - off[i].rows[YEARS - 1].sur);
 const se = sd(dSur) / Math.sqrt(dSur.length);
-const cost = YEARS * RISK_CONTROL_PLACEHOLDER_ANNUAL_COST;
+const cost = tot.c;
+const PRE_CHARGE_ARITHMETIC = 4.53e6 - 5e6;   // the probe's own reading before the spend was wired (f285c86)
 console.log(`\n  FIVE-YEAR TOTALS (${YEARS} yrs)`);
 console.log(`    gross avoided                 $${(tot.g / M).toFixed(2)}M`);
 console.log(`    pool keeps (ultimate basis)   $${(tot.k / M).toFixed(2)}M   tower ${(100 * (1 - tot.k / tot.g)).toFixed(1)}%`);
 console.log(`    back to members as premium    $${(tot.p / M).toFixed(2)}M   (${(100 * tot.p / tot.k).toFixed(0)}% of what the pool keeps)`);
-console.log(`    year-${YEARS} surplus               +$${(mean(dSur) / M).toFixed(2)}M   SE $${(se / M).toFixed(2)}M, t = ${(mean(dSur) / se).toFixed(1)}`);
-console.log(`    placeholder cost, NOT CHARGED $${(cost / M).toFixed(2)}M`);
-console.log(`    keep / cost ${(tot.k / cost).toFixed(2)}x    year-${YEARS} surplus / cost ${(mean(dSur) / cost).toFixed(2)}x    `
-  + `surplus net of cost ${((mean(dSur) - cost) / M).toFixed(2)}M`);
+console.log(`    charged, as the engine moved it $${(cost / M).toFixed(2)}M   (flat $${WC_SAFETY_RTW_ANNUAL_COST / M}M x ${YEARS})`);
+console.log(`    year-${YEARS} surplus, NET of charge  ${mean(dSur) >= 0 ? '+' : '-'}$${(Math.abs(mean(dSur)) / M).toFixed(2)}M   SE $${(se / M).toFixed(2)}M, t = ${(mean(dSur) / se).toFixed(1)}`);
+console.log(`    keep / charge ${(tot.k / cost).toFixed(2)}x  (full claim life, ultimate basis)`);
+console.log(`    AGAINST THE PRE-CHARGE ARITHMETIC (+$4.53M gross - $5.00M = -$0.47M):`);
+console.log(`      engine net ${(mean(dSur) / M).toFixed(2)}M, arithmetic ${(PRE_CHARGE_ARITHMETIC / M).toFixed(2)}M, `
+  + `difference ${((mean(dSur) - PRE_CHARGE_ARITHMETIC) / M).toFixed(2)}M — `
+  + `the investment income the spent money no longer earns, plus whatever the charge moves downstream`);
 console.log('\nREADING ONLY — no pass condition.');

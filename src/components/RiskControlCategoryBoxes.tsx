@@ -82,7 +82,7 @@ import {
   type RiskControlCategory,
 } from '../data/riskControlCategories';
 import {
-  BUYABLE_PROGRAM_IDS, GL_ANALYTICS_BUILD_YEARS, glAnalyticsStanding, type ProgramStanding,
+  BUYABLE_PROGRAM_IDS, standingFor, type ProgramStanding,
 } from '../utils/riskControlPrograms';
 import { formatCurrency } from '../utils/formatters';
 import type { CoverageLine } from '../types/simulation';
@@ -95,7 +95,10 @@ const WIRED = new Set<string>(BUYABLE_PROGRAM_IDS);
 function standingLabel(st: ProgramStanding): string {
   if (!st.committed) return st.benefitFraction > 0 ? 'Lapsing' : 'Not active';
   if (st.maintaining) return 'Maintained';
-  return `Year ${st.tenure} of ${GL_ANALYTICS_BUILD_YEARS}`;
+  // Past its term a program that is still funded is simply continuing — WC's
+  // flat cost has no maintenance tier to name (GL's reaches 'Maintained' first).
+  if (st.tenure > st.termYears) return 'Continuing';
+  return `Year ${st.tenure} of ${st.termYears}`;
 }
 
 const SCOPE_STYLE: Record<string, string> = {
@@ -105,11 +108,18 @@ const SCOPE_STYLE: Record<string, string> = {
   Pool: 'bg-gray-200 text-gray-600',
 };
 
-// ⚠ ONE TILE IS A BUTTON AND FOUR ARE STILL DIVS, AND THE SPLIT IS THE POINT.
+// ⚠ TWO TILES ARE BUTTONS AND THREE ARE STILL DIVS, AND THE SPLIT IS THE POINT.
 // The header above says an inert button is a lie about interactivity. That
-// argument has not changed — it has simply stopped applying to ONE tile. The
-// four unwired programs stay divs because they still do nothing; the moment any
-// of them is wired it becomes a button by the same rule.
+// argument has not changed — it has simply stopped applying to the two programs
+// that are BUYABLE (GL's analytics and WC's safety & return-to-work; each shows
+// only in a pool writing its line). The other three stay divs because they still
+// do nothing; the moment one has a standing and a charge it becomes a button by
+// the same rule.
+//
+// ⚠ "Safety & Return-to-Work" was checked against the drivers' button queries
+// the way "Law Enforcement Analytics" was: none is unanchored on a string it
+// contains — /Workers' Compensation|General Liability|^Property$/, /Lock Year/,
+// /Start/i, /Decline/i, 'Start Simulation'.
 //
 // ⚠ THE ACCESSIBLE NAME IS THE PROGRAM'S TILE NAME AND NOTHING ELSE, which is
 // what keeps it out of the drivers' way. Two session drivers query this page by
@@ -182,7 +192,17 @@ export default function RiskControlCategoryBoxes({
   // the page is exactly the failure the shared helper prevents.
   const shown = availableCategories(activeLines);
   const live = programIds !== undefined && onProgramsChange !== undefined;
-  const standing = live ? glAnalyticsStanding(programIds, priorProgramIds ?? []) : undefined;
+  // ⚠ EACH TILE'S OWN STANDING. This read glAnalyticsStanding once and handed it
+  // to every buyable tile, which was correct while GL was the only one and would
+  // have put GL's tenure and charge on WC's tile — see BUYABLE_PROGRAM_IDS.
+  const standings = new Map<string, ProgramStanding>();
+  if (live) {
+    for (const c of shown) {
+      if (!WIRED.has(c.id)) continue;
+      const st = standingFor(c.id, programIds, priorProgramIds ?? []);
+      if (st) standings.set(c.id, st);
+    }
+  }
 
   const toggle = (id: string) => {
     if (!live || !onProgramsChange) return;
@@ -193,7 +213,9 @@ export default function RiskControlCategoryBoxes({
 
   // What the pool is actually committed to THIS year, which is not the same as
   // what the menu would cost — see the two lines below the grid.
-  const committedCost = standing?.committed ? standing.annualCost : 0;
+  const committedCost = [...standings.values()].reduce((s, st) => s + (st.committed ? st.annualCost : 0), 0);
+  // The caption names what is buyable in THIS pool — the grid is gated by line.
+  const buyableNames = shown.filter(c => standings.has(c.id)).map(c => c.tileName);
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-3 space-y-2">
@@ -203,12 +225,13 @@ export default function RiskControlCategoryBoxes({
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-1.5">
         {shown.map(c => {
-          const wired = live && WIRED.has(c.id);
+          const st = standings.get(c.id);
+          const wired = st !== undefined;
           return (
             <CategoryTile
               key={c.id}
               c={c}
-              standing={wired ? standing : undefined}
+              standing={st}
               onToggle={wired ? () => toggle(c.id) : undefined}
               disabled={disabled}
             />
@@ -242,7 +265,9 @@ export default function RiskControlCategoryBoxes({
             pool is shown THREE tiles and a sentence naming four contradicts the
             screen it sits under. Caught by reading the rendered card on a
             GL-only pool, where it said "the other four" beside two of them. */}
-        {live ? ' Law Enforcement Analytics is live; the others are not yet buyable.' : ''}
+        {live && buyableNames.length > 0
+          ? ` ${buyableNames.join(' and ')} ${buyableNames.length === 1 ? 'is' : 'are'} live; the others are not yet buyable.`
+          : ''}
       </p>
     </div>
   );

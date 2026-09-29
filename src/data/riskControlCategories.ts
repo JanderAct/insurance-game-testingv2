@@ -28,7 +28,7 @@
 // claims-management-system and member-services reach nothing;
 // WIRED_PROGRAM_IDS in riskControlPrograms.ts is the list that decides, and it
 // has two entries. Which of those a player can COMMIT from a tile is a separate
-// list, BUYABLE_PROGRAM_IDS, and it has one: GL. WC has no cost or standing yet.
+// list, BUYABLE_PROGRAM_IDS; it has both, each with its own standing and charge.
 //
 // The older pool-wide control, SLIDER_RANGES.riskControlPct, still exists and is
 // still pinned at 0 with no UI behind it. It reaches the draw by a DIFFERENT
@@ -187,13 +187,18 @@ export interface RiskControlCategory {
  * are at WC_RTW_TARGET_REDUCTION in riskControlPrograms.ts. The GL program was
  * measured against it too (0.28x, gl-program-value.ts).
  *
- * ⚠ WHAT IS CHARGED, AS OF THE MERGE OF THE WC PROGRAM INTO RISK-CONTROL. GL IS:
- * it has its own cost shape — GL_ANALYTICS_BUILD_ANNUAL_COST for three years,
- * then GL_ANALYTICS_MAINTENANCE_ANNUAL_COST — which happens to equal this
- * constant in the build years but does not read it. WC IS NOT: programAnnualCost
- * returns 0 for it, and it is not buyable from a tile (BUYABLE_PROGRAM_IDS). The
- * WC figures above are therefore gross of cost, and the comparison with $5.00M
- * is arithmetic in wc-program-value.ts, not money the engine moved.
+ * ⚠ WHAT IS CHARGED. BOTH ARE, EACH WITH ITS OWN CONSTANT, AND NEITHER READS
+ * THIS ONE. GL: GL_ANALYTICS_BUILD_ANNUAL_COST for three years, then
+ * GL_ANALYTICS_MAINTENANCE_ANNUAL_COST. WC: WC_SAFETY_RTW_ANNUAL_COST, flat,
+ * every committed year — people, not a platform, so no maintenance tier. Both
+ * equal $1M today because both were sized against this placeholder, and both
+ * are equally without a basis.
+ *
+ * ⚠ THE WC FIGURES ABOVE ARE THE GROSS ARITHMETIC. With the charge wired the
+ * engine's own five-year net is -$1.01M, not -$0.47M: the spent money stops
+ * earning investment income. On that figure the program is clearly behind at
+ * year 5, and break-even needs a cost near $0.8M/yr (estimated). See
+ * WC_RTW_TARGET_REDUCTION for the table.
  */
 export const RISK_CONTROL_PLACEHOLDER_ANNUAL_COST = 1_000_000;
 
@@ -284,11 +289,10 @@ export function availableCategories(
  * this figure.
  *
  * ⚠ THIS NOTE USED TO SAY THE TILES WERE INERT AND NOTHING WAS CHARGED, and both
- * went stale when the GL program became buyable and charged: its tile is a
- * button and its cost leaves cash and underwriting income. The WC program's
- * benefit is live in the engine but it is neither buyable nor charged — see
- * BUYABLE_PROGRAM_IDS — so no played game can reach it for free. Its spend is
- * the next commit in this area.
+ * went stale when the GL program became buyable and charged. The WC program is
+ * now buyable and charged the same way: both tiles are buttons in a pool that
+ * writes their line, and both costs leave cash and underwriting income. No
+ * program anywhere delivers a benefit it does not pay for.
  */
 export function totalAnnualCost(activeLines: readonly CoverageLine[]): number {
   return availableCategories(activeLines).length * RISK_CONTROL_PLACEHOLDER_ANNUAL_COST;
