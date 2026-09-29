@@ -77,6 +77,12 @@ export interface LineYearGenerationBase {
    * records the rule and the two ways sharing one record goes wrong.
    */
   programFreqMultiplier: number;
+  /**
+   * This line's RETURN-TO-WORK conversion rate, 0 when none applies. WC only;
+   * the other two generators do not read it. Same separate-channel rule as the
+   * frequency multiplier above.
+   */
+  programRtwConversion: number;
 }
 
 export interface LineYearGenerationOutput {
@@ -111,6 +117,8 @@ export function wcGenerationInputs(b: LineYearGenerationBase): WcGenerationInput
     instanceSeed: b.instanceSeed, kLine: b.k, riskControlEffectiveness: b.riskControlEffectiveness,
     componentFreqMultipliers: b.shock?.componentFreqMultipliers,
     injections: b.shock?.injections,
+    programFreqMultiplier: b.programFreqMultiplier,
+    programRtwConversion: b.programRtwConversion,
   };
 }
 

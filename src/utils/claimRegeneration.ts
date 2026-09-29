@@ -133,5 +133,6 @@ export function regenerateLineYearClaims(
     // exactly. Defaulting a field whose absence is unambiguous is not the same
     // act as defaulting one whose absence is not.
     programFreqMultiplier: lr.programFreqApplied ?? 1,
+    programRtwConversion: lr.programRtwApplied ?? 0,
   });
 }

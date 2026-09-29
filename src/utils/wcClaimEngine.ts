@@ -30,6 +30,10 @@
 //    loss trend. Keeping them one-sided is what makes risk control and risk
 //    quality genuinely move the loss ratio.
 //
+//    The WC RISK CONTROL PROGRAM's two levers — programFreqMultiplier and
+//    programRtwConversion — are draw-only for the same reason, and are absent
+//    from k_line too: they are the pool's purchase, not the book's mix.
+//
 //    ⚠ THE TILT IS NOT ABSENT FROM k_line. k_line's job is to normalise the
 //    book's risk-quality MIX, so it must see every channel RQ acts on or the
 //    held pure premium drifts as the roster changes. That is why there are TWO
@@ -86,6 +90,7 @@ import {
   type WcRatingGroup,
 } from '../data/defaultAssumptions';
 import { shockFactorFor } from './shockEffects';
+import { WC_RTW_CONVERSION_CEILING, WC_RTW_LOST_TIME_COMPONENTS } from './riskControlPrograms';
 
 // WC'S OWN SHARED YEAR FACTOR. One Gamma(shape, 1/shape) draw per year, mean
 // exactly 1, multiplying every WC member's arrival rate — see
@@ -545,6 +550,17 @@ export interface WcGenerationInputs {
   // Current-horizon shock multipliers on a COMPONENT'S ARRIVAL RATE. Keys are
   // component names ('large', ...) or '*' for every component. DRAW ONLY.
   componentFreqMultipliers?: Record<string, number>;
+  // RISK CONTROL PROGRAM channels — see riskControlPrograms.ts. DRAW ONLY, and
+  // deliberately NOT fields of the shock record: the marketplace call passes
+  // componentFreqMultipliers and must never receive either of these. Absent
+  // reads as no program (1 and 0), which is what every caller that predates
+  // them means.
+  //
+  // The SAFETY lever: a scalar on every component's arrival rate.
+  programFreqMultiplier?: number;
+  // The RETURN-TO-WORK lever: the probability an eligible lost-time claim
+  // converts to medical-only. Applied AFTER the draw — see below.
+  programRtwConversion?: number;
 }
 
 export interface WcGenerationResult {
@@ -573,6 +589,9 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
 
   const trend = wcFrequencyTrend(yearNumber);
   const rcFactor = Math.max(0, 1 - riskControlEffectiveness);
+  // The safety lever. Composes with a shock multiplicatively and independently,
+  // exactly as GL's program does.
+  const programMult = Math.max(0, inputs.programFreqMultiplier ?? 1);
 
   const claims: Claim[] = [];
   const occurrences: Occurrence[] = [];
@@ -666,7 +685,7 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
       // does not read it and the ruling at WC_LOSS_MODEL.poolYearFactor that
       // decoupled the lines stands. gYear is WC's own stream.
       const epsilon = freqRng.gamma(params.memberFrequencyNoise.shape, params.memberFrequencyNoise.scale);
-      const lambda = payroll * g.ratePer1M * thetaWc(rq) * kLine * trend * epsilon * gYear * rcFactor;
+      const lambda = payroll * g.ratePer1M * thetaWc(rq) * kLine * trend * epsilon * gYear * rcFactor * programMult;
       const weights = tiltedWeights(group, rq, params);
 
       // ⚠ POISSON THINNING: one Poisson draw PER COMPONENT at rate
@@ -743,6 +762,54 @@ export function generateWcClaims(inputs: WcGenerationInputs): WcGenerationResult
       // there is nothing deferred to exclude and nothing emerging to add later.
       simulatedLoss: reportedThisYear,
     });
+  }
+
+  // --- the return-to-work lever: CONVERSION, after the draw ------------------
+  //
+  // A lost-time claim under the ceiling becomes medical-only with probability
+  // `conversion`: its amount is re-drawn from `small` and its component label
+  // becomes `small`. Count, id and occurrence are unchanged — one for one.
+  //
+  // ⚠ AFTER THE PER-MEMBER LOOP, NOT INSIDE IT, AND ON ITS OWN LABELLED STREAM.
+  // The ceiling needs the drawn amount, so this cannot be a rate on lambda; and
+  // it must not consume from wc_freq/wc_sev, or every later draw for that member
+  // would re-phase. Each claim gets its own sub-stream keyed on its id
+  // ('wc_rtw:<id>'), so the natural register is bit-identical whether or not a
+  // program runs, and whether one claim converts cannot move another.
+  //
+  // ⚠ INJECTED CLAIMS ARE NEVER ELIGIBLE. They carry an instructor's explicit
+  // amount and are emitted below, after this pass.
+  const conversion = Math.max(0, Math.min(1, inputs.programRtwConversion ?? 0));
+  if (conversion > 0) {
+    const small = WC_SEVERITY_COMPONENTS.small;
+    const primaryDelta = new Map<string, number>();
+    const lossDelta = new Map<string, number>();
+    for (const c of claims) {
+      if (!WC_RTW_LOST_TIME_COMPONENTS.includes(c.tier)) continue;
+      if (!(c.grossUltimate < WC_RTW_CONVERSION_CEILING)) continue;
+      const rtwRng = deriveSubRng(instanceSeed, yearNumber, `wc_rtw:${c.id}`);
+      if (rtwRng.next() >= conversion) continue;
+      const amount = Math.min(
+        rtwRng.lognormal(trendedMu(small.mu, yearNumber), small.sigma),
+        wcSeverityCap(yearNumber));
+      claimCountsByComponent[c.tier] -= 1;
+      claimCountsByComponent.small += 1;
+      lossDelta.set(c.memberId, (lossDelta.get(c.memberId) ?? 0) + amount - c.grossUltimate);
+      primaryDelta.set(c.memberId, (primaryDelta.get(c.memberId) ?? 0)
+        + Math.min(amount, EXPERIENCE_SPLIT_POINT) - Math.min(c.grossUltimate, EXPERIENCE_SPLIT_POINT));
+      c.tier = 'small';
+      c.grossUltimate = amount;
+      c.caseReserve = amount;
+    }
+    // The member rows were written from the unconverted claims; restate them
+    // from the same claims, so simulatedLoss and primaryLoss stay the sums of
+    // what this member's claims now are.
+    for (const r of memberLossResults) {
+      const dl = lossDelta.get(r.memberId);
+      if (dl) r.simulatedLoss += dl;
+      const dp = primaryDelta.get(r.memberId);
+      if (dp) r.primaryLoss += dp;
+    }
   }
 
   // --- shock injections ---------------------------------------------------------

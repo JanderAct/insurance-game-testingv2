@@ -42,7 +42,7 @@ import { experienceRatePer100, type ExperienceBasis } from './experienceRating';
 import { projectPricingTriangle, windowRows } from './pricingTriangle';
 import { developmentDrift, initialEstimate } from './claimTriangle';
 import { poolYearFactor, wcGenerationInputs, glGenerationInputs, propertyGenerationInputs } from './claimGeneration';
-import { programFreqMultiplier } from './riskControlPrograms';
+import { programFreqMultiplier, programRtwConversion } from './riskControlPrograms';
 import {
   aggregateRecovery,
   cedeOccurrences,
@@ -512,6 +512,10 @@ interface LineYearContext {
   // riskControlPrograms.ts. The marketplace draw takes `shock` and must not take
   // this.
   programFreqMultiplier: number;
+  // The RETURN-TO-WORK conversion rate, 0 when none applies. WC only. Computed
+  // beside the multiplier above and for the same reason; the same separate-
+  // channel rule applies.
+  programRtwConversion: number;
   cash: number;
   investments: number;
   assetAllocation: AssetAllocation;
@@ -1274,6 +1278,7 @@ export function processLineYear(
       members: enrolledMembers, yearNumber, calendarYear, instanceSeed: instance.seed,
       k: kLine, riskControlEffectiveness: newRCEffectiveness, gPool: ctx.gPool, shock: ctx.shock,
       programFreqMultiplier: ctx.programFreqMultiplier,
+      programRtwConversion: ctx.programRtwConversion,
     }));
     // PROSPECTS: the rest of the 200-member marketplace, generated at kLine = 1
     // and rc = 0. See the marketplaceProspects note above for why those two are
@@ -1350,6 +1355,7 @@ export function processLineYear(
       members: enrolledMembers, yearNumber, calendarYear, instanceSeed: instance.seed,
       k: kGl, riskControlEffectiveness: newRCEffectiveness, gPool: ctx.gPool, shock: ctx.shock,
       programFreqMultiplier: ctx.programFreqMultiplier,
+      programRtwConversion: ctx.programRtwConversion,
     }));
     // PROSPECTS at kGl = 1, rc = 0 — see the marketplaceProspects note above.
     const prospectGenerated = marketplaceProspects.length > 0
@@ -1421,6 +1427,7 @@ export function processLineYear(
       members: enrolledMembers, yearNumber, calendarYear, instanceSeed: instance.seed,
       k: kPr, riskControlEffectiveness: newRCEffectiveness, gPool: ctx.gPool, shock: ctx.shock,
       programFreqMultiplier: ctx.programFreqMultiplier,
+      programRtwConversion: ctx.programRtwConversion,
     }));
     generatedClaims = generated.claims;
     generatedOccurrences = generated.occurrences;
@@ -2183,6 +2190,7 @@ export function processLineYear(
     kLineApplied,
     rcEffectivenessApplied: newRCEffectiveness,
     programFreqApplied: ctx.programFreqMultiplier,
+    programRtwApplied: ctx.programRtwConversion,
     memberLossResults,
     memberPremiumShares,
     aggregateMemberLoss,
@@ -2605,6 +2613,7 @@ export function processYear(
       shock: shocks?.byLine[line],
       shockFirings: shocks?.firings.filter(f => f.linesAffected.includes(line)),
       programFreqMultiplier: programFreqMultiplier(line, decisions.riskControlProgramIds, priorProgramIds),
+      programRtwConversion: programRtwConversion(line, decisions.riskControlProgramIds, priorProgramIds),
       cash: poolState.cash * share,
       investments: lineState.investedAssets,
       assetAllocation: lineDecisions.assetAllocation,

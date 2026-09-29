@@ -1,10 +1,11 @@
 // ============================================================================
 // RISK CONTROL, AS FIVE CATEGORIES INSTEAD OF ONE INTENSITY DIAL.
 //
-// ⚠ ONE OF THE FIVE NOW REACHES THE ENGINE. THIS FILE IS NO LONGER INERT.
+// ⚠ TWO OF THE FIVE NOW REACH THE ENGINE. THIS FILE IS NO LONGER INERT.
 //
 // `gl-law-enforcement-analytics` reduces GL CLAIM FREQUENCY on a three-year
-// ramp. The mechanism, the magnitude and the rule for composing with a shock
+// ramp, and `wc-safety-rtw` cuts WC frequency and converts lost-time WC claims
+// to medical-only. The mechanisms, the magnitude and the rule for composing with a shock
 // live in src/utils/riskControlPrograms.ts; this file still holds only the
 // DESCRIPTION — id, name, scope, term, benefit shape — and the engine reads the
 // program by id rather than reading these fields.
@@ -17,10 +18,16 @@
 // the engine DOES. If that ever becomes confusing enough to matter, the fix is
 // to derive one from the other — not to duplicate the numbers into this file.
 //
-// THE OTHER FOUR ARE STILL DESCRIPTION ONLY. wc-safety-rtw, property-mitigation,
+// ⚠ AND THE WC ENTRY'S `benefit: 'immediate'` IS NOW ONLY HALF TRUE. Both of
+// its levers act from year one, which is what the label says — but safety
+// ramps 25/60/100 and RTW 75/100/100. Left as `immediate` because changing it
+// changes the department page's text, which this engine change must not do;
+// see riskControlPrograms.ts for the real schedule.
+//
+// THE OTHER THREE ARE STILL DESCRIPTION ONLY. property-mitigation,
 // claims-management-system and member-services reach nothing;
 // WIRED_PROGRAM_IDS in riskControlPrograms.ts is the list that decides, and it
-// has one entry.
+// has two entries.
 //
 // The older pool-wide control, SLIDER_RANGES.riskControlPct, still exists and is
 // still pinned at 0 with no UI behind it. It reaches the draw by a DIFFERENT
@@ -168,6 +175,17 @@ export interface RiskControlCategory {
  * WHAT REPLACES IT: per-program costs in dollars, with the flat-versus-scaling
  * question settled per program and each figure's basis recorded at the entry.
  * Until then, five identical numbers.
+ *
+ * ⚠ AND THE WC PROGRAM IS SIZED AGAINST IT, SO MOVING IT MOVES A DECISION. The
+ * WC safety & RTW program returns +$4.53M of surplus over five years against
+ * this constant's $5.00M — 2.3 standard errors behind — and $9.15M over the
+ * claims' full life. Behind in game and ahead after is deliberate; it is what
+ * makes committing to it a judgement. A cost near $0.9M/yr breaks it even at
+ * year 5, so a replacement figure below that turns the program into an obvious
+ * yes and one well above it into an obvious no. The measurement and the table
+ * are at WC_RTW_TARGET_REDUCTION in riskControlPrograms.ts. The GL program was
+ * measured against it too (0.28x, gl-program-value.ts). NEITHER IS CHARGED:
+ * nothing in the engine spends this money yet.
  */
 export const RISK_CONTROL_PLACEHOLDER_ANNUAL_COST = 1_000_000;
 
@@ -256,7 +274,7 @@ export function availableCategories(
  * ⚠ AND IT IS WHAT SELECTING THEM WOULD COST, NOT A SPEND THAT HAPPENS. STILL
  * TRUE, AND NOW IT IS THE ASYMMETRY THAT MATTERS. The tiles are still inert and
  * riskControlPct is still pinned at 0, so the pool's actual risk-control spend
- * is zero — but the GL analytics program's BENEFIT is now live (see
+ * is zero — but the GL and WC programs' BENEFITS are now live (see
  * riskControlPrograms.ts). A committed program therefore delivers a real
  * reduction and is charged nothing.
  *
