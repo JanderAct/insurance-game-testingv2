@@ -1,10 +1,11 @@
 // ============================================================================
 // RISK CONTROL, AS FIVE CATEGORIES INSTEAD OF ONE INTENSITY DIAL.
 //
-// ⚠ ONE OF THE FIVE NOW REACHES THE ENGINE. THIS FILE IS NO LONGER INERT.
+// ⚠ TWO OF THE FIVE NOW REACH THE ENGINE. THIS FILE IS NO LONGER INERT.
 //
 // `gl-law-enforcement-analytics` reduces GL CLAIM FREQUENCY on a three-year
-// ramp. The mechanism, the magnitude and the rule for composing with a shock
+// ramp, and `wc-safety-rtw` cuts WC frequency and converts lost-time WC claims
+// to medical-only. The mechanisms, the magnitude and the rule for composing with a shock
 // live in src/utils/riskControlPrograms.ts; this file still holds only the
 // DESCRIPTION — id, name, scope, term, benefit shape — and the engine reads the
 // program by id rather than reading these fields.
@@ -17,10 +18,17 @@
 // the engine DOES. If that ever becomes confusing enough to matter, the fix is
 // to derive one from the other — not to duplicate the numbers into this file.
 //
-// THE OTHER FOUR ARE STILL DESCRIPTION ONLY. wc-safety-rtw, property-mitigation,
+// ⚠ AND THE WC ENTRY'S `benefit: 'immediate'` IS NOW ONLY HALF TRUE. Both of
+// its levers act from year one, which is what the label says — but safety
+// ramps 25/60/100 and RTW 75/100/100. Left as `immediate` because changing it
+// changes the department page's text, which this engine change must not do;
+// see riskControlPrograms.ts for the real schedule.
+//
+// THE OTHER THREE ARE STILL DESCRIPTION ONLY. property-mitigation,
 // claims-management-system and member-services reach nothing;
 // WIRED_PROGRAM_IDS in riskControlPrograms.ts is the list that decides, and it
-// has one entry.
+// has two entries. Which of those a player can COMMIT from a tile is a separate
+// list, BUYABLE_PROGRAM_IDS, and it has one: GL. WC has no cost or standing yet.
 //
 // The older pool-wide control, SLIDER_RANGES.riskControlPct, still exists and is
 // still pinned at 0 with no UI behind it. It reaches the draw by a DIFFERENT
@@ -168,6 +176,24 @@ export interface RiskControlCategory {
  * WHAT REPLACES IT: per-program costs in dollars, with the flat-versus-scaling
  * question settled per program and each figure's basis recorded at the entry.
  * Until then, five identical numbers.
+ *
+ * ⚠ AND THE WC PROGRAM IS SIZED AGAINST IT, SO MOVING IT MOVES A DECISION. The
+ * WC safety & RTW program returns +$4.53M of surplus over five years against
+ * this constant's $5.00M — 2.3 standard errors behind — and $9.15M over the
+ * claims' full life. Behind in game and ahead after is deliberate; it is what
+ * makes committing to it a judgement. A cost near $0.9M/yr breaks it even at
+ * year 5, so a replacement figure below that turns the program into an obvious
+ * yes and one well above it into an obvious no. The measurement and the table
+ * are at WC_RTW_TARGET_REDUCTION in riskControlPrograms.ts. The GL program was
+ * measured against it too (0.28x, gl-program-value.ts).
+ *
+ * ⚠ WHAT IS CHARGED, AS OF THE MERGE OF THE WC PROGRAM INTO RISK-CONTROL. GL IS:
+ * it has its own cost shape — GL_ANALYTICS_BUILD_ANNUAL_COST for three years,
+ * then GL_ANALYTICS_MAINTENANCE_ANNUAL_COST — which happens to equal this
+ * constant in the build years but does not read it. WC IS NOT: programAnnualCost
+ * returns 0 for it, and it is not buyable from a tile (BUYABLE_PROGRAM_IDS). The
+ * WC figures above are therefore gross of cost, and the comparison with $5.00M
+ * is arithmetic in wc-program-value.ts, not money the engine moved.
  */
 export const RISK_CONTROL_PLACEHOLDER_ANNUAL_COST = 1_000_000;
 
@@ -253,19 +279,16 @@ export function availableCategories(
  * programs, so its total is $3M, not $5M. Reading the ungated five would
  * overstate the number for every pool that is not writing all three lines.
  *
- * ⚠ AND IT IS WHAT SELECTING THEM WOULD COST, NOT A SPEND THAT HAPPENS. STILL
- * TRUE, AND NOW IT IS THE ASYMMETRY THAT MATTERS. The tiles are still inert and
- * riskControlPct is still pinned at 0, so the pool's actual risk-control spend
- * is zero — but the GL analytics program's BENEFIT is now live (see
- * riskControlPrograms.ts). A committed program therefore delivers a real
- * reduction and is charged nothing.
+ * ⚠ AND IT IS WHAT SELECTING THEM WOULD COST, NOT A SPEND THAT HAPPENS. The
+ * spend a pool actually incurs is programAnnualCost, per line, and it is not
+ * this figure.
  *
- * ⚠ THAT MAKES IT A BUTTON RATHER THAN A DECISION UNTIL THE SPEND IS WIRED, and
- * it is said here rather than left for someone to discover from a suspiciously
- * good result. Nothing in the shipped game commits a program —
- * defaultDecisionSet commits none and there is no control that sets one — so no
- * played game can reach the free benefit today. The next commit in this area is
- * the spend, not another program.
+ * ⚠ THIS NOTE USED TO SAY THE TILES WERE INERT AND NOTHING WAS CHARGED, and both
+ * went stale when the GL program became buyable and charged: its tile is a
+ * button and its cost leaves cash and underwriting income. The WC program's
+ * benefit is live in the engine but it is neither buyable nor charged — see
+ * BUYABLE_PROGRAM_IDS — so no played game can reach it for free. Its spend is
+ * the next commit in this area.
  */
 export function totalAnnualCost(activeLines: readonly CoverageLine[]): number {
   return availableCategories(activeLines).length * RISK_CONTROL_PLACEHOLDER_ANNUAL_COST;

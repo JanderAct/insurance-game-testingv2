@@ -82,12 +82,14 @@ import {
   type RiskControlCategory,
 } from '../data/riskControlCategories';
 import {
-  WIRED_PROGRAM_IDS, GL_ANALYTICS_BUILD_YEARS, glAnalyticsStanding, type ProgramStanding,
+  BUYABLE_PROGRAM_IDS, GL_ANALYTICS_BUILD_YEARS, glAnalyticsStanding, type ProgramStanding,
 } from '../utils/riskControlPrograms';
 import { formatCurrency } from '../utils/formatters';
 import type { CoverageLine } from '../types/simulation';
 
-const WIRED = new Set<string>(WIRED_PROGRAM_IDS);
+// BUYABLE, not WIRED: a tile shows GL's standing and charge, so only programs
+// that have their own may become buttons — see BUYABLE_PROGRAM_IDS.
+const WIRED = new Set<string>(BUYABLE_PROGRAM_IDS);
 
 /** The status slot's words, for a program that is wired. */
 function standingLabel(st: ProgramStanding): string {

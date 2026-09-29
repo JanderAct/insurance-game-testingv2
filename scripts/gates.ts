@@ -143,6 +143,7 @@ const FAST: string[] = [
   'value-identity-check',            //   3s
   'wc-cap-check',                    //   4s
   'wc-cutover-check',                //   6s   PROMOTED at this commit
+  'wc-program-check',                //  12s   the WC safety & RTW program reaches WC's draw and nothing else
   'wc-severity-rebuild-check',       //   3s
 ];
 
@@ -263,6 +264,8 @@ const SLOW: string[] = [
   // MUTATED SATISFACTION weights, so reusing it would silently change what is
   // measured. Checked before this move, not assumed.
   'member-satisfaction-check',       //   90s
+  'wc-program-verify',               //  69s   a SECOND instrument for wc-program-check's claims, plus BOTH programs at once — different
+                                     //         seeds, deep Object.is; slow because it duplicates a FAST gate's coverage
 ];
 
 // ============================================================================
@@ -310,6 +313,7 @@ const PROBES: Record<string, string> = {
   'renewal-threshold-derive': 'the experience-ratio distribution the renewal threshold sits on, and what each candidate would decline per line-year. The record for why RENEWAL_THRESHOLDS is 2.50 on the ratio rather than 1.10 on the modifier [330s]',
   'development-cession-size': 'the cession rate by allocation rule; the calibration table [20s]',
   'basis-cross-check': "every quantity two or more places in the tree compute, on ONE sample, printed side by side with the basis named. ASSERTS NOTHING and must not: a tolerance would make it another gate with its own basis, which is the failure it exists to catch. Built after three green-but-mismatched results in one day — a ceded share reading 5.6% to 77.2% depending on which pairing you write, and triangle-check's 2.140 against terminal-severity-check's 2.29 [4s]",
+  'wc-program-value': "what the WC safety & return-to-work program is worth — each lever alone at full effect on the enrolled book (where WC_RTW_CONVERSION_RATE is solved and the RTW tower share is read), then both levers on their ramps paired over five years, on the ultimate basis. A READING with no pass condition; the cost is not charged [65s at GAMES=96]",
   'gl-program-value': "what the GL analytics program is worth against its $1,000,000 placeholder cost — paired on seeds, program on against program off. A READING with no pass condition: whether a program is worth buying is a judgement, and the confinement claims are asserted by gl-program-check instead [150s]",
   'open-share-derive': "derives TRIANGLE_OPEN_SHARE and asserts the identity that justifies it — cohort compounding against the per-claim mean-of-products, 0.9966 / 1.0000 / 1.0000. A GENERATOR, but one that exits non-zero if the curve stops reproducing the per-claim clock [25s]",
   'forward-booking-climb-report': "the climb against the development a cohort SHOULD have received by its age — the acceptance instrument for every forward-booking attempt, replacing a 3-observation statistic with an all-observation one. A READING with no threshold: the mechanism it measures is not built. Prints its own per-game sd and required sample every run. GAMES=112 resolves GL to +/-0.02 and costs ~4.5 min; the 24-game default costs 57s [57s]",

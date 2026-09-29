@@ -1224,6 +1224,11 @@ export interface ResultSet {
   // rcEffectiveness had a live slider behind it, so an absent value there could
   // have been anything and defaulting would have fabricated a register.
   programFreqApplied?: number;
+  // The RETURN-TO-WORK conversion rate this line-year was drawn with, 0 when no
+  // program applied. WC only. Absent defaults to 0 for programFreqApplied's
+  // reason: a result written before the WC program existed was drawn without
+  // it, and 0 is the only value it could have had.
+  programRtwApplied?: number;
   // ENROLLED MEMBERS ONLY. This is the pool-accounting list: aggregateMemberLoss,
   // grossUltimateLoss, reserves and reinsurance all derive from it.
   memberLossResults: MemberLossResult[];

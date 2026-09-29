@@ -77,17 +77,26 @@ function play(g: number, lines: CoverageLine[], ids: (y: number) => string[]) {
       byLine: Record<string, {
         grossUltimateLoss: number; claimCount?: number; riskControlInvestment: number;
         endingSurplus: number;
-        marketMemberLossResults?: { actual: number }[];
+        memberLossResults?: { memberId: string; simulatedLoss: number }[];
+        marketMemberLossResults?: { memberId: string; simulatedLoss: number }[];
       }>;
     };
     const gross: Record<string, number> = {};
     for (const l of lines) gross[l] = r.byLine[l]?.grossUltimateLoss ?? 0;
-    const mk = r.byLine.GL?.marketMemberLossResults ?? [];
+    // ⚠ PROSPECTS ONLY, ON simulatedLoss — AND THIS WAS DEAD UNTIL THE WC MERGE.
+    // It summed `m.actual ?? 0`, and MemberLossResult has no `actual`, so every
+    // row read 0 and this assertion could never fail: the check that proves
+    // prospects never receive the program proved nothing. The market ledger is
+    // the enrolled rows followed by the prospects', so the enrolled part must be
+    // excluded — it moves with the program by design. Validated by handing the
+    // program to GL's prospect draw and watching it go red.
+    const enrolled = new Set((r.byLine.GL?.memberLossResults ?? []).map(m => m.memberId));
+    const mk = (r.byLine.GL?.marketMemberLossResults ?? []).filter(m => !enrolled.has(m.memberId));
     out.push({
       gross, claims: r.byLine.GL?.claimCount ?? 0,
       charge: r.byLine.GL?.riskControlInvestment ?? 0,
       surplus: r.byLine.GL?.endingSurplus ?? 0,
-      market: mk.reduce((s, m) => s + (m.actual ?? 0), 0),
+      market: mk.reduce((s, m) => s + m.simulatedLoss, 0),
     });
     gs = {
       ...gs, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result],
@@ -128,7 +137,7 @@ console.log('   3 consecutive -> 3, gap -> 2, uncommitted -> 0: OK');
 
 // --- 3. YEAR ONE IS BIT-IDENTICAL, AND OTHER LINES ALWAYS ARE ---------------
 console.log('\n--- 3. paired games, three lines: year 1 and the other two lines ---');
-let y1Checked = 0, otherChecked = 0;
+let y1Checked = 0, otherChecked = 0, prospectLoss = 0;
 for (let g = 0; g < GAMES; g++) {
   const off = play(g, ALL, never);
   const on = play(g, ALL, always);
@@ -148,6 +157,7 @@ for (let g = 0; g < GAMES; g++) {
   }
   // --- 4. MARKETPLACE ------------------------------------------------------
   for (let y = 0; y < YEARS; y++) {
+    prospectLoss += off[y].market;
     if (Math.abs(off[y].market - on[y].market) > CENT) {
       fail(`g${g} y${y + 1}: the MARKETPLACE loss ledger moved (${off[y].market} != ${on[y].market}) — `
         + 'a program the pool bought reached members who are not in it');
@@ -156,7 +166,8 @@ for (let g = 0; g < GAMES; g++) {
 }
 console.log(`   year-1 line-figures compared: ${y1Checked}, all identical`);
 console.log(`   WC/Property line-years compared: ${otherChecked}, all identical`);
-console.log('   marketplace ledger unchanged at every year: OK');
+console.log(`   marketplace ledger (prospects only) unchanged at every year; non-empty: ${prospectLoss > 0 ? 'yes' : 'NO'}`);
+ok(prospectLoss > 0, 'the GL prospect ledger summed to zero — the marketplace assertion would be vacuous');
 
 // --- 5. DIRECTION AND SIZE, ON CLAIM COUNT ---------------------------------
 //
