@@ -245,9 +245,15 @@ console.log('\n=== 6. LIVE GAME: ceded reconciles, and GL above-tower exceeds th
         `${note(above === 0 || wcTop >= REINSURANCE_TOWER.WC[2].limit - 1, 'WC retained above the tower while its top layer had unused limit')}`);
     }
   }
-  // Property now runs the SAME tower, one layer, $5M retention.
+  // Property runs the SAME tower machinery — TWO treaties now, per-risk $70M xs
+  // $5M and cat $462.5M xs $37.5M, each answering one kind of occurrence.
+  // ⚠ THIS ASSERTED `length === 1` UNTIL THE CAT BAND, and the declined arms
+  // below passed `[false]` — which, once the tower had two layers, was the WRONG
+  // LENGTH and normalizeLayersPlaced read it as "all placed". A one-element
+  // decline would have tested a fully-placed tower. Read from the tower now.
   const pr = locked[0].byLine.Property!;
-  console.log(`  Property is on the tower now: cededByLayer populated ${note(pr.cededByLayer.length === 1, 'Property has no tower layer')}` +
+  const PR_NONE = REINSURANCE_TOWER.Property.map(() => false);
+  console.log(`  Property is on the tower now: cededByLayer populated ${note(pr.cededByLayer.length === REINSURANCE_TOWER.Property.length, 'Property has no tower layer')}` +
     `, default decline of the aggregate ${note(pr.aggregateRecovery === 0 && pr.aggregatePremium === 0, 'Property aggregate fired on the default decision set')}` +
     `, reinsuranceCost ${fmt$(pr.reinsuranceCost)} from the occurrence layer (not REINSURANCE_PROGRAMS)`);
 
@@ -265,7 +271,7 @@ console.log('\n=== 6. LIVE GAME: ceded reconciles, and GL above-tower exceeds th
   // attachment. Every field with real economic weight (premium, cost,
   // recovery, net/gross loss, membership, surplus) was exactly unchanged.
   const declined = play('TOWERCHK-DECLINE', ['WC', 'GL', 'Property'], 5, d => ({
-    ...d, byLine: { ...d.byLine, Property: { ...d.byLine.Property, layersPlaced: [false], aggregateStopLevel: -1 } },
+    ...d, byLine: { ...d.byLine, Property: { ...d.byLine.Property, layersPlaced: PR_NONE, aggregateStopLevel: -1 } },
   }));
   // ⚠ `net === gross` WAS A PROXY FOR "NO CESSION" AND IT STOPPED BEING ONE.
   // netUltimateLoss is net of reinsurance AND of the booking markdown, and those
@@ -303,7 +309,7 @@ console.log('\n=== 6. LIVE GAME: ceded reconciles, and GL above-tower exceeds th
   // engine must price and pay NOTHING for it. If aggregatePremium is ever
   // non-zero here, the gate is not on the path the engine actually takes.
   const gated = play('TOWERCHK-AGGGATE', ['WC', 'GL', 'Property'], 5, d => ({
-    ...d, byLine: { ...d.byLine, Property: { ...d.byLine.Property, layersPlaced: [false], aggregateStopLevel: 1 } },
+    ...d, byLine: { ...d.byLine, Property: { ...d.byLine.Property, layersPlaced: PR_NONE, aggregateStopLevel: 1 } },
   }));
   let gateOk = true;
   for (const r of gated) {
@@ -316,7 +322,14 @@ console.log('\n=== 6. LIVE GAME: ceded reconciles, and GL above-tower exceeds th
   // same request goes through untouched. A gate that swallowed the aggregate
   // unconditionally would also pass the check above.
   console.log(`  with the layer PLACED the same level passes through: ` +
-    `${note(normalizeAggregateStopLevel('Property', [true], 1) === 1, 'the gate suppressed a legitimate aggregate')}`);
+    `${note(normalizeAggregateStopLevel('Property', [true, true], 1) === 1, 'the gate suppressed a legitimate aggregate')}`);
+  // ⚠ AND THE CAT LAYER ALONE DOES NOT ENABLE IT. It answers catastrophe
+  // occurrences only and caps no attritional claim, so per-risk declined + cat
+  // placed is the aggregate-only trap reached through a layer that never
+  // touches the claims the gate exists for. See normalizeAggregateStopLevel.
+  console.log(`  with ONLY the cat layer placed the aggregate stays gated: ` +
+    `${note(normalizeAggregateStopLevel('Property', [false, true], 1) === -1, 'the cat layer alone enabled the Property aggregate over uncapped attritional claims')}` +
+    `; per-risk alone passes: ${note(normalizeAggregateStopLevel('Property', [true, false], 1) === 1, 'the per-risk layer alone did not enable the aggregate')}`);
   // WC IS NOW GATED THE SAME WAY, one commit after Property so that commit's
   // line control stayed clean. Measured: all three layers declined, WC's
   // aggregate attaches at $19.17M with a $17.42M limit, so it tops out at

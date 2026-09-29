@@ -1,3 +1,19 @@
+> ⚠ **SUPERSEDED — A DIFFERENT, MINIMAL CAT BAND WAS BUILT.** This design (three peril
+> engines with hazard tables, drawn intensities, Beta within-event severity, a
+> two-region earthquake span and a $1B tower) was NOT built, and its figures are stale
+> on the roster, the tower and the bands. What shipped is one regional event process:
+> Poisson events, one region per event, each member in it hit with probability 0.075
+> for a fixed 0.35 x primaryAssetShare x TIV, one occurrence per event, a flat $37.5M
+> retention under a $500M ceiling, priced from the EXACT event distribution. See
+> PROPERTY_CAT_MODEL in src/data/defaultAssumptions.ts and src/utils/propertyCatastrophe.ts.
+>
+> The load went back in the same commit as the losses, as the note below required —
+> but DERIVED (0.0286 per $100, 12% of the full market's expected loss), not the
+> asserted 0.0247 recorded below. Kept for the vocabulary and the reasoning, NOT as a
+> description of the live model.
+>
+> *(The note that stood here before the build:)*
+>
 > ⚠ **STILL UNBUILT. THE CAT LOAD HAS BEEN PULLED FROM THE PRICE.** No cat band exists,
 > so Property no longer prices for one: the ASSERTED 0.0247 per $100 came out of
 > `PROPERTY_HELD_PURE_PREMIUM_PER_100` (0.1209 -> 0.0962) because it was collected with

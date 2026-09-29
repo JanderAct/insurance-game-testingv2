@@ -1042,8 +1042,14 @@ function TowerControls({
   return (
     <div className="space-y-3">
       <div>
+        {/* Property carries TWO retentions — $5M per risk, $37.5M per cat event
+            — because its two treaties answer different occurrences (see
+            TowerLayer.responds). A single "Retention $5M" would tell the player
+            a catastrophe is retained at $5M. */}
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-          Occurrence Layers — Retention ${layers[0].attachment / 1e6}M
+          {line === 'Property'
+            ? <>Occurrence Layers — Retention ${layers[0].attachment / 1e6}M per risk, ${(layers.find(l => l.responds === 'catastrophe')?.attachment ?? 0) / 1e6}M per catastrophe</>
+            : <>Occurrence Layers — Retention ${layers[0].attachment / 1e6}M</>}
         </p>
         <div className="space-y-1.5">
           {layers.map((l, i) => {
@@ -1163,13 +1169,17 @@ function TowerControls({
           {/* A disabled control with no reason reads as a bug. Say the reason —
               and WC's is worse than Property's, because WC severity has no
               cap at all, so it gets its own copy rather than sharing Property's. */}
+          {/* ⚠ "THE PER-RISK LAYER", NOT "EVERY LAYER": the cat layer does not cap
+              an ordinary claim, so placing it alone does not enable the
+              aggregate — see normalizeAggregateStopLevel. */}
           {!aggAvailable && line === 'Property' && (
             <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2.5 mt-2 leading-relaxed">
-              <strong>Unavailable while every occurrence layer is declined.</strong> The aggregate
-              protects <em>retained</em> loss and it has a limit. With no per-occurrence layer capping
+              <strong>Unavailable while the per-risk layer is declined.</strong> The aggregate
+              protects <em>retained</em> loss and it has a limit. With no per-risk layer capping
               each claim at the retention, one large claim can exceed the aggregate's
               attachment plus limit on its own, with nothing above it — so the cover would not
-              answer the exposure it is being bought against. Place a layer to enable it.
+              answer the exposure it is being bought against. The catastrophe layer does not cap
+              ordinary claims, so it does not enable it. Place the per-risk layer to enable it.
               Declining everything remains available: that is self-insurance, and it is a real choice.
             </p>
           )}
@@ -1215,10 +1225,10 @@ function TowerControls({
             />
           )}
           <DataRow label="Total Reinsurance Cost" value={`${formatCurrency(totalCost)}/yr`} />
-          {/* Property's "above tower" band is structurally ~0, not a market
-              retention like WC/GL's — TOWER_TOP.Property equals the severity
-              cap itself, so nothing the generator draws ever lands there. Still
-              shown for consistency; the number just reads near-zero. */}
+          {/* Property's "above tower" band is above the $500M cat ceiling —
+              reached only by a catastrophe bigger than the cat layer. It used
+              to be structurally zero, when TOWER_TOP.Property was the $75M
+              severity cap; the cat band made it a real, if rare, band. */}
           <DataRow label="Retained Above Tower" value={`Above ${TOWER_TOP[line] / 1e6}M — unlimited`} />
         </div>
       </div>

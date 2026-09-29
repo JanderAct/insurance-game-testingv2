@@ -139,7 +139,8 @@
 // ============================================================================
 
 import { REINSURANCE_TOWER, TOWER_TOP } from '../data/reinsuranceTower';
-import { cedeToLayer, normalizeLayersPlaced } from './reinsuranceTower';
+import { cedeToLayer, layerResponds, normalizeLayersPlaced } from './reinsuranceTower';
+import { CAT_BAND } from './propertyClaimEngine';
 import { MARKET_TARGET_LOSS_RATIO } from './marketConditions';
 import type {
   Claim, CoverageLine, MemberPremiumShare, MemberValueRow, PoolValueRow, PotTotals,
@@ -189,8 +190,13 @@ const ZERO: PotTotals = { retained: 0, tower: 0, aboveTower: 0, gross: 0 };
  * layer pays. A declined middle layer leaves a DISJOINT retained band, which is
  * the case a hand-rolled `min`/`max` pair gets wrong.
  */
+//
+// `catastrophe` says the amount is a Property CAT EVENT's total: only the
+// layers that answer that kind of occurrence cede it (TowerLayer.responds).
+// False — every WC and GL call, and every attritional claim — leaves the
+// arithmetic exactly as it was.
 export function potSplit(
-  amount: number, line: CoverageLine, layersPlaced?: boolean[],
+  amount: number, line: CoverageLine, layersPlaced?: boolean[], catastrophe = false,
 ): PotTotals {
   const { towerTop } = potBounds(line);
   const towerLine = line as keyof typeof REINSURANCE_TOWER;
@@ -199,7 +205,7 @@ export function potSplit(
   const x = Math.max(0, amount);
   let tower = 0;
   layers.forEach((l, i) => {
-    if (!placed[i] || !l.purchasable) return;
+    if (!placed[i] || !l.purchasable || !layerResponds(l, catastrophe)) return;
     tower += cedeToLayer(x, l.attachment, l.limit);
   });
   const aboveTower = Math.max(0, x - towerTop);
@@ -213,11 +219,40 @@ const addPots = (a: PotTotals, b: PotTotals): PotTotals => ({
   gross: a.gross + b.gross,
 });
 
+const isCatClaim = (c: Claim) => c.line === 'Property' && c.tier === CAT_BAND;
+
+// Each claim's pots, in claim order.
+//
+// ⚠ A CAT CLAIM IS NOT SPLIT ON ITS OWN AMOUNT. The cat treaty attaches to the
+// EVENT — the sum of every member's claim in it — so the split is taken on the
+// event total and each claim takes its pro-rata share of the tower and
+// above-tower pots. Splitting per claim would let a $150M event hitting eight
+// members at $19M each look as though no claim reached the $37.5M retention
+// and the treaty paid nothing. `retained` is taken by subtraction so the parts
+// still sum to the claim exactly.
+function claimPots(claims: readonly Claim[], line: CoverageLine, layersPlaced?: boolean[]): PotTotals[] {
+  const eventTotal = new Map<string, number>();
+  for (const c of claims) {
+    if (isCatClaim(c)) eventTotal.set(c.occurrenceId, (eventTotal.get(c.occurrenceId) ?? 0) + Math.max(0, c.grossUltimate));
+  }
+  const eventPots = new Map<string, PotTotals>();
+  return claims.map(c => {
+    if (!isCatClaim(c)) return potSplit(c.grossUltimate, line, layersPlaced);
+    const total = eventTotal.get(c.occurrenceId) ?? 0;
+    let ev = eventPots.get(c.occurrenceId);
+    if (!ev) { ev = potSplit(total, line, layersPlaced, true); eventPots.set(c.occurrenceId, ev); }
+    const x = Math.max(0, c.grossUltimate);
+    const share = total > 0 ? x / total : 0;
+    const tower = ev.tower * share, aboveTower = ev.aboveTower * share;
+    return { retained: x - tower - aboveTower, tower, aboveTower, gross: x };
+  });
+}
+
 /** Every claim on the line, split and summed. */
 export function potTotals(
   claims: readonly Claim[], line: CoverageLine, layersPlaced?: boolean[],
 ): PotTotals {
-  return claims.reduce((acc, c) => addPots(acc, potSplit(c.grossUltimate, line, layersPlaced)), ZERO);
+  return claimPots(claims, line, layersPlaced).reduce((acc, p) => addPots(acc, p), ZERO);
 }
 
 /** The same split, kept per member. */
@@ -225,9 +260,10 @@ export function memberPotTotals(
   claims: readonly Claim[], line: CoverageLine, layersPlaced?: boolean[],
 ): Map<string, PotTotals> {
   const out = new Map<string, PotTotals>();
-  for (const c of claims) {
-    out.set(c.memberId, addPots(out.get(c.memberId) ?? ZERO, potSplit(c.grossUltimate, line, layersPlaced)));
-  }
+  const pots = claimPots(claims, line, layersPlaced);
+  claims.forEach((c, i) => {
+    out.set(c.memberId, addPots(out.get(c.memberId) ?? ZERO, pots[i]));
+  });
   return out;
 }
 

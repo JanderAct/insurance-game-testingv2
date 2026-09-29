@@ -5218,17 +5218,99 @@ export const PROPERTY_LOSS_MODEL = {
 //   ⚠ IT RETURNS WITH THE CAT BAND, IN THE SAME COMMIT AS THE CAT BAND, so the
 //   price and the losses can never disagree again. Adding the load back on its
 //   own would recreate exactly the defect that removed it.
-export const PROPERTY_HELD_PURE_PREMIUM_PER_100 = 0.2100;
+//
+// ⚠ AND IT HAS RETURNED — BUT NOT AS 0.0247. The cat band is built (see
+// PROPERTY_CAT_MODEL below), so the load comes back in the same commit as the
+// losses, and it comes back DERIVED from the generator rather than re-asserted
+// from the one observation above: 0.0286 per $100, the full market's analytic
+// cat AAL (eventsPerYear x E[event gross]) over its TIV. That is 12% of the
+// total by construction — the budget eventsPerYear was solved against — so
+// 0.2100 / 0.88 = 0.2386. A 13.6% rise in Property's pure premium, and every
+// cent of it is a loss the generator now draws.
+export const PROPERTY_HELD_PURE_PREMIUM_PER_100 = 0.2386;
 
-// The retired load, kept as data rather than prose so the restoring commit has
-// a value to reinstate and property-claim-check has something to assert the
-// held constant is NOT carrying. `catAssertedRetired` is deliberately NOT summed
-// into the held constant anywhere. Left at its pre-recalibration value (0.0247,
-// against the original pre-recalibration 0.0962) — it was a single observed
-// cat event priced at a chosen return period, unrelated to either frequency/
-// severity recalibration above, and restoring it is a separate, later
-// decision.
-export const PROPERTY_PURE_PREMIUM_SPLIT = { nonCatDerived: 0.2100, catAssertedRetired: 0.0247 };
+// The held constant, by source. BOTH HALVES ARE DERIVED NOW and both are
+// asserted against the generator by property-claim-check: `nonCatDerived` is
+// frequency x capped severity at neutral risk quality, `catDerived` is
+// PROPERTY_CAT_MODEL's analytic AAL on the full market. They sum to the held
+// constant.
+//
+// `catAssertedRetired` stays as the record of what the load USED to be — one
+// observed event priced at a chosen 1-in-20 — and is still summed into nothing.
+// It sits 0.0039 below the derived figure. That is a coincidence of scale, not
+// a confirmation: the two were built on different books by different methods.
+export const PROPERTY_PURE_PREMIUM_SPLIT = { nonCatDerived: 0.2100, catDerived: 0.0286, catAssertedRetired: 0.0247 };
+
+// ===========================================================================
+// THE PROPERTY CATASTROPHE BAND — one regional event process, priced exactly.
+//
+// THE MECHANISM. Events arrive Poisson(eventsPerYear) per year. Each event
+// strikes ONE region, drawn with regionWeights. Every enrolled member in that
+// region is hit independently with probability `footprint`, and a hit member
+// loses damageRatio x primaryAssetShare x TIV — a FIXED amount per member, the
+// same every time that member is hit. All of an event's claims are ONE
+// OCCURRENCE: the tower sees their sum.
+//
+// ⚠ ONE OCCURRENCE PER REGION. An event is one region by construction; a
+// wildfire that crosses two regions is two events, two occurrences, and two
+// retentions. That is the ruling, not an approximation of a spanning event.
+//
+// WHY THE LOSS IS FIXED PER MEMBER, AND NOT DRAWN. With a fixed loss the only
+// randomness inside an event is which region is struck and which members are
+// hit, so each member is a TWO-POINT variable {0 w.p. 1-f, L_i w.p. f} and the
+// event loss distribution is EXACT: convolve a region's members, mix over the
+// three regions. propertyCatastrophe.ts builds it that way and nothing on the
+// pricing path samples. A drawn damage ratio would still be exact (more points
+// per member); a shared event intensity scaling every member would not.
+//
+// ALL PARAMETERS FIXED BY RULING, NONE TUNED HERE:
+//   footprint    0.075   share of a struck region's members that are hit
+//   budget       12%     cat share of TOTAL expected loss on the calibration
+//                        book — the target eventsPerYear is solved against
+//   retention    $37.5M  per event, FLAT. A percentage-of-affected-TIV
+//                        retention depends on the hit set's TIV as well as its
+//                        loss, and loss is not proportional to TIV here
+//                        (primaryAssetShare varies), so the retained
+//                        distribution would need a two-dimensional lattice and
+//                        stop being exact. Flat is required, not preferred.
+//   ceiling      $500M   top of the cat layer, its own constant — see
+//                        PROPERTY_CAT_CEILING in reinsuranceTower.ts
+//
+// ⚠ eventsPerYear AND regionWeights ARE PROPERTIES OF THE MARKET, NOT OF THE
+// ENROLLED BOOK. Both were derived once on the 200-member canonical roster and
+// are held, like every other calibrated constant here — and they have to be:
+// a region's chance of being struck that depended on who had enrolled would
+// make one member's cat losses move with another member's enrolment decision,
+// which is the coupling enrolment-independence-check exists to forbid.
+//   regionWeights   the roster's TIV share by region, to 4 dp (asserted)
+//   eventsPerYear   catAAL / E[event gross] on the full roster at neutral RQ,
+//                   catAAL = 0.12/0.88 x E[attritional]: $16.96M / $201.63M
+//                   = 0.084117, held at 0.08412 (asserted)
+// So the 12% budget holds EXACTLY on the full market and only there. An
+// enrolled book's realised share moves with its region mix and its members'
+// primaryAssetShare. That is a real property of the book, so it is measured
+// rather than forced.
+//
+// WHAT IS NOT APPLIED TO A CAT CLAIM, deliberately:
+//   - severityCap. The $75M cap disciplines the FITTED mixture's second
+//     moment; a cat claim is bounded by the member's own TIV, not by it.
+//   - kPr and risk quality. The cat loss has no RQ term, so there is nothing
+//     for the RQ-mix correction to correct.
+//   - risk control. Property Mitigation discounts the attritional frequency
+//     only. Whether it should touch cat damage is a design question this
+//     commit does not answer.
+export const PROPERTY_CAT_MODEL = {
+  eventsPerYear: 0.08412,
+  regionWeights: { North: 0.3523, Central: 0.3384, South: 0.3093 },
+  footprint: 0.075,
+  damageRatio: 0.35,
+  // Per event, flat. REINSURANCE_TOWER.Property's cat layer attaches here —
+  // this is the single source.
+  retention: 37_500_000,
+  // The budget eventsPerYear was solved against. The engine never reads it; it
+  // is held so property-claim-check can re-derive eventsPerYear from it.
+  budgetShareOfExpectedLoss: 0.12,
+} as const;
 
 // ===========================================================================
 // THE OPEN-SHARE CURVE — the share of a cohort's VALUE still able to develop,

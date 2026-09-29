@@ -69,10 +69,44 @@
 //   caller), extended from "one ratio" to "a whole distribution".
 // ============================================================================
 
-import { PROPERTY_LOSS_MODEL } from '../data/defaultAssumptions';
-import { AGG_LIMIT_MULTIPLE, RISK_LOAD_LAMBDA } from '../data/reinsuranceTower';
+//
+// ============================================================================
+// ⚠ AND THE RETAINED LOSS IS TWO PROCESSES NOW, NOT ONE. With the cat band in,
+// annual retained loss is
+//
+//   R = R_attritional + R_cat
+//
+// two compound distributions with structurally different frequency and
+// severity. They are INDEPENDENT — the attritional draws and the cat draws come
+// from disjoint streams and share no factor (measured correlation of the two
+// annual totals: 0.0011) — so the distribution of R is the CONVOLUTION of the
+// two, and that is how it is built:
+//
+//   R_attritional   the NegBin Panjer fit above, rescaled to its dollar level,
+//                   then RE-BINNED onto the lattice by the same mean-preserving
+//                   split every other lattice placement here uses
+//   R_cat           EXACT: the event distribution of propertyCatastrophe.ts,
+//                   mapped through the cat layer, compounded by Panjer's
+//                   Poisson recursion (exact for a Poisson count)
+//
+// The attritional re-bin is the ONLY approximation the cat band adds, and it
+// is mean-preserving. Validated against an independent event simulation by
+// scripts/diagnostics/property-cat-check.ts.
+//
+// ⚠ THE CONVOLUTION STOPS AT THE LAYER TOP, AND THAT IS EXACT, NOT A SHORTCUT.
+// Every retained dollar at or above attachment + limit cedes the full limit, so
+// the layer needs the distribution only BELOW its top plus the mass above it —
+// and the mass above it is 1 minus the mass below. A convolution's first T
+// outputs depend only on the first T inputs of each side, so truncating both
+// at T changes nothing below T. That is what keeps a live re-quote in the
+// low milliseconds instead of a 28,000 x 8,000 product.
+// ============================================================================
+
+import { PROPERTY_CAT_MODEL, PROPERTY_LOSS_MODEL } from '../data/defaultAssumptions';
+import { AGG_LIMIT_MULTIPLE, REINSURANCE_TOWER, RISK_LOAD_LAMBDA } from '../data/reinsuranceTower';
 import { normalCdf } from './claimMath';
 import { propertyInternals } from './propertyClaimEngine';
+import { PROPERTY_LATTICE_BIN, catAnnualRetainedPmf, catEventRetained } from './propertyCatastrophe';
 import type { Member } from '../types/simulation';
 
 const PM = PROPERTY_LOSS_MODEL;
@@ -99,10 +133,16 @@ const PM = PROPERTY_LOSS_MODEL;
 // bucket resolution depends on it. $25k gives 40 buckets per $1M against
 // attachments rounded to whole $1M, and quotes in a few milliseconds, which
 // the Decisions panel needs since it re-quotes live on every render.
-const BIN = 25_000;
+//
+// ⚠ SHARED WITH THE CAT BAND — read from propertyCatastrophe rather than
+// restated, because the combined convolution needs one lattice for both sides.
+const BIN = PROPERTY_LATTICE_BIN;
 // Retained loss up to $200M/yr covers every playable scenario with wide margin
 // (even fully declining the layer, ~37 claims/yr capped individually at the
 // $75M severity cap does not realistically sum anywhere near this).
+// ⚠ ATTRITIONAL RETAINED LOSS ONLY, now. The cat side is never built on this
+// range — it is built to the layer top, and anything above the top is the tail
+// mass, so a $500M event does not need this range to hold it.
 const MAX_BINS = Math.round(200_000_000 / BIN);
 
 // Neutral-RQ mixture CDF, F(x) = P(raw severity <= x). Retained only for the
@@ -208,23 +248,42 @@ export interface AggregateQuote {
 }
 
 // Quote Property's aggregate for a given occurrence-layer selection.
-// `expectedGrossLoss` is the line's own actual-basis E[gross] for the year
-// (same role as in WC's quoteAggregate); `level` indexes
-// AGG_ATTACHMENT_LEVELS.Property.
+// `expectedGrossLoss` is the line's own actual-basis E[gross] for the year —
+// BOTH bands — (same role as in WC's quoteAggregate); `level` indexes
+// AGG_ATTACHMENT_LEVELS.Property. `layerExpectedCeded` is index-aligned to
+// REINSURANCE_TOWER.Property.
 export function quotePropertyAggregate(
   placed: boolean[],
   members: Member[],
   expectedGrossLoss: number,
   level: number,
   attachmentMultiples: readonly number[],
-  layerExpectedCeded: number,
+  layerExpectedCeded: readonly number[],
   termsRetained?: number,
 ): AggregateQuote {
-  // E[R] is DERIVED from the layer price, exactly like WC: retained = gross -
-  // everything the occurrence layer cedes. Kept on the caller's actual basis so
+  // E[R] is DERIVED from the layer prices, exactly like WC: retained = gross -
+  // everything the PLACED layers cede. Kept on the caller's actual basis so
   // this cannot drift from the engine's own funding numbers.
-  const purchased = placed[0] === true;
-  const expectedRetained = Math.max(1, expectedGrossLoss - (purchased ? layerExpectedCeded : 0));
+  const layers = REINSURANCE_TOWER.Property;
+  const on = (i: number) => i >= 0 && placed[i] === true && layers[i].purchasable;
+  const perRiskIdx = layers.findIndex(l => l.responds !== 'catastrophe');
+  const catIdx = layers.findIndex(l => l.responds === 'catastrophe');
+  const purchased = on(perRiskIdx);
+  const cededByPlaced = layers.reduce((s, _l, i) => s + (on(i) ? (layerExpectedCeded[i] ?? 0) : 0), 0);
+  const expectedRetained = Math.max(1, expectedGrossLoss - cededByPlaced);
+
+  // THE CAT SIDE'S RETAINED DISTRIBUTION, EXACT, under this placement. Its mean
+  // is this book's own — so the ATTRITIONAL side is what absorbs any gap between
+  // the caller's E[R] and the model's: the held rate carries the MARKET's cat
+  // load, this book's events are this book's. The gap is the book's realised
+  // cat share against the 12% budget, and it is small; see property-cat-check.
+  const catLayer = on(catIdx)
+    ? { attachment: layers[catIdx].attachment, ceiling: layers[catIdx].attachment + layers[catIdx].limit }
+    : null;
+  const catEvent = catEventRetained(members, catLayer, BIN);
+  const catMean = PROPERTY_CAT_MODEL.eventsPerYear * catEvent.m1Retained;
+  const catVariance = PROPERTY_CAT_MODEL.eventsPerYear * catEvent.m2Retained;
+  const attritionalRetained = Math.max(1, expectedRetained - catMean);
 
   // ⚠ THE TREATY IS AGREED IN ADVANCE AND E[R] IS NOT. `termsBasis` sets the
   // attachment and the limit; `expectedRetained` sets the DISTRIBUTION those
@@ -268,41 +327,82 @@ export function quotePropertyAggregate(
   const g = panjerNegBinCompound(r, beta, severityPmf, MAX_BINS);
 
   // Panjer's own mean (neutral severity x actual-basis frequency) generally
-  // does not exactly equal expectedRetained (severity here is neutral-RQ,
-  // expectedRetained reflects the book's ACTUAL RQ mix) — rescale the dollar
-  // axis so the distribution's mean matches the engine's own E[R] exactly,
-  // preserving the SHAPE (CV, skew) the Panjer fit supplies. Same division of
-  // labour as WC's quoteAggregate: shape from a neutral-basis model, level
-  // from the caller's actual-basis figure.
+  // does not exactly equal the attritional target (severity here is neutral-RQ,
+  // the target reflects the book's ACTUAL RQ mix) — rescale the dollar axis so
+  // the distribution's mean matches it exactly, preserving the SHAPE (CV, skew)
+  // the Panjer fit supplies. Same division of labour as WC's quoteAggregate:
+  // shape from a neutral-basis model, level from the caller's actual-basis
+  // figure. The target is E[R] LESS the cat side's exact mean, so the combined
+  // distribution's mean is the engine's E[R] to the cent.
   let panjerMean = 0;
   for (let s = 0; s <= MAX_BINS; s++) panjerMean += g[s] * s * BIN;
-  const scale = panjerMean > 0 ? expectedRetained / panjerMean : 1;
+  const scale = panjerMean > 0 ? attritionalRetained / panjerMean : 1;
 
   const attachment = Math.round((termsBasis * attachmentMultiples[level]) / 1e6) * 1e6;
   const limit = termsBasis * AGG_LIMIT_MULTIPLE;
   const top = attachment + limit;
 
-  let eCeded = 0, eCeded2 = 0;
+  // The last lattice index strictly below the layer top. Everything at or above
+  // the top cedes the full limit; see the header on why stopping here is exact.
+  const below = Math.max(0, Math.ceil(top / BIN) - 1);
+
+  // THE ATTRITIONAL SIDE, RE-BINNED onto the lattice after the rescale: a
+  // rescaled point s x scale falls between two lattice points and is split
+  // between them in the proportion that keeps its mean.
+  const attritional = new Float64Array(below + 1);
   for (let s = 0; s <= MAX_BINS; s++) {
-    if (g[s] <= 0) continue;
-    const dollar = s * BIN * scale;
-    const ceded = Math.max(0, Math.min(dollar, top) - attachment);
-    eCeded += g[s] * ceded;
-    eCeded2 += g[s] * ceded * ceded;
+    const p = g[s];
+    if (p <= 0) continue;
+    const x = s * scale;
+    const lo = Math.floor(x);
+    if (lo > below) break;
+    const frac = x - lo;
+    attritional[lo] += p * (1 - frac);
+    if (frac > 0 && lo + 1 <= below) attritional[lo + 1] += p * frac;
   }
+
+  // THE CAT SIDE, annual, exact to the same index.
+  const cat = catAnnualRetainedPmf(catEvent, below);
+
+  // THE CONVOLUTION, fixed loop order, below the top only.
+  const combined = new Float64Array(below + 1);
+  for (let i = 0; i <= below; i++) {
+    const a = attritional[i];
+    if (a === 0) continue;
+    for (let j = 0; i + j <= below; j++) {
+      const b = cat[j];
+      if (b !== 0) combined[i + j] += a * b;
+    }
+  }
+
+  let massBelow = 0, eCeded = 0, eCeded2 = 0;
+  for (let k = 0; k <= below; k++) {
+    const p = combined[k];
+    if (p === 0) continue;
+    massBelow += p;
+    const ceded = Math.max(0, Math.min(k * BIN - attachment, limit));
+    eCeded += p * ceded;
+    eCeded2 += p * ceded * ceded;
+  }
+  // Everything at or above the top: the full limit.
+  const tail = Math.max(0, 1 - massBelow);
+  eCeded += tail * limit;
+  eCeded2 += tail * limit * limit;
   const variance = Math.max(0, eCeded2 - eCeded * eCeded);
   const sdCeded = Math.sqrt(variance);
 
   // sdRetained: reported for parity with WC's AggregateQuote shape (the UI
-  // reads it), computed the same rescaled way as E[ceded] above rather than
-  // re-deriving a second SD from the raw moment formulas.
+  // reads it). The two sides are independent, so their variances add: the
+  // attritional side's from the rescaled Panjer distribution, the cat side's
+  // exactly as lambda E[r^2] of a compound Poisson sum.
   let eRet2 = 0;
   for (let s = 0; s <= MAX_BINS; s++) {
     if (g[s] <= 0) continue;
     const dollar = s * BIN * scale;
     eRet2 += g[s] * dollar * dollar;
   }
-  const sdRetained = Math.sqrt(Math.max(0, eRet2 - expectedRetained * expectedRetained));
+  const attritionalVariance = Math.max(0, eRet2 - attritionalRetained * attritionalRetained);
+  const sdRetained = Math.sqrt(attritionalVariance + catVariance);
 
   return {
     attachment, limit, expectedRetained, sdRetained,

@@ -45,6 +45,7 @@ import { poolYearFactor, wcGenerationInputs, glGenerationInputs, propertyGenerat
 import {
   aggregateRecovery,
   cedeOccurrences,
+  occurrenceKinds,
   normalizeAggregateStopLevel,
   normalizeLayersPlaced,
   occurrenceTotals,
@@ -1414,30 +1415,22 @@ export function processLineYear(
     aggregateMemberLoss = generated.grossUltimateLoss;
     kLineApplied = kPr;
     glClaimCount = generated.claimCount;
-    // ⚠ NO SHOCK CHANNEL, AND NO CAT LOAD EITHER — the two facts belong
-    // together. Property's shock used to arrive as an aggregate add-on keyed
-    // off commonLossFactor, which went with the Gamma path; its replacement is
-    // the cat shock events, still gated off. The held pure premium therefore no
-    // longer carries the ASSERTED 0.0247 cat load: a line that cannot incur a
-    // peril must not be priced for it, and the load is now recorded as retired
-    // at PROPERTY_HELD_PURE_PREMIUM_PER_100 rather than collected.
+    // ⚠ NO SHOCK CHANNEL — BUT A CAT BAND, AND ITS LOAD, TOGETHER. Property's
+    // shock used to arrive as an aggregate add-on keyed off commonLossFactor,
+    // which went with the Gamma path; the cat shock events are still gated
+    // off. The catastrophe band is not a shock: it is drawn every year by
+    // generatePropertyClaims (PROPERTY_CAT_MODEL), and its derived load is in
+    // PROPERTY_HELD_PURE_PREMIUM_PER_100 — the load and the losses went back in
+    // the SAME commit, which is the only way either was allowed back. The load
+    // alone is a certain over-collection, the losses alone a certain
+    // under-collection.
     //
-    // WHEN THE CAT BAND LANDS, THE LOAD AND THE LOSSES GO BACK IN THE SAME
-    // COMMIT. Restoring either alone recreates the defect: the load alone is a
-    // certain over-collection, the losses alone a certain under-collection.
-    //
-    // ⚠ AND WHEN IT DOES, EACH CAT EVENT MUST BE ONE OCCURRENCE, NOT ONE
-    // OCCURRENCE PER MEMBER HIT. The occurrence tower above already groups
-    // claims by occurrenceId before layering (see reinsuranceTower.ts's
-    // occurrenceTotals and the header note in data/reinsuranceTower.ts) — it
-    // requires no change to price a multi-claim cat event correctly. The
-    // requirement is entirely on the generator: `generatePropertyClaims`'s cat
-    // band must emit one Occurrence per event with every hit member's claim in
-    // that occurrence's claimIds, the same shape a GL abuse batch or WC's
-    // (retired) weather band used. Get this wrong — one occurrence per claim,
-    // as today's attritional band correctly does for a single loss — and a
-    // catastrophe that should pierce the $5M retention as one $74M occurrence
-    // instead looks like twenty $3.7M claims, none of which reaches it.
+    // ⚠ EACH CAT EVENT IS ONE OCCURRENCE, NOT ONE OCCURRENCE PER MEMBER HIT —
+    // the generator emits it that way and occurrenceTotals sums its claims
+    // before the tower sees it. The tower ALSO needs the kind: the cat layer
+    // answers cat events only and the per-risk layer attritional claims only
+    // (TowerLayer.responds), which is why occurrenceKinds is passed to the
+    // cession below and to the tracked set.
     shockOccurred = false;
   } else {
     shockOccurred = commonLossFactor > catastropheThreshold;
@@ -1546,15 +1539,21 @@ export function processLineYear(
     // $300k. Contracting first means far less pierces at inception and the
     // recovery arrives later, through cedeDevelopment, as the claim develops
     // past the retention — which is what makes recovery LAG the loss.
-    // Occurrences are 1:1 with claims on all three lines (see occurrenceTotals),
-    // so contracting the occurrence total IS contracting the claim.
+    // Occurrences are 1:1 with claims on WC, GL and Property's attritional band
+    // (see occurrenceTotals), so there contracting the occurrence total IS
+    // contracting the claim. ⚠ A PROPERTY CAT EVENT IS THE EXCEPTION: its total
+    // is several members' claims and it is contracted as one booked estimate —
+    // the event is booked, and develops, as a unit.
     const totals = FORWARD_BOOKING.enabled
       ? drawnTotals.map(t => initialEstimate(line, t))
       : drawnTotals;
     const drawnSum = drawnTotals.reduce((a, b) => a + b, 0);
     const bookedSum = totals.reduce((a, b) => a + b, 0);
     if (FORWARD_BOOKING.enabled && drawnSum > 0) bookedGrossContraction = bookedSum / drawnSum;
-    const cession = cedeOccurrences(towerLine, totals, placed);
+    // Which occurrences are Property cat events — the cat layer answers those
+    // and the per-risk layer does not (TowerLayer.responds). All false on WC and
+    // GL, where the kind changes nothing.
+    const cession = cedeOccurrences(towerLine, totals, placed, occurrenceKinds(generatedOccurrences ?? []));
     cededByLayer = cession.cededByLayer;
     retainedAboveTower = cession.retainedAboveTower;
 
@@ -1669,6 +1668,10 @@ export function processLineYear(
         DEVELOPMENT_ALLOCATION,
         ibnerRng,
         reselectRng(instance.seed, line, yearNumber, yearNumber, 'bench'),
+        undefined,
+        // Cat events are tracked against the cat retention and carry the kind,
+        // so their development cedes through the cat layer.
+        occurrenceKinds(generatedOccurrences ?? []),
       )
     : { tracked: [], untrackedTotal: 0, bench: [] };
 

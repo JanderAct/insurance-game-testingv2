@@ -221,6 +221,22 @@ for (const arm of ARMS) {
       s.yrCols = Math.max(s.yrCols, yrIdx.length);
       s.totalCols = Math.max(s.totalCols, header.length);
 
+      // Every claim's gross, summed per occurrence — what the occurrence ledger
+      // booked is initialEstimate of THIS, not of any one row's claim. On a
+      // one-claim occurrence the sum is that claim's own gross exactly (0 + x),
+      // so every WC, GL and Property attritional row is asserted as before; it
+      // differs only on a Property catastrophe, where one event owns several
+      // members' claims.
+      const occGross = new Map<string, number>();
+      for (let i = hdrIdx + 1; i < sheet.length; i++) {
+        const r = sheet[i];
+        if (!r || r[0] === '' || r[0] === undefined) continue;
+        const gv = num(r[iGross]);
+        if (gv === null) continue;
+        const k = String(r[iOcc]);
+        occGross.set(k, (occGross.get(k) ?? 0) + gv);
+      }
+
       for (let i = hdrIdx + 1; i < sheet.length; i++) {
         const r = sheet[i];
         if (!r || r[0] === '' || r[0] === undefined) continue;
@@ -348,14 +364,21 @@ for (const arm of ARMS) {
         //   MOVING EITHER REPRESENTATION DOES. Scaling the occurrence ledger's
         //   drawn figure by 1.001 fails it on every developed WC row. A tenth of a
         //   per cent between the claim register and the ledger is caught.
-        const expectDrawn = gross === null ? null
-          : (FORWARD_BOOKING.enabled ? initialEstimate(line, gross) : gross);
+        //
+        // ⚠ "ONE CLAIM" BECAME "ITS CLAIMS" WITH THE CAT BAND. A Property cat
+        // event is one occurrence holding every hit member's claim, booked as
+        // ONE contracted estimate of their sum — so the expectation is
+        // initialEstimate(sum of the occurrence's claims), which on every
+        // one-claim occurrence is exactly the old initialEstimate(gross).
+        const occTotal = gross === null ? null : (occGross.get(String(r[iOcc])) ?? gross);
+        const expectDrawn = occTotal === null ? null
+          : (FORWARD_BOOKING.enabled ? initialEstimate(line, occTotal) : occTotal);
         if (expectDrawn !== null && Math.abs(drawn - expectDrawn) <= 1e-6 * Math.max(1, Math.abs(expectDrawn))) {
           s.drawnEqGross++;
         } else {
           fail(`${arm.name} g${g} ${line} row ${i}: Drawn Occurrence ${drawn} !== `
-            + `${FORWARD_BOOKING.enabled ? `initialEstimate(${gross})` : 'Gross Incurred'} ${expectDrawn} `
-            + '— the occurrence ledger and its one claim disagree about what was booked');
+            + `${FORWARD_BOOKING.enabled ? `initialEstimate(${occTotal})` : 'Gross Incurred'} ${expectDrawn} `
+            + '— the occurrence ledger and its claims disagree about what was booked');
         }
         if (drawn - booked > 1e-6) s.drawnGtBooked++;
         else if (Math.abs(drawn - booked) <= 1e-6) s.drawnEqBooked++;

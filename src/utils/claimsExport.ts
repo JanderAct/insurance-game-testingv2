@@ -90,10 +90,12 @@ const PAID_NOTE =
   'developed one. The two documents are on different bases ON PURPOSE and each says so.';
 
 const PROPERTY_NOTE =
-  'Property claims are drawn from a mixture fitted to the pool\'s own nine years of claims. Band is ' +
-  'a tier label kept so Claim.tier stays populated — there is ONE band, not a set: the separate ' +
-  'weather and catastrophe bands went with the fit (weather is inside the mixture; catastrophes are ' +
-  'shock events now). Reported Year always equals Accident Year: Property carries no report lag.';
+  'Property claims come from two bands. "property" claims are drawn from a mixture fitted to the ' +
+  'pool\'s own nine years of claims, one claim per occurrence (weather is inside the mixture). "cat" ' +
+  'claims come from regional catastrophe events: each event strikes one region, and every member it ' +
+  'hits loses a fixed share of its primary asset — all of one event\'s claims share one occurrence, ' +
+  'and the catastrophe layer attaches to their sum. Reported Year always equals Accident Year: ' +
+  'Property carries no report lag.';
 
 function safeStr(v: unknown): string {
   return v === null || v === undefined ? '' : String(v);

@@ -718,6 +718,12 @@ export interface DevelopingClaim {
    *  (scripts/diagnostics/claims-workbook-check.ts): 12.7-13.5 KB of a 389 KB
    *  serialised poolState, 3.3-3.5% of it and ~0.27% of a 5MB quota. */
   movementByStep?: number[];
+  /** Present, and true, only on a Property CATASTROPHE occurrence. The tower
+   *  needs it to cede development through the right treaty — the cat layer
+   *  answers these and the per-risk layer does not (TowerLayer.responds).
+   *  Absent everywhere else, so every WC and GL record serialises exactly as it
+   *  did before the cat band existed. */
+  catastrophe?: true;
 }
 
 // ============================================================================
@@ -753,6 +759,8 @@ export interface BenchClaim {
   /** Its share of the untracked mass now. Becomes the occurrence's `current` on
    *  promotion, so no dollars are created or lost by promoting. */
   current: number;
+  /** As DevelopingClaim.catastrophe — carried so a promotion keeps the kind. */
+  catastrophe?: true;
 }
 
 // Annual reserve cohort for simplified development. NET basis: losses enter

@@ -44,6 +44,7 @@
     "pin-vs-band-check": 96,
     "pool-aggregation-check": 3,
     "pregame-acceptance-check": 93,
+    "property-cat-check": 19,
     "property-claim-check": 2,
     "property-tower-mc": 1074,
     "ratemaking-loop-check": 12,

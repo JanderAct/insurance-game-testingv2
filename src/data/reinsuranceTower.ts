@@ -6,6 +6,37 @@
 // reinsuranceEngine.ts are gone — Property was the model's last consumer.
 //
 // ============================================================================
+// ⚠ PROPERTY'S TOWER IS TWO TREATIES NOW, AND THEY DO NOT STACK. The section
+// below described the one-layer tower as "the whole structure" and it no longer
+// is. What changed, in one place:
+//
+//   PER-RISK   $70M xs $5M     ATTRITIONAL occurrences only (one claim each)
+//   CAT XL     $462.5M xs $37.5M   CATASTROPHE occurrences only (one per event)
+//
+// Each layer RESPONDS TO ONE KIND OF OCCURRENCE (TowerLayer.responds), so an
+// attritional $60M claim is never also ceded to the cat layer and a $150M
+// event is never also run through the per-risk layer. Without that gate the two
+// would overlap on $37.5M-$75M and a claim in that band would be recovered
+// twice.
+//
+// ⚠ PER-RISK RECOVERIES DO NOT INURE TO THE CAT TREATY HERE. In market practice
+// a cat XL usually attaches to the event NET of per-risk recoveries on the
+// individual risks inside it. This tower retains the first $37.5M of the
+// event GROSS instead, because that is the retention the cat band was sized
+// and priced against (PROPERTY_CAT_MODEL) and the retained distribution was
+// validated on. Recorded as a simplification, not a claim about the market.
+//
+// TOWER_TOP.Property IS NO LONGER THE SEVERITY CAP. It is PROPERTY_CAT_CEILING,
+// $500M, its own constant. The two coincided only because occurrence == claim
+// made them the same number; a regional event summed into one occurrence
+// breaks that premise, and with the top left at $75M everything above it on
+// every sizeable event would have landed in `retainedAboveTower`.
+//
+// The paragraphs below are the one-layer record, kept for the reasoning; read
+// them with the above in mind.
+// ============================================================================
+//
+// ============================================================================
 // PROPERTY'S TOWER IS ONE LAYER, NOT THREE, AND THAT IS THE WHOLE STRUCTURE.
 //
 // $70M xs $5M, to the fitted severity mixture's own cap ($75M) — see
@@ -90,9 +121,13 @@
 // consumption tracked per layer) and would change every price here.
 // ============================================================================
 
-import { PROPERTY_LOSS_MODEL } from './defaultAssumptions';
+import { PROPERTY_CAT_MODEL, PROPERTY_LOSS_MODEL } from './defaultAssumptions';
 
 export type TowerLine = 'WC' | 'GL' | 'Property';
+
+// Which occurrences a layer answers. Absent means EVERY occurrence, which is
+// every WC and GL layer — their towers are unchanged by the kind at all.
+export type OccurrenceKind = 'attritional' | 'catastrophe';
 
 export interface TowerLayer {
   name: string;
@@ -100,7 +135,30 @@ export interface TowerLayer {
   limit: number;
   // Layers that exist but cannot currently be bought. See WC's top layer.
   purchasable: boolean;
+  // Set only on Property's two treaties — see the header. A layer that
+  // responds to one kind cedes NOTHING on an occurrence of the other.
+  responds?: OccurrenceKind;
 }
+
+// THE CAT LAYER'S CEILING, $500M. ITS OWN CONSTANT, DECOUPLED FROM
+// PROPERTY_LOSS_MODEL.severityCap, and sized rather than assumed. Swept at the
+// representative enrolled book (f 0.075, $37.5M retention, 12% budget, 150,000
+// events): the share of events above the ceiling and what raising it from $75M
+// costs a year —
+//
+//   $75M    29.6% of events above     —
+//   $150M   12.2%                     +$6.69M
+//   $250M    3.0%                     +$11.10M
+//   $500M    0.0%                     +$12.31M    <- this
+//   $1B      0.0%                     +$12.31M
+//
+// $500M rather than the real programme's $1B because this book's modelled tail
+// is fully inside $500M; the last $500M would buy nothing the generator draws.
+// ⚠ THAT SWEEP WAS ON ONE ENROLLED BOOK, and a bigger book has bigger events —
+// the full 200-member market's mean event is $201.6M against that book's
+// $78.9M. What exceeds $500M lands in retainedAboveTower, visibly, not
+// silently; it is reported, not re-swept, in the commit that introduced it.
+export const PROPERTY_CAT_CEILING = 500_000_000;
 
 // ============================================================================
 // ⚠ THERE ARE NO PRICING CONSTANTS IN THIS FILE ANY MORE. A LAYER IS ITS BOUNDS.
@@ -219,23 +277,35 @@ export const REINSURANCE_TOWER: Record<TowerLine, TowerLayer[]> = {
   // it. BOTH BOUNDS READ FROM PROPERTY_LOSS_MODEL rather than restating the
   // numbers — perRiskRetention and severityCap are the single source for
   // both this tower and propertyAggregate.ts's Panjer pricing.
+  //
+  // ⚠ TWO LAYERS NOW, EACH ANSWERING ONE KIND OF OCCURRENCE — see the header.
+  // Index 0 stays the per-risk layer, so every reader of `[0].attachment` as
+  // "the retention" still reads $5M; the cat layer is index 1.
   Property: [
     {
       name: `$${(PROPERTY_LOSS_MODEL.severityCap - PROPERTY_LOSS_MODEL.perRiskRetention) / 1e6}M xs $${PROPERTY_LOSS_MODEL.perRiskRetention / 1e6}M`,
       attachment: PROPERTY_LOSS_MODEL.perRiskRetention,
       limit: PROPERTY_LOSS_MODEL.severityCap - PROPERTY_LOSS_MODEL.perRiskRetention,
       purchasable: true,
+      responds: 'attritional',
+    },
+    {
+      name: `Cat $${(PROPERTY_CAT_CEILING - PROPERTY_CAT_MODEL.retention) / 1e6}M xs $${PROPERTY_CAT_MODEL.retention / 1e6}M`,
+      attachment: PROPERTY_CAT_MODEL.retention,
+      limit: PROPERTY_CAT_CEILING - PROPERTY_CAT_MODEL.retention,
+      purchasable: true,
+      responds: 'catastrophe',
     },
   ],
 };
 
 // Top of each tower. Above this the pool retains, unlimited.
 //
-// PROPERTY IS NOT "UNLIMITED" IN THE SAME SENSE AS WC/GL. Their tops are market
-// capacity limits with real unbounded severity above them. Property's $75M
-// equals PROPERTY_LOSS_MODEL.severityCap exactly — nothing the generator draws
-// exceeds it, so `retainedAboveTower` is a structural ~0, not a market retention.
-export const TOWER_TOP: Record<TowerLine, number> = { WC: 50e6, GL: 25e6, Property: PROPERTY_LOSS_MODEL.severityCap };
+// PROPERTY'S TOP IS THE CAT CEILING, $500M — see PROPERTY_CAT_CEILING. It USED
+// to be PROPERTY_LOSS_MODEL.severityCap ($75M), when occurrence == claim made
+// the two the same number. An attritional claim still cannot exceed $75M, so
+// above-tower dollars now come only from a catastrophe larger than $500M.
+export const TOWER_TOP: Record<TowerLine, number> = { WC: 50e6, GL: 25e6, Property: PROPERTY_CAT_CEILING };
 
 // ============================================================================
 // THE RISK LOAD — one market parameter, not four chosen multiples.

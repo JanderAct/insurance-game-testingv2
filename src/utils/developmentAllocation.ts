@@ -151,7 +151,7 @@
 // ============================================================================
 
 import type { SeededRandom } from './random';
-import { cedeToLayer } from './reinsuranceTower';
+import { cedeToLayer, layerResponds } from './reinsuranceTower';
 import { REINSURANCE_TOWER, type TowerLine } from '../data/reinsuranceTower';
 import type { BenchClaim, DevelopingClaim } from '../types/simulation';
 
@@ -336,8 +336,23 @@ export interface TrackedSet {
   bench: BenchClaim[];
 }
 
+// The retention an occurrence of this kind meets: the attachment of the lowest
+// layer that answers it. On WC and GL every layer answers every occurrence, so
+// this is layer 0's attachment exactly as it always was; on Property a cat
+// event meets the cat layer's $37.5M and an attritional claim the per-risk $5M.
+export function retentionFor(line: TowerLine, catastrophe: boolean): number {
+  const layers = REINSURANCE_TOWER[line];
+  const answering = layers.filter(l => layerResponds(l, catastrophe));
+  return answering.length ? Math.min(...answering.map(l => l.attachment)) : layers[0].attachment;
+}
+
 // Build the tracked set: every occurrence at or above the retention, plus the
 // developing claims, whichever way those overlap. Then the bench, from what is left.
+//
+// `catastrophe[i]` marks occurrence i as a Property cat event — it is tracked
+// against the cat retention and carries the flag so its development cedes
+// through the cat layer. Absent means no occurrence is, which is every WC and
+// GL call.
 export function buildTrackedSet(
   line: TowerLine,
   occurrenceIds: string[],
@@ -347,10 +362,14 @@ export function buildTrackedSet(
   rng?: SeededRandom,
   benchRng?: SeededRandom,
   benchDepth: number = DEVELOPMENT_BENCH_DEPTH,
+  catastrophe?: readonly boolean[],
 ): TrackedSet {
   const n = totals.length;
   if (n === 0) return { tracked: [], untrackedTotal: 0, bench: [] };
-  const retention = REINSURANCE_TOWER[line][0].attachment;
+  const retentionAttritional = retentionFor(line, false);
+  const retentionCat = retentionFor(line, true);
+  const isCat = (i: number) => catastrophe?.[i] === true;
+  const kind = (i: number) => (isCat(i) ? { catastrophe: true as const } : {});
 
   // The developing set.
   //
@@ -381,7 +400,7 @@ export function buildTrackedSet(
   let untrackedTotal = 0;
   const benchPool: { t: number; i: number }[] = [];
   for (let i = 0; i < n; i++) {
-    if (isDeveloping.has(i) || totals[i] >= retention) {
+    if (isDeveloping.has(i) || totals[i] >= (isCat(i) ? retentionCat : retentionAttritional)) {
       tracked.push({
         claimId: claimIds[i] ?? occurrenceIds[i],
         occurrenceId: occurrenceIds[i],
@@ -390,6 +409,7 @@ export function buildTrackedSet(
         current: totals[i],
         developing: isDeveloping.has(i),
         closed: false,
+        ...kind(i),
       });
     } else {
       untrackedTotal += totals[i];
@@ -432,6 +452,7 @@ export function buildTrackedSet(
         drawn: totals[i],
         original: totals[i],
         current: totals[i],
+        ...kind(i),
       });
     }
   }
@@ -683,6 +704,7 @@ export function reselectDevelopingSet(
         current: b.current,
         developing: true,
         closed: false,
+        ...(b.catastrophe ? { catastrophe: true as const } : {}),
       });
       held += Math.max(0, b.current);
       promoted++;
@@ -933,8 +955,11 @@ export function cedeDevelopment(
   let ceded = 0;
   const moved = tracked.map((c, i) => {
     const next = Math.max(0, c.current + deltas[i]);
+    // Only the treaty that answers this occurrence's kind — see
+    // TowerLayer.responds. Identically every layer on WC and GL.
+    const cat = c.catastrophe === true;
     layers.forEach((l, li) => {
-      if (!placed[li] || !l.purchasable) return;
+      if (!placed[li] || !l.purchasable || !layerResponds(l, cat)) return;
       ceded += cedeToLayer(next, l.attachment, l.limit) - cedeToLayer(c.current, l.attachment, l.limit);
     });
     return { ...c, current: next };

@@ -111,8 +111,11 @@ const FAST: string[] = [
   'paid-ledger-check',               //   4s
   'panel-engine-parity-check',       //   4s
   'pool-aggregation-check',          //   2s
+  'property-cat-check',              //  19s   the EXACT cat distribution against an INDEPENDENT event simulation
+                                     //         (own generator, fresh events), both placements, and the generator
+                                     //         drawing what the price describes
   'property-claim-check',            //   3s
-  'ratemaking-loop-check',           //  80s   THE ACCEPTANCE TEST — 4/4; condition 3 is paired with two null controls
+  'ratemaking-loop-check',          //  80s   THE ACCEPTANCE TEST — 4/4; condition 3 is paired with two null controls
   'ratio-basis-check',               //   7s
   'reserve-centring-check',          //  55s   IBNER_CALENDAR_RHO adds dispersion and NOT drift; carries its own positive control
   'report-lag-derive',               //  33s   derives LINE_REPORTING_PATTERN and asserts it against the three recorded figures

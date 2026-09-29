@@ -21,6 +21,7 @@ import {
   REINSURANCE_TOWER,
   RISK_LOAD_LAMBDA,
   TOWER_TOP,
+  type TowerLayer,
   type TowerLine,
 } from '../data/reinsuranceTower';
 import { lognormalPartialMoment } from './claimMath';
@@ -62,6 +63,16 @@ export function occurrenceTotals(claims: Claim[], occurrences: Occurrence[]): nu
 export const cedeToLayer = (total: number, attachment: number, limit: number) =>
   Math.max(0, Math.min(total - attachment, limit));
 
+// Does this layer answer an occurrence of this kind? A layer with no `responds`
+// answers every occurrence — every WC and GL layer — so on those lines this is
+// identically true and the arithmetic below is unchanged by the kind.
+export const layerResponds = (l: TowerLayer, catastrophe: boolean): boolean =>
+  l.responds === undefined || (l.responds === 'catastrophe') === catastrophe;
+
+// The kind of each occurrence, index-aligned to occurrenceTotals' output.
+export const occurrenceKinds = (occurrences: Occurrence[]): boolean[] =>
+  occurrences.map(o => o.isCatastrophe === true);
+
 export interface OccurrenceCession {
   cededByLayer: number[];   // index-aligned to REINSURANCE_TOWER[line]
   totalCeded: number;
@@ -71,26 +82,31 @@ export interface OccurrenceCession {
 
 // Apply the tower to one year's occurrences. `placed[i]` false = that band is
 // retained.
+//
+// `catastrophe[j]` says whether occurrence j is a cat event; absent means none
+// is. Only Property's layers read it — see TowerLayer.responds.
 export function cedeOccurrences(
   line: TowerLine,
   totals: number[],
   placed: boolean[],
+  catastrophe?: readonly boolean[],
 ): OccurrenceCession {
   const layers = REINSURANCE_TOWER[line];
   const cededByLayer = layers.map(() => 0);
   let totalCeded = 0, gross = 0, retainedAboveTower = 0;
-  for (const t of totals) {
+  totals.forEach((t, j) => {
     gross += t;
+    const cat = catastrophe?.[j] === true;
     layers.forEach((l, i) => {
       // A layer that is not purchasable cannot be placed even if the flag says
       // so — belt and braces against a stale save or a hand-edited decision.
-      if (!placed[i] || !l.purchasable) return;
+      if (!placed[i] || !l.purchasable || !layerResponds(l, cat)) return;
       const c = cedeToLayer(t, l.attachment, l.limit);
       cededByLayer[i] += c;
       totalCeded += c;
     });
     retainedAboveTower += Math.max(0, t - TOWER_TOP[line]);
-  }
+  });
   return { cededByLayer, totalCeded, retained: gross - totalCeded, retainedAboveTower };
 }
 
@@ -282,13 +298,14 @@ export function quoteAggregate(
   termsRetained?: number,
 ): AggregateQuote {
   if (line === 'Property') {
-    // ONE moment pass for the (single) layer, at neutral basis — same role as
-    // WC's layerMoms below, feeding expectedRetained = expectedGrossLoss minus
-    // what the occurrence layer cedes.
+    // ONE moment pass for both treaties — same role as WC's layerMoms below,
+    // feeding expectedRetained = expectedGrossLoss minus what the PLACED layers
+    // cede. The per-risk layer's comes from the fitted mixture, the cat layer's
+    // from the exact event distribution; quotePropertyAggregate reads each.
     const layerMoms = allLayerRiskMoments('Property', members, yearNumber);
     return quotePropertyAggregate(
       placed, members, expectedGrossLoss, level,
-      AGG_ATTACHMENT_LEVELS.Property, layerMoms[0].expected, termsRetained,
+      AGG_ATTACHMENT_LEVELS.Property, layerMoms.map(m => m.expected), termsRetained,
     );
   }
 
@@ -399,6 +416,14 @@ export function normalizeLayersPlaced(line: TowerLine, placed: boolean[] | undef
 // the cover. That is a severity-cap question and deliberately not answered
 // here; scripts/diagnostics/wc-above-tower-report.ts measures what the band
 // costs so the decision has numbers behind it.
+//
+// ⚠ "A LAYER" MEANS A LAYER THAT CAPS THE ATTRITIONAL CLAIMS, which on WC is
+// every layer and on Property is the per-risk layer alone. Property's cat
+// layer answers catastrophe occurrences only (TowerLayer.responds), so with
+// per-risk declined and cat placed every attritional claim runs uncapped to
+// $75M under the aggregate — exactly the aggregate-only trap above, reachable
+// again through a layer that never touches those claims. The gate asks the
+// question it always asked; the cat layer just is not an answer to it.
 export function normalizeAggregateStopLevel(
   line: TowerLine,
   placedNormalized: boolean[],
@@ -406,5 +431,7 @@ export function normalizeAggregateStopLevel(
 ): number {
   if (!(requested >= 0)) return -1;
   if (line !== 'WC' && line !== 'Property') return requested;
-  return placedNormalized.some(Boolean) ? requested : -1;
+  const layers = REINSURANCE_TOWER[line];
+  return placedNormalized.some((on, i) => on && layers[i] !== undefined && layerResponds(layers[i], false))
+    ? requested : -1;
 }
