@@ -446,12 +446,16 @@ export function programFreqMultiplier(
 // see generateWcClaims.
 //
 // ⚠ THE SIZES, AND WHERE THEY COME FROM.
-//   RTW 10% of WC gross loss at full effect. The Texas State Office of Risk
+//   RTW 12.5% of WC gross loss at full effect. The Texas State Office of Risk
 //     Management says a return-to-work program should cut overall WC losses by
-//     at least 10% and as much as 30%. 10% is its FLOOR, chosen because it is
-//     the one size at which the program was measured to be a real decision —
-//     near break-even against the placeholder cost by year 5 — rather than an
-//     obvious yes. The conversion RATE that delivers it is solved, below.
+//     at least 10% and as much as 30%; IRMI gives 25-35% for self-insured
+//     employers. 12.5% sits near the bottom of the more conservative source.
+//     It was 10% — SORM's floor — until the engine charged the program and the
+//     five-year net read -$1.01M, five SE behind: a decision with one right
+//     answer. 12.5% is where the CHARGED net breaks even at year 5, measured;
+//     see WC_RTW_TARGET_REDUCTION. The EFFECT moved rather than the cost because
+//     the cost is a placeholder with no basis and the effect has a source. The
+//     conversion RATE that delivers it is solved, below.
 //   SAFETY 5%. Not sourced. The low end of an ordinary safety-program claim,
 //     and the same size as the GL program's.
 //
@@ -459,7 +463,8 @@ export function programFreqMultiplier(
 // a culture build — committees, training, habits — small in year 1 and real by
 // year 3. RTW is a policy change: adopt modified duty and the next injured worker
 // is back in weeks, so it is near-full at once. Both are indexed by TENURE,
-// exactly as GL's ramp is, so dropping the program resets both.
+// exactly as GL's ramp is. Stopping does NOT reset both — they lapse
+// differently (safety decays, RTW is a cliff); see wcSafetyRtwStanding.
 //
 // ⚠ AND NEITHER RAMP STARTS AT ZERO, WHICH IS WHERE THIS DIFFERS FROM GL. GL's
 // year 1 is a free negative control because its ramp is 0 there. WC's is not:
@@ -485,48 +490,33 @@ export const WC_RTW_RAMP: readonly number[] = [0.75, 1, 1];
  * The share of WC gross loss RTW is sized to remove at full effect. The TARGET;
  * the rate below is what delivers it.
  *
- * ⚠ WHAT THE PROGRAM IS WORTH AT THESE SIZES — AND WHY BEHIND IN GAME IS THE
- * POINT. Safety 5% and RTW 10% together, both ramps, 96 games x 5 years WC solo,
- * paired on seeds (wc-program-value.ts), against the $1M/yr placeholder at
- * RISK_CONTROL_PLACEHOLDER_ANNUAL_COST — which is NOT CHARGED yet:
+ * ⚠ WHAT THE PROGRAM IS WORTH AT THESE SIZES, CHARGED. Safety 5% and RTW 12.5%,
+ * both ramps, $1M/yr flat (WC_SAFETY_RTW_ANNUAL_COST), 96 games x 5 years WC
+ * solo, paired on seeds (wc-program-value.ts). The engine CHARGES, so this is
+ * NET — benefit, charge, premium feedback and the investment income the spent
+ * money no longer earns, together:
  *
  *   year                      1      2      3      4      5
- *   surplus gained, cum     0.54   1.41   2.50   3.64   4.53   ($M)
- *   placeholder cost, cum   1.00   2.00   3.00   4.00   5.00
+ *   NET surplus, cum       -0.31  -0.33  -0.15  +0.04  -0.10   ($M)
+ *   charge, cum             1.00   2.00   3.00   4.00   5.00
  *
- *   year-5 surplus +$4.53M against $5.00M: -$0.47M, SE $0.20M, 2.3 SE behind
- *   pool keeps over the claims' full life (ultimate basis) $9.15M = 1.83x cost
- *   of which ~$1.45M (16%) returns to members as lower premium
+ *   year-5 net -$0.10M, SE $0.21M, t = -0.5 — BREAK-EVEN within the noise
+ *   pool keeps over the claims' full life (ultimate basis) $11.01M = 2.20x
+ *   the charge, of which ~$1.75M (16%) returns to members as lower premium
  *
- * Behind in every game year and clearly ahead over the claims' life is
- * DELIBERATE: it is the only size at which the program is a decision a player
- * weighs rather than an obvious yes or no. What would change it: RTW near 11%,
- * or a cost near $0.9M/yr, breaks even at year 5 (estimated by scaling, not
- * re-run). The cost is the softer of the two numbers — see the placeholder.
+ * Behind in the early game, even by year 4-5, and well ahead over the claims'
+ * life is DELIBERATE: it is the size at which committing is a judgement about
+ * horizon rather than an obvious yes or no. A LOWER cost or a HIGHER effect makes
+ * it an obvious yes; either moved the other way makes it an obvious no.
  *
- * ⚠ AND ONCE THE ENGINE CHARGES, IT IS FURTHER BEHIND THAN THAT ARITHMETIC SAID.
- * The table above is GROSS OF COST with $5M subtracted by hand. With the charge
- * wired (WC_SAFETY_RTW_ANNUAL_COST through riskControlInvestment), same 96 games,
- * the engine's own paired surplus is NET:
- *
- *   year                      1      2      3      4      5
- *   NET surplus, cum       -0.46  -0.65  -0.66  -0.67  -1.01   ($M)
- *
- *   year-5 net -$1.01M, SE $0.20M, t = -5.1 — against the arithmetic's -$0.47M
- *
- * The -$0.54M gap is the investment income the spent money stops earning (about
- * 5.3% on a balance that averages $2.5M over the game) — the same omission that
- * cost GL's arithmetic ~$80k a year. Losses, keep, premium and reserves are
- * IDENTICAL to the uncharged run: the charge moves cash and nothing else.
- *
- * ⚠ SO AT THESE SIZES IT IS CLEARLY BEHIND AT YEAR 5, NOT "ROUGHLY EVEN". The
- * decision-point argument above was made on the gross arithmetic. On the charged
- * figure, break-even at year 5 needs a cost near $0.8M/yr, or RTW near 12.5-13%
- * — BOTH ESTIMATED by scaling the measured figures, NOT re-run. Whether to move
- * a size or the cost is not settled here; this commit wires the charge the
- * program was sized against and reports what it does.
+ * ⚠ HOW IT GOT HERE — 10% FIRST, AND WHY THAT WAS WRONG. At RTW 10% the uncharged
+ * probe read +$4.53M against $5M of hand-subtracted cost: -$0.47M, which looked
+ * close. Once the engine charged, the same 96 games read -$1.01M (t = -5.1). The
+ * -$0.54M gap was the investment income the $5M no longer earned, which the
+ * arithmetic did not carry — the same omission GL's did. The scaled estimate for
+ * break-even was "RTW near 12.5-13%"; measured, 12.5% lands on it.
  */
-export const WC_RTW_TARGET_REDUCTION = 0.10;
+export const WC_RTW_TARGET_REDUCTION = 0.125;
 
 /**
  * The probability that an eligible lost-time claim converts to medical-only, at
@@ -536,10 +526,20 @@ export const WC_RTW_TARGET_REDUCTION = 0.10;
  * converted claim keeps only a `small` draw (mean $489), so a rate c removes
  * about 0.57c of gross. SOLVED on the enrolled book by wc-program-value.ts part
  * 1 — every played WC year of 96 games x 5 redrawn with this lever alone:
- * c = 0.179 removed 10.18%, so 10.00% needs c = 0.1758, rounded to 0.176.
- * Re-solve with that script if the WC severity mixture or the ceiling moves.
+ *
+ *   c = 0.176   removed 10.05%     (the 10% sizing, solved from c = 0.179)
+ *   c = 0.220   removed 12.42%     trial, 0.176 x 1.25
+ *   c = 0.221   removed 12.47%     SHIPPED — 12.5% needs c = 0.2215
+ *
+ * ⚠ IT IS LINEAR IN c, and the ceiling does not make it otherwise. Each eligible
+ * claim converts on its own fixed uniform, so the claims converted at 0.22 are a
+ * superset of those at 0.176 and the expected saving is c x (the eligible
+ * dollars' excess over a `small` draw). The $1M ceiling sets the SLOPE (~0.57
+ * rather than ~0.99 unrestricted), not a curve. 0.571 and 0.565 per unit of c
+ * at the two sizes differ by sampling in the added band. Re-solve with that
+ * script if the WC severity mixture or the ceiling moves.
  */
-export const WC_RTW_CONVERSION_RATE = 0.176;
+export const WC_RTW_CONVERSION_RATE = 0.221;
 
 /**
  * Lost-time claims at or above this drawn amount never convert — a catastrophic
@@ -557,7 +557,11 @@ export const WC_RTW_CONVERSION_RATE = 0.176;
  *                                                       net +$0.17M over the run
  *
  * The third is 0.09% of the $187M gross the run avoided, and it moved in the
- * pool's favour. THE CAUSE IS A READING, NOT A PROOF: development is a
+ * pool's favour. RE-MEASURED AT 12.5% (c = 0.221), same 120 line-years: ultimate
+ * and inception unchanged in 120 of 120 again; development moved in the SAME 68,
+ * net +$0.03M, 0.014% of $233M avoided — the same line-years, a smaller and
+ * different net, which is what a tracked-set reselection would do and a
+ * size-proportional leak would not. THE CAUSE IS A READING, NOT A PROOF: development is a
  * cohort-level amount (IBNER on the cohort's net unpaid) spread across a TRACKED
  * set of claims chosen by developmentAllocation's reselection, and conversion
  * changes which claims are in that set, so a share of the cohort's movement

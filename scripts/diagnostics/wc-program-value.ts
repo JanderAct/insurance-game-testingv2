@@ -26,9 +26,9 @@
 //   through riskControlInvestment — so the paired surplus in part 2 is NET: the
 //   benefit, the charge, development timing, premium feedback and the investment
 //   income the spent money no longer earns, all together. Before the spend was
-//   wired this probe read +$4.53M GROSS OF COST against $5M as arithmetic; the
-//   gap between that arithmetic (-$0.47M) and the engine's own net figure is
-//   printed below, and is mostly the forgone investment income.
+//   wired this probe read +$4.53M GROSS OF COST against $5M as arithmetic, at
+//   RTW 10%; charged, the engine read -$1.01M, not -$0.47M — the gap was the
+//   forgone investment income. That is why RTW is now 12.5%.
 // ============================================================================
 import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
@@ -136,7 +136,6 @@ for (let y = 0; y < YEARS; y++) {
 const dSur = on.map((g, i) => g.rows[YEARS - 1].sur - off[i].rows[YEARS - 1].sur);
 const se = sd(dSur) / Math.sqrt(dSur.length);
 const cost = tot.c;
-const PRE_CHARGE_ARITHMETIC = 4.53e6 - 5e6;   // the probe's own reading before the spend was wired (f285c86)
 console.log(`\n  FIVE-YEAR TOTALS (${YEARS} yrs)`);
 console.log(`    gross avoided                 $${(tot.g / M).toFixed(2)}M`);
 console.log(`    pool keeps (ultimate basis)   $${(tot.k / M).toFixed(2)}M   tower ${(100 * (1 - tot.k / tot.g)).toFixed(1)}%`);
@@ -144,8 +143,7 @@ console.log(`    back to members as premium    $${(tot.p / M).toFixed(2)}M   (${
 console.log(`    charged, as the engine moved it $${(cost / M).toFixed(2)}M   (flat $${WC_SAFETY_RTW_ANNUAL_COST / M}M x ${YEARS})`);
 console.log(`    year-${YEARS} surplus, NET of charge  ${mean(dSur) >= 0 ? '+' : '-'}$${(Math.abs(mean(dSur)) / M).toFixed(2)}M   SE $${(se / M).toFixed(2)}M, t = ${(mean(dSur) / se).toFixed(1)}`);
 console.log(`    keep / charge ${(tot.k / cost).toFixed(2)}x  (full claim life, ultimate basis)`);
-console.log(`    AGAINST THE PRE-CHARGE ARITHMETIC (+$4.53M gross - $5.00M = -$0.47M):`);
-console.log(`      engine net ${(mean(dSur) / M).toFixed(2)}M, arithmetic ${(PRE_CHARGE_ARITHMETIC / M).toFixed(2)}M, `
-  + `difference ${((mean(dSur) - PRE_CHARGE_ARITHMETIC) / M).toFixed(2)}M — `
-  + `the investment income the spent money no longer earns, plus whatever the charge moves downstream`);
+// The gross-arithmetic comparison this probe printed at the 10% sizing is not
+// re-derivable at another size without an uncharged run, so it is not printed.
+// History: at RTW 10% the arithmetic said -$0.47M and the engine -$1.01M.
 console.log('\nREADING ONLY — no pass condition.');

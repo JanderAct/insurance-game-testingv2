@@ -177,15 +177,15 @@ export interface RiskControlCategory {
  * question settled per program and each figure's basis recorded at the entry.
  * Until then, five identical numbers.
  *
- * ⚠ AND THE WC PROGRAM IS SIZED AGAINST IT, SO MOVING IT MOVES A DECISION. The
- * WC safety & RTW program returns +$4.53M of surplus over five years against
- * this constant's $5.00M — 2.3 standard errors behind — and $9.15M over the
- * claims' full life. Behind in game and ahead after is deliberate; it is what
- * makes committing to it a judgement. A cost near $0.9M/yr breaks it even at
- * year 5, so a replacement figure below that turns the program into an obvious
- * yes and one well above it into an obvious no. The measurement and the table
- * are at WC_RTW_TARGET_REDUCTION in riskControlPrograms.ts. The GL program was
- * measured against it too (0.28x, gl-program-value.ts).
+ * ⚠ AND THE WC PROGRAM IS SIZED AGAINST IT, SO MOVING IT MOVES A DECISION. At
+ * RTW 12.5% and $1M/yr, charged by the engine, the WC safety & RTW program nets
+ * -$0.10M over five years (SE $0.21M — break-even) and keeps $11.01M over the
+ * claims' full life. RTW was raised from 10% to get there, rather than this cost
+ * lowered, because this cost has no basis and the effect has a source. A
+ * replacement figure materially below $1M turns the program into an obvious yes
+ * and one materially above into an obvious no. The table is at
+ * WC_RTW_TARGET_REDUCTION in riskControlPrograms.ts. The GL program was measured
+ * against it too (0.28x, gl-program-value.ts).
  *
  * ⚠ WHAT IS CHARGED. BOTH ARE, EACH WITH ITS OWN CONSTANT, AND NEITHER READS
  * THIS ONE. GL: GL_ANALYTICS_BUILD_ANNUAL_COST for three years, then
@@ -194,11 +194,10 @@ export interface RiskControlCategory {
  * equal $1M today because both were sized against this placeholder, and both
  * are equally without a basis.
  *
- * ⚠ THE WC FIGURES ABOVE ARE THE GROSS ARITHMETIC. With the charge wired the
- * engine's own five-year net is -$1.01M, not -$0.47M: the spent money stops
- * earning investment income. On that figure the program is clearly behind at
- * year 5, and break-even needs a cost near $0.8M/yr (estimated). See
- * WC_RTW_TARGET_REDUCTION for the table.
+ * ⚠ THE WC FIGURES ABOVE ARE THE ENGINE'S, NET OF THE CHARGE. The earlier gross
+ * arithmetic (+$4.53M - $5M at RTW 10%) understated the cost by the investment
+ * income the spent money stops earning — -$1.01M measured against -$0.47M
+ * arithmetic — which is why RTW moved to 12.5%.
  */
 export const RISK_CONTROL_PLACEHOLDER_ANNUAL_COST = 1_000_000;
 
