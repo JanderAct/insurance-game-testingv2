@@ -53,7 +53,12 @@ import type { CoverageLine, Member } from '../types/simulation';
 //
 // atExpected: WC/GL ONLY — bypasses the grid and returns exactly 1.0, mirroring
 // simulationEngine.ts's selectedFundingCLF dispatch. Property ignores it.
-function clfFor(line: CoverageLine, confidenceLevel: number, atExpected: boolean): number {
+// ⚠ EXPORTED AT THIS COMMIT so the actuarial memorandum can state the indicated
+// pure premium at a funding choice without writing a second load. The paragraph
+// above is the reason: a panel reading a different curve from the one the engine
+// charges is a defect this file already carries the scar of, and the memo is a
+// third reader of the same quantity. There is one dispatch and all three use it.
+export function clfFor(line: CoverageLine, confidenceLevel: number, atExpected: boolean): number {
   if (hasStaticClf(line)) return atExpected ? 1.0 : staticClf(line, confidenceLevel);
   return lookupCLF(confidenceLevel);
 }

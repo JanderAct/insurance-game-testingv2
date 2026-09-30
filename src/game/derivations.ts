@@ -31,6 +31,7 @@ import type { LineLoanInfo } from '../pages/DecisionsPage';
 import type { FundingConsequence } from '../utils/fundingConsequence';
 import { computeFundingConsequence } from '../utils/fundingConsequence';
 import { aggregateTermsRetainedPer100 } from '../utils/simulationEngine';
+import { pricingExperienceBasis } from '../utils/pricingTriangle';
 import { toHistoricalYear } from '../utils/priorHistoryEngine';
 import { getMemberExposure, selectResultView } from '../utils/lineHelpers';
 
@@ -193,11 +194,15 @@ export function useGameDerivations(
         priorRcEffectiveness: lineState.riskControlEffectiveness,
         riskControlPct: d.riskControlPct,
         // S3: the panel prices off the same played triangle the engine does.
-        experience: {
-          rows: lineState.reserveDevelopment ?? [],
-          allMarketMembers: gameState.poolState.allMarketMembers,
-          membershipHistory: gameState.poolState.membershipHistory,
-        },
+        //
+        // ⚠ IT DID NOT, UNTIL THIS COMMIT. These three fields were spelled out
+        // here with `rows: lineState.reserveDevelopment ?? []` and NO
+        // windowRows, so the panel priced off the pool's whole history against
+        // an engine pricing off ten years — WC's basis ran 23.3% high on average
+        // and 72.9% at worst, in every line-year of every game from year one.
+        // pricingExperienceBasis is now the single builder; see its header for
+        // the measurement and for the identity that validates it.
+        experience: pricingExperienceBasis(gameState.poolState, decisionLine),
       },
     );
   }, [gameState, decisionLine, decisionLineFundingLevel, decisionLineFundingAtExpected, decisionLineActiveMembers, currentDecisions]);

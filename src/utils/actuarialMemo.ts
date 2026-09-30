@@ -24,11 +24,15 @@
 // two are negatives of each other and the memo says so in prose.
 
 import type {
-  GameState, LinePoolState, ReserveDevelopmentRow,
+  CoverageLine, GameState, LinePoolState, ReserveDevelopmentRow,
 } from '../types/simulation';
 import { ibnerUnwindWeight } from './simulationEngine';
 import { cumulativePaid } from './payoutPattern';
-import { LINE_PAYOUT_PATTERN } from '../data/defaultAssumptions';
+import { LINE_PAYOUT_PATTERN, TRIANGLE_HISTORY_YEARS } from '../data/defaultAssumptions';
+import { pricingExperienceBasis, windowRows } from './pricingTriangle';
+import { experienceRatePer100 } from './experienceRating';
+import { clfFor } from './fundingConsequence';
+import { lineDisplayName } from './lineDisplay';
 
 // A line's share of ultimate paid by the end of its accident year, from the
 // payout pattern the engine pays on — so the memo's "GL near 10%, Property past
@@ -526,6 +530,144 @@ export function buildActuarialMemo({ gameState, asAtYear }: ActuarialMemoInput):
     'it. On a short-tail line you know where you stand quickly. On a long-tail line you do not, ' +
     'and a funding decision made today is still being marked years after you made it.',
   );
+
+  // ==========================================================================
+  // THE INDICATION — what the triangle above says the NEXT year costs.
+  //
+  // ⚠ IT IS FILED ONLY AT THE LATEST VALUATION, and that is the same discipline
+  // lastValuation() already applies to the exhibit. An indication is a statement
+  // about the triangle AS IT STANDS; printing one under a back-dated heading
+  // would date it to a year whose triangle is not the one it was computed from.
+  // When the reader has selected an earlier valuation, the section says where to
+  // find it rather than recomputing a historical indication nobody charged.
+  //
+  // ⚠ EVERY FIGURE HERE IS RETAINED LOSS COST PER $100, ON ONE BASIS, AND THAT
+  // IS THE POINT OF READING netPurePremiumPer100 RATHER THAN purePremiumPer100.
+  // The triangle is built on ReserveDevelopmentRow, whose ultimate and paid
+  // series are both NET of reinsurance, so what it indicates is a RETAINED loss
+  // cost. `purePremiumPer100` on the result is GROSS. Putting the indication
+  // beside the gross figure would be a basis mismatch of exactly the family this
+  // project has retracted more findings to than any other — and it would print
+  // a movement that is mostly the reinsurance programme. pricingTriangle's own
+  // header states the pairing: "it is netPurePremiumPer100 that equals this,
+  // not purePremiumPer100".
+  //
+  // NOTHING BELOW IS RECOMPUTED. The charged figure is read off the locked
+  // result; the indication comes from the one basis builder; the load comes from
+  // the one CLF dispatch the funding panel uses.
+  if (asAt === latest) {
+    const chargedYear = gameState.currentYearNumber - 1;
+    const indicatedYear = gameState.currentYearNumber;
+    const lastLocked = gameState.lockedResults[gameState.lockedResults.length - 1];
+    type IndRow = {
+      line: CoverageLine; charged: number | null; indicated: number | null;
+      entered: number | null; left: number | null;
+    };
+    const indRows: IndRow[] = lines.map(line => {
+      const basis = pricingExperienceBasis(gameState.poolState, line);
+      const indicated = experienceRatePer100(line, basis);
+      const charged = (lastLocked?.byLine?.[line]?.netPurePremiumPer100) ?? null;
+      // WHICH ACCIDENT YEARS MOVED, read off the two windows rather than
+      // derived from the year number — a seeded ledger does not start at 1 and
+      // an arithmetic guess would be wrong on exactly the lines that matter.
+      // ⚠ `< chargedYear`, NOT `<= chargedYear`. The window that priced year N
+      // was built from the state at the CLOSE OF YEAR N-1, which holds accident
+      // years up to N-1; year N's own cohort joins the ledger at the close of
+      // year N, after its price was set. The off-by-one here printed "window
+      // unchanged" on every line, which is the one answer that cannot be true.
+      const now = basis.rows.map(r => r.yearNumber);
+      const before = windowRows(
+        (gameState.poolState.lines[line]?.reserveDevelopment ?? [])
+          .filter(r => r.yearNumber < chargedYear),
+      ).map(r => r.yearNumber);
+      const entered = now.find(y => !before.includes(y)) ?? null;
+      const left = before.find(y => !now.includes(y)) ?? null;
+      return { line, charged, indicated, entered, left };
+    });
+
+    if (indRows.some(r => r.indicated !== null)) {
+      out.push('## Indicated pure premium');
+      // ⚠ BEFORE THE FIRST YEAR IS LOCKED THERE IS NOTHING TO COMPARE AGAINST,
+      // AND THE FIRST DRAFT INVENTED ONE. It printed a "Charged, year 0" column
+      // of dashes under the sentence "what year 0 was actually charged" — but
+      // year 0 is the seeded prior, nobody was charged in it, and the movement
+      // column was differencing against a year that was never priced. The
+      // opening indication is a real and useful figure; a movement is not.
+      const haveCharged = lastLocked !== undefined && chargedYear >= 1;
+      if (haveCharged) {
+        out.push(
+          `The pool prices off the triangle above. This is what it indicates for year ${indicatedYear}, ` +
+          `against what year ${chargedYear} was actually charged. Both columns are **retained loss cost ` +
+          'per $100** — net of reinsurance, which is the basis the triangle is built on.',
+        );
+      } else {
+        out.push(
+          `The pool prices off the triangle above. This is what it indicates for year ${indicatedYear}, ` +
+          'the first year to be played. It is **retained loss cost per $100** — net of reinsurance, ' +
+          'which is the basis the triangle is built on. There is nothing to compare it against yet: ' +
+          'the opening triangle is seeded history, and no year of it was priced by this pool.',
+        );
+      }
+      const body = indRows.map(r => {
+        const ind = r.indicated === null ? '—' : r.indicated.toFixed(4);
+        if (!haveCharged) return `| ${lineDisplayName(r.line)} | ${ind} |`;
+        const mv = (r.charged && r.indicated) ? (r.indicated / r.charged - 1) : null;
+        const moved = r.entered !== null || r.left !== null
+          ? `year ${r.entered ?? '—'} in, year ${r.left ?? '—'} out`
+          : 'window unchanged';
+        return `| ${lineDisplayName(r.line)} | ${r.charged === null ? '—' : r.charged.toFixed(4)} `
+          + `| ${ind} | ${mv === null ? '—' : `${mv >= 0 ? '+' : ''}${(100 * mv).toFixed(1)}%`} | ${moved} |`;
+      }).join('\n');
+      out.push(haveCharged
+        ? `| Line | Charged, year ${chargedYear} | Indicated, year ${indicatedYear} | Movement | Why the triangle moved |\n`
+          + '|---|---:|---:|---:|---|\n' + body
+        : `| Line | Indicated, year ${indicatedYear} |\n|---|---:|\n` + body);
+      if (haveCharged) {
+        out.push(
+          'The indication moves because the window moves. It holds the most recent '
+          + `${TRIANGLE_HISTORY_YEARS} accident years, so each year one enters and one leaves, and the `
+          + 'mean is taken over what is left. A line whose movement is large is telling you those two '
+          + 'years were very different from each other — not that the pool got better or worse.',
+        );
+      }
+
+      // ⚠ THE LEGIBILITY DEVICE, AND IT IS STRUCTURAL RATHER THAN A CAVEAT.
+      // A single rate figure beside an indication reads as a forecast however it
+      // is hedged, because one number per line is what a forecast looks like.
+      // Two numbers per line, each labelled with the choice that produces it,
+      // cannot be read that way: the reader has to pick one, which is precisely
+      // the decision that has not been made yet. The caveat is carried by the
+      // shape of the table instead of by a paragraph asking to be believed.
+      // ⚠ PER LINE, NOT ONE LEVEL FOR ALL THREE. fundingConfidenceLevel is a
+      // per-line decision and the first draft read lines[0]'s for every row,
+      // which would print Property's indication at WC's chosen confidence and
+      // label it as the reader's own choice. The chosen percentage rides in the
+      // cell for the same reason — one column header cannot state three levels.
+      const loadBody = indRows.filter(r => r.indicated !== null).map(r => {
+        const lvl = gameState.currentDecisions?.byLine?.[r.line]?.fundingConfidenceLevel ?? 0.80;
+        const ind = r.indicated as number;
+        return `| ${lineDisplayName(r.line)} | ${ind.toFixed(4)} `
+          + `| ${(ind * clfFor(r.line, lvl, true)).toFixed(4)} `
+          + `| ${(ind * clfFor(r.line, lvl, false)).toFixed(4)} _(at ${(100 * lvl).toFixed(0)}%)_ |`;
+      }).join('\n');
+      out.push('### The indication is not a rate');
+      out.push(
+        '**A pure premium is a loss cost. A rate is a loss cost times a confidence load**, and the '
+        + 'load comes from a funding stop nobody has chosen yet. The indication above is the pool\'s; '
+        + 'the load is the board\'s. Below is the same indication under two of the choices open to '
+        + `you — not two forecasts, and neither is year ${indicatedYear}'s rate until you pick one.`,
+      );
+      out.push(
+        '| Line | Indicated | At Expected funding | At your chosen confidence |\n'
+        + '|---|---:|---:|---:|\n' + loadBody,
+      );
+      out.push(
+        '_That is what the funding slider does._ It chooses the multiplier between the first column '
+        + 'and the others. The indication is what the pool costs; the slider decides how much of it '
+        + 'to collect this year and how much to leave to surplus.',
+      );
+    }
+  }
 
   if (gameState.isComplete && asAt === gameState.setup.gameLength) {
     const endingSurplus = gameState.lockedResults[gameState.lockedResults.length - 1]?.endingSurplus ?? 0;

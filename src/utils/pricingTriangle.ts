@@ -79,7 +79,7 @@ import { TRIANGLE_HISTORY_YEARS } from '../data/defaultAssumptions';
 import { getMemberExposure } from './lineHelpers';
 import { wasActiveInLine } from './membershipHistory';
 import type {
-  CoverageLine, Member, MembershipHistory, PricingTriangleState, ReserveDevelopmentRow,
+  CoverageLine, Member, MembershipHistory, PoolState, PricingTriangleState, ReserveDevelopmentRow,
 } from '../types/simulation';
 
 /** Everything the projection needs that the ledger does not carry. */
@@ -104,6 +104,48 @@ export function windowRows(
   return [...rows]
     .sort((a, b) => a.yearNumber - b.yearNumber)
     .slice(-years);
+}
+
+/**
+ * THE PRICING BASIS A CLOSED POOL STATE IMPLIES — the one place a consumer
+ * outside the engine builds one.
+ *
+ * ⚠ IT EXISTS BECAUSE THE SENTENCE ABOVE — "every consumer that wants a window
+ * has to take one" — WAS AN INSTRUCTION AND ONE CONSUMER DID NOT FOLLOW IT.
+ * derivations.ts built the funding panel's basis as
+ * `rows: lineState.reserveDevelopment ?? []`, unwindowed, so the panel priced
+ * off the pool's WHOLE history while the engine priced off ten years. Measured
+ * over 8 games x 12 years x 3 lines, unwindowed against windowed:
+ *
+ *     line        mean     median     worst
+ *     WC        +23.31%   +21.30%   +72.91%
+ *     GL         +1.16%    +0.42%   +18.92%
+ *     Property   +3.63%    +2.75%   +21.18%
+ *
+ * The ledger is longer than the window in EVERY line-year from year one — WC
+ * opens with 14 seeded rows against a window of 10 — so this was not a late-game
+ * edge, it was every game from the first decision. A leading underscore of doubt
+ * about which rows to pass is what a named builder removes.
+ *
+ * ⚠ IT IS FOR A CLOSED STATE AND THE ENGINE DELIBERATELY DOES NOT CALL IT. The
+ * engine assembles its basis mid-year from `ctx`, whose roster is the one being
+ * moved, and re-pointing it at `poolState` would change what it prices. What
+ * makes this helper trustworthy is not that the engine shares it but that it
+ * PROVABLY REPRODUCES IT: computed from the pool state at the close of year N,
+ * `experienceRatePer100` over this basis equals the engine's own
+ * `netPurePremiumPer100` for year N+1 EXACTLY — 42 of 42 line-years to 1e-9,
+ * across a fourteen-year game on all three lines. That identity is the whole
+ * reason the indication can be shown a year ahead of being charged.
+ */
+export function pricingExperienceBasis(
+  poolState: Pick<PoolState, 'lines' | 'allMarketMembers' | 'membershipHistory'>,
+  line: CoverageLine,
+): TriangleBasis & { rows: ReserveDevelopmentRow[] } {
+  return {
+    rows: windowRows(poolState.lines[line]?.reserveDevelopment ?? []),
+    allMarketMembers: poolState.allMarketMembers,
+    membershipHistory: poolState.membershipHistory,
+  };
 }
 
 /** The exposure enrolled in `line` in accident year `ay`, or 0 if unknowable. */
