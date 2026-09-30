@@ -689,7 +689,10 @@ export interface DecisionSet {
 export interface DevelopingClaim {
   claimId: string;
   occurrenceId: string;
-  /** As the generator drew it, GROSS of reinsurance. Never moves. */
+  /** As first REPORTED, GROSS of reinsurance: with FORWARD_BOOKING on, the
+   *  contracted initialEstimate of the drawn occurrence (simulationEngine's
+   *  buildTrackedSet call), BELOW what the generator drew. The drawn value is the
+   *  register's Claim.grossUltimate, which this develops toward. Never moves. */
   drawn: number;
   /** As first BOOKED — `drawn` less this cohort's optimistic markdown. Equal to
    *  `drawn` when the line was funded at or above break-even. Never moves. */
@@ -769,8 +772,10 @@ export interface DevelopingClaim {
 export interface BenchClaim {
   claimId: string;
   occurrenceId: string;
-  /** As the generator drew it, GROSS. Never moves. Also the size the closure
-   *  curve is resolved on, exactly as for a tracked occurrence. */
+  /** As first REPORTED, GROSS — the contracted initialEstimate when
+   *  FORWARD_BOOKING is on, exactly as DevelopingClaim.drawn. Never moves. Also
+   *  the size the closure curve is resolved on, exactly as for a tracked
+   *  occurrence. */
   drawn: number;
   /** As first BOOKED — `drawn` less this cohort's optimistic markdown. */
   original: number;

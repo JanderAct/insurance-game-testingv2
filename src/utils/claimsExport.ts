@@ -54,6 +54,8 @@ import { resolveClosureCurve } from '../data/defaultAssumptions';
 // ⚠ IMPORTED, NOT RESTATED. The exhibit and this workbook must agree on which
 // accident years can carry claims; a second copy of -2 would be two facts.
 import { PRIOR_BOUNDARY } from './actuarialMemo';
+import { MATURATION_YEARS } from './priorHistoryEngine';
+import { glSeverityCap } from './glClaimEngine';
 import { regenerateLineYearClaims, ClaimRegenerationError } from './claimRegeneration';
 import type { GameInstance } from '../types/simulation';
 
@@ -70,12 +72,15 @@ const ENROLLED_NOTE =
 const PAID_NOTE =
   'Gross Paid is this claim\'s share of its accident year\'s cumulative GROSS paid — a split of the ' +
   'paydown the line\'s payout pattern already set, never a schedule the claim draws for itself. The ' +
-  'split is in two tiers: a CLOSED file has paid everything it will ever pay, so it takes its own ' +
-  'gross incurred, and the OPEN files share what is left pro rata. Status is the claim\'s own closure ' +
-  'draw against a curve fitted to the pool\'s closure experience. Both are derived at read time and ' +
-  'neither is stored. Closure is SLOWER than payment, so an open claim can still be substantially ' +
-  'paid — but it will not have paid itself out, which the previous flat pro-rata split allowed and ' +
-  'which is the reason for the tiers. Gross Paid and Gross Incurred are both GROSS, so they are ' +
+  'split is in two tiers. When the year has paid at least what its CLOSED files are worth, each closed ' +
+  'file takes its own gross incurred and the OPEN files share what is left pro rata. When it has not, ' +
+  'the closed files share what was paid pro rata and every open file shows nothing paid yet — so a ' +
+  'closed file can show less paid than its incurred. That second case is common, not an edge: closure ' +
+  'runs on a count of files and payment on dollars, and the files already closed are often worth more ' +
+  'than the year has paid. Status is the claim\'s own closure draw against a curve fitted to the ' +
+  'pool\'s closure experience. Both are derived at read time and neither is stored. An open claim can ' +
+  'still be substantially paid — but it will not have paid itself out, which the previous flat pro-rata ' +
+  'split allowed and which is the reason for the tiers. Gross Paid and Gross Incurred are both GROSS, so they are ' +
   'subtractable — but they are NOT the same VINTAGE, and their ratio is not this claim\'s ' +
   'paid-to-incurred. Gross Incurred is the claim AS DRAWN and never develops; Gross Paid is a share ' +
   'of the accident year\'s paid to date, and that year\'s register HAS developed. On a year that ' +
@@ -90,10 +95,13 @@ const PAID_NOTE =
   'developed one. The two documents are on different bases ON PURPOSE and each says so.';
 
 const PROPERTY_NOTE =
-  'Property claims are drawn from a mixture fitted to the pool\'s own nine years of claims. Band is ' +
-  'a tier label kept so Claim.tier stays populated — there is ONE band, not a set: the separate ' +
-  'weather and catastrophe bands went with the fit (weather is inside the mixture; catastrophes are ' +
-  'shock events now). Reported Year always equals Accident Year: Property carries no report lag.';
+  'Property claim sizes are drawn from a mixture fitted to the pool\'s own nine years of claims, and ' +
+  'claim frequency from the most recent five of them. Band is a tier label kept so Claim.tier stays ' +
+  'populated — there is ONE band, not a set. The separate weather band went with the fit (weather is ' +
+  'inside the mixture), and there is NO catastrophe band, so no catastrophe occurs in this game. The ' +
+  'shock catalog\'s one catastrophe event cannot supply one either: nothing yet puts a shock schedule ' +
+  'into a game, and that event\'s effect is not one the engine can run. Reported Year always equals ' +
+  'Accident Year: Property carries no report lag.';
 
 function safeStr(v: unknown): string {
   return v === null || v === undefined ? '' : String(v);
@@ -163,7 +171,9 @@ const TEXT = undefined;
 // with many claims, and on that day a claim-id join starts misattributing
 // silently. This is written for that day rather than for today.
 interface OccDevelopment {
-  /** As the generator drew the occurrence. Never moves. */
+  /** The occurrence as first REPORTED — with forward booking on, the contracted
+   *  initial estimate, BELOW what the generator drew. Never moves. Exported
+   *  under the historical header "Drawn Occurrence"; see DEV_NOTE. */
   drawn: number;
   /** As first BOOKED — `drawn` less the cohort's optimistic markdown. */
   booked: number;
@@ -325,9 +335,15 @@ const SHARED_FORMATS: (NumFmt | undefined)[] = [TEXT, TEXT, TEXT, TEXT, TEXT, YE
 
 const DEV_NOTE =
   'The development block at the right of this sheet is the claim\'s OCCURRENCE, joined on Occurrence ' +
-  'ID — not the claim\'s own share of it. Gross Incurred is the CLAIM as drawn; Drawn Occurrence is ' +
-  'the occurrence as drawn; Booked Occurrence is what the pool actually put on its register, which is ' +
-  'LOWER than drawn whenever the line was funded below break-even and equal to it otherwise. Each ' +
+  'ID — not the claim\'s own share of it. Gross Incurred is the CLAIM as drawn. ⚠ DRAWN OCCURRENCE IS ' +
+  'NOT THE OCCURRENCE AS DRAWN, whatever its name says: it is the occurrence as first REPORTED. Every ' +
+  'claim is reported at an initial estimate that is a power of its drawn size — it UNDERSTATES a large ' +
+  'claim and can overstate a small one — and develops toward its drawn value in the years after. So on ' +
+  'a one-claim occurrence Drawn Occurrence is NOT equal to Gross Incurred: it is below it on a large ' +
+  'claim and can be above it on a small one. The name predates that estimate and is kept so the ' +
+  'column does not move. Booked Occurrence is Drawn Occurrence less the accident year\'s ' +
+  'optimistic markdown: LOWER whenever the line was funded below break-even (a funding multiplier under ' +
+  '1.000) and equal to it otherwise. Each ' +
   'Yr column is THAT YEAR\'S CHANGE, not the level, so Booked + all the Yr columns = Current exactly. ' +
   'A blank Yr cell means the occurrence did not move that year; a blank development block means the ' +
   'claim was never in the subset that carries development at all — a different thing from developing ' +
@@ -359,10 +375,11 @@ interface LineClaimRow {
 // cohorts that have a claim register and cohorts that do not". So the years this
 // can show and the years the exhibit shows individually are the same set, by
 // construction rather than by inspection — which is why the constant is imported
-// rather than restated. Cohorts older than it (measured: -4 through -8) are SEED
-// cohorts, apportioned from a drawn reserve total at generation with no claims
-// behind them at all. They can never appear on a claim sheet, and that is the
-// exhibit's collapsed Prior row.
+// rather than restated. The MATURATION years just older than it (-9 through -3,
+// MATURATION_YEARS of them) have registers but no retained result — see
+// ClaimCoverage.unretained. Only cohorts older than THOSE are SEED cohorts,
+// apportioned from a drawn reserve total at generation with no claims behind
+// them at all. Both sit in the exhibit's collapsed Prior row.
 // ============================================================================
 // ============================================================================
 // THE REGISTER FOR A LINE-YEAR: what the result carries, or what it can redraw.
@@ -521,19 +538,37 @@ function claimCoverage(
 /** The sheet note describing that coverage. Empty when there is nothing to say. */
 function coverageNote(cov: ClaimCoverage): string {
   if (cov.neverProduced) return '';
+  // ⚠ THE SEED BOUNDARY IS NOT PRIOR_BOUNDARY. The years just older than it are
+  // the maturation years, which DO have registers (maturationNote, below); the
+  // note that stood here called every year older than -2 a seed cohort with no
+  // register, two sentences before naming those same years as having one.
   const seedNote =
-    `Cohorts older than accident year ${PRIOR_BOUNDARY} are SEED cohorts — apportioned from a drawn `
-    + 'reserve total at generation, with no claim register behind them — so they can never appear on '
-    + 'this sheet. They are the Actuarial exhibit\'s collapsed Prior row, and their absence is '
-    + 'permanent rather than a gap.';
+    `Cohorts older than accident year ${PRIOR_BOUNDARY - MATURATION_YEARS} are SEED cohorts — `
+    + 'apportioned from a drawn reserve total at generation, with no claim register behind them — so '
+    + 'they can never appear on this sheet or on the Development sheet, and their absence is permanent '
+    + 'rather than a gap. The Actuarial exhibit\'s collapsed Prior row gathers every accident year older '
+    + `than ${PRIOR_BOUNDARY}: the seed cohorts and the simulated years below together.`;
   // ⚠ SAID PLAINLY BECAUSE THE DEVELOPMENT SHEET WILL SHOW THESE YEARS. They have
   // registers, so their occurrences develop and appear there; they have no
   // result, so they have no rows here. A reader who totals one sheet against the
   // other must be told that before they do it, not after.
-  const maturationNote = cov.unretained.length === 0 ? '' :
-    ` Accident years ${Math.min(...cov.unretained)} to ${Math.max(...cov.unretained)} were SIMULATED to `
-    + 'build the pool\'s opening book and are not part of its declared past. They have real claim '
-    + 'registers — their development is on the Development sheet — but their per-year results are not '
+  //
+  // ⚠ THE SPAN IS THE CONSTANT'S, THE LIST IS THE SHEET'S. The sentence used to
+  // name only the years still developing on this line, so GL read "Accident
+  // years -3 to -3" and said nothing about -9 to -4, which sit below the seed
+  // boundary's line and above it at once. Every simulated year is named; which of
+  // them still develop is read from the same lookup the Development sheet reads.
+  const matFrom = PRIOR_BOUNDARY - MATURATION_YEARS, matTo = PRIOR_BOUNDARY - 1;
+  const developing = cov.unretained.length === 0
+    ? 'none of them still develops on this line, so none is on the Development sheet either'
+    : cov.unretained.length === matTo - matFrom + 1
+      ? 'all of them still develop, and that development is on the Development sheet'
+      : `of them, ${cov.unretained.join(', ')} still develop${cov.unretained.length === 1 ? 's' : ''} on this line `
+        + 'and that development is on the Development sheet; the rest carry no developing occurrence';
+  const maturationNote =
+    ` Accident years ${matFrom} to ${matTo} were SIMULATED to `
+    + 'build the pool\'s opening book and are not part of its declared past. They had real claim '
+    + `registers — ${developing} — but their per-year results are not `
     + 'carried, so there is nothing to rebuild their claim rows from and they cannot appear on this '
     + 'sheet. That is a deliberate boundary, not a lost save: see MATURATION_YEARS in '
     + 'priorHistoryEngine.';
@@ -734,9 +769,10 @@ function sharedCells(row: LineClaimRow): Row {
 // indemnity on different payout patterns. Recorded in CALIBRATION_FINDINGS.
 const WC_COMPONENT_NOTE =
   'One amount per claim: WC severity is a per-rating-group lognormal mixture with no medical / ' +
-  'indemnity split. Tier is the MIXTURE COMPONENT the claim was drawn from (small / medium / large / ' +
-  'schoolsMedium, or "injected" for a shock claim) — these are NOT the retired medOnly / temp / perm / ' +
-  'catastrophic tiers. Rating Class is the rating GROUP (county / schools / highSafety / lowSafety). ' +
+  'indemnity split. Component is the MIXTURE COMPONENT the claim was drawn from (small / medium / ' +
+  'large / schoolsMedium, or "injected" for a shock claim) — these are NOT the retired medOnly / temp / ' +
+  'perm / catastrophic tiers. Rating Group is the claimant\'s rating group (county / schools / ' +
+  'highSafety / lowSafety). ' +
   'Reported Year always equals Accident Year: WC\'s report lag and the IBNR inventory it fed were ' +
   'both removed, and every claim is reported in the year it happens. The column is KEPT rather than ' +
   'dropped so that if a lag is ever reintroduced the divergence shows up here immediately — a ' +
@@ -784,11 +820,21 @@ function buildWcSheetRows(rows: LineClaimRow[], dev: Map<string, OccDevelopment>
 //
 // This changes the sheet's SHAPE, so solo-export-guard's GL hash moves. That
 // is expected and is a shape change, not a value change.
+// ⚠ THE CEILING IS READ FROM THE ENGINE, NOT WRITTEN HERE. This note said "$100M
+// in YEAR 1 ... carried forward by glSeverityTrend" through two re-pins of that
+// constant — to $84M, then flat — because it restated a number it could have
+// asked for. Whether the ceiling trends is asked of the engine too, across the
+// longest game, so the sentence cannot outlive the next reversal either.
+const GL_CAP_M = glSeverityCap(1) / 1e6;
+const GL_CAP_FLAT = glSeverityCap(20) === glSeverityCap(1);
 const GL_COMPONENT_NOTE =
   'One amount per claim: GL severity is a flat 3-component lognormal mixture clamped at a per-claim ' +
-  'ceiling that TRENDS — GL_SEVERITY_CAP is $100M in YEAR 1 and is carried forward by ' +
-  'glSeverityTrend, so a later accident year is capped higher. With no sub-coverage, ' +
-  'gate, litigation stage, or indemnity/ALAE split (ALAE is included in the drawn amount). Tier is ' +
+  `ceiling of $${GL_CAP_M}M` +
+  (GL_CAP_FLAT
+    ? ' in EVERY accident year — the ceiling does not trend, so no claim on this sheet exceeds it. '
+    : ` in YEAR 1, raised in later accident years (year 20: $${glSeverityCap(20) / 1e6}M). `) +
+  'With no sub-coverage, ' +
+  'gate, litigation stage, or indemnity/ALAE split (ALAE is included in the drawn amount). Component is ' +
   'the MIXTURE COMPONENT the claim was drawn from (component1 / component2 / component3) — these are ' +
   'NOT the retired general / epl / lawEnforcement / abuse sub-coverages. Reported Year always equals ' +
   'Accident Year: GL carries no report lag.';
@@ -920,7 +966,7 @@ function buildDevelopmentRows(poolState: PoolState, activeLines: CoverageLine[],
     'the chosen subset is carried, not the whole register — cession is per occurrence and independent ' +
     'between occurrences, so the ones that did not move cede exactly what they always did. Amounts are ' +
     'OCCURRENCE totals, GROSS of reinsurance. A blank sheet means no accident year has developed yet, ' +
-    'or the cohorts carrying it are all seed cohorts, which have no claim register. ' +
+    'or the only cohorts developing are seed cohorts, which have no claim register. ' +
     '⚠ THIS IS THE SHEET TO TOTAL, and it is the only one that can be. The line sheets repeat an ' +
     'occurrence figure on each of its claims; these rows are one per occurrence and do not repeat, so ' +
     'a Yr column summed here is the pool\'s GROSS development in that valuation year across every ' +
@@ -932,9 +978,11 @@ function buildDevelopmentRows(poolState: PoolState, activeLines: CoverageLine[],
     '⚠ THE PRE-GAME YEARS ARE ON THE LINE SHEETS NOW, and the sentence that stood here saying they ' +
     'appear "here and nowhere else in this workbook" was true when written and is not any more. The ' +
     'line sheets read priorHistory as well as lockedResults, so accident years -2 to 0 have claim ' +
-    'rows like any other year. What this sheet still carries alone is development on SEED cohorts ' +
-    'older than -2 — apportioned from a reserve total with no claim register, so there is no row for ' +
-    'them to have. ' +
+    'rows like any other year. What this sheet still carries alone is development on the SIMULATED ' +
+    `years ${PRIOR_BOUNDARY - MATURATION_YEARS} to ${PRIOR_BOUNDARY - 1}, run to build the opening book, ` +
+    'on whichever of them still develop: they have claim registers, so their occurrences develop here, but no retained result, so the line ' +
+    'sheets have no rows for them. SEED cohorts older than that have no register and appear on neither ' +
+    'sheet. ' +
     'The Claim ID column was DROPPED: it held the occurrence\'s FIRST claim beside an occurrence-level ' +
     'amount, which is a misattribution waiting for the first multi-claim event.' +
     (coverage ? ' ' + coverage : '');
