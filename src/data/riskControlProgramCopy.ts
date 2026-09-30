@@ -23,12 +23,23 @@
 // tile renders. See riskControlCategories.ts.
 // ============================================================================
 
+import { RISK_CONTROL_CATEGORIES } from './riskControlCategories';
+
+// ⚠ THE COMMITMENT IS READ FROM THE CATALOG, NOT RESTATED. Each program's
+// "Commitment: N years" line is its RiskControlCategory.commitmentYears, so the
+// memo a player reads cannot promise a term the program does not carry.
+function commitment(id: string): string {
+  const c = RISK_CONTROL_CATEGORIES.find(x => x.id === id);
+  if (!c) throw new Error(`riskControlProgramCopy: no catalog entry '${id}'`);
+  return `${c.commitmentYears} year${c.commitmentYears === 1 ? '' : 's'}`;
+}
+
 /** Keyed by RiskControlCategory.id. */
 export const RISK_CONTROL_PROGRAM_COPY: Record<string, string> = {
   'wc-safety-rtw': `Workers' Compensation Safety & Return-to-Work Program
 
 Applies to: Workers' Compensation
-Commitment: 3 years
+Commitment: ${commitment('wc-safety-rtw')}
 
 This program combines workplace safety initiatives with a structured return-to-work program for injured employees.
 
@@ -41,7 +52,7 @@ Benefits are expected to build over time as participating members implement safe
   'gl-law-enforcement-analytics': `Law Enforcement Early Intervention & Analytics
 
 Applies to: General Liability
-Commitment: 3 years
+Commitment: ${commitment('gl-law-enforcement-analytics')}
 
 This program provides participating law enforcement agencies with tools to identify emerging patterns that may lead to significant liability claims.
 
@@ -54,7 +65,7 @@ The benefits develop gradually. The first stage focuses on establishing the syst
   'property-mitigation': `Property Loss Prevention & Mitigation
 
 Applies to: Property
-Commitment: 2 years
+Commitment: ${commitment('property-mitigation')}
 
 This program focuses resources on physical improvements that can reduce the severity of property losses, particularly at higher-value or more vulnerable locations.
 
@@ -67,7 +78,7 @@ Unlike some other risk control programs, the value of property mitigation may no
   'claims-management-system': `Claims Management Modernization
 
 Applies to: All active coverage lines
-Commitment: 3 years
+Commitment: ${commitment('claims-management-system')}
 
 This program modernizes the systems and processes used to manage claims throughout the Pool.
 
@@ -82,7 +93,7 @@ This program can benefit every active coverage line because it affects the way c
   'member-services': `Member Services & Risk Education
 
 Applies to: All active coverage lines
-Commitment: 1 year
+Commitment: ${commitment('member-services')}
 
 This program expands the services available to Pool members through training, advisory support, model policies, educational programs, member hotlines, and other resources.
 

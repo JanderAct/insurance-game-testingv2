@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Shuffle, BookOpen } from 'lucide-react';
 import type { GameSetupSettings, CoverageLine } from '../types/simulation';
 import RippleLogo from '../assets/RippleLogo';
+import { GAME_LENGTH_YEARS } from '../data/defaultAssumptions';
 import WelcomeModal from '../components/WelcomeModal';
 
 interface SetupPageProps {
@@ -107,16 +108,16 @@ export default function SetupPage({ onStart }: SetupPageProps) {
                 </label>
                 <input
                   type="range"
-                  min={3}
-                  max={10}
+                  min={GAME_LENGTH_YEARS.min}
+                  max={GAME_LENGTH_YEARS.max}
                   step={1}
                   value={gameLength}
                   onChange={e => setGameLength(parseInt(e.target.value))}
                   className="w-full accent-blue-600 h-2"
                 />
                 <div className="flex justify-between text-sm text-gray-400 mt-1.5">
-                  <span>3 years</span>
-                  <span>10 years</span>
+                  <span>{GAME_LENGTH_YEARS.min} years</span>
+                  <span>{GAME_LENGTH_YEARS.max} years</span>
                 </div>
               </div>
 

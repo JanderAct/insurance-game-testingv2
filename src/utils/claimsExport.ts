@@ -338,7 +338,10 @@ const DEV_NOTE =
   'ID — not the claim\'s own share of it. Gross Incurred is the CLAIM as drawn. ⚠ DRAWN OCCURRENCE IS ' +
   'NOT THE OCCURRENCE AS DRAWN, whatever its name says: it is the occurrence as first REPORTED. Every ' +
   'claim is reported at an initial estimate that is a power of its drawn size — it UNDERSTATES a large ' +
-  'claim and can overstate a small one — and develops toward its drawn value in the years after. So on ' +
+  'claim and can overstate a small one. It is the ACCIDENT YEAR, not each claim, that then develops ' +
+  'toward the drawn total: a year\'s development lands on a size-weighted subset of its occurrences, so ' +
+  'one occurrence\'s Current need not end at its own drawn value, and one outside that subset does not ' +
+  'move at all. So on ' +
   'a one-claim occurrence Drawn Occurrence is NOT equal to Gross Incurred: it is below it on a large ' +
   'claim and can be above it on a small one. The name predates that estimate and is kept so the ' +
   'column does not move. Booked Occurrence is Drawn Occurrence less the accident year\'s ' +

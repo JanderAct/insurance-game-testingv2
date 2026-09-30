@@ -9,6 +9,17 @@ import type { ClosureCurve } from '../utils/claimClosure';
 // after the selected CLF is applied and is not itself multiplied by the CLF.
 export const ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM = 0.15;
 
+// EXCESS CAPITAL STATUS, by the excess capital ratio (excess surplus over the
+// reserve risk margin needed): at or above `strong` is Strong, at or above
+// `adequate` Adequate, at or above `thin` Thin, below that Deficient. The engine
+// grades on these and the audit page states them FROM these, so the sentence a
+// player reads cannot name a threshold the engine is not using.
+export const CAPITAL_ADEQUACY_THRESHOLDS = { strong: 0.25, adequate: 0, thin: -0.10 } as const;
+
+// THE GAME-LENGTH SLIDER'S RANGE, in years. The setup screen's slider and the
+// welcome guide's "you may select a game lasting N to M years" both read it.
+export const GAME_LENGTH_YEARS = { min: 3, max: 10 } as const;
+
 // Liquid operating cash the pool keeps on hand each year, sized to that year's
 // premium. Cash above this target is swept into investments at year-end, where
 // it earns a return; cash below this target is covered by drawing down

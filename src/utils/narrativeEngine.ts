@@ -1,6 +1,10 @@
 // Rule-based narrative explanation engine for Risk Pool Simulation v1
 
 import type { ResultSet } from '../types/simulation';
+import { REINSURANCE_TOWER, type TowerLine } from '../data/reinsuranceTower';
+import { normalizeLayersPlaced } from './reinsuranceTower';
+
+const TOWER_LINES: readonly TowerLine[] = ['WC', 'GL', 'Property'];
 
 export function generateNarrative(result: ResultSet, _priorResult?: ResultSet): string {
   const parts: string[] = [];
@@ -70,13 +74,29 @@ export function generateNarrative(result: ResultSet, _priorResult?: ResultSet): 
   // is deleted rather than narrated, per the same reasoning as
   // reinsuranceDisplay.ts: a narrative describing a quota share on a line
   // with a tower would be worse than no narrative.
+  //
+  // ⚠ PER LINE, FROM EACH LINE'S OWN DECISIONS AND TOWER. This is the POOLED
+  // result, and it used to read `result.decisions` — which the pool copies from
+  // its FIRST line — and `result.cededByLayer`, which deliberately excludes
+  // Property. So a Property-only pool that bought its layer was told "No
+  // occurrence layers were placed", and every pool was told of "the $1M
+  // retention" although Property's lowest layer attaches at $5M and a player
+  // who declines a line's first layer retains up to the next one. Each line now
+  // names the attachment of its own lowest PLACED layer, from the tower itself.
   {
-    const anyPlaced = (result.cededByLayer ?? []).length > 0
-      && (result.decisions.layersPlaced ?? []).some(Boolean);
+    const lowestPlaced = TOWER_LINES
+      .filter(line => result.byLine?.[line])
+      .map(line => {
+        const placed = normalizeLayersPlaced(line, result.byLine[line].decisions.layersPlaced);
+        const attachments = REINSURANCE_TOWER[line].filter((_, i) => placed[i]).map(l => l.attachment);
+        return { line, attachment: attachments.length > 0 ? Math.min(...attachments) : null };
+      })
+      .filter((x): x is { line: TowerLine; attachment: number } => x.attachment !== null);
     if (reinsuranceRecovery > 0) {
       parts.push(`The reinsurance tower recovered $${fmt(reinsuranceRecovery)}, reducing net losses.`);
-    } else if (anyPlaced) {
-      parts.push(`Occurrence layers were placed but no single loss reached the $1M retention.`);
+    } else if (lowestPlaced.length > 0) {
+      const where = lowestPlaced.map(x => `${x.line} at $${fmtM(x.attachment)}`).join(', ');
+      parts.push(`Occurrence layers were placed but no single loss reached the lowest one placed (${where}).`);
     } else {
       parts.push(`No occurrence layers were placed — the pool retained every loss in full.`);
     }
@@ -137,6 +157,10 @@ export function generateNarrative(result: ResultSet, _priorResult?: ResultSet): 
 
 function pct(n: number): string {
   return `${(n * 100).toFixed(1)}%`;
+}
+
+function fmtM(n: number): string {
+  return `${+(n / 1e6).toFixed(2)}M`;
 }
 
 function fmt(n: number): string {

@@ -119,6 +119,9 @@ const FAST: string[] = [
   'panel-engine-parity-check',       //   4s
   'pool-aggregation-check',          //   2s
   'property-claim-check',            //   3s
+  'prose-identifier-check',          //   3s   every code-shaped name in PLAYER-FACING prose exists in src; positive
+                                     //         control inside. --comments lists the same over developer comments
+                                     //         as a report, never a failure (246 names, mostly deliberate history)
   'ratemaking-loop-check',           //  80s   THE ACCEPTANCE TEST — 4/4; condition 3 is paired with two null controls
   'ratio-basis-check',               //   7s
   'reserve-centring-check',          //  55s   IBNER_CALENDAR_RHO adds dispersion and NOT drift; carries its own positive control

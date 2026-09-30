@@ -24,7 +24,7 @@ function mergeShockRecords(lineResults: LineResultSet[]): ShockRecord[] | undefi
   return merged.size > 0 ? [...merged.values()] : undefined;
 }
 import { SeededRandom, deriveSubRng } from './random';
-import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, FUNDING_CLF_TABLE, IBNER_BOOKING_BIAS_COEFF, IBNER_CALENDAR_RHO, IBNER_COHORT_SD_SCALE, IBNER_HORIZON, IBNER_STEP_MIXTURE, IBNER_TOTAL_SD, IBNER_UNWIND_DECAY, LINE_PAYOUT_PATTERN, FORWARD_BOOKING, PER_CLAIM_REVISION, PRICING_TRIANGLE, MEMBER_LOSS_VOLATILITY, OPERATING_CASH_PCT_OF_PREMIUM, PROPERTY_HELD_PURE_PREMIUM_PER_100, RISK_CONTROL_PARAMS, resolveClosureCurve, openShareAtStep } from '../data/defaultAssumptions';
+import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, CAPITAL_ADEQUACY_THRESHOLDS, FUNDING_CLF_TABLE, IBNER_BOOKING_BIAS_COEFF, IBNER_CALENDAR_RHO, IBNER_COHORT_SD_SCALE, IBNER_HORIZON, IBNER_STEP_MIXTURE, IBNER_TOTAL_SD, IBNER_UNWIND_DECAY, LINE_PAYOUT_PATTERN, FORWARD_BOOKING, PER_CLAIM_REVISION, PRICING_TRIANGLE, MEMBER_LOSS_VOLATILITY, OPERATING_CASH_PCT_OF_PREMIUM, PROPERTY_HELD_PURE_PREMIUM_PER_100, RISK_CONTROL_PARAMS, resolveClosureCurve, openShareAtStep } from '../data/defaultAssumptions';
 import type { TowerLine } from '../data/reinsuranceTower';
 import {
   DEVELOPMENT_ALLOCATION, DEVELOPMENT_CESSION_ENABLED, STOCHASTIC_ALLOCATION_MODE,
@@ -57,7 +57,7 @@ import { simulateMemberMovement } from './membershipEngine';
 import { cloneMembershipHistory, openInterval, closeInterval } from './membershipHistory';
 import { cloneMemberLossHistory, recordMemberLossYear } from './memberLossHistory';
 import { computeKLine, deriveNeutralClassRatesPer100, deriveNeutralPurePremiumPer100, expectedWcGrossLossForPricing, generateWcClaims, ratingGroupOf, wcFrequencyTrend, wcSeverityTrend } from './wcClaimEngine';
-import { hasStaticClf, staticClf } from '../data/clfTables';
+import { hasStaticClf, RESERVE_MARGIN_CONFIDENCE, staticClf } from '../data/clfTables';
 import { computeKGl, deriveNeutralGlPurePremiumPer100, expectedGlGrossLossForPricing, generateGlClaims, glCappedSeverityTrend } from './glClaimEngine';
 import { computeKPr, generatePropertyClaims } from './propertyClaimEngine';
 import { generateNarrative } from './narrativeEngine';
@@ -2011,17 +2011,18 @@ export function processLineYear(
   //
   // ⚠ THE ONE THING THAT MAY LEGITIMATELY READ THIS RATIO IS A ONE-OFF
   // CALIBRATION. Because reserveMarginCLF is a static per-line table, the line
-  // below makes margin/reserve an EXACT constant — WC 0.3294, GL 0.5020,
-  // Property 0.5923, zero dispersion across seeds and across both payout-pattern
-  // arms. So any "hold J x reserve" capital rule is "hold T x this margin"
+  // below makes margin/reserve an EXACT constant — staticClf(line,
+  // RESERVE_MARGIN_CONFIDENCE) - 1 on each line, zero dispersion across seeds and
+  // across both payout-pattern arms. (The three figures that stood here were read
+  // off tables that have since moved; the expression is what stays true.) So any "hold J x reserve" capital rule is "hold T x this margin"
   // wearing a different denominator, and adopting one puts the 90% CLF back on
   // the opening path. The consequences are worked through beside
   // OPENING_SURPLUS_BAND in defaultAssumptions.ts, together with the
   // reserve pin that was measured and rejected. Read that before wiring anything
   // here to the opening.
   const reserveMarginCLF = hasStaticClf(line)
-    ? staticClf(line, 0.90)
-    : lookupCLF(0.90);
+    ? staticClf(line, RESERVE_MARGIN_CONFIDENCE)
+    : lookupCLF(RESERVE_MARGIN_CONFIDENCE);
   const reserveRiskMarginNeeded = Math.max(
     0,
     expectedNetUnpaidLoss * (reserveMarginCLF - 1)
@@ -2044,11 +2045,11 @@ export function processLineYear(
   const capitalAdequacyStatus =
     excessCapitalRatio === null
       ? 'N/A'
-      : excessCapitalRatio >= 0.25
+      : excessCapitalRatio >= CAPITAL_ADEQUACY_THRESHOLDS.strong
       ? 'Strong'
-      : excessCapitalRatio >= 0
+      : excessCapitalRatio >= CAPITAL_ADEQUACY_THRESHOLDS.adequate
         ? 'Adequate'
-        : excessCapitalRatio >= -0.10
+        : excessCapitalRatio >= CAPITAL_ADEQUACY_THRESHOLDS.thin
           ? 'Thin'
           : 'Deficient';
 
@@ -2933,9 +2934,9 @@ function resyncSurplusDerived(r: LineResultSet): void {
   r.capitalAdequacyRatio = excess;
   r.capitalAdequacyStatus =
     excess === null ? 'N/A'
-      : excess >= 0.25 ? 'Strong'
-      : excess >= 0 ? 'Adequate'
-      : excess >= -0.10 ? 'Thin'
+      : excess >= CAPITAL_ADEQUACY_THRESHOLDS.strong ? 'Strong'
+      : excess >= CAPITAL_ADEQUACY_THRESHOLDS.adequate ? 'Adequate'
+      : excess >= CAPITAL_ADEQUACY_THRESHOLDS.thin ? 'Thin'
       : 'Deficient';
   r.surplusTieOutDifference = r.endingSurplus - r.surplusFromIncome;
 }
@@ -3240,11 +3241,11 @@ export function aggregateLineResults(
   const capitalAdequacyStatus =
     excessCapitalRatio === null
       ? 'N/A'
-      : excessCapitalRatio >= 0.25
+      : excessCapitalRatio >= CAPITAL_ADEQUACY_THRESHOLDS.strong
       ? 'Strong'
-      : excessCapitalRatio >= 0
+      : excessCapitalRatio >= CAPITAL_ADEQUACY_THRESHOLDS.adequate
         ? 'Adequate'
-        : excessCapitalRatio >= -0.10
+        : excessCapitalRatio >= CAPITAL_ADEQUACY_THRESHOLDS.thin
           ? 'Thin'
           : 'Deficient';
 

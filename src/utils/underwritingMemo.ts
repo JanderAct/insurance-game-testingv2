@@ -160,7 +160,7 @@ export function buildUnderwritingMemo(gameState: GameState): string {
     if ((CREDIBILITY_Z[line] ?? 0) <= 0) {
       out.push(`## ${lineDisplayName(line)}`, '',
         'Not available on Property. A typical member has about one property claim every other year — '
-        + 'fewer than two in a three-year record — so a quiet stretch cannot be told apart from a safe '
+        + `about ${EXPERIENCE_MOD.windowYears / 2} in a ${EXPERIENCE_MOD.windowYears}-year record — so a quiet stretch cannot be told apart from a safe `
         + 'one. No member is experience-rated, no loss ratio is shown, and the renewal bar declines '
         + 'nobody. Candidates are not listed with loss runs because a Property prospect has none on '
         + 'record: the marketplace-wide ledger carries Workers\' Compensation and General Liability for '

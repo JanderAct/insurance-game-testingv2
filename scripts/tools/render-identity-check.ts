@@ -229,8 +229,17 @@ const NORMALISE = (raw: string): string => raw
   .replace(/\s+/g, ' ')
   .trim();
 
+// RENDER_TEXT_DIR=<dir> keeps the TEXT behind every fingerprint, as <dir>/<hash>.txt.
+// A fingerprint says THAT a screen moved and not WHAT moved; with the text kept on
+// both sides of an A/B, a moved row is a plain text diff — which is how a prose-
+// only change is shown to be prose-only rather than asserted to be. Off by default.
+const TEXT_DIR = process.env.RENDER_TEXT_DIR;
+if (TEXT_DIR) fs.mkdirSync(TEXT_DIR, { recursive: true });
+
 function hash(s: string): string {
-  return crypto.createHash('sha256').update(s, 'utf8').digest('hex').slice(0, 16);
+  const h = crypto.createHash('sha256').update(s, 'utf8').digest('hex').slice(0, 16);
+  if (TEXT_DIR) fs.writeFileSync(path.join(TEXT_DIR, `${h}.txt`), s);
+  return h;
 }
 
 async function visibleText(page: Page): Promise<string> {

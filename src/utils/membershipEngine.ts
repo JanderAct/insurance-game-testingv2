@@ -126,6 +126,12 @@ function priceSignalFor(inputs: MemberMovementInputs): {
   return { changeDeviationPct, levelDeviationPct };
 }
 
+// The band a member's retention probability is clamped to, and the noise factor
+// the expected withdrawal count is multiplied by. Named so the Calculation Audit
+// page states them from here rather than restating them.
+export const RETENTION_PROBABILITY_BOUNDS = { min: 0.80, max: 0.99 } as const;
+export const WITHDRAWAL_NOISE_RANGE = { min: 0.4, max: 1.6 } as const;
+
 function calcRetentionProbability(inputs: MemberMovementInputs): number {
   const { decisions, currentMemberSatisfaction, surplus, annualPremium, priorYearLossRatio } = inputs;
 
@@ -156,7 +162,7 @@ function calcRetentionProbability(inputs: MemberMovementInputs): number {
     - W.rateIncreasePenalty * rateIncreasePenalty
     - poorResultPenalty;
 
-  return Math.max(0.80, Math.min(0.99, BASE_RETENTION + adjustment));
+  return Math.max(RETENTION_PROBABILITY_BOUNDS.min, Math.min(RETENTION_PROBABILITY_BOUNDS.max, BASE_RETENTION + adjustment));
 }
 
 // ============================================================================
@@ -355,7 +361,7 @@ export function simulateMemberMovement(inputs: MemberMovementInputs): MemberMove
   const expectedWithdrawals = currentMembers.length * (1 - retentionProb);
   const cappedWithdrawalCount = Math.min(
     currentMembers.length,
-    Math.round(expectedWithdrawals * rng.range(0.4, 1.6)),
+    Math.round(expectedWithdrawals * rng.range(WITHDRAWAL_NOISE_RANGE.min, WITHDRAWAL_NOISE_RANGE.max)),
   );
 
   // ============================================================================

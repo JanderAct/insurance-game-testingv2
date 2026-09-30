@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { hasStaticClf, staticClf } from '../data/clfTables';
+import { hasStaticClf, RESERVE_MARGIN_CONFIDENCE, staticClf } from '../data/clfTables';
 import { lookupCLF, ibnerBookingBias } from '../utils/simulationEngine';
 import {
   Calculator,
@@ -21,7 +21,9 @@ import { simulateMarketReturns, blendInvestmentReturn } from '../utils/investmen
 import {
   ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM,
   AGGREGATE_LOSS_DISTRIBUTION,
-  LOSS_TREND,
+  CAPITAL_ADEQUACY_THRESHOLDS,
+  VOLUNTARY_DEPARTURES_ENABLED,
+  WC_LOSS_MODEL,
   MEMBER_LOSS_VOLATILITY,
   BASE_RETENTION,
   FUNDING_CLF_TABLE,
@@ -41,6 +43,11 @@ import {
   OPERATING_CASH_PCT_OF_PREMIUM,
 } from '../data/defaultAssumptions';
 import { MARKET_MEMBER_COUNT, MARKET_TOTAL_EXPOSURE } from '../data/memberCatalog';
+import { RETENTION_PROBABILITY_BOUNDS, WITHDRAWAL_NOISE_RANGE } from '../utils/membershipEngine';
+import { WC_SEVERITY_TREND_PER_YEAR } from '../utils/wcClaimEngine';
+import { GL_SEVERITY_TREND_PER_YEAR } from '../utils/glClaimEngine';
+import { PROPERTY_DRAW_SEVERITY_TREND_PER_YEAR } from '../utils/propertyClaimEngine';
+import { defaultLineDecisionSet } from '../utils/decisionDefaults';
 
 interface CalculationAuditPageProps {
   // Pool-level results, UNFILTERED by line view: the page selects its own
@@ -1059,7 +1066,7 @@ function buildAssumptionRows(): AuditRow[] {
     {
       metric: 'Admin Expense as % of Pure Premium',
       value: formatPct(ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM),
-      formula: 'Pure Premium × 15%. Added after selected CLF and not multiplied by CLF.',
+      formula: `Pure Premium × ${formatPct(ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, 0)}. Added after selected CLF and not multiplied by CLF.`,
       note:
         'Higher values make it harder to generate underwriting income. This is separate from LAE, so avoid double counting claim adjustment expenses.',
     },
@@ -1093,11 +1100,18 @@ function buildAssumptionRows(): AuditRow[] {
       formula: 'An annual shared factor above the selected CLF-table threshold is classified as a catastrophe for reporting.',
     },
     {
+      // ⚠ THIS ROW SHOWED LOSS_TREND (4%) AS "the default annual claim inflation
+      // assumption" the engine applies, and named a 0% rate-change selection that
+      // no longer exists. No loss generator reads LOSS_TREND, nor the per-instance
+      // lossEnvironment.lossTrend: each line trends its own claims, at the draw,
+      // by the constants below — so the row states those, from those.
       metric: 'Loss Trend',
-      value: formatPct(LOSS_TREND),
-      formula: 'Default annual claim inflation assumption.',
+      value: `WC severity ${signedPct(WC_SEVERITY_TREND_PER_YEAR)}, frequency ${signedPct(WC_LOSS_MODEL.frequencyTrendPerYear)}; `
+        + `GL severity ${signedPct(GL_SEVERITY_TREND_PER_YEAR)}; Property severity ${signedPct(PROPERTY_DRAW_SEVERITY_TREND_PER_YEAR)}`,
+      formula: 'Per line, per year, applied to each claim as it is drawn and frozen onto it at its accident year.',
       note:
-        'Current engine applies trend to simulated actual losses, not to the displayed expected rate when the player selects 0% rate change.',
+        'There is no single pool-wide loss trend: each line trends its own claims, and a line with no trend listed here has none. '
+        + 'The rate is not trended separately — it is priced from the pool\'s own experience of the trended claims.',
     },
     {
       metric: 'Base Retention',
@@ -1119,10 +1133,17 @@ function buildAssumptionRows(): AuditRow[] {
     },
     {
       metric: 'Member Withdrawals',
-      value: 'proportional, uncapped',
-      formula: 'Expected withdrawals = book x (1 - retention probability), times a noise factor in [0.4, 1.6].',
+      // ⚠ READS THE FLAG. This row described proportional voluntary departures
+      // while VOLUNTARY_DEPARTURES_ENABLED was false — the count is computed and
+      // discarded, and members leave only when declined at renewal.
+      value: VOLUNTARY_DEPARTURES_ENABLED ? 'proportional, uncapped' : 'off — members leave only when declined at renewal',
+      formula: `${VOLUNTARY_DEPARTURES_ENABLED ? '' : 'When enabled: '}Expected withdrawals = book x (1 - retention probability), `
+        + `times a noise factor in [${WITHDRAWAL_NOISE_RANGE.min}, ${WITHDRAWAL_NOISE_RANGE.max}].`,
       note:
-        'No count cap. Retention is already clamped to a 0.80-0.99 band, so departures cannot exceed a fifth of '
+        (VOLUNTARY_DEPARTURES_ENABLED ? '' : 'Voluntary departures are switched off in this build: the count is computed and discarded, so '
+          + 'the only members who leave are the ones the renewal bar declines. ')
+        + `No count cap. Retention is already clamped to a ${RETENTION_PROBABILITY_BOUNDS.min.toFixed(2)}-${RETENTION_PROBABILITY_BOUNDS.max.toFixed(2)} band, `
+        + `so departures cannot exceed ${formatPct(1 - RETENTION_PROBABILITY_BOUNDS.min, 0)} of `
         + 'the book in any year. A flat cap here suppressed proportionally more departures the larger the book '
         + 'grew, which made growth compound against a brake that weakened as it was needed.',
     },
@@ -1284,6 +1305,24 @@ function sizeLabel(index: number): string {
   return `Index ${index}`;
 }
 
+// ⚠ STATED FROM THE CODE, NOT RESTATED. The margin factors below stood as
+// literals in three sentences — "WC 1.3709, GL 1.5020, Property 1.5923" — and two
+// of the three had moved (WC is 1.4730, Property 1.4414) while GL happened not
+// to, so the page read plausibly and was wrong. Likewise "the default on WC and
+// GL", written before Property's own default moved to funding at expected.
+const STATIC_LINES = ['WC', 'GL', 'Property'] as const;
+const MARGIN_PCT = formatPct(RESERVE_MARGIN_CONFIDENCE, 0);
+const MARGIN_FACTORS = STATIC_LINES.map(l => `${l} ${staticClf(l, RESERVE_MARGIN_CONFIDENCE).toFixed(4)}`).join(', ');
+const AT_EXPECTED_BY_DEFAULT = STATIC_LINES.filter(l => defaultLineDecisionSet(l).fundingAtExpected);
+const AT_EXPECTED_DEFAULT_TEXT = AT_EXPECTED_BY_DEFAULT.length === STATIC_LINES.length
+  ? 'the default on every line'
+  : AT_EXPECTED_BY_DEFAULT.length === 0 ? 'not the default on any line' : `the default on ${AT_EXPECTED_BY_DEFAULT.join(' and ')}`;
+
+/** An annual trend as the audit page states it: signed, per year, or "none". */
+function signedPct(v: number): string {
+  return v === 0 ? 'none' : `${v > 0 ? '+' : ''}${(v * 100).toFixed(2)}%/yr`;
+}
+
 function labelize(value: string): string {
   return value
     .replace(/([A-Z])/g, ' $1')
@@ -1348,7 +1387,7 @@ export function buildSupportingRows(
     ? MARGIN_ORDER.filter(l => poolResult.byLine[l]).map(l => ({
         line: l,
         expectedNetUnpaidLoss: poolResult.byLine[l].expectedNetUnpaidLoss,
-        marginFactor: (hasStaticClf(l) ? staticClf(l, 0.90) : lookupCLF(0.90)) - 1,
+        marginFactor: (hasStaticClf(l) ? staticClf(l, RESERVE_MARGIN_CONFIDENCE) : lookupCLF(RESERVE_MARGIN_CONFIDENCE)) - 1,
         expectedLoss: poolResult.byLine[l].expectedLoss,
         clf: poolResult.byLine[l].selectedFundingCLF,
         poolPremium: poolResult.byLine[l].poolPremium,
@@ -1420,8 +1459,8 @@ export function buildSupportingRows(
   // The page was telling the user the engine was wrong, every year, using a
   // curve the engine stopped reading when the static tables landed.
   const reserveMarginCLFForLine = result.line && hasStaticClf(result.line)
-    ? staticClf(result.line, 0.90)
-    : lookupCLF(0.90);
+    ? staticClf(result.line, RESERVE_MARGIN_CONFIDENCE)
+    : lookupCLF(RESERVE_MARGIN_CONFIDENCE);
 
   // WHERE THE SELECTED CLF ACTUALLY CAME FROM. Under fundingAtExpected — the
   // DEFAULT on WC and GL — no table is consulted at all and the multiplier is
@@ -1453,8 +1492,8 @@ export function buildSupportingRows(
   const marginCheck = (diff: number) =>
     isPoolView
       ? naNote(
-          'the reserve risk margin is summed across lines, each with its own 90% CLF ' +
-          '(WC 1.3709, GL 1.5020, Property 1.5923) — no single factor reproduces the sum. ' +
+          `the reserve risk margin is summed across lines, each with its own ${MARGIN_PCT} CLF ` +
+          `(${MARGIN_FACTORS}) — no single factor reproduces the sum. ` +
           'Select a line tab to check it.'
         )
       : legacyCheck(diff);
@@ -1678,13 +1717,15 @@ export function buildSupportingRows(
       formula: {
         kind: 'text',
         text:
-          'Cannot be expressed on this page: it depends on (1) last year\'s own rate — a different row, not simultaneously visible here — ' +
-          '(2) the actual loss trend applied this game (instance.lossEnvironment.lossTrend), which is drawn per instance and is NOT the ' +
-          'Loss Trend value shown on Default Assumptions — verified to differ by up to 1.9 percentage points on real seeds, so that card is ' +
-          'currently showing the wrong number for this game, not just an unrelated default — and (3) the rolling risk-control effectiveness ' +
-          'score, which the engine computes every year but does not store on this result at all.',
+          // ⚠ REWRITTEN: this named last year's rate, the per-instance loss
+          // trend and the risk-control score as the inputs. The pure premium no
+          // longer compounds off a prior rate and reads no instance loss trend
+          // (see computeFundingConsequence's header); it is currentPurePremiumPer100.
+          'Cannot be expressed on this page: it is priced from the line and the year, the class mix of the enrolled book (Workers\' ' +
+          'Compensation only), and the pool\'s own played paid triangle put back on the gross basis through the tower — ' +
+          'none of which is a single row here.',
       },
-      note: 'Not evaluated — see formula for the confirmed Loss Trend display defect.',
+      note: 'Not evaluated — see formula.',
     },
     {
       metric: 'Selected Funding Confidence',
@@ -2127,7 +2168,7 @@ export function buildSupportingRows(
       value: formatPct(result.expectedCombinedRatio),
       numericValue: result.expectedCombinedRatio,
       formula: { kind: 'sum', terms: [pctTerm(result.expectedLossRatioMemberBasis, 'expected loss ratio (member charge)'), pctTerm(result.expectedExpenseRatio, 'expected expense ratio (member charge)')] },
-      explain: 'Both terms share the total-member-charge denominator AND the net numerator basis, so the sum is meaningful. At CLF 1.000 — the default on WC and GL — it is EXACTLY 100%, because pool premium + admin + reinsurance is identically the total member charge. Above CLF 1.000 the shortfall below 100% is the deliberate funding margin, which is what a confidence level above expected buys.',
+      explain: `Both terms share the total-member-charge denominator AND the net numerator basis, so the sum is meaningful. At CLF 1.000 — ${AT_EXPECTED_DEFAULT_TEXT} — it is EXACTLY 100%, because pool premium + admin + reinsurance is identically the total member charge. Above CLF 1.000 the shortfall below 100% is the deliberate funding margin, which is what a confidence level above expected buys.`,
       note: basisGuardNote,
       status: basisGuardStatus,
     },
@@ -2202,8 +2243,8 @@ export function buildSupportingRows(
 
   const fundingMarginCLF = reserveMarginCLFForLine;
   const fundingMarginCLFLabel = result.line && hasStaticClf(result.line)
-    ? `STATIC_CLF_TABLE.${result.line}[90%]`
-    : 'FUNDING_CLF_TABLE[90%]';
+    ? `STATIC_CLF_TABLE.${result.line}[${MARGIN_PCT}]`
+    : `FUNDING_CLF_TABLE[${MARGIN_PCT}]`;
 
   const capitalRows: AuditRow[] = [
     {
@@ -2240,7 +2281,7 @@ export function buildSupportingRows(
       // ⚠ AT POOL SCOPE THIS IS A SUM, NOT A PRODUCT, and showing the product
       // was a regression this page's own diagnostic caught in its first run.
       // The pool figure is summed across lines, each applying its OWN 90% CLF
-      // (WC 1.3709, GL 1.5020, Property 1.5923), so a single factor cannot
+      // (MARGIN_FACTORS, above), so a single factor cannot
       // reproduce it. The CHECK was correctly made n/a when that was found; the
       // FORMULA was left showing expectedNetUnpaidLoss x 0.951 and read $20.47M
       // against a stated $7.99M. A wrong derivation beside a neutralised check
@@ -2269,8 +2310,8 @@ export function buildSupportingRows(
         spec: { kind: 'sum', terms: [factorTerm(fundingMarginCLF, fundingMarginCLFLabel), factorTerm(-1, '1.0')] },
       },
       explain: isPoolView
-        ? 'Summed across the active lines, each applying its own 90%-confidence margin factor from its own static table (WC 1.3709, GL 1.5020, Property 1.5923). No single blended factor reproduces the total, which is why the check above is n/a at pool scope; select a line tab to check one line against its own curve.'
-        : `${fundingMarginCLFLabel} is a fixed 90%-confidence reserve-margin factor, independent of the player's own selected funding confidence level above. It is the LINE'S OWN curve, read from that line's static table: WC 1.3709, GL 1.5020, Property 1.5923.`,
+        ? `Summed across the active lines, each applying its own ${MARGIN_PCT}-confidence margin factor from its own static table (${MARGIN_FACTORS}). No single blended factor reproduces the total, which is why the check above is n/a at pool scope; select a line tab to check one line against its own curve.`
+        : `${fundingMarginCLFLabel} is a fixed ${MARGIN_PCT}-confidence reserve-margin factor, independent of the player's own selected funding confidence level above. It is the LINE'S OWN curve, read from that line's static table: ${MARGIN_FACTORS}.`,
     },
     {
       metric: 'Reserve Risk Margin Check Difference',
@@ -2328,7 +2369,9 @@ export function buildSupportingRows(
         kind: 'text',
         text: result.excessCapitalRatio === null
           ? 'No required reserve margin, so status defaults on the same thresholds applied to $0.'
-          : `Excess Capital Ratio ${formatPct(result.excessCapitalRatio)} against fixed thresholds: ≥25% Strong, ≥0% Adequate, ≥−10% Thin, else Deficient.`,
+          : `Excess Capital Ratio ${formatPct(result.excessCapitalRatio)} against fixed thresholds: `
+            + `≥${formatPct(CAPITAL_ADEQUACY_THRESHOLDS.strong, 0)} Strong, ≥${formatPct(CAPITAL_ADEQUACY_THRESHOLDS.adequate, 0)} Adequate, `
+            + `≥${formatPct(CAPITAL_ADEQUACY_THRESHOLDS.thin, 0).replace('-', '−')} Thin, else Deficient.`,
       },
       explain: 'A categorical read of the ratio above, not a further calculation.',
     },

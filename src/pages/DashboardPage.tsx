@@ -5,6 +5,7 @@ import { formatCurrency, formatMillions, formatPct, colorForRatio, colorForSurpl
 import { lineDisplayName } from '../utils/lineDisplay';
 import EndingPositionPanel from '../components/EndingPositionPanel';
 import type { EndingPositionRow } from '../utils/endingPosition';
+import { MARKET_MEMBER_COUNT } from '../data/memberCatalog';
 
 interface DashboardPageProps {
   lockedResults: LineResultSet[];
@@ -119,7 +120,7 @@ export default function DashboardPage({ lockedResults, historicalYears, starting
           label="Active Members"
           value={String(displayMembers)}
           icon={<Users size={16} />}
-          sub={`of 100 market members`}
+          sub={`of ${MARKET_MEMBER_COUNT} market members`}
         />
         <StatCard
           label="Member Satisfaction"

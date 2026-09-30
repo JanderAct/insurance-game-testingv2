@@ -13,7 +13,7 @@ import { normalizeAggregateStopLevel, normalizeLayersPlaced, quoteAggregate } fr
 import { allLayerRiskMoments } from '../utils/towerMoments';
 import { lineDisplayName } from '../utils/lineDisplay';
 import { lookupCLF } from '../utils/simulationEngine';
-import { hasStaticClf, staticClf } from '../data/clfTables';
+import { hasStaticClf, RESERVE_MARGIN_CONFIDENCE, staticClf } from '../data/clfTables';
 import type { FundingConsequence } from '../utils/fundingConsequence';
 import { RENEWAL_THRESHOLDS, renewalDeclines } from '../utils/renewalUnderwriting';
 import { EXPERIENCE_MOD } from '../utils/memberExperienceMod';
@@ -21,7 +21,7 @@ import {
   NEW_BUSINESS_APPETITE_TIERS, NO_NEW_BUSINESS, appetiteEligible,
 } from '../utils/newBusinessAppetite';
 import { APPLICATION_RATE, MAX_NEW_MEMBER_SHARE } from '../data/defaultAssumptions';
-import { canReenroll } from '../utils/membershipHistory';
+import { canReenroll, REENROLLMENT_COOLDOWN_YEARS } from '../utils/membershipHistory';
 
 export interface LineLoanInfo {
   balance: number;
@@ -488,7 +488,7 @@ function FundingConsequencePanel({ c, lastLineResult, line }: { c: FundingConseq
   // line, against WC's actual 1.3709 and GL's 1.5020, i.e. the same
   // wrong-curve-on-the-display defect clfFor above this file was written to fix,
   // surviving in the one readout that did not go through it.
-  const reserveMarginCLF = hasStaticClf(line) ? staticClf(line, 0.90) : lookupCLF(0.90);
+  const reserveMarginCLF = hasStaticClf(line) ? staticClf(line, RESERVE_MARGIN_CONFIDENCE) : lookupCLF(RESERVE_MARGIN_CONFIDENCE);
 
   return (
     <div className="bg-gray-50 rounded-lg p-3 border border-gray-200 text-xs space-y-2 -mt-1">
@@ -658,7 +658,7 @@ function PropertyNoSignalNote() {
   return (
     <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 leading-relaxed mt-1">
       Not available on Property, and no loss ratio is shown. A typical member has about one property claim
-      every other year — fewer than two in a three-year record — so a quiet stretch cannot be told apart
+      every other year — about {EXPERIENCE_MOD.windowYears / 2} in a {EXPERIENCE_MOD.windowYears}-year record — so a quiet stretch cannot be told apart
       from a safe one. Every Property member is charged the same relativity for their size and location,
       whatever their recent claims. Workers&rsquo; Compensation and General Liability have enough claims to
       rate on.
@@ -779,7 +779,7 @@ function RenewalUnderwriting({
             <span>
               Declines members whose losses have run more than the bar times their own expected cost over
               the last {EXPERIENCE_MOD.windowYears} years — the Loss Ratio column on Membership. A declined
-              member cannot rejoin for two years, so holding a level costs more than its yearly count.
+              member cannot rejoin for {REENROLLMENT_COOLDOWN_YEARS} years, so holding a level costs more than its yearly count.
             </span>
           </p>
         </>

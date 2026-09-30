@@ -141,6 +141,14 @@ export interface TowerLayer {
 // reaches only the retained band above the tower, which it bounds at $75M.
 // ============================================================================
 
+// A purchasable layer, NAMED FROM ITS OWN TERMS. The names were literals beside
+// the numbers they describe ("$4M xs $1M" next to attachment 1e6, limit 4e6) —
+// the same restatement Property's entry already avoided by building its name.
+// A re-pinned attachment now renames the layer on every screen that shows it.
+function layer(attachment: number, limit: number): TowerLayer {
+  return { name: `$${limit / 1e6}M xs $${attachment / 1e6}M`, attachment, limit, purchasable: true };
+}
+
 export const REINSURANCE_TOWER: Record<TowerLine, TowerLayer[]> = {
   // ⚠ RE-DERIVED FOR THE WC SEVERITY REBUILD, THEN RESTRUCTURED TO THREE LAYERS
   // (the retired scripts/diagnostics/wc-tower-rederive.ts; its Monte Carlo
@@ -169,8 +177,8 @@ export const REINSURANCE_TOWER: Record<TowerLine, TowerLayer[]> = {
   // market in year 1 they are 1.33x / 1.87x / 3.02x on WC and 1.27x / 1.51x /
   // 1.82x on GL; on a $82M GL book the working layer's rises to ~1.98x.
   WC: [
-    { name: '$4M xs $1M', attachment: 1e6, limit: 4e6, purchasable: true },
-    { name: '$5M xs $5M', attachment: 5e6, limit: 5e6, purchasable: true },
+    layer(1e6, 4e6),
+    layer(5e6, 5e6),
     // THE MERGED BAND, $10M-$50M. Absorbs the retired `$15M xs $10M` and
     // `$25M xs $25M`. Pierced 0.22/yr — once every 4.6 years, against the
     // 1-per-26-years of the `$25M xs $25M` layer it swallowed, which is what
@@ -189,7 +197,7 @@ export const REINSURANCE_TOWER: Record<TowerLine, TowerLayer[]> = {
     // against an inflating distribution. The fixed ceiling was concealing half
     // of it by shrinking the modelled tail at the same rate the tower lost
     // ground. Do not restate this as a single number.
-    { name: '$40M xs $10M', attachment: 10e6, limit: 40e6, purchasable: true },
+    layer(10e6, 40e6),
   ],
   // GL KEEPS THREE LAYERS — re-confirmed at the runtime-pricing change against
   // the rebuilt severity model. The merge test WC failed is pierce frequency, and
@@ -197,9 +205,9 @@ export const REINSURANCE_TOWER: Record<TowerLine, TowerLayer[]> = {
   // years) against the 1-per-27-years that got WC's top layer merged away. All
   // three GL bands are working layers.
   GL: [
-    { name: '$4M xs $1M', attachment: 1e6, limit: 4e6, purchasable: true },
-    { name: '$5M xs $5M', attachment: 5e6, limit: 5e6, purchasable: true },
-    { name: '$15M xs $10M', attachment: 10e6, limit: 15e6, purchasable: true },
+    layer(1e6, 4e6),
+    layer(5e6, 5e6),
+    layer(10e6, 15e6),
     // No fourth layer. Market capacity — see the header. The pool retains above
     // $25M and it is DISPLAYED as retainedAboveTower.
     //

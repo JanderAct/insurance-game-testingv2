@@ -3,6 +3,8 @@
 // touching component code. Source: 01A_WELCOME_TO_RIPPLE.md. Inline **bold**
 // markers are parsed by WelcomeModal into <strong> spans.
 
+import { GAME_LENGTH_YEARS } from './defaultAssumptions';
+
 export type WelcomeBlock =
   | { type: 'heading'; text: string }
   | { type: 'subheading'; text: string }
@@ -36,7 +38,7 @@ export const WELCOME_GUIDE: WelcomeBlock[] = [
   { type: 'paragraph', text: 'The starting year establishes the calendar used throughout your game.' },
   { type: 'subheading', text: '3. Choose Your Game Length' },
   { type: 'paragraph', text: 'Decide how many years you would like to manage your Pool.' },
-  { type: 'paragraph', text: 'You may select a game lasting **3 to 10 years**.' },
+  { type: 'paragraph', text: `You may select a game lasting **${GAME_LENGTH_YEARS.min} to ${GAME_LENGTH_YEARS.max} years**.` },
   {
     type: 'paragraph',
     text: 'A shorter game places greater emphasis on the immediate effects of your decisions. A longer game provides more time for claims to develop, financial trends to emerge, and the long-term consequences of your strategy to become visible.',

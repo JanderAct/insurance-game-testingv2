@@ -27,6 +27,15 @@ import type {
   GameState, LinePoolState, ReserveDevelopmentRow,
 } from '../types/simulation';
 import { ibnerUnwindWeight } from './simulationEngine';
+import { cumulativePaid } from './payoutPattern';
+import { LINE_PAYOUT_PATTERN } from '../data/defaultAssumptions';
+
+// A line's share of ultimate paid by the end of its accident year, from the
+// payout pattern the engine pays on — so the memo's "GL near 10%, Property past
+// 50%" follows the pattern rather than restating it.
+function firstYearPaidPct(line: string): string {
+  return `${Math.round(100 * cumulativePaid(LINE_PAYOUT_PATTERN[line], 1))}%`;
+}
 
 // One accident year as the exhibit presents it, at a chosen valuation year.
 // Nulls are EMPTY CELLS, not zeros: a year with no prior valuation has not
@@ -487,8 +496,8 @@ export function buildActuarialMemo({ gameState, asAtYear }: ActuarialMemoInput):
     'documents are not meant to tie.\n' +
     '- **Paid / incurred is what says whether a year is nearly settled or still moving,** and it ' +
     'is the reading that only became informative once the three lines got their own payout ' +
-    'patterns. A recent GL year sits near 10% paid while a Property year of the same age is past ' +
-    '50%: same age, same exhibit, entirely different amounts of money still to leave. Nothing ' +
+    `patterns. A GL year at its first valuation has paid about ${firstYearPaidPct('GL')} while a Property year of the same age has ` +
+    `paid about ${firstYearPaidPct('Property')}: same age, same exhibit, entirely different amounts of money still to leave. Nothing ` +
     'else in the game shows that — Net Paid Losses is one calendar-year total per line.\n' +
     '- **A year can be well paid and still open.** Closure is slower than payment, deliberately ' +
     'and from the pool\'s own experience, so a high paid ratio does not mean the files are shut.\n' +

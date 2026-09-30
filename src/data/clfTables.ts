@@ -1026,6 +1026,13 @@ export function clfFromTable(table: ClfTable, confidenceLevel: number): number {
   return clf[last];
 }
 
+// ⚠ THE CONFIDENCE LEVEL THE RESERVE RISK MARGIN IS HELD AT, NAMED ONCE. It was
+// a literal 0.90 at four call sites and a "90%" in three sentences of the audit
+// page, and those sentences carried per-line factors (WC 1.3709, Property
+// 1.5923) that the tables had long since moved away from. Every reader routes
+// through this constant, and every sentence that names the factor asks for it.
+export const RESERVE_MARGIN_CONFIDENCE = 0.90;
+
 export function staticClf(line: StaticClfLine, confidenceLevel: number): number {
   return clfFromTable(STATIC_CLF_TABLE[line], confidenceLevel);
 }
