@@ -31,6 +31,10 @@ import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { regenerateLineYearClaims } from '../../src/utils/claimRegeneration';
+import { packSave, unpackSave } from '../../src/utils/gameSave';
+import { buildTeamGame, replayTeamYears } from '../../src/session/client/buildGame';
+import { decisionsToJson } from '../../src/session/client/decisions';
+import { drawShockSchedule, drawableShocks, shockDrawCount } from '../../src/session/shockDraw';
 import { resolveShocks, ownFreqMultipliers, ownComponentFreqMultipliers, ownSevMultipliers } from '../../src/utils/shockResolver';
 import { WHOLE_LINE } from '../../src/utils/shockEffects';
 import { computeKGl, expectedGlGrossLossForPricing, generateGlClaims } from '../../src/utils/glClaimEngine';
@@ -40,7 +44,7 @@ import type { Member } from '../../src/types/simulation';
 import { SHOCK_CATALOG, validateShockDefinition } from '../../src/data/shockCatalog';
 import { buildResultsWorkbook } from '../../src/utils/resultsExport';
 import { RESULT_METRICS } from '../../src/utils/resultMetrics';
-import type { CoverageLine, GameInstance, GameState, LineResultSet, ResultSet } from '../../src/types/simulation';
+import type { CoverageLine, DecisionSet, GameInstance, GameState, LineResultSet, ResultSet } from '../../src/types/simulation';
 import type { ScheduledShock, ShockDefinition } from '../../src/types/shocks';
 
 const problems: string[] = [];
@@ -751,6 +755,123 @@ console.log('\n--- 10. #2 / WILDFIRE / WATER-CONTAMINATION ---');
     console.log(`  validator rejects ${label}: ${note(throws(() => validateShockDefinition(def)), `the validator accepts ${label}`)}`);
   }
   console.log(`  and accepts every shipped row: ${note(Object.values(SHOCK_CATALOG).every(d => !throws(() => validateShockDefinition(d))), 'a shipped catalog row fails its own validator')}`);
+}
+
+// ============================================================================
+// 11. THE SCHEDULE REACHES THE GAME — through the constructor, the save, and a
+// session player's rebuild.
+//
+// generateGameInstance takes the schedule as an argument from both callers.
+// Four things are asserted, and the last is the one that fails QUIETLY if it
+// breaks: a session player keeps no save, so a reload REBUILDS the game from the
+// room's seed and schedule and replays every year — and a rebuild that dropped
+// the schedule would replay the year without the wildfire, post numbers the team
+// never played, and show nothing wrong. It is proven here against buildTeamGame
+// and replayTeamYears, the two functions useSessionGame runs, fed a room that
+// has been through JSON the way a room record crosses the wire.
+// ============================================================================
+console.log('\n--- 11. the schedule reaches the game: constructor, save, session rebuild ---');
+{
+  const ID = 'MAMC6EA4';
+  const SCHEDULE = [{ shockId: 'WILDFIRE', yearNumber: 3 }];
+
+  // (a) AN EMPTY SCHEDULE IS THE OLD INSTANCE, BYTE FOR BYTE.
+  const bare = generateGameInstance(ID, seedOf(ID));
+  const empty = generateGameInstance(ID, seedOf(ID), []);
+  console.log(`  empty schedule -> identical instance, no field written: ${note(
+    JSON.stringify(bare) === JSON.stringify(empty) && !('scheduledShocks' in empty),
+    'an empty schedule changed the instance — every unshocked game would move')}`);
+  const carried = generateGameInstance(ID, seedOf(ID), SCHEDULE);
+  const { scheduledShocks: _s, ...rest } = carried;
+  console.log(`  a schedule is carried, and changes nothing else: ${note(
+    JSON.stringify(carried.scheduledShocks) === JSON.stringify(SCHEDULE) && JSON.stringify(rest) === JSON.stringify(bare),
+    'the constructor dropped the schedule or moved another field')}`);
+  console.log(`  constructor rejects an unknown id: ${note(throws(() => generateGameInstance(ID, 1, [{ shockId: '#NOPE', yearNumber: 2 }])), 'an unknown shock id is accepted at build — it would throw in the year it fires instead')}`
+    + `   and year 0: ${note(throws(() => generateGameInstance(ID, 1, [{ shockId: '#22', yearNumber: 0 }])), 'a pre-game fire year is accepted')}`);
+
+  const decided = (y: number): DecisionSet => {
+    const d = defaultDecisionSet(y);
+    // Vary the funding level by year, so a replay on the wrong year's decisions
+    // would be visible — the decisions-history defect's own test condition.
+    const lines = Object.fromEntries(Object.entries(d.byLine).map(([l, ld]) =>
+      [l, { ...ld, fundingConfidenceLevel: [0.6, 0.65, 0.7, 0.55, 0.6][y - 1] ?? 0.6 }]));
+    return { ...d, byLine: lines } as DecisionSet;
+  };
+
+  // The uninterrupted game, solo-style.
+  const settings = { poolName: 'G', gameLength: 5, startingYear: 2026, instanceId: ID, activeLines: LINES };
+  const run = (instance: GameInstance, from?: GameState) => {
+    let gs: GameState = from ?? (() => {
+      const { poolState, priorHistory } = runPriorHistory(instance, settings as never);
+      return { setup: settings as never, instance, currentYearNumber: 1, isStarted: true, isComplete: false,
+        poolState, lockedResults: [], currentDecisions: decided(1), priorHistory };
+    })();
+    while (gs.currentYearNumber <= 5) {
+      const y = gs.currentYearNumber;
+      const p = processYear(gs, decided(y));
+      gs = { ...gs, currentYearNumber: y + 1, poolState: p.updatedPoolState, lockedResults: [...gs.lockedResults, p.result] };
+      if (from === undefined && y === 2) break;
+    }
+    return gs;
+  };
+  const straight = (() => { let g = run(carried); return run(carried, g); })();
+  const firedStraight = straight.lockedResults.map(r => (r.shockEvents ?? []).some(e => e.shockId === 'WILDFIRE'));
+  console.log(`  the scheduled wildfire fires in year 3 of a constructed game: ${note(
+    firedStraight.join() === [false, false, true, false, false].join(), `fired in years ${firedStraight.map((f, i) => f ? i + 1 : '').filter(Boolean).join(',') || 'none'}`)}`);
+
+  // (b) THE SAVE CARRIES IT. Out through packSave at the end of year 2, back
+  // through unpackSave, continue — the reloaded game must still hold the
+  // schedule and must play years 3-5 exactly as the uninterrupted one did.
+  const atTwo = run(carried);
+  const reloaded = unpackSave(packSave({ gameState: atTwo, startingFinancials: {}, initialMembers: [], currentDecisions: decided(3) })) as { gameState: GameState };
+  const afterReload = run(reloaded.gameState.instance, reloaded.gameState);
+  const same = JSON.stringify(fieldsOf(afterReload.lockedResults.slice(2), 's')) === JSON.stringify(fieldsOf(straight.lockedResults.slice(2), 's'));
+  console.log(`  the save keeps the schedule (${JSON.stringify(reloaded.gameState.instance.scheduledShocks)}): ${note(
+    JSON.stringify(reloaded.gameState.instance.scheduledShocks) === JSON.stringify(SCHEDULE), 'a reload dropped the shock schedule')}`
+    + `   and years 3-5 replay identically after it: ${note(same, 'a reloaded solo game played its shock years differently')}`);
+
+  // (c) THE SESSION REBUILD — the path that fails quietly.
+  const roomRecord = JSON.parse(JSON.stringify({ seed: ID, yearCount: 5, startingYear: 2026, eventName: 'G', shocks: SCHEDULE }));
+  const history = Object.fromEntries([1, 2, 3, 4, 5].map(y => [String(y), decisionsToJson(decided(y))]));
+  const playFromRoom = (room: typeof roomRecord) => {
+    const built = buildTeamGame(room, LINES);
+    return replayTeamYears(built.gameState, 6, history).state;
+  };
+  const first = playFromRoom(roomRecord);
+  const reload = playFromRoom(JSON.parse(JSON.stringify(roomRecord)));
+  const firedSession = reload.lockedResults.map(r => (r.shockEvents ?? []).some(e => e.shockId === 'WILDFIRE'));
+  console.log(`  a session build carries the room's schedule into the instance: ${note(
+    JSON.stringify(first.instance.scheduledShocks) === JSON.stringify(SCHEDULE), "the session build dropped the room's schedule")}`);
+  console.log(`  A RELOADED PLAYER'S REBUILD FIRES THE WILDFIRE IN YEAR 3: ${note(
+    firedSession.join() === [false, false, true, false, false].join(), 'the rebuild from the room replayed the year WITHOUT the scheduled shock')}`);
+  console.log(`  and rebuilds every year identically to the first build: ${note(
+    JSON.stringify(fieldsOf(reload.lockedResults, 'r')) === JSON.stringify(fieldsOf(first.lockedResults, 'r')), 'a rebuild from the room is not the game the team played')}`);
+  console.log(`  and is the same game solo builds from the same instance and decisions: ${note(
+    JSON.stringify(fieldsOf(first.lockedResults, 'x')) === JSON.stringify(fieldsOf(straight.lockedResults, 'x')), 'the session and solo paths build different games from one schedule')}`);
+  // The negative control: without the schedule, the room's game is different —
+  // so the identities above are about the schedule, not about nothing moving.
+  const noShock = playFromRoom({ ...roomRecord, shocks: [] });
+  console.log(`  control — the same room WITHOUT the schedule plays a different year 3: ${note(
+    noShock.lockedResults[2].grossUltimateLoss !== reload.lockedResults[2].grossUltimateLoss, 'removing the schedule changed nothing — the checks above prove nothing about it')}`);
+
+  // (d) THE HOST'S DRAW — a pure function of the room's seed and year count.
+  const d1 = drawShockSchedule('MAMC6EA4', 5), d2 = drawShockSchedule('MAMC6EA4', 5);
+  const drawable = new Set(drawableShocks().map(d => d.id));
+  let shapeOk = true;
+  for (let i = 0; i < 400; i++) {
+    const n = 1 + (i % 20);
+    const sch = drawShockSchedule(`DRAW${i}`, n);
+    const years = sch.map(x => x.yearNumber), ids = sch.map(x => x.shockId);
+    if (sch.length !== Math.min(shockDrawCount(n), Math.max(1, n - 1))) shapeOk = false;
+    if (new Set(years).size !== years.length || new Set(ids).size !== ids.length) shapeOk = false;
+    if (years.some(y => y < (n >= 2 ? 2 : 1) || y > n) || ids.some(id => !drawable.has(id))) shapeOk = false;
+    if (years.some((y, k) => k > 0 && y < years[k - 1])) shapeOk = false;
+    // Every draw builds — the constructor accepts what the host can draw.
+    if (throws(() => generateGameInstance(`DRAW${i}`, seedOf(`DRAW${i}`), sch))) shapeOk = false;
+  }
+  console.log(`  host draw is reproducible from the room's seed and year count: ${note(JSON.stringify(d1) === JSON.stringify(d2), 'the same seed drew two different schedules')}`
+    + `   ${JSON.stringify(d1)}`);
+  console.log(`  400 draws: right count, one event per year, no event twice, year 1 kept calm, drawable ids only, all build: ${note(shapeOk, 'a host draw broke one of its rules')}`);
 }
 
 console.log(problems.length === 0

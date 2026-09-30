@@ -52,22 +52,21 @@ export type JsonValue =
 
 // ---------------------------------------------------------------- shocks
 
-// The shock schedule the room carries.
+// The shock schedule the room carries — and every team's game is built from it.
 //
-// ⚠ CARRIED, NOT CONSUMED — AND THE CONSUMING HALF IS ALREADY BUILT. The engine
-// reads its schedule as a deterministic list already: resolveShocks (see
-// src/utils/shockResolver.ts) filters `instance.scheduledShocks` by fire year,
-// sorts by (year, catalog id), and CONSUMES NO RANDOMNESS doing it — that is the
-// byte-identity guarantee stated in its own header. `ScheduledShock` in
-// src/types/shocks.ts is structurally identical to this type.
+// ⚠ CONSUMED NOW, THROUGH THE ENGINE'S OWN CONSTRUCTOR. buildTeamGame
+// (client/buildGame.ts) passes this list to generateGameInstance, which takes a
+// schedule as an argument from both callers — solo passes an empty one — and
+// resolveShocks then reads it as a deterministic, year-filtered list that
+// consumes no randomness. `ScheduledShock` in src/types/shocks.ts is
+// structurally identical to this type.
 //
-// WHAT IS STILL MISSING is only the population step: generateGameInstance
-// (src/utils/instanceGenerator.ts) takes (instanceId, seed) and never writes
-// the `scheduledShocks` field, so nothing today can get a list from setup into
-// the instance the engine reads. That single seam is the entire remaining gap,
-// it lives in engine code this work does not touch, and it is being done
-// elsewhere. The room record below carries the list so that when the seam lands
-// the schedule is already flowing to every client.
+// ⚠ THE ROOM RECORD IS WHAT MAKES EVERY TEAM FACE THE SAME SCHEDULE. A host's
+// randomised schedule is drawn once, on the host's client at creation
+// (session/shockDraw.ts), and arrives here as concrete entries like a
+// hand-picked one; no client ever re-draws it. It is readable by every caller —
+// it has to be, since every player's browser builds from it — so what players
+// do not see is a screen decision, not a secret.
 export interface ScheduledShockSpec {
   shockId: string;
   yearNumber: number;

@@ -24,6 +24,9 @@ import {
   IBNER_STEP_MIXTURE,
 } from '../data/defaultAssumptions';
 import type { CoverageLine } from '../types/simulation';
+import type { ScheduledShock } from '../types/shocks';
+import { IMPLEMENTED_EFFECTS } from '../types/shocks';
+import { SHOCK_CATALOG } from '../data/shockCatalog';
 
 // Each active line independently enrolls its own starting members. First it
 // draws its own seeded TARGET share within the STARTING_EXPOSURE_SHARE band
@@ -258,7 +261,52 @@ function generateStartingReserveCohorts(
   return cohorts;
 }
 
-export function generateGameInstance(instanceId: string, seed: number): GameInstance {
+// ============================================================================
+// THE SHOCK SCHEDULE IS AN ARGUMENT OF THE CONSTRUCTOR, AND BOTH CALLERS PASS IT.
+//
+// Solo (App.tsx) passes what its setup screen holds — nothing today; the solo
+// setup screen has no shock control, so it passes an empty list. The session
+// (session/client/buildGame.ts) passes the room's list. One constructor, both
+// callers: a session layer assembling the instance its own way is how two paths
+// come to disagree, which is why this seam was left open until it could be
+// closed HERE rather than there.
+//
+// ⚠ AN EMPTY SCHEDULE WRITES NO FIELD AT ALL. `scheduledShocks` stays absent,
+// exactly as before this argument existed, so every unshocked game — every
+// solo game, every room nobody scheduled a shock in — is byte-identical to one
+// built before it. Both baselines are the check.
+//
+// ⚠ THE LIST IS COPIED AND CHECKED, NOT TRUSTED. It is copied so a caller's
+// array cannot be mutated underneath the instance. It is checked because a
+// room's schedule arrives from another machine: an id the catalog does not
+// know, or one whose effects cannot run, would otherwise throw inside
+// resolveShocks in the year it fires — possibly years into a session, on every
+// team at once. Here it fails when the game is BUILT, before year 1.
+// No randomness is consumed: the schedule is data, drawn (if it was drawn at
+// all) once, by the host, before the room existed.
+// ============================================================================
+export function generateGameInstance(
+  instanceId: string,
+  seed: number,
+  scheduledShocks: readonly ScheduledShock[] = [],
+): GameInstance {
+  for (const s of scheduledShocks) {
+    const def = SHOCK_CATALOG[s.shockId];
+    if (!def) throw new Error(`generateGameInstance: scheduled shock '${s.shockId}' is not in SHOCK_CATALOG`);
+    if (!def.effects.every(e => IMPLEMENTED_EFFECTS.has(e.kind))) {
+      throw new Error(`generateGameInstance: scheduled shock '${s.shockId}' uses an effect that is not implemented`);
+    }
+    if (!Number.isInteger(s.yearNumber) || s.yearNumber < 1) {
+      throw new Error(`generateGameInstance: scheduled shock '${s.shockId}' has fire year ${s.yearNumber}; it must be a game year, 1 or later`);
+    }
+  }
+  const instance = baseInstance(instanceId, seed);
+  return scheduledShocks.length > 0
+    ? { ...instance, scheduledShocks: scheduledShocks.map(s => ({ shockId: s.shockId, yearNumber: s.yearNumber })) }
+    : instance;
+}
+
+function baseInstance(instanceId: string, seed: number): GameInstance {
   const rng = new SeededRandom(seed);
   return {
     instanceId,

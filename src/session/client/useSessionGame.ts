@@ -26,16 +26,10 @@
 // ============================================================================
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { seedFromInstanceId } from '../../seedHash';
-import { openingRoster } from '../../game/openingRoster';
-import { generateGameInstance } from '../../utils/instanceGenerator';
-import { runPriorHistory } from '../../utils/priorHistoryEngine';
-import { applyLoanAuthorizations, processYear } from '../../utils/simulationEngine';
-import { defaultDecisionSet } from '../../utils/decisionDefaults';
-import type { CoverageLine, GameSetupSettings, GameState, Member, PoolState, ResultSet, StartingFinancials } from '../../types/simulation';
+import type { CoverageLine, GameState, Member, PoolState, ResultSet, StartingFinancials } from '../../types/simulation';
 import { sessionTransport, type CallerView, type RoomView } from '../index';
-import { decisionsForYear } from './decisions';
 import { summarize } from './results';
+import { buildTeamGame, replayTeamYears } from './buildGame';
 
 export type GamePhase = 'idle' | 'building' | 'ready' | 'processing' | 'failed';
 
@@ -89,81 +83,28 @@ export function useSessionGame(
   //
   // ⚠ AND THE LINE SET IS PART OF THE BUILD KEY. Two different subsets are two
   // different games, so a key that omitted them would let a rebuild reuse a game
-  // assembled for a different book.
+  // assembled for a different book. So is the shock schedule, for the same
+  // reason: it is fixed at room creation and never edited, so the key never
+  // moves on it in play — it is in the key so that nothing could reuse a game
+  // built for a different schedule if that ever stopped being true.
   const myLines = you?.lines;
   const buildKey = room && myLines && myLines.length > 0
-    ? `${room.seed}|${room.yearCount}|${room.startingYear}|${myLines.join(',')}|${room.eventName}`
+    ? `${room.seed}|${room.yearCount}|${room.startingYear}|${myLines.join(',')}|${room.eventName}|${JSON.stringify(room.shocks)}`
     : null;
   const builtKey = useRef<string | null>(null);
 
+  // ⚠ THE BUILD IS buildTeamGame's, AND THE ROOM'S SHOCK SCHEDULE REACHES THE
+  // ENGINE'S OWN CONSTRUCTOR THROUGH IT. This was the seam: the room carried the
+  // list all the way here and the instance was built without it, so a
+  // scheduled wildfire never fired. It is closed in generateGameInstance, which
+  // now takes the schedule as an argument from both callers, rather than by this
+  // layer attaching it to an instance assembled some other way.
   const build = useCallback((r: RoomView, lines: CoverageLine[]) => {
-    const settings: GameSetupSettings = {
-      // ⚠ THE EVENT'S NAME, DELIBERATELY UNCHANGED IN MEANING. The engine's
-      // GameSetupSettings.poolName is display-only (the Header chip), and it has
-      // always carried the room's name for every team. Renaming the room field
-      // does not change what the engine is handed. Naming each team's pool after
-      // the TEAM would read better and is a separate decision — it would change
-      // what every session player sees in the header.
-      poolName: r.eventName,
-      gameLength: r.yearCount,
-      startingYear: r.startingYear,
-      instanceId: r.seed,
-      activeLines: [...lines],
-    };
-
-    const instance = generateGameInstance(r.seed, seedFromInstanceId(r.seed));
-
-    // ⚠ THE SHOCK SEAM, AND IT IS THE ONLY THING THIS LAYER CANNOT FINISH.
-    // r.shocks is carried all the way here from the host's setup form, and the
-    // engine's consuming half already exists: resolveShocks reads
-    // instance.scheduledShocks as a deterministic sorted list and consumes no
-    // randomness doing it. What is missing is the population step —
-    // generateGameInstance takes (instanceId, seed) and never writes the field.
-    //
-    // Attaching it here would be a one-line spread, and it is deliberately NOT
-    // done: instanceGenerator is engine code, that work is happening elsewhere,
-    // and a session layer quietly assembling an instance a different way than
-    // the engine's own constructor is exactly the kind of second opinion that
-    // makes two code paths disagree later. When generateGameInstance accepts a
-    // schedule, it is passed r.shocks here and nothing else in this file moves.
-    // Until then a room's shock list is carried, displayed and ignored, which
-    // leaves the game byte-identical to one with no shocks at all.
-
-    const { poolState, startingFinancials: sf, priorHistory } = runPriorHistory(instance, settings);
-
-    const gs: GameState = {
-      setup: settings,
-      instance,
-      currentYearNumber: 1,
-      isStarted: true,
-      isComplete: false,
-      poolState,
-      lockedResults: [],
-      currentDecisions: defaultDecisionSet(1),
-      priorHistory,
-    };
-    setGameState(gs);
-    setStartingFinancials(sf);
-    // The same openingRoster the solo path calls, over THIS TEAM's lines. The
-    // lines.WC read that stood here — mirroring App.tsx's own — is gone from
-    // both callers at once, which is the only way to fix it without the session
-    // assembling a GameState differently from solo.
-    setInitialMembers(openingRoster(poolState, settings.activeLines));
-
-    // ⚠ THE OPENING POSITION IS A REAL ENGINE YEAR, WHICH IS WHY IT CAN BE
-    // POSTED AT ALL. runPriorHistory plays the pre-game through processYear and
-    // numbers its last year 0; that year's ResultSet is where the opening
-    // surplus, the opening roster and the opening reserve come from. So the
-    // chart's year-0 point is not assembled from three loose fields — it is the
-    // same summarize() over the same shape, one year earlier.
-    //
-    // ⚠ THE POOL STATE COMES BACK WITH IT, because the summary needs BOTH: the
-    // ResultSet is the year's own news and the reserve ledger on the pool state
-    // is every prior accident year restated as at that year. At year 0 the
-    // ledger already exists — the pre-game wrote it — so the opening post
-    // carries a developed column like every other post.
-    const openingResult = priorHistory.find(r => r.yearNumber === 0) ?? null;
-    opening.current = openingResult ? { result: openingResult, poolState } : null;
+    const built = buildTeamGame(r, lines);
+    setGameState(built.gameState);
+    setStartingFinancials(built.startingFinancials);
+    setInitialMembers(built.initialMembers);
+    opening.current = built.opening;
     return opening.current;
   }, []);
 
@@ -226,55 +167,10 @@ export function useSessionGame(
     // Kept synchronous through the engine calls, then awaited once to post.
     void (async () => {
       try {
-        let state = gs;
-        // ⚠ EVERY YEAR THE LOOP PRODUCES, NOT THE LAST ONE. This was a single
-        // `produced` slot, and that made the room's record depend on how far
-        // behind a tab happened to be: a tab catching up three years computed
-        // all three and posted only the third, so the host's charts lost the two
-        // in between FOREVER. Measured before the fix — a tab three years behind
-        // left the room holding years [0, 3] with 1 and 2 simply absent.
-        //
-        // ⚠ AND EACH CARRIES ITS OWN POOL STATE, because the developed column is
-        // a VALUATION. Posting three years against the newest pool state would
-        // back-date today's reserve estimates onto years that had not seen them.
-        const produced: Array<{ result: ResultSet; poolState: PoolState }> = [];
-
-        // A loop rather than a single step: a tab that joined late, or was
-        // asleep while the host advanced twice, has more than one year to catch
-        // up on and must play them in order rather than skipping to the front.
-        while (state.currentYearNumber < room.currentYear && !state.isComplete) {
-          const year = state.currentYearNumber;
-          // ⚠ THE YEAR'S OWN SET, NOT THE LATEST ONE. This loop is the whole
-          // reason the room stores a history: it runs on a reload, replaying
-          // every year from the seed, and reading one slot for all of them
-          // produced results the team never played.
-          const decisions = decisionsForYear(year, you.decisionsByYear);
-          const processed = processYear(state, decisions);
-
-          // ⚠ AN UNRESOLVED LOAN OFFER IS DECLINED, AND THAT IS A REAL
-          // SIMPLIFICATION TO FLAG. Solo play pauses on a loan offer and asks
-          // the player to authorize or decline it. A session year is triggered
-          // by the host, not by the team, so there is nobody to ask at the
-          // moment it arises — the team may not even have the tab focused.
-          // Declining is the choice that changes nothing on its own initiative,
-          // matching the same reasoning as the renewal and appetite defaults.
-          // An interactive loan step belongs in the turn cycle later, before a
-          // deficient line is a realistic outcome in a taught session.
-          const settled = processed.loanOffers.length > 0
-            ? applyLoanAuthorizations(processed, year, [])
-            : { updatedPoolState: processed.updatedPoolState, result: processed.result };
-
-          const nextYear = year + 1;
-          state = {
-            ...state,
-            currentYearNumber: nextYear,
-            isComplete: nextYear > state.setup.gameLength,
-            poolState: settled.updatedPoolState,
-            lockedResults: [...state.lockedResults, settled.result],
-            currentDecisions: defaultDecisionSet(nextYear),
-          };
-          produced.push({ result: settled.result, poolState: settled.updatedPoolState });
-        }
+        // ⚠ THE REPLAY IS replayTeamYears', the same function the session proof
+        // in shock-check runs — see buildGame.ts for the rules it carries: every
+        // year produced, the year's own decisions, loan offers declined.
+        const { state, produced } = replayTeamYears(gs, room.currentYear, you.decisionsByYear);
 
         setGameState(state);
 

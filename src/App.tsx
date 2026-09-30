@@ -246,7 +246,10 @@ export default function App() {
 
   const handleStartGame = useCallback((settings: GameSetupSettings) => {
     const seed = seedFromInstanceId(settings.instanceId);
-    const instance = generateGameInstance(settings.instanceId, seed);
+    // ⚠ NO SCHEDULE: the solo setup screen has no shock control, so solo passes
+    // an empty list and the instance carries no field at all. The session passes
+    // its room's list through this same constructor (session/client/buildGame).
+    const instance = generateGameInstance(settings.instanceId, seed, []);
     // Stage 2.10: each active line simulates its own 3-year pre-game past
     // through the real engine; the ending state is the Year 1 opening position.
     const { poolState, startingFinancials: sf, priorHistory } = runPriorHistory(instance, settings);

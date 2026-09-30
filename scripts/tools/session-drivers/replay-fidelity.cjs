@@ -4,6 +4,7 @@
 const { BASE, launchBrowser, requireServer } = require('./_shared.cjs');
 const TEAM = 'Harbour Mutual';
 const YEARS = 4;
+const SEED = 'RFHZCGF2';
 
 const fails = [];
 let checks = 0;
@@ -40,18 +41,41 @@ const room = (page, code) => page.evaluate(c =>
 
   await host.goto('/host');
   await host.waitForSelector('[data-testid="create-room"]');
-  await host.fill('[data-testid="seed"]', 'MAMC6EA4');
+  // ⚠ THE SEED IS A FIXTURE FOR THE SHOCK DRAW. RFHZCGF2 over 4 years draws
+  // exactly one event, the WILDFIRE in year 2 (session/shockDraw.ts). This used
+  // to be MAMC6EA4, which draws #22 in year 3; nothing below asserted a number
+  // tied to that seed, so the swap costs no assertion.
+  await host.fill('[data-testid="seed"]', SEED);
   await host.fill('[data-testid="year-count"]', String(YEARS));
   await host.fill('[data-testid="expected-teams"]', '1');
+
+  // ---- THE HOST RANDOMISES, AND THE ROOM HOLDS WHAT THE HOST SAW -----------
+  // The draw is the host client's, once, here. What the room carries has to be
+  // exactly the list the host was shown — concrete entries, not a recipe that a
+  // client re-runs — or teams could face a schedule nobody saw.
+  await host.click('[data-testid="randomise-shocks"]');
+  await host.waitForSelector('[data-testid="shock-list"]');
+  const shown = await host.$$eval('[data-testid="shock-list"] li', lis => lis.map(li => li.textContent.replace(/\s+/g, ' ').trim()));
+  console.log(`  host sees the draw: ${JSON.stringify(shown)}`);
+  ok(shown.length === 1 && /WILDFIRE/.test(shown[0]) && /year 2/.test(shown[0]), 'Randomise drew the fixture schedule (WILDFIRE, year 2) and the host can see it');
+  ok(await host.locator('[data-testid="shock-drawn-note"]').count() === 1, 'the host is told what the schedule was drawn from');
+
   await host.click('[data-testid="create-room"]');
   await host.waitForSelector('[data-testid="room-code"]');
   const code = (await host.textContent('[data-testid="room-code"]')).trim();
   console.log(`\nroom ${code}\n`);
+  const carried = (await room(host, code)).shocks;
+  ok(JSON.stringify(carried) === JSON.stringify([{ shockId: 'WILDFIRE', yearNumber: 2 }]),
+    `the room record carries the drawn schedule as concrete entries (${JSON.stringify(carried)})`);
 
   await player.goto(`/join/${code}`);
   await player.waitForSelector('[data-testid="team-picker"]');
   await player.fill('[data-testid="team-name"]', TEAM);
+  // ⚠ ALL THREE LINES: the wildfire's property catastrophe lands on Property,
+  // and a WC-only book would see only its secondary WC claims.
   await player.click('[data-testid="pick-line-WC"]');
+  await player.click('[data-testid="pick-line-GL"]');
+  await player.click('[data-testid="pick-line-Property"]');
   await player.click('[data-testid="join-team"]');
   await player.waitForSelector('[data-testid="session-strip"]', { timeout: 120000 });
 
@@ -137,6 +161,23 @@ const room = (page, code) => page.evaluate(c =>
   console.log(`  after the reload   : surplus=${rebuilt.pool.endingSurplus.toFixed(2)} lossRatio=${rebuilt.pool.actualLossRatioPricingBasis.toFixed(4)}`);
 
   ok(rebuilt.pool.endingSurplus === postedAt[3].pool.endingSurplus, 'REBUILT SURPLUS === WHAT WAS POSTED AT THE TIME');
+  const rebuilt2 = (await room(host, code)).teams[0].resultsByYear['2'];
+  ok(JSON.stringify(rebuilt2) === JSON.stringify(postedAt[2]), 'the WILDFIRE year (2) rebuilt field for field as it was posted');
+
+  // ---- THE WILDFIRE IS IN THE REBUILT YEAR ---------------------------------
+  // The identities above would ALSO hold if both the first play and the
+  // rebuild had dropped the schedule. This is the check that separates the two:
+  // the reloaded player's own Results page, year 2, must name the event.
+  await player.getByRole('button', { name: 'Results', exact: true }).click();
+  await player.waitForTimeout(600);
+  const yearSelect = player.locator('select').filter({ has: player.locator('option', { hasText: /Year 2 / }) }).first();
+  await yearSelect.selectOption({ label: (await yearSelect.locator('option', { hasText: /Year 2 / }).first().textContent()).trim() });
+  await player.waitForTimeout(500);
+  const y2Text = await player.locator('main').innerText();
+  ok(/Major Wildfire/.test(y2Text), "AFTER THE RELOAD, THE PLAYER'S YEAR 2 RESULTS NAME THE MAJOR WILDFIRE — the rebuild did not drop the schedule");
+  await yearSelect.selectOption({ label: (await yearSelect.locator('option', { hasText: /Year 1 / }).first().textContent()).trim() });
+  await player.waitForTimeout(500);
+  ok(!/Major Wildfire/.test(await player.locator('main').innerText()), 'and year 1 does not — the event fired in its own year only');
   ok(rebuilt.pool.actualLossRatioPricingBasis === postedAt[3].pool.actualLossRatioPricingBasis, 'rebuilt loss ratio matches too');
   ok(JSON.stringify(rebuilt) === JSON.stringify(postedAt[3]), 'the whole year-3 summary is identical, field for field');
 

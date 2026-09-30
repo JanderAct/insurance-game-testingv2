@@ -496,11 +496,15 @@ export interface GameInstance {
   // src/data/shockCatalog.ts.
   //
   // OPTIONAL AND ABSENT BY DEFAULT, AND THAT IS LOAD-BEARING. generateGameInstance
-  // does NOT draw to populate this and does not write the field at all unless a
-  // scenario supplies one, so a game with no shocks is byte-identical to one
-  // from before shocks existed. Probability-based firing, when it is added,
-  // populates this same list from its own purpose-keyed RNG label; everything
-  // downstream is unchanged by that.
+  // takes the list as an argument — solo passes an empty one, a session passes
+  // its room's — draws nothing to populate it, and writes the field only when
+  // the list is non-empty, so a game with no shocks is byte-identical to one
+  // from before shocks existed. A host's randomised schedule is drawn once, at
+  // room creation, and arrives here as concrete entries like any other.
+  //
+  // ⚠ IT RIDES THE SAVE WITH THE INSTANCE. The solo save serialises the whole
+  // instance and SAVE_STRIPPED_KEYS does not list this, so a reload keeps the
+  // schedule; a session player keeps no save and rebuilds from the room.
   scheduledShocks?: ScheduledShock[];
 }
 

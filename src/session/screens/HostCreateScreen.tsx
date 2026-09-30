@@ -20,11 +20,12 @@
 // ============================================================================
 
 import { useState } from 'react';
-import { Trash2, Zap } from 'lucide-react';
+import { Shuffle, Trash2, Zap } from 'lucide-react';
 import { SHOCK_CATALOG } from '../../data/shockCatalog';
 import { IMPLEMENTED_EFFECTS } from '../../types/shocks';
 import { sessionTransport, isSessionError, type ScheduledShockSpec, type SessionError } from '../index';
 import { rememberHostToken, saveActive } from '../client/identity';
+import { drawShockSchedule } from '../shockDraw';
 import { navigate } from '../client/navigation';
 
 // A shock whose effects the generators cannot execute throws inside the
@@ -53,6 +54,25 @@ export default function HostCreateScreen() {
   const [shocks, setShocks] = useState<ScheduledShockSpec[]>([]);
   const [shockId, setShockId] = useState(SCHEDULABLE.find(s => s.buildable)?.id ?? '');
   const [shockYear, setShockYear] = useState(2);
+  // What the last Randomise drew FOR. The draw is a pure function of the seed
+  // and the year count, so the list is reproducible from the room record only
+  // while both still match — and only if the host has not edited the list since.
+  const [drawnFor, setDrawnFor] = useState<{ seed: string; yearCount: number } | null>(null);
+
+  // ⚠ THE DRAW HAPPENS HERE, ONCE, ON THE HOST'S CLICK, AND NOWHERE ELSE. The
+  // result is written into the room as concrete entries by handleCreate below,
+  // and every team builds from those entries — see session/shockDraw.ts. The
+  // host SEES what was drawn (ruled): it lands in the same list a hand-picked
+  // shock does, and can be edited like one.
+  function handleRandomise() {
+    // A blank seed would be replaced at creation, and the schedule would then
+    // have been drawn from a seed the room does not carry. So fill it first.
+    const s = seed.trim() || randomSeed();
+    if (s !== seed) setSeed(s);
+    setShocks(drawShockSchedule(s, yearCount));
+    setDrawnFor({ seed: s, yearCount });
+  }
+  const drawStale = drawnFor !== null && (drawnFor.seed !== seed.trim() || drawnFor.yearCount !== yearCount);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<SessionError | null>(null);
@@ -161,7 +181,7 @@ export default function HostCreateScreen() {
           <div>
             <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Shock schedule</span>
             <p className="mt-1 text-xs text-slate-400">
-              Read as a list, never drawn. The same schedule reaches every team.
+              The same schedule reaches every team. Randomise draws it once, here, from the seed.
             </p>
             <div className="mt-2 flex gap-2">
               <select
@@ -186,12 +206,33 @@ export default function HostCreateScreen() {
               <button
                 type="button"
                 data-testid="add-shock"
-                onClick={() => setShocks(prev => [...prev, { shockId, yearNumber: shockYear }])}
+                onClick={() => { setShocks(prev => [...prev, { shockId, yearNumber: shockYear }]); setDrawnFor(null); }}
                 className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600"
               >
                 Add
               </button>
+              <button
+                type="button"
+                data-testid="randomise-shocks"
+                onClick={handleRandomise}
+                disabled={yearCount < 1}
+                className="flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600 disabled:text-slate-300"
+                title="Replace the list with a draw from the catalog: one event per three years, never year 1, milder events more likely"
+              >
+                <Shuffle size={13} />
+                Randomise
+              </button>
             </div>
+            {drawnFor && !drawStale && (
+              <p data-testid="shock-drawn-note" className="mt-1.5 text-xs text-slate-400">
+                Drawn from seed <span className="font-mono">{drawnFor.seed}</span> over {drawnFor.yearCount} years.
+              </p>
+            )}
+            {drawStale && (
+              <p data-testid="shock-drawn-stale" className="mt-1.5 text-xs text-amber-700">
+                The seed or year count changed after this was drawn. Randomise again to draw for the current settings.
+              </p>
+            )}
             {shocks.length > 0 && (
               <ul data-testid="shock-list" className="mt-2 space-y-1">
                 {shocks.map((s, i) => (
@@ -201,7 +242,7 @@ export default function HostCreateScreen() {
                     <span className="text-slate-400">year {s.yearNumber}</span>
                     <button
                       type="button"
-                      onClick={() => setShocks(prev => prev.filter((_, j) => j !== i))}
+                      onClick={() => { setShocks(prev => prev.filter((_, j) => j !== i)); setDrawnFor(null); }}
                       className="text-slate-400 hover:text-red-600"
                       aria-label={`Remove shock ${i + 1}`}
                     >
