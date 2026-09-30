@@ -60,7 +60,7 @@
     "save-round-trip-check": 15,
     "save-size-check": 11,
     "seed-cohort-shape-check": 1,
-    "shock-check": 9,
+    "shock-check": 28,
     "solo-export-guard": 7,
     "surface-privacy-check": 1,
     "terminal-severity-check": 24,

@@ -317,6 +317,13 @@ None is an accident. All of them are things a reader will otherwise assume work.
 
 ## 3. Shock events: only four of nine effect kinds actually run, and the player is told so
 
+> **Updated since this was written:** five kinds run now. `forceEvent` is implemented for
+> Property on top of the cat band (a scheduled catastrophe in a named region at a stated
+> size), and `injectClaim` runs on GL as well as WC, with ranged counts and amounts on GL.
+> #2 Major Earthquake is executable, and WILDFIRE and WATER-CONTAMINATION were added.
+> shockCatalog now rejects any effect on a line whose generator does not read it. The
+> section below is the earlier snapshot.
+
 `src/types/shocks.ts` declares its union as *"The eight effects"*. **There are
 nine.** `IMPLEMENTED_EFFECTS` — the runtime allow-list the resolver actually
 checks — contains **four**:

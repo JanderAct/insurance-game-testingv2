@@ -1367,6 +1367,15 @@ export function processLineYear(
     // Occurrence == claim for GL now, so this is the largest single claim.
     shockOccurred = generated.maxOccurrenceGross > 1_000_000;
 
+    // EXACT attribution of any injected claims, as on WC: one outcome per
+    // requested injection, in order, each carrying the shock that asked for it.
+    (ctx.shock?.injections ?? []).forEach((injection, i) => {
+      const outcome = generated.injectionResults[i];
+      if (!outcome) return;
+      shockAttributableLoss[injection.shockId] = (shockAttributableLoss[injection.shockId] ?? 0) + outcome.gross;
+      shockAttributableClaims[injection.shockId] = (shockAttributableClaims[injection.shockId] ?? 0) + outcome.count;
+    });
+
     // The EXPECTED cost of any frequency shock on this line, attributed per
     // event. Computed as the difference between GL's own analytic expectation
     // with and without the multipliers, rather than reconstructed — a second
@@ -1415,6 +1424,12 @@ export function processLineYear(
     aggregateMemberLoss = generated.grossUltimateLoss;
     kLineApplied = kPr;
     glClaimCount = generated.claimCount;
+    // EXACT attribution of a forced catastrophe: the generator reports what
+    // each scheduled event landed, in input order, keyed to its shock.
+    for (const r of generated.forcedEventResults) {
+      shockAttributableLoss[r.shockId] = (shockAttributableLoss[r.shockId] ?? 0) + r.gross;
+      shockAttributableClaims[r.shockId] = (shockAttributableClaims[r.shockId] ?? 0) + r.claims;
+    }
     // ⚠ NO SHOCK CHANNEL — BUT A CAT BAND, AND ITS LOAD, TOGETHER. Property's
     // shock used to arrive as an aggregate add-on keyed off commonLossFactor,
     // which went with the Gamma path; the cat shock events are still gated

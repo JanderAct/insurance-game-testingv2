@@ -34,12 +34,18 @@ import { IMPLEMENTED_EFFECTS } from '../types/shocks';
 import { SHOCK_CATALOG } from '../data/shockCatalog';
 import { WHOLE_LINE } from './shockEffects';
 
+const money = (x: number) => `$${(x / 1e6).toFixed(2)}M`;
+
 function describe(effect: ShockEffect): string {
   switch (effect.kind) {
     case 'forceEvent':
-      return `force ${effect.peril} in ${effect.region} at intensity ${effect.intensity}${effect.span ? ' (spanning)' : ''}`;
-    case 'injectClaim':
-      return `inject ${effect.count} ${effect.line} claim${effect.count === 1 ? '' : 's'} at $${(effect.amount / 1e6).toFixed(2)}M`;
+      return `force a ${effect.peril} catastrophe in ${effect.region}, ${money(effect.loss.min)}-${money(effect.loss.max)} gross`;
+    case 'injectClaim': {
+      const n = typeof effect.count === 'number' ? `${effect.count}` : `${effect.count.min}-${effect.count.max}`;
+      const plural = typeof effect.count === 'number' && effect.count === 1 ? '' : 's';
+      const amt = typeof effect.amount === 'number' ? money(effect.amount) : `${money(effect.amount.min)}-${money(effect.amount.max)}`;
+      return `inject ${n} ${effect.line} claim${plural} at ${amt}${typeof effect.amount === 'number' ? '' : ' each'}`;
+    }
     case 'freqMultiplier':
       return `${effect.line}${effect.sub ? ` ${effect.sub}` : ''} frequency x${effect.factor}`;
     case 'componentFreqMultiplier':
@@ -151,6 +157,15 @@ export function resolveShocks(instance: GameInstance, yearNumber: number): Shock
           // both. Same rule as freqMultiplier.
           bucket.componentFreqMultipliers[effect.component] =
             (bucket.componentFreqMultipliers[effect.component] ?? 1) * effect.factor;
+          break;
+        }
+        case 'forceEvent': {
+          // DATA ONLY. The size and which members are hit are drawn later, by
+          // Property's generator, from streams keyed on this shock id — this
+          // function stays free of randomness.
+          const bucket = lineBucket(byLine, effect.line);
+          bucket.forcedEvents = bucket.forcedEvents ?? [];
+          bucket.forcedEvents.push({ shockId: def.id, peril: effect.peril, region: effect.region, loss: effect.loss });
           break;
         }
         case 'injectClaim': {

@@ -313,6 +313,10 @@ export interface PropertyGenerationInputs {
   instanceSeed: number;
   kPr: number;
   riskControlEffectiveness: number; // DRAW ONLY
+  // Scheduled catastrophes this year (shock effect `forceEvent`). DRAW ONLY,
+  // like every shock: the price does not see them. Absent on every unshocked
+  // year, and then nothing below reads a stream it did not read before.
+  forcedEvents?: { shockId: string; peril: string; region: Region; loss: { min: number; max: number } }[];
 }
 
 export interface PropertyGenerationResult {
@@ -329,6 +333,11 @@ export interface PropertyGenerationResult {
   // struck a region and hit no enrolled member (those emit no occurrence).
   catEvents: number;
   catGrossLoss: number;
+  // One entry per forced event, in input order, for exact shock attribution.
+  // `target` is the drawn size; `gross` is what landed, which is `target`
+  // unless the region's enrolled members could not absorb it all (then every
+  // one of them was hit in full and `shortfall` is the rest).
+  forcedEventResults: { shockId: string; target: number; gross: number; claims: number; shortfall: number }[];
 }
 
 export function generatePropertyClaims(inputs: PropertyGenerationInputs): PropertyGenerationResult {
@@ -403,6 +412,53 @@ export function generatePropertyClaims(inputs: PropertyGenerationInputs): Proper
   const eventClaimIds: string[][] = eventRegions.map(() => []);
   const eventMemberIds: string[][] = eventRegions.map(() => []);
   let catGrossLoss = 0;
+
+  // ==========================================================================
+  // FORCED CATASTROPHES — a scheduled shock's event (see ShockEffect
+  // 'forceEvent'). The same kind of event as the band's, at a stated size.
+  //
+  // THE SIZE is drawn uniformly inside the shock's range from `pr_force:<id>`.
+  // THE HIT ORDER is one uniform per member from `pr_force:<id>:<member>` — a
+  // member's place in the order is its own draw, so it does not move when an
+  // unrelated member joins or leaves. Members of the named region are hit in
+  // that order, each at the cat band's own loss-if-hit, until the event reaches
+  // its size; the member at the edge takes the partial remainder. Whether a
+  // given member is hit still depends on who else is enrolled — an event of
+  // FIXED size over a variable book cannot avoid that — but no draw of anyone
+  // else's moves, and no cat-band or attritional stream is touched.
+  //
+  // Planned here, emitted in the member loop below so each member's claims
+  // stay contiguous with the rest of its year.
+  // ==========================================================================
+  const forcedEvents = inputs.forcedEvents ?? [];
+  const forcedPlan = new Map<string, { event: number; loss: number }[]>();
+  const forcedEventResults: PropertyGenerationResult['forcedEventResults'] = [];
+  const forcedClaimIds: string[][] = forcedEvents.map(() => []);
+  const forcedMemberIds: string[][] = forcedEvents.map(() => []);
+  forcedEvents.forEach((fe, ev) => {
+    const sizeRng = deriveSubRng(instanceSeed, yearNumber, `pr_force:${fe.shockId}`);
+    const target = fe.loss.min + sizeRng.next() * (fe.loss.max - fe.loss.min);
+    const candidates = members
+      .filter(m => m.region === fe.region && catLossIfHit(m) > 0)
+      .map(m => ({ m, key: deriveSubRng(instanceSeed, yearNumber, `pr_force:${fe.shockId}:${m.id}`).next() }))
+      .sort((a, b) => (a.key - b.key) || (a.m.id < b.m.id ? -1 : a.m.id > b.m.id ? 1 : 0));
+    let landed = 0;
+    let claimsForEvent = 0;
+    for (const { m } of candidates) {
+      if (landed >= target) break;
+      const loss = Math.min(catLossIfHit(m), target - landed);
+      landed += loss;
+      claimsForEvent++;
+      const list = forcedPlan.get(m.id) ?? [];
+      list.push({ event: ev, loss });
+      forcedPlan.set(m.id, list);
+    }
+    forcedEventResults.push({
+      shockId: fe.shockId, target, gross: landed, claims: claimsForEvent, shortfall: Math.max(0, target - landed),
+    });
+  });
+  const forcedOccurrenceId = (ev: number) =>
+    `PR-${yearNumber}-SHOCK-${forcedEvents[ev].shockId.replace(/[^A-Za-z0-9]/g, '')}-${ev}`;
 
   for (const member of members) {
     // PER-MEMBER STREAMS, KEYED ON member.id — unchanged from the retired
@@ -531,6 +587,33 @@ export function generatePropertyClaims(inputs: PropertyGenerationInputs): Proper
       }
     }
 
+    // THIS MEMBER'S SHARE OF ANY FORCED CATASTROPHE — planned above. A cat
+    // claim like the band's own: tier 'cat', joining the event's occurrence.
+    for (const { event, loss } of forcedPlan.get(member.id) ?? []) {
+      const occurrenceId = forcedOccurrenceId(event);
+      const claimId = `${occurrenceId}-${member.id}`;
+      claims.push({
+        id: claimId,
+        occurrenceId,
+        memberId: member.id,
+        line: LINE,
+        accidentYear: yearNumber,
+        calendarYear,
+        tier: CAT_BAND,
+        status: 'open',
+        reportedYear: yearNumber,
+        grossUltimate: loss,
+        paidToDate: 0,
+        caseReserve: loss,
+        paymentPattern: [...M.payoutPattern],
+      });
+      forcedClaimIds[event].push(claimId);
+      forcedMemberIds[event].push(member.id);
+      memberLoss += loss;
+      grossUltimateLoss += loss;
+      claimCount++;
+    }
+
     // PER CLAIM, over the claims this member just generated. Property is not
     // RATED on experience (its measured primary-layer credibility is 0.000 —
     // see memberExperienceMod.ts), but the figure is recorded anyway so the
@@ -579,6 +662,25 @@ export function generatePropertyClaims(inputs: PropertyGenerationInputs): Proper
     });
   });
 
+  // One occurrence per forced event, exactly as for the band's own events —
+  // flagged as a catastrophe so the cat layer, not the per-risk layer, answers
+  // it. `peril` names the scheduled peril rather than the band's generic 'cat'.
+  forcedEvents.forEach((fe, ev) => {
+    if (forcedClaimIds[ev].length === 0) return;
+    occurrences.push({
+      id: forcedOccurrenceId(ev),
+      line: LINE,
+      ...(forcedMemberIds[ev].length === 1 ? { memberId: forcedMemberIds[ev][0] } : {}),
+      memberIds: forcedMemberIds[ev],
+      accidentYear: yearNumber,
+      calendarYear,
+      region: fe.region,
+      isCatastrophe: true,
+      claimIds: forcedClaimIds[ev],
+      peril: fe.peril,
+    });
+  });
+
   return {
     claims,
     occurrences,
@@ -590,6 +692,7 @@ export function generatePropertyClaims(inputs: PropertyGenerationInputs): Proper
     capBindings,
     catEvents: eventCount,
     catGrossLoss,
+    forcedEventResults,
   };
 }
 

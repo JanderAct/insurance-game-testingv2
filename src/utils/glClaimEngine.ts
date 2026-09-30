@@ -522,6 +522,15 @@ export interface GlGenerationInputs {
   // DRAW-ONLY rule. Applied through trendedMuGl's log-location shift, so a
   // severity shock and the severity trend are one mechanism.
   sevMultipliers?: Record<string, number>;
+  // Claims a shock event injects this year — the water-system contamination
+  // event is the first GL one. GL read NONE of these until that event: the
+  // resolver bucketed them and glGenerationInputs dropped them, so a GL
+  // injection was silently inert.
+  //
+  // `count` and `amount` may be explicit or a range the matrix states. A range
+  // is drawn from a sub-stream keyed on the SHOCK ID (`gl_inject:<id>:<n>`), so
+  // no natural GL draw moves and two events never share a stream.
+  injections?: { count: number | { min: number; max: number }; amount: number | { min: number; max: number }; shockId: string }[];
 }
 
 export interface GlGenerationResult {
@@ -531,6 +540,9 @@ export interface GlGenerationResult {
   memberLossResults: MemberLossResult[];
   claimCount: number;          // total claims generated this line-year
   maxOccurrenceGross: number;  // GL's shock signal: any occurrence > $1M (ruled J11) — occurrence == claim, so this is the largest single claim
+  // One entry per requested injection, in the same order — exact attribution,
+  // the same shape as WC's.
+  injectionResults: { count: number; gross: number }[];
 }
 
 export function generateGlClaims(inputs: GlGenerationInputs): GlGenerationResult {
@@ -678,8 +690,80 @@ export function generateGlClaims(inputs: GlGenerationInputs): GlGenerationResult
     });
   }
 
+  // --- shock injections -------------------------------------------------------
+  //
+  // After every natural draw, from the shock's own streams, so the natural book
+  // is bit-identical whether or not anything is injected.
+  //
+  // WHO IT HAPPENS TO follows GL's natural incidence — payroll x theta(rq), the
+  // member-varying part of the frequency — so an injected claim lands where such
+  // a claim would, not on an arbitrary member.
+  //
+  // CAPPED AT THIS YEAR'S CEILING, as a drawn claim is and as WC's injections
+  // are: the ceiling is a statement about what a GL claim can cost, and an
+  // instructor-scheduled one cannot exceed it either.
+  const injectionResults: { count: number; gross: number }[] = [];
+  if (inputs.injections?.length) {
+    const targets: { member: Member; weight: number }[] = [];
+    let totalWeight = 0;
+    for (const member of members) {
+      const payroll = member.exposureByLine.GL ?? 0;
+      if (!(payroll > 0)) continue;
+      const weight = payroll * thetaGl(member.riskQuality);
+      if (weight > 0) { targets.push({ member, weight }); totalWeight += weight; }
+    }
+    const injectedByMember = new Map<string, number>();
+    const perShock = new Map<string, number>();
+    for (const injection of inputs.injections) {
+      const n = perShock.get(injection.shockId) ?? 0;
+      perShock.set(injection.shockId, n + 1);
+      const rng = deriveSubRng(instanceSeed, yearNumber, `gl_inject:${injection.shockId}:${n}`);
+      const count = typeof injection.count === 'number'
+        ? injection.count
+        : injection.count.min + Math.floor(rng.next() * (injection.count.max - injection.count.min + 1));
+      let placed = 0, gross = 0;
+      for (let i = 0; i < count && totalWeight > 0; i++) {
+        const raw = typeof injection.amount === 'number'
+          ? injection.amount
+          : injection.amount.min + rng.next() * (injection.amount.max - injection.amount.min);
+        if (!(raw > 0)) throw new Error(`GL claim injection requires a positive amount; got ${raw}`);
+        let pick = targets[targets.length - 1];
+        let u = rng.next() * totalWeight;
+        for (const t of targets) { u -= t.weight; if (u <= 0) { pick = t; break; } }
+        const amount = Math.min(raw, glSeverityCap(yearNumber));
+        const occurrenceId = `gl-inject-${yearNumber}-${injection.shockId.replace(/[^A-Za-z0-9]/g, '')}-${n}-${i}`;
+        const claimId = `${occurrenceId}-c1`;
+        claims.push({
+          id: claimId, occurrenceId, memberId: pick.member.id, line: LINE,
+          accidentYear: yearNumber, calendarYear, tier: 'injected', status: 'open',
+          reportedYear: yearNumber, grossUltimate: amount, paidToDate: 0, caseReserve: amount,
+        });
+        occurrences.push({
+          id: occurrenceId, line: LINE, memberId: pick.member.id, memberIds: [pick.member.id],
+          accidentYear: yearNumber, calendarYear, region: pick.member.region,
+          isCatastrophe: false, claimIds: [claimId],
+        });
+        if (amount > maxOccurrenceGross) maxOccurrenceGross = amount;
+        injectedByMember.set(pick.member.id, (injectedByMember.get(pick.member.id) ?? 0) + amount);
+        claimCount += 1;
+        placed += 1;
+        gross += amount;
+      }
+      injectionResults.push({ count: placed, gross });
+    }
+    // Into the member's own loss, exactly as WC's injections are — simulatedLoss
+    // only, NOT primaryLoss, so an injected claim does not enter the member's
+    // experience record on either line. Whether a scheduled event SHOULD count
+    // against the member it lands on is a rating question, and it is answered
+    // the same way on both lines until it is answered deliberately.
+    for (const result of memberLossResults) {
+      const added = injectedByMember.get(result.memberId);
+      if (added) result.simulatedLoss += added;
+    }
+  }
+
   const grossUltimateLoss = claims.reduce((s, c) => s + c.grossUltimate, 0);
-  return { claims, occurrences, grossUltimateLoss, memberLossResults, claimCount, maxOccurrenceGross };
+  return { claims, occurrences, grossUltimateLoss, memberLossResults, claimCount, maxOccurrenceGross, injectionResults };
 }
 
 // Exposed for the diagnostic harness: the exact internals the analytic uses,

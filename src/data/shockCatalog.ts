@@ -5,8 +5,10 @@
 // and the effect vocabulary in src/types/shocks.ts.
 //
 // IDs are the design-matrix numbers so the table and the matrix stay mapped to
-// each other. Six of the ~40 events are present: five representative events
-// chosen to exercise the machinery, plus #2, which is present as DATA ONLY.
+// each other — except WILDFIRE and WATER-CONTAMINATION, whose matrix numbers
+// are not in the repository and which carry provisional names (see their
+// rows). Eight of the ~40 events are present, and all eight are executable:
+// #2 was data only until the Property cat band gave it something to force.
 //
 // EVERY MAGNITUDE HERE IS PROVISIONAL AND CALIBRATION IS DEFERRED. These are
 // sized to their stated MECHANISM, never tuned to make the game feel risky. The
@@ -18,47 +20,53 @@
 // shock-check.ts reports what each event actually costs and asserts nothing
 // about whether that is the right amount.
 
-import type { ShockDefinition } from '../types/shocks';
+import type { ShockDefinition, ShockRange } from '../types/shocks';
+import type { CoverageLine } from '../types/simulation';
 import { WC_SEVERITY_COMPONENTS } from './defaultAssumptions';
 import { WHOLE_LINE } from '../utils/shockEffects';
+import { CAT_REGIONS } from '../utils/propertyCatastrophe';
 
 export const SHOCK_CATALOG: Record<string, ShockDefinition> = {
   // -------------------------------------------------------------------------
-  // #2 — DATA ONLY. NOT BUILDABLE, AND DELIBERATELY LEFT THAT WAY.
+  // THE CATASTROPHE EVENTS — forceEvent, one kind for every regional peril.
   //
-  // Two independent blockers, both structural:
+  // ⚠ #2 WAS DATA ONLY AND IS NOW EXECUTABLE. Its two blockers were "no cat
+  // generator" and "no occurrence tower for a cat event to pierce". Both went
+  // with the cat band (propertyCatastrophe.ts, PROPERTY_CAT_MODEL): a regional
+  // event summed into ONE occurrence, answered by the $462.5M xs $37.5M cat
+  // layer. A forced event reuses all of it — the occurrence, the catastrophe
+  // flag the tower reads, the cat layer, development and the claims export — and
+  // adds only a named region and a stated size. So wildfire, earthquake,
+  // flooding and windstorm are rows of ONE effect kind, not four mechanisms.
   //
-  //   1. THERE IS NO CAT GENERATOR. There is no quake peril, no region-span
-  //      logic, and no intensity draw to force.
+  // WHAT CHANGED IN #2's ROW, AND WHY:
+  //   - `span: true` and `intensity: 5.3` are gone. The cat band's ruling is one
+  //     occurrence per region; a quake reaching an adjacent region is a second
+  //     forceEvent, and the matrix row asks for one large Property loss.
+  //   - its WC half was `freqMultiplier` on WC, which WC's generator never read
+  //     (WC takes componentFreqMultiplier) — it would have fired as a
+  //     Property-only event while describing crew injuries. It is now an
+  //     explicit WC injection, and shockCatalog below now REJECTS a
+  //     freqMultiplier on WC outright.
   //
-  //      ⚠ CORRECTED: this used to claim propertyClaimEngine "has an
-  //      attritional band and a weather band, both unwired" and cited an inert
-  //      PROPERTY_CAT_MODEL, and that "a live game still runs Property through
-  //      the legacy aggregate member-Gamma path." All three claims are false as
-  //      of Property's rebuild (645c15e): propertyClaimEngine has ONE fitted
-  //      severity mixture, not a separate attritional/weather split;
-  //      PROPERTY_CAT_MODEL is not in `src/` at all; and Property draws
-  //      individual claims through its own per-occurrence generator, the same
-  //      family as WC and GL, not the retired aggregate-Gamma path. What is
-  //      still true, and the actual blocker: no cat generator exists.
+  // THE SIZE, $25M-$100M, is the matrix's range, drawn uniformly per firing
+  // from a stream keyed on the shock id. Against the $37.5M cat retention that
+  // is a real reinsurance question: the bottom of the range is retained in
+  // full, the top cedes $62.5M.
   //
-  //   2. THERE IS NO OCCURRENCE TOWER FOR A CAT EVENT TO PIERCE IN THE WAY THIS
-  //      EVENT'S DESCRIPTION ASSUMES.
+  // THE WC HALVES ARE JUDGMENT CALLS, stated. The matrix row says Property and
+  // WC "both take a large loss" for the earthquake and names WC only as
+  // secondary for the wildfire, with no WC figure for either. Both reuse
+  // magnitudes this catalog already documents rather than inventing new ones:
+  //   earthquake  one claim at $9.0M — #15's catastrophic-injury amount, the
+  //               heavy component's 99.95th percentile
+  //   wildfire    two claims at $900,000 — #10's serious-occupational amount,
+  //               the heavy component's ~98.3rd percentile
+  // DISPLACED BY: a WC figure in the matrix row.
   //
-  //      ⚠ ALSO CORRECTED: this used to say Property's reinsurance was "an
-  //      AGGREGATE QUOTA SHARE... UNCAPPED," which was true before dbd9138 and
-  //      is not now — Property has had its own one-layer occurrence tower
-  //      ($5M retention) and an aggregate stop-loss since that commit. The
-  //      remaining blocker is narrower than "no tower": the tower cedes
-  //      whatever occurrence a generator hands it, and there is still no CAT
-  //      generator to hand it a multi-claim catastrophe occurrence (see #1) —
-  //      today's tower ceded a single ordinary claim, not an event.
-  //
-  // So the occurrence tower is a PREREQUISITE for #2 having its intended meaning
-  // at all, not merely for it running. Against an uncapped aggregate quota share
-  // a $400M gross quake produces roughly the opposite of the intended result.
-  // The resolver will throw if this event is ever scheduled, which is correct:
-  // it must not silently do half of what it says.
+  // BANDS. The matrix grades wildfire at severity 4 and contamination at 3 on
+  // its own 1-5 scale; this catalog's three bands map 3 -> moderate and
+  // 4 -> high. #2 keeps the 'severe' it already had.
   // -------------------------------------------------------------------------
   '#2': {
     id: '#2',
@@ -66,12 +74,68 @@ export const SHOCK_CATALOG: Record<string, ShockDefinition> = {
     horizon: 'current',
     band: 'severe',
     description:
-      'A major earthquake in the Central region spanning into an adjacent zone at near-99th-percentile '
-      + 'intensity. Building damage plus crew injuries; no third-party GL assumed. NOT EXECUTABLE — '
-      + 'requires the Property cat band and an occurrence-basis reinsurance tower, neither of which exists.',
+      'A major earthquake strikes the Central region. Damage runs across the members there as one '
+      + 'catastrophe — one occurrence, answered by the catastrophe layer — and building collapse '
+      + 'brings a catastrophic workers\' compensation injury with it.',
     effects: [
-      { kind: 'forceEvent', line: 'Property', peril: 'earthquake', region: 'Central', intensity: 5.3, span: true },
-      { kind: 'freqMultiplier', line: 'WC', factor: 1.4 },
+      { kind: 'forceEvent', line: 'Property', peril: 'earthquake', region: 'Central', loss: { min: 25_000_000, max: 100_000_000 } },
+      { kind: 'injectClaim', line: 'WC', count: 1, amount: 9_000_000 },
+    ],
+  },
+
+  // -------------------------------------------------------------------------
+  // WILDFIRE — PROVISIONAL ID. The design matrix numbers its events ('#2',
+  // '#22'), and its number for this row is not in the repository. Rather than
+  // guess one that may collide with a real row, this carries a name. Renumber
+  // it when the matrix number is known — BEFORE any room schedules it, since a
+  // room's schedule stores the id.
+  //
+  // NORTH, because the cat design's wildfire hazard weights put 45% of the
+  // peril there (North 0.45 / Central 0.35 / South 0.20 — the wildland-urban
+  // interface), in docs/PROPERTY_CAT_ENGINE_DESIGN.md.
+  // -------------------------------------------------------------------------
+  'WILDFIRE': {
+    id: 'WILDFIRE',
+    name: 'Major Wildfire',
+    horizon: 'current',
+    band: 'high',
+    description:
+      'A major wildfire burns through the North region\'s wildland-urban interface. The damage across the '
+      + 'members it reaches is one catastrophe — one occurrence, answered by the catastrophe layer — and '
+      + 'staff responding to it are seriously injured.',
+    effects: [
+      { kind: 'forceEvent', line: 'Property', peril: 'wildfire', region: 'North', loss: { min: 25_000_000, max: 100_000_000 } },
+      { kind: 'injectClaim', line: 'WC', count: 2, amount: 900_000 },
+    ],
+  },
+
+  // -------------------------------------------------------------------------
+  // WATER SYSTEM CONTAMINATION — PROVISIONAL ID, for the same reason as
+  // WILDFIRE. GL primary, severity 3, current year.
+  //
+  // THE FIRST GL INJECTION. glClaimEngine read no injections until this row:
+  // the resolver bucketed them and the generator's input mapping dropped them,
+  // so a GL injectClaim would have fired, been recorded, and cost nothing.
+  //
+  // TWO TO FIVE CLAIMS ABOVE $5M is the matrix's statement, and both halves are
+  // ranges here, drawn from a stream keyed on the shock id. The count is
+  // uniform on {2,3,4,5}. Each claim is uniform on $5M-$10M: the floor is the
+  // matrix's "above $5M", which is also the attachment of GL's $5M xs $5M layer;
+  // the ceiling is that layer's top, so every claim lands in one layer's band
+  // and the event tests the tower rather than GL's unreinsurable band above
+  // $25M. The ceiling is a JUDGMENT CALL — the matrix gives no upper bound.
+  // DISPLACED BY: an upper bound in the matrix row.
+  // -------------------------------------------------------------------------
+  'WATER-CONTAMINATION': {
+    id: 'WATER-CONTAMINATION',
+    name: 'Water System Contamination',
+    horizon: 'current',
+    band: 'moderate',
+    description:
+      'Contamination of a member\'s public water system brings a cluster of large bodily-injury and '
+      + 'property claims against the pool\'s members — two to five claims, each above $5M.',
+    effects: [
+      { kind: 'injectClaim', line: 'GL', count: { min: 2, max: 5 }, amount: { min: 5_000_000, max: 10_000_000 } },
     ],
   },
 
@@ -354,18 +418,72 @@ export const SHOCK_CATALOG: Record<string, ShockDefinition> = {
 // simulation output.
 // ---------------------------------------------------------------------------
 
-for (const def of Object.values(SHOCK_CATALOG)) {
+// Which shock channel each line's generator actually reads — the single table
+// the rejections below check against. claimGeneration.ts is where these are
+// mapped; a line reading a new channel is added in both places.
+const READS: Record<string, readonly CoverageLine[]> = {
+  forceEvent: ['Property'],
+  injectClaim: ['WC', 'GL'],
+  freqMultiplier: ['GL'],
+  componentFreqMultiplier: ['WC'],
+  sevMultiplier: ['GL'],
+};
+const isRange = (v: unknown): v is ShockRange => typeof v === 'object' && v !== null && 'min' in v && 'max' in v;
+
+// One definition's checks, exported so shock-check can hand it rows the
+// catalog must never contain and assert each one throws — a validator nothing
+// ever sees fail is a validator nobody has tested.
+export function validateShockDefinition(def: ShockDefinition): void {
   for (const effect of def.effects) {
+    // ⚠ AN EFFECT ON A LINE THAT DOES NOT READ IT IS REJECTED. This is the class
+    // of defect that has now bitten three times — #28's WC half, #22's EPL sub,
+    // and #2's freqMultiplier on WC — where an effect resolves, is recorded as
+    // firing, and costs nothing because the line's generator never looks at it.
+    // It used to be unvalidated because #2 carried exactly such an effect and
+    // was kept unschedulable by an unimplemented forceEvent. #2 is executable
+    // now, so the hole is closed rather than documented.
+    const readers = READS[effect.kind];
+    if (readers && 'line' in effect && !readers.includes(effect.line)) {
+      throw new Error(
+        `shockCatalog ${def.id}: ${effect.kind} on ${effect.line}, but only ${readers.join(' and ')} `
+        + `read${readers.length === 1 ? 's' : ''} ${effect.kind}` + (effect.kind === 'forceEvent'
+          ? ' — Property is the only line with a cat band.'
+          : '. As written this effect would fire, be recorded, and silently cost nothing.'),
+      );
+    }
+
+    // A forced catastrophe must name a region the cat band has, and a size
+    // range that is a range. It is the region the tower and the claims land in.
+    if (effect.kind === 'forceEvent') {
+      if (!CAT_REGIONS.includes(effect.region)) {
+        throw new Error(`shockCatalog ${def.id}: forceEvent region '${effect.region}' is not one of ${CAT_REGIONS.join('/')}.`);
+      }
+      if (!(effect.loss.min > 0) || !(effect.loss.max >= effect.loss.min)) {
+        throw new Error(`shockCatalog ${def.id}: forceEvent loss range [${effect.loss.min}, ${effect.loss.max}] is not a positive range.`);
+      }
+      if (!effect.peril) throw new Error(`shockCatalog ${def.id}: forceEvent needs a peril.`);
+    }
+
     // An injected claim MUST carry a positive explicit amount. The generator
     // throws too, but that is at fire time, possibly years into a game; this
     // catches a bad row at startup. See the #15 comment for why a missing
     // amount is the dangerous case rather than an obviously broken one.
     if (effect.kind === 'injectClaim') {
-      if (!(effect.amount > 0)) {
-        throw new Error(`shockCatalog ${def.id}: injectClaim needs a positive explicit amount, got ${effect.amount}`);
+      // A RANGE IS GL-ONLY. GL's injection path draws ranges from a shock-keyed
+      // stream; WC's takes explicit values, and a range reaching it would throw
+      // at fire time instead of here.
+      if ((isRange(effect.count) || isRange(effect.amount)) && effect.line !== 'GL') {
+        throw new Error(`shockCatalog ${def.id}: injectClaim on ${effect.line} uses a range, and only GL draws ranges. Give an explicit count and amount.`);
       }
-      if (!(effect.count > 0)) {
-        throw new Error(`shockCatalog ${def.id}: injectClaim needs a positive count, got ${effect.count}`);
+      const amountMin = isRange(effect.amount) ? effect.amount.min : effect.amount;
+      const amountMax = isRange(effect.amount) ? effect.amount.max : effect.amount;
+      if (!(amountMin > 0) || !(amountMax >= amountMin)) {
+        throw new Error(`shockCatalog ${def.id}: injectClaim needs a positive explicit amount, got ${JSON.stringify(effect.amount)}`);
+      }
+      const countMin = isRange(effect.count) ? effect.count.min : effect.count;
+      const countMax = isRange(effect.count) ? effect.count.max : effect.count;
+      if (!(countMin > 0) || !(countMax >= countMin) || !Number.isInteger(countMin) || !Number.isInteger(countMax)) {
+        throw new Error(`shockCatalog ${def.id}: injectClaim needs a positive integer count, got ${JSON.stringify(effect.count)}`);
       }
     }
     // A component multiplier must name a component the model actually has, or
@@ -401,14 +519,7 @@ for (const def of Object.values(SHOCK_CATALOG)) {
         + `'${WHOLE_LINE}'. Omit ` + '`sub`' + ` to target the whole line. As written this effect would be silently inert.`,
       );
     }
-    // ⚠ NOT VALIDATED HERE, AND KNOWN: a `freqMultiplier` on WC or Property is
-    // read by NEITHER line's generator (WC takes componentFreqMultipliers;
-    // Property is still on the legacy aggregate path), so it is inert too. #2
-    // carries exactly that — `freqMultiplier` on WC — and is NOT a live bug only
-    // because #2 also carries an unimplemented `forceEvent`, which makes the
-    // resolver throw if #2 is ever scheduled. Throwing here instead would break
-    // module load for a deliberately-unexecutable event. If #2's forceEvent is
-    // ever implemented, its WC half needs re-targeting to
-    // componentFreqMultiplier at the same time, or it will silently do nothing.
   }
 }
+
+for (const def of Object.values(SHOCK_CATALOG)) validateShockDefinition(def);

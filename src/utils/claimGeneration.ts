@@ -84,10 +84,12 @@ export interface LineYearGenerationOutput {
  *
  * ⚠ THE SHOCK CHANNELS DIFFER BY LINE AND THAT IS NOT AN OVERSIGHT. WC takes
  * component arrival-rate multipliers and explicit injections; GL takes
- * whole-line frequency and severity multipliers plus gPool; Property takes no
- * shock channel and no gPool (its fitted mixture already contains what gPool
- * would add — see the note at its engine call site). A shock effect the line
- * does not read is dropped here, exactly as the engine always dropped it.
+ * whole-line frequency and severity multipliers, injections (explicit or
+ * ranged) and gPool; Property takes forced catastrophes and no gPool (its
+ * fitted mixture already contains what gPool would add — see the note at its
+ * engine call site). A shock effect the line does not read is dropped here —
+ * and shockCatalog now REJECTS such an effect at load, so a catalog event can
+ * no longer be dropped silently.
  *
  * ⚠ THESE RETURN INPUTS, NOT RESULTS, and that is deliberate. The engine reads
  * generator outputs the regenerator has no use for — WC's per-component counts
@@ -101,8 +103,16 @@ export function wcGenerationInputs(b: LineYearGenerationBase): WcGenerationInput
     members: b.members, yearNumber: b.yearNumber, calendarYear: b.calendarYear,
     instanceSeed: b.instanceSeed, kLine: b.k, riskControlEffectiveness: b.riskControlEffectiveness,
     componentFreqMultipliers: b.shock?.componentFreqMultipliers,
-    injections: b.shock?.injections,
+    // WC takes EXPLICIT injections only. shockCatalog rejects a range on a WC
+    // injectClaim at load, so this narrowing cannot fire on a catalog event; it
+    // is here so a range can never reach WC's generator as a malformed number.
+    injections: b.shock?.injections?.map(i => ({ count: explicit(i.count, 'WC count'), amount: explicit(i.amount, 'WC amount') })),
   };
+}
+
+function explicit(v: number | { min: number; max: number }, what: string): number {
+  if (typeof v === 'number') return v;
+  throw new Error(`${what}: a shock range reached a generator that takes explicit values only`);
 }
 
 export function glGenerationInputs(b: LineYearGenerationBase): GlGenerationInputs {
@@ -112,6 +122,7 @@ export function glGenerationInputs(b: LineYearGenerationBase): GlGenerationInput
     riskControlEffectiveness: b.riskControlEffectiveness,
     freqMultipliers: b.shock?.freqMultipliers,
     sevMultipliers: b.shock?.sevMultipliers,
+    injections: b.shock?.injections,
   };
 }
 
@@ -119,6 +130,7 @@ export function propertyGenerationInputs(b: LineYearGenerationBase): PropertyGen
   return {
     members: b.members, yearNumber: b.yearNumber, calendarYear: b.calendarYear,
     instanceSeed: b.instanceSeed, kPr: b.k, riskControlEffectiveness: b.riskControlEffectiveness,
+    forcedEvents: b.shock?.forcedEvents,
   };
 }
 

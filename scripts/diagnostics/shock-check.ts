@@ -30,17 +30,18 @@ import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
+import { regenerateLineYearClaims } from '../../src/utils/claimRegeneration';
 import { resolveShocks, ownFreqMultipliers, ownComponentFreqMultipliers, ownSevMultipliers } from '../../src/utils/shockResolver';
 import { WHOLE_LINE } from '../../src/utils/shockEffects';
 import { computeKGl, expectedGlGrossLossForPricing, generateGlClaims } from '../../src/utils/glClaimEngine';
 import { computeKLine, componentMean, expectedWcGrossLossForPricing, generateWcClaims } from '../../src/utils/wcClaimEngine';
 import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
 import type { Member } from '../../src/types/simulation';
-import { SHOCK_CATALOG } from '../../src/data/shockCatalog';
+import { SHOCK_CATALOG, validateShockDefinition } from '../../src/data/shockCatalog';
 import { buildResultsWorkbook } from '../../src/utils/resultsExport';
 import { RESULT_METRICS } from '../../src/utils/resultMetrics';
 import type { CoverageLine, GameInstance, GameState, LineResultSet, ResultSet } from '../../src/types/simulation';
-import type { ScheduledShock } from '../../src/types/shocks';
+import type { ScheduledShock, ShockDefinition } from '../../src/types/shocks';
 
 const problems: string[] = [];
 const note = (ok: boolean, msg: string) => { if (!ok) problems.push(msg); return ok ? 'OK' : 'FAIL'; };
@@ -151,10 +152,23 @@ console.log('\n--- 2. resolver contract ---');
   console.log(`  #10 in Y3, asked for Y2 -> ${resolveShocks(future, 2) === undefined ? 'undefined' : 'RESOLUTION'}  ${note(resolveShocks(future, 2) === undefined, 'a future-horizon shock applies before its own year')}`);
 
   // An unimplemented effect must THROW, not be silently skipped.
-  const blocked = { ...base, scheduledShocks: [{ shockId: '#2', yearNumber: 1 }] };
+  //
+  // ⚠ THIS USED #2, AND #2 IS EXECUTABLE NOW — the Property cat band gave its
+  // forceEvent something to force. No catalog row carries an unimplemented kind
+  // any more, so the guarantee is exercised with a TEMPORARY row carrying one
+  // (investmentShock), removed again at once. Dropping the assertion because
+  // the catalog stopped exercising it would leave the guarantee untested.
+  SHOCK_CATALOG['#TEST-UNIMPLEMENTED'] = {
+    id: '#TEST-UNIMPLEMENTED', name: 'test', horizon: 'current', band: 'moderate', description: 'test',
+    effects: [{ kind: 'investmentShock', assetClass: 'equities', returnDelta: -0.2 }],
+  };
   let threw = false;
-  try { resolveShocks(blocked, 1); } catch { threw = true; }
-  console.log(`  #2 (forceEvent, unimplemented) throws: ${note(threw, '#2 does not throw — an unimplemented effect is being silently skipped')}`);
+  try { resolveShocks({ ...base, scheduledShocks: [{ shockId: '#TEST-UNIMPLEMENTED', yearNumber: 1 }] }, 1); } catch { threw = true; }
+  delete SHOCK_CATALOG['#TEST-UNIMPLEMENTED'];
+  console.log(`  an unimplemented effect (investmentShock) throws: ${note(threw, 'an unimplemented effect is being silently skipped')}`);
+  let twoThrew = false;
+  try { resolveShocks({ ...base, scheduledShocks: [{ shockId: '#2', yearNumber: 1 }] }, 1); } catch { twoThrew = true; }
+  console.log(`  #2 resolves now that forceEvent is implemented: ${note(!twoThrew, '#2 still throws — forceEvent is not in IMPLEMENTED_EFFECTS')}`);
   let unknownThrew = false;
   try { resolveShocks({ ...base, scheduledShocks: [{ shockId: '#999', yearNumber: 1 }] }, 1); } catch { unknownThrew = true; }
   console.log(`  unknown shock id throws: ${note(unknownThrew, 'an unknown shock id is silently ignored')}`);
@@ -169,7 +183,7 @@ console.log('\n--- 3. catalog ---');
     console.log(`    ${def.id.padEnd(5)} ${def.band.padEnd(8)} ${def.horizon.padEnd(7)} ${def.name}`);
     for (const e of def.effects) console.log(`          - ${e.kind}${'line' in e ? ` (${e.line})` : ''}`);
   }
-  console.log(`  paramOverride paths validated against the real models at module load (shockCatalog.ts)`);
+  console.log(`  every row validated at module load by validateShockDefinition (shockCatalog.ts)`);
 }
 
 console.log('\n--- 4. recording surface ---');
@@ -638,6 +652,105 @@ console.log('\n--- 9. #19 Social Inflation Hard Market — the first sevMultipli
   console.log(`    Y2-Y5 ALL moved — the ratchet does not unwind: ${note(moved[1] && moved[2] && moved[3] && moved[4], '#19 does not persist after its firing year — a future-horizon ratchet must apply every subsequent year')}`);
   console.log(`    (a hard market leaves the severity LEVEL higher; Swiss Re's index has been above zero`);
   console.log(`     every year since 2014. A one-year spike would be the wrong physics — see types/shocks.ts.)`);
+}
+
+// ============================================================================
+// 10. THE THREE CATASTROPHE-SCALE EVENTS — two mechanisms, proven end to end.
+//
+// #2 and WILDFIRE force a Property catastrophe (forceEvent) plus a WC
+// injection; WATER-CONTAMINATION is the first GL injection, with a ranged count
+// and amount. Each is asserted on the three things a scheduled event owes: it
+// fires in its own year and no other, its loss lands on the lines it names and
+// nowhere else, and its size is inside the matrix's range. Plus the property
+// the data rule exists for — the draws are the shock's own, so everything that
+// is NOT the event is bit-identical to the unshocked game.
+// ============================================================================
+console.log('\n--- 10. #2 / WILDFIRE / WATER-CONTAMINATION ---');
+{
+  const FIRE = 3;
+  const EVENTS: { id: string; lines: CoverageLine[] }[] = [
+    { id: 'WILDFIRE', lines: ['Property', 'WC'] },
+    { id: '#2', lines: ['Property', 'WC'] },
+    { id: 'WATER-CONTAMINATION', lines: ['GL'] },
+  ];
+  const cleanBySeed = new Map(SEEDS.map(id => [id, play(id, 5, [])]));
+  for (const ev of EVENTS) {
+    let fireOk = true, linesOk = true, sizeOk = true, naturalOk = true, reproOk = true, regenOk = true;
+    const sizes: string[] = [];
+    for (const id of SEEDS) {
+      const clean = cleanBySeed.get(id)!;
+      const shocked = play(id, 5, [{ shockId: ev.id, yearNumber: FIRE }]);
+      shocked.forEach((r, i) => {
+        const fired = (r.shockEvents ?? []).some(e => e.shockId === ev.id);
+        if (fired !== (i === FIRE - 1)) fireOk = false;
+      });
+      // LINES — only the named ones move in the firing year, and nothing moves before it.
+      const r3 = shocked[FIRE - 1], c3 = clean[FIRE - 1];
+      for (const l of LINES) {
+        const moved = r3.byLine[l]!.grossUltimateLoss !== c3.byLine[l]!.grossUltimateLoss;
+        if (moved !== ev.lines.includes(l)) linesOk = false;
+        for (let i = 0; i < FIRE - 1; i++) if (shocked[i].byLine[l]!.grossUltimateLoss !== clean[i].byLine[l]!.grossUltimateLoss) linesOk = false;
+      }
+      // SIZE, and THE NATURAL BOOK UNTOUCHED — every claim that is not the event's is the same claim.
+      const eventClaim = (c: { tier: string; occurrenceId: string }) => c.tier === 'injected' || c.occurrenceId.includes('-SHOCK-');
+      for (const l of LINES) {
+        const a = (c3.byLine[l]!.claims ?? []).map(c => `${c.id}:${c.grossUltimate}`).join('|');
+        const b = (r3.byLine[l]!.claims ?? []).filter(c => !eventClaim(c)).map(c => `${c.id}:${c.grossUltimate}`).join('|');
+        if (a !== b) naturalOk = false;
+      }
+      if (ev.id === 'WATER-CONTAMINATION') {
+        const inj = (r3.byLine.GL!.claims ?? []).filter(c => c.tier === 'injected');
+        if (!(inj.length >= 2 && inj.length <= 5 && inj.every(c => c.grossUltimate > 5e6 && c.grossUltimate <= 10e6))) sizeOk = false;
+        sizes.push(`${inj.length} x ${inj.map(c => fmt$(c.grossUltimate)).join('/')}`);
+      } else {
+        const evClaims = (r3.byLine.Property!.claims ?? []).filter(c => c.occurrenceId.includes('-SHOCK-'));
+        const occ = new Set(evClaims.map(c => c.occurrenceId));
+        const g = evClaims.reduce((t, c) => t + c.grossUltimate, 0);
+        if (!(g >= 25e6 - 1e-6 && g <= 100e6 + 1e-6) || occ.size !== 1) sizeOk = false;
+        const o = (r3.byLine.Property!.occurrences ?? []).find(x => occ.has(x.id));
+        if (!o?.isCatastrophe) sizeOk = false;
+        sizes.push(`${fmt$(g)} on ${evClaims.length} member(s), one occurrence`);
+      }
+      // REPRODUCIBLE — the same schedule on the same seed is the same game.
+      // One seed per event: it is a determinism check, not a sample.
+      if (id === SEEDS[0]) {
+        const again = play(id, 5, [{ shockId: ev.id, yearNumber: FIRE }]);
+        if (JSON.stringify(fieldsOf(again, 'x')) !== JSON.stringify(fieldsOf(shocked, 'x'))) reproOk = false;
+        // AND A RELOADED GAME REDRAWS THE SAME EVENT. The claims memo and the
+        // workbook rebuild a saved year's register through claimRegeneration,
+        // which reaches the generators through the same input mapping — so a
+        // forced event or a GL injection must come back claim for claim.
+        const inst = { ...generateGameInstance(id, seedOf(id)), scheduledShocks: [{ shockId: ev.id, yearNumber: FIRE }] };
+        for (const l of ev.lines) {
+          const redrawn = regenerateLineYearClaims(inst, r3, l).claims.map(c => `${c.id}:${c.grossUltimate}`).join('|');
+          const drawn = (r3.byLine[l]!.claims ?? []).map(c => `${c.id}:${c.grossUltimate}`).join('|');
+          if (redrawn !== drawn) regenOk = false;
+        }
+      }
+    }
+    console.log(`  ${ev.id}: ${sizes.join('; ')}`);
+    console.log(`    fires in Y${FIRE} and no other: ${note(fireOk, `${ev.id} fired outside its scheduled year`)}`
+      + `   loss on ${ev.lines.join(' + ')} only: ${note(linesOk, `${ev.id} moved a line it does not name, or moved one before it fired`)}`
+      + `   size in the matrix range: ${note(sizeOk, `${ev.id} landed outside its matrix range`)}`);
+    console.log(`    every non-event claim identical to the unshocked game: ${note(naturalOk, `${ev.id} moved a natural draw — its randomness is not confined to its own streams`)}`
+      + `   reproducible on replay: ${note(reproOk, `${ev.id} is not deterministic on the same seed`)}`
+      + `   a reloaded year redraws it: ${note(regenOk, `${ev.id}'s claims do not survive claimRegeneration — a reloaded game would lose or change the event`)}`);
+  }
+
+  // THE VALIDATOR — each rule must be seen to fire.
+  const bad: [string, ShockDefinition][] = [
+    ['forceEvent on WC', { id: 'x', name: 'x', horizon: 'current', band: 'high', description: 'x', effects: [{ kind: 'forceEvent', line: 'WC' as 'Property', peril: 'wildfire', region: 'North', loss: { min: 1, max: 2 } }] }],
+    ['forceEvent on GL', { id: 'x', name: 'x', horizon: 'current', band: 'high', description: 'x', effects: [{ kind: 'forceEvent', line: 'GL' as 'Property', peril: 'wildfire', region: 'North', loss: { min: 1, max: 2 } }] }],
+    ['forceEvent in no region', { id: 'x', name: 'x', horizon: 'current', band: 'high', description: 'x', effects: [{ kind: 'forceEvent', line: 'Property', peril: 'wildfire', region: 'East' as 'North', loss: { min: 1, max: 2 } }] }],
+    ['injectClaim on Property', { id: 'x', name: 'x', horizon: 'current', band: 'high', description: 'x', effects: [{ kind: 'injectClaim', line: 'Property', count: 1, amount: 1 }] }],
+    ['a range on a WC injection', { id: 'x', name: 'x', horizon: 'current', band: 'high', description: 'x', effects: [{ kind: 'injectClaim', line: 'WC', count: { min: 1, max: 2 }, amount: 1 }] }],
+    ['freqMultiplier on WC (the old #2 defect)', { id: 'x', name: 'x', horizon: 'current', band: 'high', description: 'x', effects: [{ kind: 'freqMultiplier', line: 'WC', factor: 1.4 }] }],
+    ['sevMultiplier on Property', { id: 'x', name: 'x', horizon: 'current', band: 'high', description: 'x', effects: [{ kind: 'sevMultiplier', line: 'Property', factor: 1.1 }] }],
+  ];
+  for (const [label, def] of bad) {
+    console.log(`  validator rejects ${label}: ${note(throws(() => validateShockDefinition(def)), `the validator accepts ${label}`)}`);
+  }
+  console.log(`  and accepts every shipped row: ${note(Object.values(SHOCK_CATALOG).every(d => !throws(() => validateShockDefinition(d))), 'a shipped catalog row fails its own validator')}`);
 }
 
 console.log(problems.length === 0
