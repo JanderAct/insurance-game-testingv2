@@ -52,6 +52,12 @@ Neither receives work. Quote a number from either as "the demo build", never as 
 **Standing red set:** `ibner-null-check` and `cession-uplift-basis`, both with their reasons in
 `EXPECTED_RED` in `scripts/gates.ts`. An unexpected *pass* on either is as loud as a failure.
 
+> ⚠ **THE SET IS NOW FOUR, NOT TWO.** True as written at `59e5c4b`; two more were entered at `98ae506`,
+> the `PER_CLAIM_REVISION` flip. The full set is `ibner-null-check` (1), `cession-uplift-basis` (2),
+> `actuarial-memo-check` (1) and `clf-label-backtest-check` (1), each with its exit code, its measured
+> figure and its paired control in `EXPECTED_RED`. Measured on a full 72-gate sweep at `8305f4d`:
+> 68 green, those four expected-red at exactly those codes, no unexpected red and no XPASS.
+
 The drivers need a built app and a preview server; there is no npm script for that reason.
 `scripts/tools/session-drivers/_shared.cjs` carries the invocation and says which of their assertions
 survive an engine change.
