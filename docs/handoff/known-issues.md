@@ -170,6 +170,14 @@ regression it would miss.
 measured justification, a paired control and a named fix. Two fired as `xfail`
 in the FAST run (`actuarial-memo-check`, `cession-uplift-basis`).
 
+⚠ **THAT IS THE FAST TIER ONLY, AND READING IT AS THE WHOLE SET IS THE MISTAKE
+IT INVITES.** `EXPECTED_RED` holds **four**; the other two live in the deferred
+tier and so never appear in a FAST run. In full: `ibner-null-check` (exit 1),
+`cession-uplift-basis` (exit 2), `actuarial-memo-check` (exit 1) and
+`clf-label-backtest-check` (exit 1). Measured on a full 72-gate sweep at
+`8305f4d` — 68 green, those four at exactly those codes, no unexpected red and
+no XPASS. Anything quoting a two-gate red set predates `98ae506`.
+
 A later entry, `clf-label-backtest-check`, is of a different kind from the rest
 and worth separating: it is not a threshold awaiting re-derivation. The tables
 are derived on calendar-year incurred while the gate now measures accident-year
