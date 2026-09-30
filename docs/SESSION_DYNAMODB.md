@@ -7,20 +7,53 @@ and this note is stale: fix this note.
 
 It is for whoever creates and sizes the table, not whoever writes the handlers.
 
-## The table
+## What the console asks for
 
-One table. One partition per room.
+None of these can be changed after the table exists.
 
-| Key | Value |
-|---|---|
-| Partition key | `ROOM#<code>` (string) |
-| Sort key | `ROOM`, `NAME#<name>`, `D#<teamId>#<yyy>`, `R#<teamId>#<yyy>`, `VIEW#<tokenHash>` (string) |
+| Console field | Enter | Type |
+|---|---|---|
+| Table name | `ripple-sessions` | — |
+| Partition key | `pk` | String |
+| Sort key | `sk` | String |
+| TTL attribute (enable TTL after creation) | `expiresAtSec` | Number, **epoch seconds** |
+
+The handler reads the table name from the `TABLE_NAME` environment variable and never hard-codes it.
+
+## The keys: attribute names and value formats are two different things
+
+The console asks what the key attribute is **called**. That is `pk` or `sk`. It does not ask for
+the values below, which the handlers write into those attributes. **Do not type `ROOM#<code>` into
+the console.**
+
+| Attribute | Type | Value format | Item |
+|---|---|---|---|
+| `pk` | String | `ROOM#<code>` | every item of a room |
+| `sk` | String | `ROOM` | the room header |
+| `sk` | String | `NAME#<team name>` | a team name's claim |
+| `sk` | String | `D#<teamId>#<yyy>` | one team's decisions for one year |
+| `sk` | String | `R#<teamId>#<yyy>` | one team's result for one year (`000` is the opening position) |
+| `sk` | String | `VIEW#<tokenHash>` | one viewer |
+
+`<yyy>` is always three digits, so the sort order holds past year 99.
 
 - **No secondary index.** The handlers do not need one, and must not read through one: every read is
   strongly consistent (below), and a GSI cannot be.
-- **TTL on.** Every item carries an expiry attribute, stamped from its room's header. A room is
-  ~220 items, so there is no single item to delete.
 - **Single region.** Strongly consistent reads hold only in the region that took the write.
+
+## TTL
+
+- **The attribute is `expiresAtSec`, a Number, in epoch SECONDS.** A value stamped in milliseconds —
+  the unit the rest of this codebase's timestamps use — reads as tens of thousands of years away, and
+  nothing is ever deleted. A duration stored in place of a timestamp reads as 1970 and expires at once.
+- **One write sets it and every other write copies it.** `createRoom` sets the header's value once
+  (creation time in seconds, plus the retention period). Every later write copies the header's value
+  verbatim onto the item it writes. A result posted in year 10 carries the same expiry as the header
+  written two hours earlier, so the room expires as one rather than in pieces.
+- **The retention period is not decided yet.** Unlike the attribute name, it can change later, for
+  new rooms.
+- **TTL deletes in the background, well after the expiry, item by item.** The handlers therefore treat
+  a room as gone once its header's expiry has passed, whether or not TTL has removed it yet.
 
 ## Sizes, ten teams by ten years
 
@@ -56,3 +89,8 @@ arrive in a burst just after each advance — their transactions conflict and re
 per item, not per table: raising capacity does not move it.** It is occasional at 10–12 teams and
 sustained at 50+. Team count times burstiness is what breaks first, not years. The module records
 the escape hatch.
+
+**The planned event is inside that range.** The AWS owner's guide plans for 140 players: 25 to 45
+teams at three to six a team. That sits between "occasional" and "sustained", and nothing in between
+has been measured. At that size the escape hatch may not be optional. Settle it before the session,
+not during it.

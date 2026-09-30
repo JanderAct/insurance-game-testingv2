@@ -15,15 +15,73 @@
 // cost a re-solve each time.
 //
 // ============================================================================
+// THE THREE THINGS THE TABLE CANNOT BE CREATED WITHOUT — none can be changed
+// after the table exists.
+//
+//   table name          ripple-sessions
+//                       The handler reads it from the TABLE_NAME environment
+//                       variable (the AWS owner's guide sets it) and never
+//                       hard-codes it, so a staging table can differ.
+//   partition key       attribute  pk   type String (S)
+//   sort key            attribute  sk   type String (S)
+//   TTL attribute       expiresAtSec    type Number (N), EPOCH SECONDS
+//
+// ⚠ THE ATTRIBUTE IS NOT THE VALUE. The attribute is CALLED `pk`; its VALUE is
+// ROOM#<code>. The attribute is called `sk`; its values are ROOM, NAME#..., D#...,
+// R#..., VIEW#.... Nobody types ROOM#<code> into the console. The names are
+// generic on purpose: one attribute carries several kinds of value, so a
+// meaningful name (`roomCode`, `year`) would be wrong for at least one of them.
+//
+// ⚠ expiresAtSec IS SECONDS, AND THE NAME SAYS SO BECAUSE ITS NEIGHBOURS ARE
+// MILLISECONDS. createdAt and updatedAt are Date.now(), as localTransport stamps
+// them. A TTL stamped in milliseconds reads to DynamoDB as a date tens of
+// thousands of years away, and nothing is EVER deleted — silently. Compute it as
+// Math.floor(ms / 1000) + retention. A DURATION stored where a timestamp belongs
+// fails the other way: an absolute time in 1970, expired at once.
+//
+// ============================================================================
+// WHAT SETS THE EXPIRY — ONE WRITE SETS IT, EVERY OTHER WRITE COPIES IT.
+//
+//   createRoom   sets the header's expiresAtSec ONCE:
+//                  Math.floor(createdAt / 1000) + retention seconds.
+//                The retention length is not decided here. Unlike the three
+//                names above it can change later — for new rooms.
+//   every other write copies the HEADER'S value VERBATIM onto the item it writes:
+//                  join     -> NAME#     viewer join -> VIEW#
+//                  submit   -> D#, R#
+//                Each of those already reads the header first, to resolve the
+//                token or confirm the room and team exist, so the value is in
+//                hand. No write computes an expiry from "now", and no write
+//                extends it.
+//
+// ⚠ A LATE ITEM GETS THE ROOM'S EXPIRY, NOT ITS OWN. A year-10 result posted two
+// hours after createRoom carries the same absolute expiresAtSec as the header
+// written at the start. If writes stamped "now + retention" instead, the room
+// would expire in pieces: the header first, its last results hours later —
+// orphans a reader could still find.
+//
+// ⚠ AND IDENTICAL STAMPS STILL DO NOT DELETE A ROOM AT ONCE. TTL deletion is a
+// background process that runs well after the expiry, item by item. So:
+//   * a header past its expiresAtSec is ROOM_NOT_FOUND, whether or not TTL has
+//     removed it yet — reads and writes check the stamp, not the item's presence;
+//   * an absent header is ROOM_NOT_FOUND even if D#/R# items of that room
+//     linger;
+//   * createRoom's attribute_not_exists guards only the header, so a new room
+//     drawing the code of a recently expired one could inherit its leftover
+//     items. Rare at 32^6 codes; the guard for it is to refuse a code whose
+//     partition has ANY item (Query, Limit 1), not just a header.
+//
+// ============================================================================
 // ONE TABLE. ONE PARTITION PER ROOM.
 //
-//   PK = ROOM#<code>            every item of a room shares it
+//   pk = ROOM#<code>            every item of a room shares it
 //
-//   SK                          holds
+//   sk                          holds (every item also carries expiresAtSec)
 //   ------------------------    ------------------------------------------------
 //   ROOM                        THE HEADER. seed, eventName, yearCount,
 //                               startingYear, expectedTeams, shocks,
 //                               currentYear, rev, createdAt, updatedAt,
+//                               expiresAtSec (the room's, set once),
 //                               hostTokenHash, and the ROSTER:
 //                                 { [teamId]: { name, lines, joined, lockedYear,
 //                                               tokenHash, posted: { [year]: true } } }
@@ -31,7 +89,7 @@
 //   D#<teamId>#<yyy>            one team's DECISIONS for one year (opaque JSON).
 //   R#<teamId>#<yyy>            one team's RESULT for one year (TeamYearSummary).
 //                               Year 000 is the opening position.
-//   VIEW#<tokenHash>            { teamId, expiresAt } for one viewer.
+//   VIEW#<tokenHash>            { teamId } for one viewer.
 //
 // WHY THIS SHAPE, point by point:
 //
@@ -186,6 +244,10 @@
 //      Escape hatch if it ever matters: results stop touching the header —
 //      postedYears comes from a Query of R#<teamId>#, rev becomes an
 //      unconditional ADD outside the transaction.
+//      ⚠ THE PLANNED EVENT IS INSIDE THAT RANGE. The AWS owner's guide plans for
+//      140 players — 25 to 45 teams at three to six a team — which sits between
+//      "occasional" and "sustained", where nothing has been measured. The
+//      escape hatch may not be optional for that event; decide before it.
 //   2. ANY QUESTION ACROSS ROOMS. Rooms by host, rooms active this week, an
 //      admin list: each is a table Scan. A GSI added later fixes it, but only
 //      for questions chosen in advance, and a GSI is eventually consistent.
@@ -199,8 +261,9 @@
 //      host-sized — ~87 KB x every client x every change. That wants a small
 //      per-team "latest figures" entry in the header, not the full history.
 //   5. REMOVING A ROOM. It is ~220 items, not one. Every item needs its own
-//      TTL attribute stamped from the header's expiry, and an explicit delete
-//      is a Query followed by batched deletes.
+//      expiresAtSec copied from the header's (see WHAT SETS THE EXPIRY), TTL
+//      removes them one by one rather than as a room, and an explicit delete is
+//      a Query followed by batched deletes.
 //   6. PRIVACY IS ENFORCED BY CODE, NOT BY KEYS. The layout keeps decisions out
 //      of the host's query, but nothing in DynamoDB stops a handler reading D#
 //      for the host. It is a handler rule and needs the harness to hold it.
@@ -217,7 +280,7 @@ const MAX_SORT_KEY_BYTES = 1024;
 /** Years are padded to this many digits so lexicographic order is numeric order. */
 const YEAR_DIGITS = 3;
 
-/** The header's sort key. */
+/** The header's sort-key VALUE — stored in the attribute named `sk`. */
 export const ROOM_HEADER_SK = 'ROOM';
 
 /** The prefix under which every team's results sort together — the host's range. */
@@ -252,7 +315,7 @@ function checkSortKey(sk: string): string {
   return sk;
 }
 
-/** The partition key every item of one room shares. */
+/** The partition-key VALUE every item of one room shares — stored in the attribute named `pk`. */
 export function roomPk(code: string): string {
   if (code.length === 0) throw new RangeError('A room code must be non-empty.');
   return `ROOM#${code}`;
