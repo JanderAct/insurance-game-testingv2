@@ -184,6 +184,20 @@ function statusOf(room: RoomRecord): RoomStatus {
   return room.teams.some(t => t.joined) ? 'running' : 'lobby';
 }
 
+// ⚠ LIVE OVER-SEND AND PRIVACY GAP, ON THE CURRENT BUILD — NOT AN AWS QUESTION.
+// roomView calls this for EVERY team and `read` returns roomView to EVERY
+// caller: host, player, viewer and anonymous alike. So every poller receives
+// every team's full resultsByYear, and any player can read every other team's
+// results in devtools. Only the host's screens use it (HostTeamsTab,
+// HostChartsTab); PlayScreen reads the roster fields and its own `you` slice.
+// It is also most of the payload — ~87 KB of a ten-by-ten room's reads.
+//
+// The redaction in `callerView` (below) covers DECISIONS only. The fix
+// is to populate resultsByYear for the host role alone, in `read` (and the
+// views submit/join return), which changes no shape — the field is already
+// optional. Not done here: it changes what players receive, and wants the
+// contract harness to prove no player screen depended on it. The AWS design
+// assumes it done; see src/session/server/keys.ts, READ.
 function teamView(t: TeamRecord, currentYear: number): TeamView {
   return {
     name: t.name,

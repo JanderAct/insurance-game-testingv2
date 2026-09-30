@@ -77,6 +77,9 @@
 //    cap is not negotiable. Split it into a room header plus one item per team —
 //    which also removes most of the write contention in (7), because two teams
 //    posting simultaneously would no longer be writing the same item.
+//    ⚠ DESIGNED: src/session/server/keys.ts — a header item plus one item per
+//    team-year for decisions and for results, with the sizes and which of them
+//    are measured. That file is authoritative; this item is the reason for it.
 //
 // 7. POLLING IS METERED NOW. Every client reads the WHOLE room on every poll;
 //    the back-off in pollSchedule.ts cuts the request count by ~60% and does
@@ -95,6 +98,13 @@
 //    conditional write — `ConditionExpression` on `rev`, retry on failure — or
 //    per-item updates per (6). Single-threaded Node is what makes the stub safe
 //    without one, and nothing about Lambda inherits that.
+//    ⚠ SUPERSEDED: THE CONDITION IS NOT ON `rev`. The design took the per-item
+//    branch, and in it each write is guarded on the field it depends on —
+//    currentYear for decisions and advance, attribute_not_exists for create
+//    and join. Guarding every write on `rev` would make any two teams writing
+//    at once conflict, which reinstates the contention (6) exists to remove.
+//    `rev` stays monotonic and stays the ETag of (7). The conditions, and why,
+//    are in src/session/server/keys.ts.
 // ============================================================================
 
 import type {

@@ -34,6 +34,9 @@
 // conditional write — DynamoDB `ConditionExpression` on the room's `rev`, retry
 // on failure — or per-field atomic updates. `rev` is already in the record and
 // already monotonic per write, which is exactly the token that condition needs.
+// ⚠ SUPERSEDED: the design took per-item writes, each guarded on the field it
+// depends on, and `rev` is NOT the write guard — guarding on it would make every
+// concurrent write conflict. It stays the ETag. See src/session/server/keys.ts.
 //
 // Run: npx tsx scripts/tools/session-stub-server.ts --port 4100
 // ============================================================================

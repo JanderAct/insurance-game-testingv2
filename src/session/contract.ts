@@ -281,6 +281,11 @@ export interface TeamView {
    * held the most recent year. Keyed by year as a STRING, per JSON.
    *
    * ⚠ YEAR "0" IS THE OPENING POSITION, NOT A PLAYED YEAR. See TeamYearSummary.
+   *
+   * ⚠ "THE HOST IS MEANT TO SEE IT" — BUT TODAY EVERYONE DOES. The local
+   * implementation fills this for every caller, players and anonymous included,
+   * though only the host's screens read it. That is a live over-send and a
+   * privacy gap, recorded at localTransport.ts's teamView, not fixed there.
    */
   resultsByYear?: Record<string, TeamYearSummary>;
 }
@@ -362,6 +367,11 @@ export interface CallerView {
 
 // ---------------------------------------------------------------- requests
 
+// ⚠ GAP, NOT YET CLOSED: createRoom IS NOT IDEMPOTENT — a retry makes a second
+// room (httpTransport.ts item 5). It wants the same fix as JoinRequest: a
+// client-generated host token, whose hash identifies a retried create as the
+// same one and means no plaintext token is ever stored server-side. Shape
+// unchanged here. See src/session/server/keys.ts.
 export interface CreateRoomRequest {
   seed: string;
   yearCount: number;
@@ -381,6 +391,14 @@ export interface CreateRoomResponse {
   room: RoomView;
 }
 
+// ⚠ GAP, NOT YET CLOSED: A CREATING JOIN IS NOT IDEMPOTENT, AND A LOST RESPONSE
+// LOCKS A PLAYER OUT OF THEIR OWN TEAM NAME. The first join creates the team and
+// mints its token; if that response never arrives, the team exists, the token is
+// gone, and the retry is refused TEAM_TAKEN. It is not among httpTransport.ts's
+// eight constraints. The fix is a CLIENT-GENERATED token on the first join:
+// a retry then presents the same token and lands on the rejoin branch that
+// already exists below. Shape unchanged here — its own commit, with the harness.
+// See src/session/server/keys.ts.
 export interface JoinRequest {
   code: string;
   /**
@@ -443,6 +461,14 @@ export interface SubmitResponse {
   you: CallerView;
 }
 
+// ⚠ GAP, NOT YET CLOSED: THIS REQUEST NEEDS THE EXPECTED CURRENT YEAR. advance
+// increments the year, so a retried POST — what a client does when a response
+// is lost — SKIPS A YEAR. The fix is a field carrying the year the host believes
+// is current, compare-and-swapped on the room header (currentYear = :expected),
+// so a retry is a no-op. The key design and the failure-branch rules are in
+// src/session/server/keys.ts; the constraint is httpTransport.ts item 4. The
+// shape is deliberately unchanged here: changing it is its own commit, with the
+// contract harness to prove both implementations honour it.
 export interface AdvanceRequest {
   code: string;
   // Host token only. Enforced by the implementation, not by hiding the button.
