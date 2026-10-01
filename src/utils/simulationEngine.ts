@@ -1556,12 +1556,9 @@ export function processLineYear(
     // past the retention — which is what makes recovery LAG the loss.
     // Occurrences are 1:1 with claims on WC, GL and Property's attritional band
     // (see occurrenceTotals), so there contracting the occurrence total IS
-    // contracting the claim. ⚠ A PROPERTY CAT EVENT IS THE EXCEPTION: its total
-    // is several members' claims and it is contracted as one booked estimate —
-    // the event is booked, and develops, as a unit.
-    const totals = FORWARD_BOOKING.enabled
-      ? drawnTotals.map(t => initialEstimate(line, t))
-      : drawnTotals;
+    // contracting the claim. ⚠ A PROPERTY CAT EVENT IS NOT CONTRACTED AT ALL —
+    // see bookedOccurrenceTotals.
+    const totals = bookedOccurrenceTotals(line, drawnTotals, occurrenceKinds(generatedOccurrences ?? []));
     const drawnSum = drawnTotals.reduce((a, b) => a + b, 0);
     const bookedSum = totals.reduce((a, b) => a + b, 0);
     if (FORWARD_BOOKING.enabled && drawnSum > 0) bookedGrossContraction = bookedSum / drawnSum;
@@ -1676,10 +1673,11 @@ export function processLineYear(
         (generatedOccurrences ?? []).map(o => o.claimIds[0] ?? o.id),
         // Same contraction the tower saw — the tracked set IS the register the
         // development law moves, so it must open where the books opened.
-        (() => {
-          const t = occurrenceTotals(generatedClaims ?? [], generatedOccurrences ?? []);
-          return FORWARD_BOOKING.enabled ? t.map(v => initialEstimate(line, v)) : t;
-        })(),
+        bookedOccurrenceTotals(
+          line,
+          occurrenceTotals(generatedClaims ?? [], generatedOccurrences ?? []),
+          occurrenceKinds(generatedOccurrences ?? []),
+        ),
         DEVELOPMENT_ALLOCATION,
         ibnerRng,
         reselectRng(instance.seed, line, yearNumber, yearNumber, 'bench'),
@@ -3511,6 +3509,32 @@ function recordReserveDevelopment(
 }
 
 // ============================================================================
+// WHAT AN OCCURRENCE IS BOOKED AT ON THE DAY IT HAPPENS — ONE DEFINITION, read
+// by the tower at inception and by the tracked set, which must open where the
+// books opened.
+//
+// Forward booking contracts an occurrence to initialEstimate(line, drawn) =
+// A x drawn^k: a large claim books at a fraction of its cost and develops up
+// towards it. That is a LIABILITY idea — the reserve is low because nobody
+// yet knows whether the pool will be found liable, or for how much.
+//
+// ⚠ A PROPERTY CATASTROPHE IS BOOKED AT ITS DRAWN TOTAL, UNCONTRACTED. A burned
+// building's value is known; pools put senior adjusters on a cat event and its
+// reserve is right when it is set. Contracting it booked a $66.8M wildfire at
+// $41.6M, ceded $7.7M in its own year against $30.0M on the event, and — once
+// the contracted figure met fast closure, a settlement factor and drift on
+// closed files — left the event at ~80% of its cost for good. It is exempted
+// from development as well as from the contraction (claimRevision.ts,
+// buildTrackedSet): the two must move together, because a cat booked at full
+// that still took the forward-booking drift would be developed PAST its cost,
+// and one still contracted but closed fast never reaches it.
+// ============================================================================
+function bookedOccurrenceTotals(line: CoverageLine, drawn: number[], catastrophe: readonly boolean[]): number[] {
+  if (!FORWARD_BOOKING.enabled) return drawn;
+  return drawn.map((t, i) => (catastrophe[i] === true ? t : initialEstimate(line, t)));
+}
+
+// ============================================================================
 // IBNER — the per-cohort development walk. See defaultAssumptions.ts's IBNER_*
 // block for the model, the parameters, and why each is what it is.
 //
@@ -4067,7 +4091,7 @@ function processIbner(
           // inequality and makes "closes at zero" land on the paid to date.
           const alloc = settleClosingSet(
             gameId,
-            developingClaimsOut.map(d => ({ claimId: d.claimId, current: d.current })),
+            developingClaimsOut.map(d => ({ claimId: d.claimId, current: d.current, ...(d.catastrophe ? { catastrophe: true as const } : {}) })),
             settling, untrackedOut ?? 0, newUnpaid,
           );
           const deltas = alloc.deltas;

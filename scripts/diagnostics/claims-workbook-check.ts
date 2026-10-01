@@ -126,6 +126,7 @@ interface Stat {
   maxSeriesLen: number; yrCols: number; totalCols: number;
   interiorBlank: number; stateBytes: number; seriesBytes: number;
   openRows: number; openFullyPaid: number; openWithHeadroom: number; openHeadroom: number[];
+  catRows: number;
 }
 const stats: Record<string, Stat> = {};
 
@@ -134,7 +135,7 @@ for (const arm of ARMS) {
     rows: 0, developed: 0, blankBlock: 0, blankYrCell: 0, printedYrCell: 0, zeroPrinted: 0,
     drawnEqGross: 0, drawnGtBooked: 0, drawnEqBooked: 0, maxSeriesLen: 0, yrCols: 0, totalCols: 0,
     interiorBlank: 0, stateBytes: 0, seriesBytes: 0,
-    openRows: 0, openFullyPaid: 0, openWithHeadroom: 0, openHeadroom: [],
+    openRows: 0, openFullyPaid: 0, openWithHeadroom: 0, openHeadroom: [], catRows: 0,
   };
   stats[arm.name] = s;
 
@@ -151,6 +152,11 @@ for (const arm of ARMS) {
 
     const sheets = roundTrip(gs);
     const names = Object.keys(sheets);
+
+    // The catastrophe occurrences, by the ENGINE's own flag rather than a label
+    // on the sheet: these are booked at their drawn total, uncontracted.
+    const catOcc = new Set([...gs.priorHistory, ...gs.lockedResults].flatMap(r =>
+      Object.values(r.byLine).flatMap(lr => (lr?.occurrences ?? []).filter(o => o.isCatastrophe).map(o => o.id))));
 
     // --- SHAPE ------------------------------------------------------------
     if (names.includes('Occurrences')) fail(`${arm.name} g${g}: the Occurrences sheet is still present`);
@@ -366,18 +372,24 @@ for (const arm of ARMS) {
         //   per cent between the claim register and the ledger is caught.
         //
         // ⚠ "ONE CLAIM" BECAME "ITS CLAIMS" WITH THE CAT BAND. A Property cat
-        // event is one occurrence holding every hit member's claim, booked as
-        // ONE contracted estimate of their sum — so the expectation is
-        // initialEstimate(sum of the occurrence's claims), which on every
-        // one-claim occurrence is exactly the old initialEstimate(gross).
+        // event is one occurrence holding every hit member's claim, so the
+        // expectation is taken on the sum of the occurrence's claims — which on
+        // every one-claim occurrence is exactly the claim's gross.
+        //
+        // ⚠ AND A CAT EVENT IS BOOKED AT THAT SUM, UNCONTRACTED: its reserve is
+        // known at inception (bookedOccurrenceTotals). Everything else books at
+        // initialEstimate of it. A cat row checked against the contraction, or
+        // an attritional row checked against its gross, fails here.
         const occTotal = gross === null ? null : (occGross.get(String(r[iOcc])) ?? gross);
+        const isCatRow = catOcc.has(String(r[iOcc]));
+        if (isCatRow) s.catRows++;
         const expectDrawn = occTotal === null ? null
-          : (FORWARD_BOOKING.enabled ? initialEstimate(line, occTotal) : occTotal);
+          : (FORWARD_BOOKING.enabled && !isCatRow ? initialEstimate(line, occTotal) : occTotal);
         if (expectDrawn !== null && Math.abs(drawn - expectDrawn) <= 1e-6 * Math.max(1, Math.abs(expectDrawn))) {
           s.drawnEqGross++;
         } else {
           fail(`${arm.name} g${g} ${line} row ${i}: Drawn Occurrence ${drawn} !== `
-            + `${FORWARD_BOOKING.enabled ? `initialEstimate(${occTotal})` : 'Gross Incurred'} ${expectDrawn} `
+            + `${FORWARD_BOOKING.enabled && !isCatRow ? `initialEstimate(${occTotal})` : 'Gross Incurred'} ${expectDrawn} `
             + '— the occurrence ledger and its claims disagree about what was booked');
         }
         if (drawn - booked > 1e-6) s.drawnGtBooked++;
@@ -542,7 +554,7 @@ for (const arm of ARMS) {
   console.log(`  Yr cells printed / blank    ${s.printedYrCell} / ${s.blankYrCell}`);
   console.log(`    of which a printed 0      ${s.zeroPrinted}   <- sub-dollar movement, NOT "unmoved"`);
   console.log(`    blanks INSIDE the span    ${s.interiorBlank}   <- valued and unmoved (Development sheet, incl. pre-game)`);
-  console.log(`  Drawn === contracted claim  ${s.drawnEqGross} of ${s.developed}`);
+  console.log(`  Drawn === booked claim     ${s.drawnEqGross} of ${s.developed}  (cat rows, booked at their drawn total: ${s.catRows})`);
   console.log(`  Drawn > Booked (markdown)   ${s.drawnGtBooked}`);
   console.log(`  Drawn === Booked (no bias)  ${s.drawnEqBooked}`);
   console.log(`  Yr columns on the sheet     ${s.yrCols}   (total columns ${s.totalCols})`);

@@ -627,12 +627,19 @@ for (const arm of ARMS) {
             // left to add — no open tracked occurrence outside the set, and an
             // empty bench. That is the whole of the shrink case, and it is a
             // statement about the register rather than about the rule.
+            //
+            // ⚠ "OPEN" MEANS OPEN AND ELIGIBLE. A Property cat event is never in
+            // the set — it is booked at its drawn total and takes no development
+            // (bookedOccurrenceTotals) — so an open cat outside a short set is the
+            // rule working, not the set failing to fill.
             if (a.age < a.horizon && nDeveloping < floor) {
-              const openOutside = ac.some(d => !d.developing && d.closed !== true);
+              const eligibleOutside = (d: { developing?: boolean; closed?: boolean; catastrophe?: true }) =>
+                !d.developing && d.closed !== true && d.catastrophe !== true;
+              const openOutside = ac.some(eligibleOutside);
               const benchLeft = (a.developmentBench ?? []).length;
               if (openOutside || benchLeft > 0) {
                 fail(ctx, 'developing subset below its floor with open occurrences left over',
-                  `AY ${b.yearNumber}: ${nDeveloping} developing, ${ac.filter(d => !d.developing && d.closed !== true).length} open outside, ${benchLeft} on the bench`);
+                  `AY ${b.yearNumber}: ${nDeveloping} developing, ${ac.filter(eligibleOutside).length} open outside, ${benchLeft} on the bench`);
               }
             }
             if (b.age < b.horizon && bc.length > 0) {

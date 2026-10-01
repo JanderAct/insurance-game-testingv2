@@ -373,20 +373,34 @@ export function buildTrackedSet(
 
   // The developing set.
   //
-  // ⚠ THIS BLOCK IS UNCHANGED AND MUST STAY UNCHANGED. It takes exactly
-  // `rule.claimCount` draws from `rng` in exactly the order it always did. The
-  // bench below takes none of them.
+  // ⚠ THIS BLOCK TAKES EXACTLY `rule.claimCount` DRAWS FROM `rng` in exactly
+  // the order it always did. The bench below takes none of them.
+  //
+  // ⚠ A CAT EVENT IS NEVER IN IT. A catastrophe is booked at its drawn total
+  // and takes no development (see bookedOccurrenceTotals in simulationEngine),
+  // so a slot in the set that carries movement would be a slot that cannot
+  // move. It is given weight zero rather than removed, so the pool and the
+  // draw count are those of every other cohort: an event changes WHICH
+  // attritional claims are drawn, never how many draws are taken — unless a
+  // cohort holds fewer than claimCount non-cat claims, when the zero-sum
+  // branch below ends the draws early exactly as it always did.
   const k = Math.min(Math.max(0, rule.claimCount), n);
   let developingIdx: number[];
   if (rule.selection === 'largest') {
-    developingIdx = totals.map((t, i) => [t, i] as const).sort((a, b) => b[0] - a[0]).slice(0, k).map(([, i]) => i);
+    developingIdx = totals.map((t, i) => [t, i] as const).filter(([, i]) => !isCat(i))
+      .sort((a, b) => b[0] - a[0]).slice(0, k).map(([, i]) => i);
   } else {
     if (!rng) throw new Error('buildTrackedSet: sizeWeighted selection needs an rng');
-    const pool = totals.map((t, i) => ({ t: Math.max(0, t), i }));
+    const pool = totals.map((t, i) => ({ t: isCat(i) ? 0 : Math.max(0, t), i }));
     developingIdx = [];
     for (let pick = 0; pick < k && pool.length > 0; pick++) {
       const sum = pool.reduce((s, p) => s + p.t, 0);
-      if (sum <= 0) { developingIdx.push(pool[0].i); pool.splice(0, 1); continue; }
+      if (sum <= 0) {
+        // The first NON-CAT, which is pool[0] in any cohort without an event.
+        const z = pool.findIndex(p => !isCat(p.i));
+        if (z < 0) break;
+        developingIdx.push(pool[z].i); pool.splice(z, 1); continue;
+      }
       let u = rng.next() * sum;
       let j = 0;
       for (; j < pool.length - 1; j++) { u -= pool[j].t; if (u <= 0) break; }
@@ -400,7 +414,11 @@ export function buildTrackedSet(
   let untrackedTotal = 0;
   const benchPool: { t: number; i: number }[] = [];
   for (let i = 0; i < n; i++) {
-    if (isDeveloping.has(i) || totals[i] >= (isCat(i) ? retentionCat : retentionAttritional)) {
+    // A cat event is ALWAYS tracked, whatever its size against the cat
+    // retention: it must sit where its development can be held at zero, and the
+    // untracked mass drifts as a whole. Booked at full it is mostly above the
+    // retention anyway; the ones below it were being drifted inside the mass.
+    if (isCat(i) || isDeveloping.has(i) || totals[i] >= (isCat(i) ? retentionCat : retentionAttritional)) {
       tracked.push({
         claimId: claimIds[i] ?? occurrenceIds[i],
         occurrenceId: occurrenceIds[i],
@@ -657,10 +675,14 @@ export function reselectDevelopingSet(
   // ============================================================================
   let untracked = untrackedTotal;
   let promoted = 0;
-  // Everything open, whether or not it was developing last time.
+  // Everything open, whether or not it was developing last time — except a cat
+  // event, which takes no development and so can hold none (see buildTrackedSet).
   const cands: { kind: 'tracked' | 'bench'; idx: number; w: number }[] = [];
   next.forEach((c, i) => {
-    if (c.closed !== true) { next[i] = { ...c, developing: false }; cands.push({ kind: 'tracked', idx: i, w: Math.max(0, c.drawn) }); }
+    if (c.closed !== true) {
+      next[i] = { ...c, developing: false };
+      if (c.catastrophe !== true) cands.push({ kind: 'tracked', idx: i, w: Math.max(0, c.drawn) });
+    }
   });
   openBench.forEach((b, i) => cands.push({ kind: 'bench', idx: i, w: Math.max(0, b.drawn) }));
 

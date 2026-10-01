@@ -725,6 +725,11 @@ export interface DevelopingClaim {
   /** Present, and true, only on a Property CATASTROPHE occurrence. The tower
    *  needs it to cede development through the right treaty — the cat layer
    *  answers these and the per-risk layer does not (TowerLayer.responds).
+   *  And it decides how the occurrence is RESERVED: booked at its drawn total
+   *  rather than contracted, always tracked, never in the developing set, and
+   *  exempt from revision and from the settlement factor — known at inception,
+   *  paid out on the Property pattern, closed at the value it was booked at.
+   *  See bookedOccurrenceTotals in simulationEngine.
    *  Absent everywhere else, so every WC and GL record serialises exactly as it
    *  did before the cat band existed. */
   catastrophe?: true;

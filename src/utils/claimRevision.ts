@@ -416,6 +416,15 @@ export interface RevisableClaim {
   claimId: string;
   /** The occurrence total now, gross — DevelopingClaim.current. */
   current: number;
+  /**
+   * A Property catastrophe — DevelopingClaim.catastrophe. It takes NO revision
+   * and NO settlement factor: it was booked at its drawn total (see
+   * bookedOccurrenceTotals in simulationEngine), so there is nothing to climb
+   * towards and no liability question for a settlement to answer. Its delta is
+   * exactly zero. Skipping its factor shifts nothing else: every factor here is
+   * keyed on the claim's own id, not drawn from a shared stream.
+   */
+  catastrophe?: true;
 }
 
 /**
@@ -532,6 +541,7 @@ export function reviseDevelopingSet(
   const deltas: number[] = [];
   let applied = 0;
   for (const t of tracked) {
+    if (t.catastrophe === true) { deltas.push(0); continue; }
     const factor = revisionFactor(gameId, t.claimId, modelAge, { value: t.current, headroom: h }, phi);
     const v = Math.max(0, t.current);
     // Drift on the value, dispersion on the reserve. See CohortStep.drift.
@@ -585,7 +595,7 @@ export function settleClosingSet(
   const deltas: number[] = [];
   let applied = 0;
   tracked.forEach((t, i) => {
-    if (!settling[i]) { deltas.push(0); return; }
+    if (!settling[i] || t.catastrophe === true) { deltas.push(0); return; }
     const d = Math.max(0, t.current) * h * (settlementFactor(gameId, t.claimId, nonZeroScale) - 1);
     deltas.push(d);
     applied += d;
