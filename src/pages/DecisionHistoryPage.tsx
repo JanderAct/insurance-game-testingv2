@@ -1,11 +1,12 @@
 import { placementSummary } from '../utils/reinsuranceDisplay';
 import { useState } from 'react';
 import { ScrollText, ArrowUpDown } from 'lucide-react';
-import type { LineResultSet, LineView } from '../types/simulation';
+import type { LineResultSet, ResultSet, LineView , CoverageLine} from '../types/simulation';
+import { isPoolRow } from '../utils/lineHelpers';
 import { lineDisplayName } from '../utils/lineDisplay';
 
 interface DecisionHistoryPageProps {
-  lockedResults: LineResultSet[];
+  lockedResults: Array<ResultSet | LineResultSet>;
   // 'pool' shows the pool-wide decisions per year (investment allocation,
   // risk control); a coverage line shows that line's own decisions.
   lineView: LineView;
@@ -81,16 +82,23 @@ export default function DecisionHistoryPage({ lockedResults, lineView }: Decisio
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {rows.map(r => (
+                {/* ⚠ THIS PAGE ALREADY KNEW THE DISTINCTION AND WAS READING IT FROM THE
+                    WRONG PLACE. It branched on isPool and showed only the pool-wide
+                    decisions at pool scope — which was right — but took them off
+                    `decisions`, a LineDecisionSet, so it was reading the first active
+                    line's copy of them. The copies were identical, so the figures were
+                    correct; the source was not. `pool` is now where they live. */}
+                {rows.map(r => {
+                  return (
                   <tr key={r.yearNumber} className="hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-3 font-bold text-gray-900">{r.yearNumber}</td>
                     <td className="px-4 py-3 text-gray-600">{r.calendarYear}</td>
-                    {isPool ? (
+                    {isPoolRow(r) ? (
                       <>
-                        <td className="px-4 py-3">{r.decisions.assetAllocation.cashPct.toFixed(0)}%</td>
-                        <td className="px-4 py-3">{r.decisions.assetAllocation.bondsPct.toFixed(0)}%</td>
-                        <td className="px-4 py-3">{r.decisions.assetAllocation.equitiesPct.toFixed(0)}%</td>
-                        <td className="px-4 py-3">{pctDisplay(r.decisions.riskControlPct)}</td>
+                        <td className="px-4 py-3">{r.pool.assetAllocation.cashPct.toFixed(0)}%</td>
+                        <td className="px-4 py-3">{r.pool.assetAllocation.bondsPct.toFixed(0)}%</td>
+                        <td className="px-4 py-3">{r.pool.assetAllocation.equitiesPct.toFixed(0)}%</td>
+                        <td className="px-4 py-3">{pctDisplay(r.pool.riskControlPct)}</td>
                       </>
                     ) : (
                       <>
@@ -100,9 +108,7 @@ export default function DecisionHistoryPage({ lockedResults, lineView }: Decisio
                           {r.dividendBlocked && <span className="text-red-600 text-xs ml-1">(blocked)</span>}
                         </td>
                         <td className="px-4 py-3">{pctDisplay(r.decisions.assessmentPct)}</td>
-                        <td className="px-4 py-3">
-                          {isPool ? 'Varies by line' : placementSummary(lineView, r.decisions)}
-                        </td>
+                        <td className="px-4 py-3">{placementSummary(lineView as CoverageLine, r.decisions)}</td>
                         {showLoanColumn && (
                           <td className="px-4 py-3">
                             {(r.outstandingLoanBalance > 0 || r.loanOriginatedThisYear > 0)
@@ -113,7 +119,8 @@ export default function DecisionHistoryPage({ lockedResults, lineView }: Decisio
                       </>
                     )}
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

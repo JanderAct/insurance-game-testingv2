@@ -25,20 +25,24 @@
 import React from 'react';
 import type {
   CoverageLine, DecisionSet, GameState, HistoricalYear,
-  LineResultSet, LineView, Member,
+  LineResultSet, LineView, Member, ResultSet,
 } from '../types/simulation';
 import type { LineLoanInfo } from '../pages/DecisionsPage';
 import type { FundingConsequence } from '../utils/fundingConsequence';
 import { computeFundingConsequence } from '../utils/fundingConsequence';
 import { aggregateTermsRetainedPer100 } from '../utils/simulationEngine';
 import { pricingExperienceBasis } from '../utils/pricingTriangle';
-import { toHistoricalYear } from '../utils/priorHistoryEngine';
+import { poolToHistoricalYear, toHistoricalYear } from '../utils/priorHistoryEngine';
 import { getMemberExposure, selectResultView } from '../utils/lineHelpers';
 
 export interface GameDerivations {
   decisionLine: CoverageLine;
-  viewResults: LineResultSet[];
-  viewPriorResults: LineResultSet[];
+  // ⚠ A UNION, NOT LineResultSet[]. At the pool view these ARE pool rows, and
+  // typing them as line rows is what let every consuming page read a per-line
+  // placeholder off one. A consumer that needs a line field must now narrow on
+  // the view, which is the question that was never being asked.
+  viewResults: Array<ResultSet | LineResultSet>;
+  viewPriorResults: Array<ResultSet | LineResultSet>;
   historicalYears: HistoricalYear[];
   lineLoanInfo: Record<CoverageLine, LineLoanInfo>;
   estimatedExpectedLoss: number;
@@ -75,12 +79,20 @@ export function useGameDerivations(
   // HistoricalYear display shape the history-aware pages render.
   const viewPriorResults = React.useMemo(() => {
     if (!gameState) return [];
-    return selectResultView(gameState.priorHistory, lineView);
+    return lineView === 'pool'
+      ? selectResultView(gameState.priorHistory, 'pool')
+      : selectResultView(gameState.priorHistory, lineView);
   }, [gameState, lineView]);
 
+  // ⚠ TWO ADAPTERS, DISPATCHED ON THE VIEW. A pool row and a line row no longer
+  // share a shape, so one `.map(toHistoricalYear)` cannot serve both: the pool
+  // one omits the two per-$100 rate fields because neither exists at pool scale.
+  // The branch is what carries that into the history-aware pages.
   const historicalYears = React.useMemo(
-    () => viewPriorResults.map(toHistoricalYear),
-    [viewPriorResults]
+    () => (lineView === 'pool'
+      ? (viewPriorResults as ResultSet[]).map(poolToHistoricalYear)
+      : (viewPriorResults as LineResultSet[]).map(toHistoricalYear)),
+    [viewPriorResults, lineView]
   );
 
   // Decisions-page reinsurance preview estimates, scoped to the line currently

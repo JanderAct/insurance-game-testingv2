@@ -1,6 +1,7 @@
 // Financial Statement engine for Risk Pool Simulation v1
 
-import type { LineResultSet } from '../types/simulation';
+import { isPoolRow } from './lineHelpers';
+import type { LineResultSet , ResultSet} from '../types/simulation';
 
 export interface IncomeStatement {
   poolPremium: number;
@@ -57,8 +58,10 @@ export interface ReserveDetail {
 // Funding Target & Adequacy detail
 // The CLF is used to calculate a funding target, NOT an accounting reserve.
 export interface FundingDetail {
-  selectedFundingConfidenceLevel: number;  // Player-facing selection (e.g., 75%)
-  selectedFundingCLF: number;              // Backend actuarial factor
+  /** ⚠ ABSENT ON A POOL ROW — each line picks its own stop. See the construction. */
+  selectedFundingConfidenceLevel?: number; // Player-facing selection (e.g., 75%)
+  /** ⚠ ABSENT ON A POOL ROW — follows the selection above. */
+  selectedFundingCLF?: number;             // Backend actuarial factor
   expectedNetUnpaidLoss: number;           // Expected unpaid losses, net of reinsurance
   netFundingTarget: number;               // expectedNet × CLF
   fundingMarginNeeded: number;            // netFundingTarget - expectedNetUnpaid
@@ -92,7 +95,7 @@ export interface AnnualFinancialStatement {
   fundingDetail: FundingDetail | null;  // null for historical years — no player-selected funding confidence exists pre-game
 }
 
-export function deriveAnnualStatement(result: LineResultSet): AnnualFinancialStatement {
+export function deriveAnnualStatement(result: ResultSet | LineResultSet): AnnualFinancialStatement {
   const incomeStatement: IncomeStatement = {
     poolPremium: result.poolPremium,
     adminExpense: result.adminExpense,
@@ -146,9 +149,22 @@ export function deriveAnnualStatement(result: LineResultSet): AnnualFinancialSta
   };
 
   // Funding detail - CLF is used for funding target, NOT accounting reserve
+  //
+  // ⚠ THE TWO SELECTION FIELDS ARE OMITTED ON A POOL ROW, AND THE REST OF THE
+  // CARD IS NOT. The dollar figures below — expected net unpaid loss, funding
+  // target, margin, gap — are genuine sums and are right at pool scale. The
+  // confidence level and the CLF are not: each line picks its own stop, so the
+  // pool row never had one and used to display the first active line's. Nulling
+  // the whole card would have thrown away four true numbers to suppress two
+  // false ones.
+  const selections = isPoolRow(result)
+    ? {}
+    : {
+      selectedFundingConfidenceLevel: result.selectedFundingConfidenceLevel,
+      selectedFundingCLF: result.selectedFundingCLF,
+    };
   const fundingDetail: FundingDetail = {
-    selectedFundingConfidenceLevel: result.selectedFundingConfidenceLevel,
-    selectedFundingCLF: result.selectedFundingCLF,
+    ...selections,
     expectedNetUnpaidLoss: result.expectedNetUnpaidLoss,
     netFundingTarget: result.netFundingTarget,
     fundingMarginNeeded: result.fundingMarginNeeded,

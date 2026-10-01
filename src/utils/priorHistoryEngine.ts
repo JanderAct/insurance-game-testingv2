@@ -572,10 +572,9 @@ function deriveStartingFinancials(poolState: PoolState, priorHistory: ResultSet[
     activeExposure: lastResult.activeExposure,
     totalMarketExposure: lastResult.totalMarketExposure,
     marketShare: lastResult.marketShare,
-    rateLevel: lastResult.rateLevel,
-    ratePer100: lastResult.ratePer100,
-    purePremiumPer100: lastResult.purePremiumPer100,
-    purePremium: lastResult.purePremiumPer100,
+    // The four rate fields that used to be set here are gone from
+    // StartingFinancials — see its own note. They read a pool row's per-line
+    // placeholders and nothing consumed them.
   };
 }
 
@@ -583,6 +582,26 @@ function deriveStartingFinancials(poolState: PoolState, priorHistory: ResultSet[
 // HistoricalYear display shape the Pool History / Dashboard / Financials
 // pages already render. Every field is present on (or derivable from) the
 // real result — no synthetic values.
+/**
+ * THE POOL ROW'S historical shape — the two per-$100 rate fields OMITTED.
+ *
+ * ⚠ BOTH WERE POOL RATES AND NEITHER HAD A DENOMINATOR. `purePremiumPer100` was
+ * the first active line's, straight off the pool row's placeholder.
+ * `poolPremiumRatePer100` is worse because the compiler cannot catch it: it is
+ * COMPUTED, `poolPremium / (activeExposure x 10_000)`, and both of those fields
+ * are real at pool scope — but pool activeExposure is payroll plus TIV, so the
+ * quotient is dollars per $100 of two different things added together. The type
+ * change finds the placeholder read and cannot find this one; it is omitted here
+ * by hand, and that asymmetry is worth knowing about the guard's reach.
+ */
+export function poolToHistoricalYear(r: ResultSet): HistoricalYear {
+  const full = toHistoricalYear(r as unknown as LineResultSet);
+  const pooled: HistoricalYear = { ...full };
+  delete pooled.purePremiumPer100;
+  delete pooled.poolPremiumRatePer100;
+  return pooled;
+}
+
 export function toHistoricalYear(r: LineResultSet): HistoricalYear {
   return {
     historyYearNumber: r.yearNumber,

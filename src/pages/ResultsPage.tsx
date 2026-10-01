@@ -9,7 +9,8 @@ import {
   Target,
   GitCompare,
 } from 'lucide-react';
-import type { LineResultSet, LineView } from '../types/simulation';
+import type { CoverageLine, LineResultSet, ResultSet, LineView } from '../types/simulation';
+import { asLineRow } from '../utils/lineHelpers';
 import {
   formatCurrency,
   formatMillions,
@@ -22,7 +23,7 @@ import { placementSummary, hasTractableCeded, towerTopLabel, RETAINED_ABOVE_TOWE
 import { lineDisplayName } from '../utils/lineDisplay';
 
 interface ResultsPageProps {
-  lockedResults: LineResultSet[];
+  lockedResults: Array<ResultSet | LineResultSet>;
   lineView: LineView;
 }
 
@@ -34,12 +35,19 @@ interface ResultsPageProps {
 type MetricPolarity = 'goodUp' | 'goodDown' | 'neutral';
 type MetricKind = 'currency' | 'ratio';
 
+/** What a per-line decision reads as at pool scope. */
+const VARIES = '— (varies by line)';
+
 interface ComparisonMetric {
   key: string;
   label: string;
   kind: MetricKind;
   polarity: MetricPolarity;
-  getValue: (r: LineResultSet) => number;
+  // Every one of these reads a field that exists on BOTH rows (dollar sums and
+  // ratios recomputed from them), so the union is honest rather than a widening
+  // to make an error go away. A metric reaching for a per-line field would stop
+  // compiling here, which is the guard working.
+  getValue: (r: ResultSet | LineResultSet) => number;
   // Fixed per-metric rule (not a dynamic threshold, so a metric always behaves
   // the same way): metrics with a small/volatile base exaggerate trivial
   // moves as a % (e.g. a $10K rise in investment income reading as the
@@ -103,6 +111,9 @@ export default function ResultsPage({ lockedResults, lineView }: ResultsPageProp
   );
 
   const result = lockedResults.find(r => r.yearNumber === selectedYear);
+  // null at pool scope. Every per-line read below goes through it, so the
+  // compiler refuses one that forgets to ask.
+  const lineRow = result ? asLineRow(result) : null;
   const priorResult = lockedResults.find(r => r.yearNumber === selectedYear - 1);
 
   return (
@@ -241,10 +252,19 @@ export default function ResultsPage({ lockedResults, lineView }: ResultsPageProp
             <ResultCard title="Decision Summary" icon={<ClipboardList size={16} />}>
               {/* Rate Change REMOVED — CLF-only pricing; the decision field it
                   displayed no longer exists. */}
-              <Row label="Funding Confidence Level" value={formatPct(result.decisions.fundingConfidenceLevel, 0)} />
-              <Row label="Dividend / Return of Pool Premium" value={formatPct(result.decisions.dividendPct, 1)} />
-              <Row label="Assessment" value={formatPct(result.decisions.assessmentPct, 1)} />
-              <Row label="Risk Control Investment" value={formatPct(result.decisions.riskControlPct, 1)} />
+              {/* ⚠ FOUR ROWS, AND ONLY ONE OF THEM IS POOL-WIDE. The first three are
+                  per-line decisions and were printing the FIRST ACTIVE LINE'S under a
+                  pool heading; they now say so. Risk Control Investment really is one
+                  choice for the whole pool, so it keeps a figure — read off `pool`,
+                  which is where it lives, rather than off a line's copy of it. */}
+              <Row label="Funding Confidence Level"
+                value={lineRow ? formatPct(lineRow.decisions.fundingConfidenceLevel, 0) : VARIES} />
+              <Row label="Dividend / Return of Pool Premium"
+                value={lineRow ? formatPct(lineRow.decisions.dividendPct, 1) : VARIES} />
+              <Row label="Assessment"
+                value={lineRow ? formatPct(lineRow.decisions.assessmentPct, 1) : VARIES} />
+              <Row label="Risk Control Investment"
+                value={formatPct(lineRow ? lineRow.decisions.riskControlPct : (result as ResultSet).pool.riskControlPct, 1)} />
               {/* TWO PRODUCTS ARE LIVE. WC/GL run the per-occurrence tower and have
                   no "level"; Property still runs the aggregate quota share. At POOL
                   scope three different programs are in force at once, so a single
@@ -253,7 +273,7 @@ export default function ResultsPage({ lockedResults, lineView }: ResultsPageProp
                 label={lineView === 'pool' ? 'Reinsurance' : hasTractableCeded(lineView) ? 'Reinsurance Program' : 'Reinsurance Level'}
                 value={lineView === 'pool'
                   ? 'Varies by line — select a line tab'
-                  : placementSummary(lineView, result.decisions)}
+                  : lineRow ? placementSummary(lineView as CoverageLine, lineRow.decisions) : VARIES}
               />
               {/* THE POOL'S LARGEST SINGLE EXPOSURE, and until now invisible. On GL
                   this band exceeds the top layer the pool actually buys and cannot be
@@ -288,12 +308,21 @@ export default function ResultsPage({ lockedResults, lineView }: ResultsPageProp
             </ResultCard>
 
             <ResultCard title="Premium & Losses" icon={<DollarSign size={16} />}>
-              <Row label="Rate Level Index" value={result.rateLevel.toFixed(2)} />
-              <Row label="Pure Premium Rate per $100 Payroll" value={`$${result.purePremiumPer100.toFixed(2)}`} />
-              <Row
-                label={`Pool Premium Rate at ${(result.selectedFundingConfidenceLevel * 100).toFixed(0)}% CLF`}
-                value={`$${(result.poolPremium / Math.max(result.activeExposure * 10_000, 1)).toFixed(2)}`}
-              />
+              {/* ⚠ THREE PER-$100 ROWS THAT DO NOT EXIST AT POOL SCALE, AND THEY ARE
+                  REMOVED THERE RATHER THAN BLANKED. Pool exposure is WC/GL payroll
+                  added to Property TIV, so a rate per $100 of it has no unit — the
+                  third row even divided by that sum directly, which the type change
+                  cannot catch because both of its operands are real at pool scope.
+                  A blank would invite someone to fill it in; an absent row says the
+                  quantity is not defined here. Select a line to see all three. */}
+              {lineRow && <>
+                <Row label="Rate Level Index" value={lineRow.rateLevel.toFixed(2)} />
+                <Row label="Pure Premium Rate per $100 Exposure" value={`$${lineRow.purePremiumPer100.toFixed(2)}`} />
+                <Row
+                  label={`Pool Premium Rate at ${(lineRow.selectedFundingConfidenceLevel * 100).toFixed(0)}% CLF`}
+                  value={`$${(lineRow.poolPremium / Math.max(lineRow.activeExposure * 10_000, 1)).toFixed(2)}`}
+                />
+              </>}
               {/* Pool scope adds WC/GL payroll to Property TIV, so it carries no single
                   unit and must not claim one. Naming both is the honest label. */}
               <Row
@@ -447,23 +476,35 @@ export default function ResultsPage({ lockedResults, lineView }: ResultsPageProp
             )}
 
             <ResultCard title="Funding Rate Build-Up" icon={<Target size={16} />}>
-              {(() => {
-                const rateAtConfidenceLevel = result.poolPremium / Math.max(result.activeExposure * 10_000, 1);
+              {/* ⚠ THE WHOLE CARD IS A PER-LINE CONSTRUCTION AND SAYS SO AT POOL SCOPE.
+                  Every row of it — the pure premium rate, the confidence selection, the
+                  CLF and the loaded rate — is one line's, and the build-up only means
+                  anything as a chain on a single line. Blanking four rows and keeping
+                  the heading would have implied a pool build-up exists with its numbers
+                  missing. It does not exist. */}
+              {lineRow === null ? (
+                <p className="text-sm text-gray-500">
+                  A funding rate builds up per line: each line has its own pure premium
+                  rate, its own confidence selection and its own CLF. Select a line tab
+                  to see the chain.
+                </p>
+              ) : (() => {
+                const rateAtConfidenceLevel = lineRow.poolPremium / Math.max(lineRow.activeExposure * 10_000, 1);
 
                 return (
                   <>
-                    <Row label="Pure Premium Rate per $100 Payroll" value={`$${result.purePremiumPer100.toFixed(2)}`} />
+                    <Row label="Pure Premium Rate per $100 Exposure" value={`$${lineRow.purePremiumPer100.toFixed(2)}`} />
 
                     <Row
                       label="Selected Funding Confidence"
-                      value={formatPct(result.selectedFundingConfidenceLevel, 0)}
+                      value={formatPct(lineRow.selectedFundingConfidenceLevel, 0)}
                       valueColor="text-blue-600"
                     />
 
-                    <Row label="Selected CLF" value={result.selectedFundingCLF.toFixed(3)} />
+                    <Row label="Selected CLF" value={lineRow.selectedFundingCLF.toFixed(3)} />
 
                     <Row
-                      label={`Pool Premium Rate at ${(result.selectedFundingConfidenceLevel * 100).toFixed(0)}% CLF`}
+                      label={`Pool Premium Rate at ${(lineRow.selectedFundingConfidenceLevel * 100).toFixed(0)}% CLF`}
                       value={`$${rateAtConfidenceLevel.toFixed(2)}`}
                       valueColor="text-amber-600"
                     />

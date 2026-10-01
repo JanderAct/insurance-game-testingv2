@@ -26,6 +26,7 @@ import type { CoverageLine, LineResultSet, PoolState, ResultSet } from '../../ty
 import { exhibitRows, poolExhibitRows, type ExhibitRow } from '../../utils/actuarialMemo';
 import type { DevelopedUltimates, TeamYearFigures, TeamYearSummary } from '../contract';
 
+/** A LINE's figures. The funding level is that line's own and always present. */
 function figuresOf(r: LineResultSet): TeamYearFigures {
   return {
     endingSurplus: r.endingSurplus,
@@ -33,6 +34,38 @@ function figuresOf(r: LineResultSet): TeamYearFigures {
     poolPremium: r.poolPremium,
     activeMembers: r.activeMembers,
     selectedFundingConfidenceLevel: r.selectedFundingConfidenceLevel,
+    netUltimateLoss: r.netUltimateLoss,
+  };
+}
+
+/**
+ * THE POOL'S figures — and the funding level is present only when there IS one.
+ *
+ * ⚠ THIS COLUMN USED TO BE THE FIRST ACTIVE LINE'S CONFIDENCE LEVEL, POSTED AS
+ * THE TEAM'S. `summarize` called the same `figuresOf` for the pool row as for a
+ * line, so a three-line team reporting WC at 60% and GL at 80% posted "60%" and
+ * the host's Teams tab printed it under Funding. The reader had no way to tell
+ * that from a team that really had chosen 60% everywhere.
+ *
+ * ⚠ AND IT IS AN HONEST POOL FIGURE WHEN THE LINES AGREE, WHICH IS WHY THIS IS A
+ * CONSTRUCTION RATHER THAN A DELETION. A team writing one line, or writing three
+ * at the same stop, HAS a pool funding level and it is that number — the common
+ * case in play, and blanking it would have thrown away a true figure to avoid a
+ * false one. When the lines disagree there is no pool level and the field is
+ * ABSENT, which the host renders as a dash. Absent means "these differ, open the
+ * team"; it does not mean zero.
+ */
+function poolFiguresOf(r: ResultSet, lineFigures: TeamYearFigures[]): TeamYearFigures {
+  const levels = lineFigures
+    .map(f => f.selectedFundingConfidenceLevel)
+    .filter((v): v is number => v !== undefined);
+  const agreed = levels.length > 0 && levels.every(v => v === levels[0]) ? levels[0] : undefined;
+  return {
+    endingSurplus: r.endingSurplus,
+    actualLossRatioPricingBasis: r.actualLossRatioPricingBasis,
+    poolPremium: r.poolPremium,
+    activeMembers: r.activeMembers,
+    ...(agreed === undefined ? {} : { selectedFundingConfidenceLevel: agreed }),
     netUltimateLoss: r.netUltimateLoss,
   };
 }
@@ -90,7 +123,7 @@ export function summarize(r: ResultSet, lines: CoverageLine[], poolState: PoolSt
   return {
     yearNumber: r.yearNumber,
     calendarYear: r.calendarYear,
-    pool: figuresOf(r),
+    pool: poolFiguresOf(r, Object.values(byLine)),
     byLine,
     developed: developedAt(poolState, lines, r.yearNumber),
   };

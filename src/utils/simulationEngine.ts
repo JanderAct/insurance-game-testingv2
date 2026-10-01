@@ -2514,7 +2514,13 @@ export function processYear(
   // relying on the defaults to stay empty — if a future default ever committed a
   // program, the pre-game must still not accrue tenure for it, because the
   // player did not buy it.
-  const priorProgramIds = gameState.lockedResults.map(r => r.decisions?.riskControlProgramIds);
+  // ⚠ READS `pool`, NOT `decisions`. The quantity is unchanged — program ids are
+  // pool-wide and were projected identically into every line, so the old read
+  // off the first line's echo returned the right list. What changed is that the
+  // pool row no longer carries a line's decision set at all, so the right list
+  // now has a field of its own to come from. `?.` survives a save written before
+  // that field existed, the same reason riskControlProgramIds is itself optional.
+  const priorProgramIds = gameState.lockedResults.map(r => r.pool?.riskControlProgramIds);
 
   const activeLines = setup.activeLines;
   const shares = computeContributionShares(poolState, activeLines);
@@ -3055,8 +3061,13 @@ export function aggregateLineResults(
   //                           them is a category error; the result is retained
   //                           only because display code still reads it, and it
   //                           must never be labelled with a unit at pool scope.
-  //   noPoolMeaning           the quantity has no pool-level referent at all.
-  //                           Returns the stated placeholder and records why.
+  //   (noPoolMeaning          RETIRED. It returned a placeholder and recorded why
+  //                           in a string the compiler discarded, so the field
+  //                           still had a readable number and pages still read
+  //                           it. Its three users now have no pool-row field at
+  //                           all — see PoolAbsentKey in types/simulation.ts.
+  //                           A quantity with no pool referent is now ABSENT
+  //                           rather than annotated.)
   //
   // Ratios are NOT in this list on purpose: never add a ratio across lines.
   // Recompute it from its own summed components, as every ratio below does.
@@ -3070,13 +3081,6 @@ export function aggregateLineResults(
   const addEnrolments = reduceKey;
   /** WC/GL payroll + Property TIV. A category error, retained for display only. */
   const addMixedUnitExposure = reduceKey;
-  /**
-   * No pool-level referent exists. `why` is REQUIRED and is the point of the
-   * helper: it forces the author to write down what the reader should do
-   * instead, at the call site, rather than leaving a bare value that looks
-   * aggregated. Discarded at runtime — the record is the source line.
-   */
-  const noPoolMeaning = <T>(placeholder: T, why: string): T => { void why; return placeholder; };
 
   // ⚠ ENROLMENTS, NOT MEMBERS, AND THE TWO DIVERGE BY ~47% ON A THREE-LINE POOL.
   // This is a plain sum of each line's active count, so a member carrying WC and
@@ -3257,7 +3261,21 @@ export function aggregateLineResults(
   const pooled: ResultSet = {
     yearNumber: first.yearNumber,
     calendarYear: first.calendarYear,
-    decisions: first.decisions,
+    // ⚠ `decisions` IS GONE FROM THIS ROW. It was `first.decisions`, a
+    // LineDecisionSet — so at pool scope the renewal bar, the funding level and
+    // the reinsurance structure were one line's, labelled as the pool's. The
+    // three decisions that really are pool-wide are below, and the type no
+    // longer offers the rest.
+    //
+    // IDENTICAL ON EVERY LINE BY CONSTRUCTION: the player sets these once and
+    // the engine projects them into each LineDecisionSet, so taking them from
+    // the first line is reading the pool's own choice, not a stand-in for it.
+    // That is the distinction a blanket sweep would have destroyed.
+    pool: {
+      assetAllocation: first.decisions.assetAllocation,
+      riskControlPct: first.decisions.riskControlPct,
+      riskControlProgramIds: first.decisions.riskControlProgramIds,
+    },
     assetAllocation: first.assetAllocation,
 
     activeMembers: distinctMembers,
@@ -3274,17 +3292,18 @@ export function aggregateLineResults(
     averageRiskQuality,
     memberList,
 
-    rateLevel: first.rateLevel,
-    ratePer100: first.ratePer100,
-    purePremiumPer100: first.purePremiumPer100,
-    purePremium: first.purePremium,
-    // Same one-line placeholder as the per-100 fields above, for the same
-    // reason: a per-100 RATE cannot be summed across lines, and blending it
-    // needs an exposure weighting sum() does not do. Do not read these at pool
-    // scope; each line's own value is exact and is what the identity in
-    // fundedNetExpectedLoss's header is asserted against.
-    expectedCededPer100: first.expectedCededPer100,
-    netPurePremiumPer100: first.netPurePremiumPer100,
+    // ⚠ THE SIX PER-$100 / RATE-LEVEL FIELDS ARE GONE FROM THIS ROW, NOT SET TO
+    // ZERO. They were `first.<field>` under a comment reading "Do not read these
+    // at pool scope" — which is the right instruction and could not be enforced,
+    // because the type offered a number and five display sites printed it.
+    //
+    // THERE IS NO POOL RATE TO BUILD. The denominator would be pool exposure,
+    // and pool exposure is `addMixedUnitExposure` — WC/GL payroll in $M plus
+    // Property TIV in $M, a category error retained only because display code
+    // reads it. A rate per $100 of (payroll + building value) is not a hard
+    // number to compute, it is not a number. Each line's own value is exact and
+    // is what fundedNetExpectedLoss's identity is asserted against; byLine
+    // carries it.
     writtenExposure: addMixedUnitExposure('writtenExposure'),
 
     poolPremium: addDollars('poolPremium'),
@@ -3306,10 +3325,11 @@ export function aggregateLineResults(
     // economic. Left as the mean rather than repaired because the field is
     // legacy and has no engine consumer; the pool value is documented here as
     // not meaning what it appears to, and GL's own row is the one to read.
-    commonLossFactor: noPoolMeaning(
-      results.reduce((s, r) => s + r.commonLossFactor, 0) / results.length,
-      'legacy aggregate-path factor; only GL carries a live value — read the GL row',
-    ),
+    // ⚠ GONE. It carried `noPoolMeaning` already — documented as not meaning
+    // what it appeared to, and still typed as a number a page could print.
+    // That is the same defect one step further along: the warning had been
+    // written and the field was still readable. GL's own row is the one to
+    // read; WC and Property are pinned at 1 and do not use the path.
     catastropheFactor: first.catastropheFactor,
     grossUltimateLoss: addDollars('grossUltimateLoss'),
     // ⚠ SUMMED LIKE ITS GROSS AND NET NEIGHBOURS, because the pool figure is the
@@ -3367,7 +3387,8 @@ export function aggregateLineResults(
     // Nothing reads this at pool scope today (checked across pages and
     // RESULT_METRICS), so 0 costs nothing and is the honest reading: there is no
     // pool attachment. Read byLine.WC / byLine.Property for the real ones.
-    aggregateAttachment: noPoolMeaning(0, 'two separate treaties; a threshold is not additive — read byLine'),
+    // ⚠ GONE. Two separate treaties; an attachment threshold is not additive,
+    // which its own noPoolMeaning note said. Read byLine.
     reinsuranceRecovery: addDollars('reinsuranceRecovery'),
     priorYearDevelopmentCeded: addDollars('priorYearDevelopmentCeded'),
     bookingGiveBack: addDollars('bookingGiveBack'),
@@ -3417,8 +3438,11 @@ export function aggregateLineResults(
     interLineCashTransfer: addDollars('interLineCashTransfer'),
     dividendBlocked: results.some(r => r.dividendBlocked),
 
-    selectedFundingConfidenceLevel: first.selectedFundingConfidenceLevel,
-    selectedFundingCLF: first.selectedFundingCLF,
+    // ⚠ GONE. Each line carries its own confidence level and its own CLF, so
+    // once two lines price differently there is no pool CLF — which is exactly
+    // what fundedNetExpectedLossSum above already works around by summing per
+    // line rather than dividing once. The placeholder and the workaround sat
+    // twenty lines apart in the same function.
 
     expectedLoss: expectedLossSum,
     clfAdjustedExpectedLoss: addDollars('clfAdjustedExpectedLoss'),
@@ -3438,7 +3462,7 @@ export function aggregateLineResults(
     capitalAdequacyRatio: excessCapitalRatio,
     capitalAdequacyStatus,
 
-    fundingCLF: first.fundingCLF,
+    // ⚠ GONE with selectedFundingCLF, of which it was an alias.
 
     underwritingIncome: addDollars('underwritingIncome'),
     netIncome: addDollars('netIncome'),

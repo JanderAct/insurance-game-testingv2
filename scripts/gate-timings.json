@@ -1,6 +1,6 @@
 {
   "_note": "Seconds per gate, from a full FAST+SLOW sweep. Regenerate with: npx tsx scripts/gates.ts --all --record-timings. Read by the manifest check to enforce TIER_THRESHOLD_SECONDS; see scripts/gates.ts.",
-  "_handEdited": "experience-pricing-drift-check: 60. HAND-ADDED, not from a sweep \u2014 its commit was scoped to exclude one. Measured 45s SERIAL and entered at 60 to allow for the 3-way contention every other entry here was recorded under; a serial figure would understate it against its neighbours. It is well inside the 88s FAST threshold either way. The next --all --record-timings overwrites this with a measured value and this key can go with it. prose-identifier-check: 5. HAND-ADDED the same way \u2014 measured 2.5s serial standalone (its commit was scoped to exclude a sweep) and entered at 5 for contention.",
+  "_handEdited": "experience-pricing-drift-check: 60. HAND-ADDED, not from a sweep \u2014 its commit was scoped to exclude one. Measured 45s SERIAL and entered at 60 to allow for the 3-way contention every other entry here was recorded under; a serial figure would understate it against its neighbours. It is well inside the 88s FAST threshold either way. The next --all --record-timings overwrites this with a measured value and this key can go with it. prose-identifier-check: 5. HAND-ADDED the same way \u2014 measured 2.5s serial standalone (its commit was scoped to exclude a sweep) and entered at 5 for contention. pool-row-metric-check: 5. HAND-ADDED the same way \u2014 measured 2.4s serial standalone, entered at 5 for contention.",
   "_recordedAt": "2026-09-16",
   "_parallelism": 3,
   "seconds": {
@@ -76,6 +76,7 @@
     "wc-cutover-check": 26,
     "wc-program-check": 15,
     "wc-severity-rebuild-check": 3,
-    "prose-identifier-check": 5
+    "prose-identifier-check": 5,
+    "pool-row-metric-check": 5
   }
 }

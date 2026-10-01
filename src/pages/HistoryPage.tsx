@@ -30,7 +30,14 @@ export default function HistoryPage({ historicalYears, lineView }: HistoryPagePr
     { label: 'Active Members', value: year => String(year.activeMembers) },
     { label: exposureLabel, value: year => formatMillions(year.activeExposure) },
     { label: 'Market Share (% of Exposure)', value: year => formatPct(year.marketShare) },
-    { label: 'Pool Premium Rate per $100 Payroll', value: year => `$${year.poolPremiumRatePer100.toFixed(2)}` },
+    // ⚠ BLANK AT POOL SCOPE, AND THE LABEL IS WHY. "per $100 Payroll" is a true
+    // description on WC and GL and a false one on Property, whose exposure is
+    // TIV; at pool scope the denominator is the two added together, so there is
+    // no rate and no unit to label it with. A dash says the pool has no such
+    // figure. Switch to a line to see it.
+    { label: 'Pool Premium Rate per $100 Exposure',
+      value: year => (year.poolPremiumRatePer100 === undefined
+        ? '—' : `$${year.poolPremiumRatePer100.toFixed(2)}`) },
   ];
 
   const performanceRows: HistoryRow[] = [

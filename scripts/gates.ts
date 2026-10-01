@@ -87,6 +87,12 @@ const FAST: string[] = [
                                      //         arm 3 of experience-pricing-check measures LOOP GAIN and
                                      //         twin-differencing cancels an ambient ramp by construction, so
                                      //         nothing else pins this. Positive control in its header.
+  'pool-row-metric-check',           //   3s   no exported metric may read a field the pool row does
+                                     //         not have. The compiler cannot see inside a metric
+                                     //         closure, so the lineOnly flag is hand-written — and
+                                     //         six were missed by hand on the commit that added it.
+                                     //         Checks BOTH directions: an unmarked metric that reads
+                                     //         an absent field, and a marked one that does not.
   'export-number-format-check',      //  12s
   'funding-basis-check',             //  10s
   'funding-expected-check',          //   2s

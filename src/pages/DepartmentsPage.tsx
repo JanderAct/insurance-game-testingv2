@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { GameState } from '../types/simulation';
+import type { DecisionSet, GameState } from '../types/simulation';
 import DocumentReader, { type DocumentEntry } from '../components/DocumentReader';
 import investmentMemoRaw from '../data/documents/investmentMemo.md?raw';
 import { buildActuarialMemo } from '../utils/actuarialMemo';
@@ -9,13 +9,16 @@ import { buildUnderwritingMemo } from '../utils/underwritingMemo';
 
 interface DepartmentsPageProps {
   gameState: GameState;
+  /** The decisions the player is editing NOW — not gameState.currentDecisions,
+   *  which resets to defaults the moment a year locks. See buildUnderwritingMemo. */
+  currentDecisions: DecisionSet;
 }
 
 // Actuarial and Claims memos will be regenerated every year, so the year
 // selector is built now even though Investment (this pass's only occupant) is
 // static and does not yet vary by year — retrofitting a selector once those
 // two exist would mean reworking this tab's shape, not just adding rows.
-export default function DepartmentsPage({ gameState }: DepartmentsPageProps) {
+export default function DepartmentsPage({ gameState, currentDecisions }: DepartmentsPageProps) {
   const [selectedYear, setSelectedYear] = useState(gameState.currentYearNumber);
   const [selectedId, setSelectedId] = useState('investment');
 
@@ -38,8 +41,8 @@ export default function DepartmentsPage({ gameState }: DepartmentsPageProps) {
   // Memoised on the same rule as the other two: it walks the whole marketplace
   // and every member's stored history for each active line.
   const underwritingMemo = useMemo(
-    () => buildUnderwritingMemo(gameState),
-    [gameState],
+    () => buildUnderwritingMemo(gameState, currentDecisions),
+    [gameState, currentDecisions],
   );
 
   const claimsMemo = useMemo(

@@ -7,11 +7,11 @@ import { formatCurrency, formatPct, colorForNetIncome } from '../utils/formatter
 import { lineDisplayName } from '../utils/lineDisplay';
 
 interface FinancialsPageProps {
-  lockedResults: LineResultSet[];
+  lockedResults: Array<ResultSet | LineResultSet>;
   // Stage 2.10: the pre-game years are REAL engine results (yearNumbers -2..0,
   // already filtered to the current view), so they get full real statements
   // through the same deriveAnnualStatement path as locked years.
-  priorResults: LineResultSet[];
+  priorResults: Array<ResultSet | LineResultSet>;
   lineView: LineView;
 }
 
@@ -240,8 +240,12 @@ export default function FinancialsPage({ lockedResults, priorResults, lineView }
             {statement.fundingDetail && (
               <StatementCard title="Funding Target & Adequacy" icon={<Target size={16} className="text-blue-600" />}>
                 <MetricRow label="Expected Net Unpaid Loss" value={formatCurrency(statement.fundingDetail.expectedNetUnpaidLoss)} />
-                <MetricRow label="Selected Funding Confidence" value={formatPct(statement.fundingDetail.selectedFundingConfidenceLevel, 0)} valueColor="text-blue-600" />
-                <MetricRow label="CLF Applied" value={statement.fundingDetail.selectedFundingCLF.toFixed(3)} />
+                {/* ⚠ A DASH AT POOL SCOPE, not a number. Each line chooses its own funding
+                    stop, so the pool has no single selection and no single CLF; this
+                    used to print the first active line's. The dollar rows around it
+                    are genuine pool sums and stay. */}
+                <MetricRow label="Selected Funding Confidence" value={statement.fundingDetail.selectedFundingConfidenceLevel === undefined ? '— (varies by line)' : formatPct(statement.fundingDetail.selectedFundingConfidenceLevel, 0)} valueColor="text-blue-600" />
+                <MetricRow label="CLF Applied" value={statement.fundingDetail.selectedFundingCLF === undefined ? '— (varies by line)' : statement.fundingDetail.selectedFundingCLF.toFixed(3)} />
                 <div className="border-t border-gray-100 my-2" />
                 <MetricRow label="Required Reserve Margin" value={formatCurrency(statement.fundingDetail.requiredReserveMargin)} valueColor="text-amber-600" />
                 <div className="border-t border-gray-100 my-2" />

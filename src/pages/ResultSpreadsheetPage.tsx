@@ -1,10 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { Download, ClipboardList, Table, Users } from 'lucide-react';
-import type { CoverageLine, ResultSet, PoolState, GameInstance } from '../types/simulation';
+import type { CoverageLine, ResultSet, LineResultSet, PoolState, GameInstance } from '../types/simulation';
 import { formatCurrency, formatPct } from '../utils/formatters';
 import { getMemberExposure } from '../utils/lineHelpers';
-import { type SpreadsheetMetric, buildResultsWorkbook, buildExportFilename } from '../utils/resultsExport';
+import { type SpreadsheetMetric, buildResultsWorkbook, buildExportFilename, buildPoolMetrics, poolRowsAsMetricInput } from '../utils/resultsExport';
 import { buildClaimsWorkbook, buildClaimsExportFilename } from '../utils/claimsExport';
 import { RESULT_METRICS } from '../utils/resultMetrics';
 
@@ -32,7 +32,14 @@ export default function ResultSpreadsheetPage({ lockedResults, priorHistory, ins
 
   const selectedResult = lockedResults.find(r => r.yearNumber === selectedYear);
 
-  const resultMetrics = RESULT_METRICS;
+  // ⚠ THE POOL FILTER, THE SAME ONE THE WORKBOOK USES. This table renders pool
+  // rows; RESULT_METRICS is the full LINE list and included six metrics reading
+  // fields that no longer exist on a pool row — rate level, both funding
+  // selections, the two per-$100 rates and the legacy common-loss factor. They
+  // printed the first active line's value under a pool heading here exactly as
+  // they did on the Pool tab. Sharing buildPoolMetrics is what stops the page
+  // and the export disagreeing about which rows a pool has.
+  const resultMetrics = buildPoolMetrics(RESULT_METRICS, activeLines);
 
   const memberRows = useMemo(() => {
     if (!selectedResult?.memberList) return [];
@@ -151,7 +158,7 @@ export default function ResultSpreadsheetPage({ lockedResults, priorHistory, ins
         title="Year-by-Year Results"
         icon={<ClipboardList size={16} />}
         metrics={resultMetrics}
-        results={lockedResults}
+        results={poolRowsAsMetricInput(lockedResults)}
       />
 
       <SpreadsheetTable
@@ -203,7 +210,7 @@ function VerticalResultTable({
   title: string;
   icon: React.ReactNode;
   metrics: SpreadsheetMetric[];
-  results: ResultSet[];
+  results: LineResultSet[];
 }) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">

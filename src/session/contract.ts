@@ -156,7 +156,14 @@ export interface TeamYearFigures {
   actualLossRatioPricingBasis: number;
   poolPremium: number;
   activeMembers: number;
-  selectedFundingConfidenceLevel: number;
+  /**
+   * ⚠ OPTIONAL, AND ITS ABSENCE IS INFORMATION. On a LINE's figures it is that
+   * line's own choice and is always present. On the POOL's it is present only
+   * when every line the team writes chose the SAME stop — then the pool really
+   * does have a funding level. When they differ there is no pool level and this
+   * is absent; the host renders a dash. Absent means "these differ", not zero.
+   */
+  selectedFundingConfidenceLevel?: number;
   netUltimateLoss: number;
 }
 

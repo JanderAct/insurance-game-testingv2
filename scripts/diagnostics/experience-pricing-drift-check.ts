@@ -215,7 +215,7 @@ function playOne(seed: number): Track {
   for (let y = 1; y <= YEARS; y++) {
     const out = processYear(gs, defaultDecisionSet(y));
     for (const L of LINES) {
-      const r = (out.result as { byLine?: Record<string, Record<string, unknown>> }).byLine?.[L];
+      const r = (out.result as unknown as { byLine?: Record<string, Record<string, unknown>> }).byLine?.[L];
       if (!r) continue;
       const shares = r.memberPremiumShares as { exposure?: number }[] | undefined;
       track[L].rate.push((r.purePremiumPer100 as number) ?? NaN);

@@ -423,8 +423,10 @@ export interface HistoricalYear {
   activeExposure: number;
   totalMarketExposure: number;
   marketShare: number;
-  purePremiumPer100: number;
-  poolPremiumRatePer100: number;
+  /** Absent on a POOL row — no pool denominator exists. See poolToHistoricalYear. */
+  purePremiumPer100?: number;
+  /** Absent on a POOL row — divides by payroll+TIV. See poolToHistoricalYear. */
+  poolPremiumRatePer100?: number;
   expectedLoss: number;
   poolPremium: number;
   adminExpense: number;
@@ -1043,7 +1045,11 @@ export interface PricingTriangleState {
 }
 
 // Full result for one completed simulation year
-export interface ResultSet {
+// ⚠ NOT EXPORTED AND NOT USED DIRECTLY. This is the full set of fields a result
+// row can carry. `LineResultSet` is exactly this; `ResultSet` (the POOL row) is
+// this MINUS PoolAbsentKey, so the compiler refuses a pool-scope read of a
+// quantity that has no pool meaning. See PoolAbsentKey for why each one went.
+interface ResultRowFields {
   yearNumber: number;
   calendarYear: number;
   // WHICH LINE THIS ROW IS. Absent on the POOL row, which is an aggregate of all
@@ -1633,14 +1639,102 @@ export interface ResultSet {
   // attempt, so there is no single pool-level value).
   pregameAttempt?: number;
 
+}
+
+// A single line's own result for the year, before pool-level aggregation.
+//
+// ⚠ THIS IS THE COMPLETE SHAPE AND THE POOL ROW IS THE NARROWER ONE. The
+// relationship used to run the other way — `LineResultSet = Omit<ResultSet,
+// 'byLine'>` — which made the POOL row the complete one and left every per-line
+// quantity sitting on it as a placeholder holding the FIRST ACTIVE LINE'S value.
+export type LineResultSet = ResultRowFields;
+
+/**
+ * THE QUANTITIES THAT DO NOT EXIST AT POOL SCALE, ABSENT FROM THE POOL ROW BY
+ * TYPE RATHER THAN HELD AS A PLACEHOLDER.
+ *
+ * ⚠ EVERY ONE OF THESE WAS `first.<field>` — THE FIRST ACTIVE LINE'S VALUE,
+ * SHOWN AS IF IT WERE THE POOL'S. The aggregator's own header admitted it
+ * ("show the first active line's value as a placeholder until Stage 2.1 adds a
+ * real per-line view") and the comment beside the per-100 block said "Do not
+ * read these at pool scope". A comment cannot enforce that. The pooling-helper
+ * header in simulationEngine records what happens when one tries: SEVEN
+ * pool-scope defects reached players, THREE of them landed directly beside a
+ * comment warning about that exact class. The compiler is the only reader that
+ * cannot skip the warning.
+ *
+ * ⚠ WHY THESE AND NOT EVERY `first.` FIELD. Three of them are genuinely
+ * pool-wide and copied identically into every line, so reading the first IS
+ * correct and they stay: `assetAllocation`, and the pool-wide risk-control spend
+ * and program ids — which now arrive on `pool` below, from the pool's own
+ * decision set rather than from a line's echo of it. `yearNumber`,
+ * `calendarYear` and `catastropheFactor` are identical on every line too (the
+ * last is pinned at 1 everywhere) and stay for the same reason. Blanking all
+ * sixteen would have broken three fields that were never wrong.
+ *
+ * THE PER-$100 RATES ARE THE CLEAREST CASE AND THE REASON THIS IS A TYPE CHANGE
+ * RATHER THAN A DOCUMENTATION ONE. Pool exposure adds WC/GL payroll to Property
+ * TIV — `addMixedUnitExposure`, a category error retained only for display — so
+ * there is no denominator at pool scale and therefore no pool rate to compute.
+ * Not a hard one; a non-existent one.
+ */
+export type PoolAbsentKey =
+  // Per-$100 rates. No pool denominator exists — see above.
+  | 'rateLevel'
+  | 'ratePer100'
+  | 'purePremiumPer100'
+  | 'purePremium'
+  | 'expectedCededPer100'
+  | 'netPurePremiumPer100'
+  // Funding selections. Each line carries its own confidence level and its own
+  // CLF; once two lines price at different confidence there is no pool CLF, and
+  // fundedNetExpectedLoss already sums per line rather than dividing once for
+  // exactly this reason.
+  | 'selectedFundingConfidenceLevel'
+  | 'selectedFundingCLF'
+  | 'fundingCLF'
+  // The decision echo. A LineDecisionSet, so at pool scope it was one line's
+  // funding level, renewal bar and reinsurance structure wearing the pool's
+  // name. The pool-wide subset moves to `pool` below.
+  | 'decisions'
+  // Already carrying a `noPoolMeaning` placeholder before this change, which is
+  // the same defect one step further along: the value was documented as
+  // meaningless and still had a type that let a page print it.
+  | 'commonLossFactor'
+  | 'aggregateAttachment';
+
+/**
+ * THE POOL ROW. Every field a line row has, except the ones that do not exist at
+ * pool scale, plus the per-line breakdown and the pool-wide decisions.
+ *
+ * A page that reads `result.ratePer100` at pool scope no longer compiles. That
+ * is the whole point of the change: the guard is the type checker rather than a
+ * comment, a probe or a gate, none of which can see a display read.
+ */
+export interface ResultSet extends Omit<ResultRowFields, PoolAbsentKey> {
   // Per-line breakdown. Pool-level fields above are aggregates across active
   // lines (dollar/count fields summed, ratios recomputed from the summed
   // components); this map retains each line's own unaggregated result.
   byLine: Record<CoverageLine, LineResultSet>;
+  /** The decisions that really are pool-wide. See PoolWideDecisions. */
+  pool: PoolWideDecisions;
 }
 
-// A single line's own result for the year, before pool-level aggregation.
-export type LineResultSet = Omit<ResultSet, 'byLine'>;
+/**
+ * THE POOL-WIDE DECISIONS, EXPLICITLY — the three that really are one choice for
+ * the whole pool rather than three choices that happen to match.
+ *
+ * DecisionSet carries exactly these three beside `byLine`, which is what makes
+ * them pool-wide: the player sets them once and the engine projects them into
+ * every LineDecisionSet. Reading them off the first line was correct and this
+ * field does not change a value — it changes where a reader is told to look, so
+ * that `decisions` can leave the pool row without taking them with it.
+ */
+export interface PoolWideDecisions {
+  assetAllocation: AssetAllocation;
+  riskControlPct: number;
+  riskControlProgramIds?: string[];
+}
 
 // UI display filter (Stage 2.1): 'pool' shows the combined/summed totals;
 // a specific line filters every figure on the page to that line's slice.
@@ -1808,10 +1902,13 @@ export interface StartingFinancials {
   activeExposure: number;      // payroll in $M
   totalMarketExposure: number; // payroll in $M
   marketShare: number;
-  rateLevel: number;
-  ratePer100: number;          // rate per $100 payroll
-  purePremiumPer100: number;   // expected loss per $100 payroll
-  purePremium: number;         // kept for compat
+  // ⚠ FOUR PER-LINE RATE FIELDS WERE HERE AND ARE GONE. StartingFinancials is a
+  // POOL-SCOPE opening summary, and these were filled from the pool result row —
+  // which meant the first active line's rate level and per-$100 rates under a
+  // pool heading. NOTHING EVER READ THEM: searched across src/ and scripts/,
+  // there is no reader of .rateLevel, .ratePer100 or .purePremium on this type.
+  // They were written every game and displayed nowhere, so the honest repair is
+  // removal rather than a blank — a blank implies someone wanted the row.
 }
 
 // V2: ChartDataPoint for future chart support

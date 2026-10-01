@@ -73,7 +73,7 @@
 // ============================================================================
 
 import type {
-  CoverageLine, GameState, Member, MemberLossHistory, MemberLossYear,
+  CoverageLine, DecisionSet, GameState, Member, MemberLossHistory, MemberLossYear,
 } from '../types/simulation';
 import { getMemberExposure } from './lineHelpers';
 import { canReenroll } from './membershipHistory';
@@ -130,8 +130,25 @@ function section(
   return parts.join('\n');
 }
 
-export function buildUnderwritingMemo(gameState: GameState): string {
-  const { poolState, setup, currentYearNumber, currentDecisions } = gameState;
+/**
+ * ⚠ `liveDecisions` IS A PARAMETER BECAUSE gameState.currentDecisions IS NOT THE
+ * PLAYER'S BAR, AND THIS PAGE EXISTS TO SHOW THE CONSEQUENCE OF THAT BAR.
+ *
+ * Locking a year replaces gameState.currentDecisions with defaultDecisionSet for
+ * the next one, and the decisions the player is actually editing live in the
+ * shell's own state until they commit. So this memo read the DEFAULT renewal
+ * threshold on every render after the first lock: the "who would be declined"
+ * list was computed against a bar nobody set, and with the default bar nothing
+ * is declined — the page said "renew every member" whatever the player chose.
+ * The one page built to show what a decision does could not see the decision.
+ *
+ * Passing the live set in is the whole fix. It is not a type-split consequence —
+ * the split would not have caught it, because `currentDecisions` is a perfectly
+ * real field holding a perfectly real DecisionSet. It is just the wrong one.
+ */
+export function buildUnderwritingMemo(gameState: GameState, liveDecisions?: DecisionSet): string {
+  const { poolState, setup, currentYearNumber } = gameState;
+  const currentDecisions = liveDecisions ?? gameState.currentDecisions;
   const history = poolState.memberLossHistory ?? {};
   const out: string[] = [
     '# Underwriting',

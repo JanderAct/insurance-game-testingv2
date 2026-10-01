@@ -1,5 +1,5 @@
 import { TrendingUp, Users, Shield, DollarSign, Activity, BarChart2, Globe, Star } from 'lucide-react';
-import type { LineResultSet, StartingFinancials, HistoricalYear, LineView } from '../types/simulation';
+import type { LineResultSet, ResultSet, StartingFinancials, HistoricalYear, LineView } from '../types/simulation';
 import StatCard from '../components/StatCard';
 import { formatCurrency, formatMillions, formatPct, colorForRatio, colorForSurplus } from '../utils/formatters';
 import { lineDisplayName } from '../utils/lineDisplay';
@@ -8,7 +8,7 @@ import type { EndingPositionRow } from '../utils/endingPosition';
 import { MARKET_MEMBER_COUNT } from '../data/memberCatalog';
 
 interface DashboardPageProps {
-  lockedResults: LineResultSet[];
+  lockedResults: Array<ResultSet | LineResultSet>;
   historicalYears: HistoricalYear[];
   startingFinancials: StartingFinancials;
   currentYearNumber: number;

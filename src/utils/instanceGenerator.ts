@@ -599,10 +599,7 @@ export function generateStartingPoolState(
     activeExposure: parseFloat(activeExposure.toFixed(2)),
     totalMarketExposure: parseFloat(totalMarketExposure.toFixed(2)),
     marketShare: parseFloat(marketShare.toFixed(4)),
-    rateLevel: 100,
-    ratePer100: parseFloat(ratePer100.toFixed(4)),
-    purePremiumPer100: parseFloat(purePremiumPer100.toFixed(4)),
-    purePremium: parseFloat(purePremiumPer100.toFixed(4)),
+    // The four rate fields are gone from StartingFinancials — see its note.
   };
 
   return { poolState, startingFinancials };

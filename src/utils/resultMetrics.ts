@@ -67,6 +67,7 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
     // hash guard will move); it is not a value change on any remaining field.
     {
       key: 'fundingConfidenceLevel',
+      lineOnly: true,
       category: 'Decisions',
       label: 'Funding Confidence Level',
       value: r => formatPct(r.selectedFundingConfidenceLevel, 0),
@@ -74,6 +75,7 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
     },
     {
       key: 'selectedFundingCLF',
+      lineOnly: true,
       category: 'Decisions',
       label: 'Selected CLF',
       value: r => r.selectedFundingCLF.toFixed(3),
@@ -81,6 +83,7 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
     },
     {
       key: 'dividendPct',
+      lineOnly: true,
       category: 'Decisions',
       label: 'Dividend %',
       value: r => formatPct(r.decisions.dividendPct, 1),
@@ -88,6 +91,7 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
     },
     {
       key: 'assessmentPct',
+      lineOnly: true,
       category: 'Decisions',
       label: 'Assessment %',
       value: r => formatPct(r.decisions.assessmentPct, 1),
@@ -95,6 +99,12 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
     },
     {
       key: 'riskControlPct',
+      // Pool-wide: one choice projected into every line. The LINE form reads the
+      // projected copy; the POOL form reads the pool's own field. Same number,
+      // named where it lives — so the Pool tab keeps the row.
+      lineOnly: true,
+      poolValue: r => formatPct(r.pool.riskControlPct, 1),
+      poolCsvValue: r => r.pool.riskControlPct,
       category: 'Decisions',
       label: 'Risk Control %',
       value: r => formatPct(r.decisions.riskControlPct, 1),
@@ -109,6 +119,11 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
       // here. That is correct: a placement is not a magnitude, and pretending
       // it is one is what the old column did.
       key: 'reinsuranceLevel',
+      // ⚠ NOT lineOnly, AND IT WAS MARKED SO BY MISTAKE. It reads r.decisions
+      // only when towerLineOf(r) yields a line, which a pool row never does —
+      // the pool path (poolReinsuranceLevelDetail) was already written for this.
+      // Marking it would have dropped a row the Pool tab can honestly show.
+      // pool-row-metric-check caught it on its first run.
       category: 'Decisions',
       label: 'Reinsurance Program',
       value: r => {
@@ -212,6 +227,7 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
     // Rate and premium
     {
       key: 'rateLevel',
+      lineOnly: true,
       category: 'Rate and Premium',
       label: 'Rate Level Index',
       value: r => r.rateLevel.toFixed(3),
@@ -219,6 +235,7 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
     },
     {
       key: 'purePremiumRatePer100',
+      lineOnly: true,
       category: 'Rate and Premium',
       label: 'Pure Premium Rate per $100 Payroll',
       value: r => dollars(r.purePremiumPer100),
@@ -232,6 +249,7 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
       // export or audit-page row could reach — an export figure the reader
       // could not reproduce from anything else on the sheet.
       key: 'expectedCededPer100',
+      lineOnly: true,
       category: 'Rate and Premium',
       label: 'Expected Ceded per $100 Payroll',
       value: r => dollars(r.expectedCededPer100),
@@ -239,6 +257,7 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
     },
     {
       key: 'netPurePremiumRatePer100',
+      lineOnly: true,
       category: 'Rate and Premium',
       label: 'Net Pure Premium Rate per $100 Payroll',
       value: r => dollars(r.netPurePremiumPer100),
@@ -253,6 +272,7 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
     },
     {
       key: 'totalMemberRatePer100',
+      lineOnly: true,
       category: 'Rate and Premium',
       label: 'Gross Premium & Admin Expense Rate per $100',
       value: r => dollars(r.ratePer100),
@@ -345,6 +365,7 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
     },
     {
       key: 'commonLossFactor',
+      lineOnly: true,
       category: 'Losses',
       label: 'Shared Annual Loss Factor',
       value: r => (r.commonLossFactor ?? 1).toFixed(4),

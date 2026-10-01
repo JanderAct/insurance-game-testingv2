@@ -30,9 +30,45 @@ export function getMemberExposure(member: Member, line: CoverageLine, yearNumber
 // this is what makes the Pool view provably identical to pre-Stage-2.1
 // behavior, not just tested to match). A specific line maps each locked
 // year to that line's own unaggregated slice.
-export function selectResultView(lockedResults: ResultSet[], view: LineView): LineResultSet[] {
+// ⚠ THE RETURN TYPE USED TO BE `LineResultSet[]` FOR BOTH VIEWS, AND THAT ONE
+// SIGNATURE IS WHY THE PLACEHOLDER READS SPREAD AS FAR AS THEY DID. It handed
+// every caller a pool row wearing a line row's type, so `rows[0].ratePer100` at
+// pool scope compiled everywhere and returned the first active line's rate. The
+// overloads below give a caller that knows its view statically the exact type,
+// and a caller that does not the union it actually has — which is what makes the
+// compiler ask the question at each site instead of at none of them.
+export function selectResultView(lockedResults: ResultSet[], view: 'pool'): ResultSet[];
+export function selectResultView(lockedResults: ResultSet[], view: CoverageLine): LineResultSet[];
+export function selectResultView(
+  lockedResults: ResultSet[], view: LineView,
+): Array<ResultSet | LineResultSet>;
+export function selectResultView(
+  lockedResults: ResultSet[], view: LineView,
+): Array<ResultSet | LineResultSet> {
   if (view === 'pool') return lockedResults;
   return lockedResults.map(r => r.byLine[view]);
+}
+
+/**
+ * NARROW A VIEW ROW TO A LINE ROW, OR null IF IT IS THE POOL.
+ *
+ * ⚠ `byLine` IS THE DISCRIMINATOR AND IT IS THE ONLY HONEST ONE. A pool row is
+ * the only row that carries a per-line breakdown; every other candidate (a line
+ * field being present, a count, a label) is a guess about shape. This narrows
+ * for the compiler and at runtime with the same test.
+ *
+ * A page holding a view row cannot know whether it is pooled — that is the
+ * reader's question, and before the result type was split nothing made them ask
+ * it. `const line = asLineRow(r); line ? line.ratePer100 : '—'` is the shape of
+ * the answer: the per-line figure where one exists, and a dash where none does.
+ */
+export function isPoolRow(r: ResultSet | LineResultSet): r is ResultSet {
+  return 'byLine' in r;
+}
+
+/** The value form of the same test, for `const line = asLineRow(r)` reads. */
+export function asLineRow(r: ResultSet | LineResultSet): LineResultSet | null {
+  return isPoolRow(r) ? null : r;
 }
 
 export function emptyLinePoolState(): LinePoolState {

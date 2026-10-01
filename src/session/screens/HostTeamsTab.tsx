@@ -183,7 +183,13 @@ export default function HostTeamsTab({ room }: Props) {
                         {state.figures.activeMembers}
                       </td>
                       <td className="px-5 py-2.5 font-mono text-slate-700">
-                        {formatPct(state.figures.selectedFundingConfidenceLevel, 0)}
+                        {/* ⚠ A DASH MEANS THE TEAM'S LINES CHOSE DIFFERENT STOPS, not zero
+                            and not missing. The pool only has a funding level when every
+                            line the team writes picked the same one; this column used to
+                            print the first line's regardless. See poolFiguresOf. */}
+                        {state.figures.selectedFundingConfidenceLevel === undefined
+                          ? <span className="text-slate-400" title="Lines chose different funding stops — open the team to see each">—</span>
+                          : formatPct(state.figures.selectedFundingConfidenceLevel, 0)}
                       </td>
                     </>
                   )}

@@ -191,7 +191,7 @@ export default function GameShell({
         )}
 
         {activeTab === 'departments' && gameState && (
-          <DepartmentsPage gameState={gameState} />
+          <DepartmentsPage gameState={gameState} currentDecisions={currentDecisions} />
         )}
 
         {activeTab === 'dashboard' && gameState && startingFinancials && (
@@ -223,7 +223,7 @@ export default function GameShell({
             /* DERIVED, NOT STORED. Each locked result echoes the decisions it
                was played with, so the commitment history is already persisted
                and replays with the game. See riskControlPrograms.ts. */
-            priorProgramIds={gameState.lockedResults.map(r => r.decisions?.riskControlProgramIds)}
+            priorProgramIds={gameState.lockedResults.map(r => r.pool?.riskControlProgramIds)}
             memberLossHistory={gameState.poolState.memberLossHistory ?? {}}
             allMarketMembers={gameState.poolState.allMarketMembers}
             membershipHistory={gameState.poolState.membershipHistory}

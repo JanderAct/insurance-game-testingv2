@@ -312,7 +312,9 @@ export default function App() {
     // pre-game (which runs on defaultDecisionSet) commits nothing.
     const nextDecisions: DecisionSet = {
       ...defaultDecisionSet(nextYearNumber),
-      riskControlProgramIds: [...(result.decisions?.riskControlProgramIds ?? [])],
+      // Pool-wide, so it comes off the pool row's own `pool` field now rather
+      // than off a line's echo of it. Same list, named where it belongs.
+      riskControlProgramIds: [...(result.pool?.riskControlProgramIds ?? [])],
     };
 
     const newGs: GameState = {
