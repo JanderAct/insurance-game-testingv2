@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { FileText, Target } from 'lucide-react';
-import type { CoverageLine, LineResultSet, LineView, ResultSet } from '../types/simulation';
-import { deriveAnnualStatement } from '../utils/financialStatementEngine';
+import type { LineResultSet, LineView, ResultSet } from '../types/simulation';
+import { deriveAnnualStatement, statementLines } from '../utils/financialStatementEngine';
 import { RETAINED_ABOVE_TOWER_CAVEAT } from '../utils/reinsuranceDisplay';
 import { formatCurrency, formatPct, colorForNetIncome } from '../utils/formatters';
 import { lineDisplayName } from '../utils/lineDisplay';
@@ -63,15 +63,12 @@ export default function FinancialsPage({ lockedResults, priorResults, lineView }
             <StatementCard title="Statement of Revenues, Expenses & Changes in Net Position">
               {(() => {
                 const is = statement.incomeStatement;
-                // Pass-throughs shown GROSS: reinsurance and admin appear as
-                // both revenue (collected from members) and expense (paid out).
-                const totalOperatingRevenues = is.reinsuranceCost + is.poolPremium + is.adminExpense + is.assessments;
-                // Prior accident years' NET incurred: net paid + change in net
-                // unpaid on prior cohorts (development net of ceded, including
-                // closed-cohort runoff). Current + recoveries + prior ties to
-                // netIncurredLoss as an algebraic identity — no plug.
-                const priorYearClaims = is.netIncurredLoss - is.netUltimateLoss;
-                const totalOperatingExpenses = is.reinsuranceCost + is.netIncurredLoss + is.operatingExpense + is.riskControlInvestment + is.dividends;
+                // ⚠ FOUR SUBTOTALS WERE COMPUTED HERE AND AGAIN ON THE AUDIT PAGE,
+                // from the same fields, with nothing holding them together. They
+                // come from statementLines now — see its header for why that
+                // mattered and which two of them were wrong in both places.
+                const lines = statementLines(selectedResult!);
+                const { totalOperatingRevenues, totalOperatingExpenses, priorYearClaims } = lines;
                 // Not modeled yet — rendered only when non-zero, so hidden today.
                 const additionalPaidInCapital = 0;
                 const restatements = 0;
@@ -88,7 +85,13 @@ export default function FinancialsPage({ lockedResults, priorResults, lineView }
                     <SectionLabel text="Operating expenses" />
                     <ISLine label="Transferred risk & insurance expense" value={formatCurrency(is.reinsuranceCost)} indent />
                     <ISLine label="Provision for claims:" value="" indent />
-                    <ISLine label="Current year claims" value={formatCurrency(is.grossUltimateLoss)} indent2 />
+                    {/* ⚠ THE BOOKED REGISTER, NOT THE DRAWN ONE, AND THIS IS THE
+                        FIGURE A PLAYER SEES CHANGE. The subtotal below it ties to
+                        netIncurredLoss, which the engine builds from the booked
+                        register; printing the drawn figure here put a pre-booking
+                        number above a post-booking total and the two did not
+                        reconcile. See statementLines.currentYearClaims. */}
+                    <ISLine label="Current year claims" value={formatCurrency(lines.currentYearClaims)} indent2 />
                     {is.reinsuranceRecovery !== 0 && (
                       <ISLine label="Less: reinsurance recoveries — current year" value={`(${formatCurrency(is.reinsuranceRecovery)})`} indent2 />
                     )}
@@ -105,6 +108,16 @@ export default function FinancialsPage({ lockedResults, priorResults, lineView }
                         permanent loss. Reads $0 whenever the line is funded at or
                         above break-even, which is the common case and has to look
                         unremarkable. */}
+                    {/* ⚠ THE BIAS MARKDOWN, WHICH THIS STATEMENT NEVER SHOWED. It is the
+                        other half of the optimistic booking — the give-back line below is
+                        the ceded part, this is the retained part — and leaving it out is
+                        why the provision subtotal did not reconcile. It only looked
+                        reconciled because the prior-year line was computed as a
+                        reconstruction that absorbed exactly this term. Reads $0 at or
+                        above break-even, which is the common case. */}
+                    {lines.bookingBiasMarkdown !== 0 && (
+                      <ISLine label="Less: claims deferred by optimistic booking" value={`(${formatCurrency(-lines.bookingBiasMarkdown)})`} indent2 />
+                    )}
                     {is.bookingGiveBack !== 0 && (
                       <ISLine label="Recovery deferred by optimistic booking" value={formatCurrency(is.bookingGiveBack)} indent2 />
                     )}
@@ -166,26 +179,15 @@ export default function FinancialsPage({ lockedResults, priorResults, lineView }
             <StatementCard title="Statement of Net Position">
               {(() => {
                 const bs = statement.balanceSheet;
-                const alloc = selectedResult!.assetAllocation;
-                const investedAssets = bs.investments;
-                const cashSlice = investedAssets * (alloc.cashPct / 100);
-                const cashAndEquivalents = bs.cash + cashSlice;
-                const noncurrentInvestments = investedAssets - cashSlice;
+                // Same shared derivation as the income statement above.
+                const bsLines = statementLines(selectedResult!);
+                const { cashAndEquivalents, noncurrentInvestments } = bsLines;
                 const totalCurrentAssets = cashAndEquivalents;
                 const totalNoncurrentAssets = noncurrentInvestments;
 
-                // Current portion = the share of each line's own net unpaid
-                // reserve expected to pay out within 12 months. The engine emits
-                // that rate per line (nextYearPaydownRate), reserve-weighted
-                // across the cohorts the line actually holds, because under a
-                // payout pattern the rate depends on each cohort's AGE and there
-                // is no single line-level constant to multiply by any more.
-                const pooled = selectedResult as unknown as ResultSet;
-                const lineKeys = pooled.byLine ? (Object.keys(pooled.byLine) as CoverageLine[]) : null;
-                const currentUnpaidPortion = lineKeys
-                  ? lineKeys.reduce((sum, l) => sum + pooled.byLine[l].endingNetReserve * pooled.byLine[l].nextYearPaydownRate, 0)
-                  : bs.netUnpaidReserve * (selectedResult?.nextYearPaydownRate ?? 0);
-                const noncurrentUnpaidPortion = bs.netUnpaidReserve - currentUnpaidPortion;
+                // The reserve-weighted current portion, also from statementLines —
+                // both pages walked byLine for this and did it identically.
+                const { currentUnpaidPortion, noncurrentUnpaidPortion } = bsLines;
 
                 const totalCurrentLiabilities = currentUnpaidPortion;
                 const totalNoncurrentLiabilities = noncurrentUnpaidPortion;

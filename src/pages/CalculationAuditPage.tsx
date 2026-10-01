@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import type { CoverageLine, LineResultSet, LineView, ResultSet } from '../types/simulation';
 import { asLineRow } from '../utils/lineHelpers';
+import { statementLines } from '../utils/financialStatementEngine';
 import { lineDisplayName } from '../utils/lineDisplay';
 import { formatCurrency, formatPct } from '../utils/formatters';
 import { unpaidShare } from '../utils/payoutPattern';
@@ -855,12 +856,12 @@ export function computeAuditChecks(
   const isLiveYear = r.yearNumber > 0;
 
   // --- Income statement ---
-  // Pass-throughs are shown GROSS: reinsurance and admin appear as both
-  // revenue (collected from members) and expense (paid out).
-  const totalOperatingRevenuesValue =
-    r.reinsuranceCost + r.poolPremium + r.adminExpense + r.assessments;
-  const totalOperatingExpensesValue =
-    r.reinsuranceCost + r.netIncurredLoss + r.operatingExpense + r.riskControlInvestment + r.dividends;
+  // ⚠ FROM THE SHARED DERIVATION. These were computed here and identically on
+  // FinancialsPage, which is the duplication this page exists to catch and was
+  // itself committing. statementLines is the one definition; see its header.
+  const lines = statementLines(r);
+  const totalOperatingRevenuesValue = lines.totalOperatingRevenues;
+  const totalOperatingExpensesValue = lines.totalOperatingExpenses;
 
   const totalOperatingRevenues = mkCheck(totalOperatingRevenuesValue, totalOperatingRevenuesValue);
   const totalOperatingExpenses = mkCheck(totalOperatingExpensesValue, totalOperatingExpensesValue);
@@ -870,31 +871,50 @@ export function computeAuditChecks(
   );
   const changeInNetPosition = mkCheck(r.underwritingIncome + r.investmentIncome, r.netIncome);
 
-  // Prior accident years' NET incurred, as the statement presents it: net paid
-  // plus the change in net unpaid on prior cohorts. The two INDEPENDENT paths
-  // meet on this line — the statement's presentation figure (net incurred less
-  // this year's net ultimate) against the reserve rollforward's own separately
-  // simulated cohort development (signed so positive = favourable, hence
-  // negated). A failure here points at the reserve development, not a subtotal.
-  const priorYearClaimsValue = r.netIncurredLoss - r.netUltimateLoss;
+  // Prior accident years' NET incurred: net paid plus the change in net unpaid on
+  // prior cohorts, signed so positive = favourable and negated for presentation.
+  //
+  // ⚠ THE CHECK WAS WRONG, NOT THE FIGURE, AND IT FAILED ONLY BELOW BREAK-EVEN.
+  // It reconstructed this as `netIncurredLoss - netUltimateLoss` and compared
+  // that against `-priorYearDevelopment`, calling the two "INDEPENDENT paths".
+  // They are the same path whenever the booked and pre-bias ultimates agree —
+  // and they stop agreeing the moment a line funds below CLF 1.000, because
+  // netIncurredLoss is built from the BOOKED figure while netUltimateLoss is the
+  // one before the booking bias and the give-back. The reconstruction therefore
+  // absorbed a CURRENT-year item into a PRIOR-year line. Measured at confidence
+  // 0.30: -0.528 / -0.832 / -1.179 $M on WC / GL / Property in year 1, and the
+  // gap equals `bookedNetUltimate - netUltimateLoss` to the cent on every
+  // line-year.
+  //
+  // The independent cross-check survives and is BETTER placed: the rollforward
+  // identity below ties the same development figure to the reserve movement,
+  // which is a genuinely separate construction. This line now simply presents
+  // what the engine emits.
+  const priorYearClaimsValue = lines.priorYearClaims;
   const priorYearClaims = mkCheck(-r.priorYearDevelopment, priorYearClaimsValue, {
     varianceCap: CLAIMS_VARIANCE_CAP,
     varianceReason: CLAIMS_VARIANCE_REASON,
   });
 
   // The subtotal's own identity: current year claims less ceded recoveries plus
-  // prior year claims must equal the net provision. Exact by construction.
+  // prior year claims must equal the net provision.
+  //
+  // ⚠ IT USED grossUltimateLoss — THE DRAWN REGISTER — AGAINST A BOOKED TOTAL,
+  // AND FAILED EVERY YEAR AT EVERY SCOPE FOR IT. netIncurredLoss is built from
+  // the register AFTER forward booking contracts it, so the only gross figure
+  // that can appear in this identity is `bookedGrossUltimate`, whose own type
+  // comment states the relation: netUltimateLoss = bookedGrossUltimate -
+  // reinsuranceRecovery. Measured at defaults, pool: +28.481 $M in year 1 with
+  // the drawn figure, 0.000 with the booked one, every year, both arms.
+  // THE CHECK WAS WRONG. The engine's figures reconcile exactly.
   const provisionForClaims = mkCheck(
-    r.grossUltimateLoss - r.reinsuranceRecovery + priorYearClaimsValue,
+    lines.currentYearClaims - r.reinsuranceRecovery + priorYearClaimsValue,
     r.netIncurredLoss
   );
 
   // --- Statement of net position ---
-  // The cash-equivalents slice is DERIVED from the allocation percentage
-  // rather than read directly, exercising the same split the statement shows.
-  const cashSlice = r.endingInvestments * (r.assetAllocation.cashPct / 100);
-  const cashAndEquivalents = r.endingCash + cashSlice;
-  const noncurrentInvestments = r.endingInvestments - cashSlice;
+  // Same shared derivation: the split the statement shows, computed once.
+  const { cashAndEquivalents, noncurrentInvestments } = lines;
   const totalAssetsSplit = mkCheck(cashAndEquivalents + noncurrentInvestments, r.totalAssets);
 
   // Current portion = the share of each line's own net unpaid reserve expected
@@ -1060,7 +1080,8 @@ export function computeAuditChecks(
     currentUnpaidPortion,
     noncurrentUnpaidPortion,
     cashAndEquivalents,
-    cashSliceOfInvestments: cashSlice,
+    // The slice itself, recovered from the two figures the helper returns.
+    cashSliceOfInvestments: cashAndEquivalents - r.endingCash,
     noncurrentInvestments,
     operatingCashTarget: sweep.operatingCashTarget,
     investmentsBeforeSweep: sweep.investmentsBeforeSweep,
@@ -1563,8 +1584,18 @@ export function buildSupportingRows(
   // than absorbed into the development figure (see CLAIMS_VARIANCE_CAP) — so
   // this reuses the same documented, bounded variance rather than asserting
   // an unconditional identity.
+  // ⚠ bookedNetUltimate, NOT netUltimateLoss — THE CHECK WAS WRONG, AND IT IS THE
+  // SAME DEFECT AS THE PRIOR-YEAR LINE ABOVE, ALGEBRAICALLY IDENTICAL. Both
+  // reduce to `netIncurredLoss - netUltimateLoss + priorYearDevelopment`, so they
+  // failed together, by the same amount, on exactly the lines that funded below
+  // break-even. What enters the reserve is the BOOKED figure: simulationEngine
+  // derives `currentYearNetReserve` and `netPaidCurrentYear` from
+  // `bookedUltimate` and from nothing else, so this identity is the engine's own
+  // and was being asserted with the wrong operand. Substituting it closes the gap
+  // to 0.000 on every line-year in both arms.
   const endingNetReserveCheck =
-    result.beginningNetReserve + result.netUltimateLoss - result.priorYearDevelopment - result.netPaidLosses;
+    result.beginningNetReserve + (result.bookedNetUltimate ?? result.netUltimateLoss)
+    - result.priorYearDevelopment - result.netPaidLosses;
   const endingNetReserveDifference = result.endingNetReserve - endingNetReserveCheck;
 
   const netIncurredLossFromIncome =
@@ -1662,8 +1693,15 @@ export function buildSupportingRows(
   // formula did not produce, by $5.9M at pool scope, INVISIBLE AT DEFAULTS
   // because the bias is zero there — the sixth time that default has hidden a
   // missing term on this page.
+  // ⚠ READ, NOT REBUILT. This expression is simulationEngine's `const
+  // bookedUltimate` copied out — same terms, same order — and a copy of an engine
+  // local is the defect this page is meant to catch. The engine records the value
+  // now (bookedNetUltimate), so there is one definition and this reads it. The
+  // fallback keeps a save written before the field existed rendering, and
+  // reproduces the old arithmetic exactly for those.
   const bookedUltimateOf = (r: LineResultSet) =>
-    r.netUltimateLoss * (1 - ibnerBookingBias(r.selectedFundingCLF)) - (r.bookingGiveBack ?? 0);
+    r.bookedNetUltimate
+    ?? (r.netUltimateLoss * (1 - ibnerBookingBias(r.selectedFundingCLF)) - (r.bookingGiveBack ?? 0));
   const bookedUltimate = isPoolView
     ? MARGIN_ORDER.filter(l => poolResult.byLine[l]).reduce((sum, l) => sum + bookedUltimateOf(poolResult.byLine[l]), 0)
     : lineRow === null ? NaN : bookedUltimateOf(lineRow);
@@ -2473,6 +2511,9 @@ export function buildRevExpRows(
   // reinsurance from. Equal to gross when there is no markdown; see the Losses
   // block for why printing gross here was the defect.
   const bookedGrossIS = result.bookedGrossUltimate ?? result.grossUltimateLoss;
+  // The same shared derivation the checks use, so the rendered build-up and the
+  // asserted identity cannot drift apart.
+  const lines = statementLines(result);
   // Mirrors the statement: neither is modelled yet, so both are zero and the
   // rows they gate stay hidden.
   const additionalPaidInCapital = 0;
@@ -2632,16 +2673,26 @@ export function buildRevExpRows(
       metric: 'Prior year claims',
       value: formatCurrency(checks.priorYearClaimsValue),
       numericValue: checks.priorYearClaimsValue,
+      // ⚠ THE STATED FORMULA WAS THE RECONSTRUCTION AND IT IS GONE WITH IT.
+      // `net incurred - net ultimate this year` is only this quantity when the
+      // booked and pre-bias ultimates agree, so below break-even the row printed
+      // a derivation that did not produce its own value. The engine emits the
+      // development; the row presents it, sign reversed.
       formula: {
         kind: 'sum',
-        terms: [cur(result.netIncurredLoss, 'net incurred'), cur(-result.netUltimateLoss, 'net ultimate this year')],
+        terms: [cur(-result.priorYearDevelopment, 'simulated cohort development, sign reversed')],
       },
-      subFormula: {
-        label: 'independently',
-        value: -result.priorYearDevelopment,
-        spec: { kind: 'sum', terms: [cur(-result.priorYearDevelopment, 'simulated cohort development, sign reversed')] },
-      },
-      explain: 'Paid plus the change in unpaid on prior cohorts, including closed-cohort runoff. The two paths must meet.',
+      // ⚠ THE SECOND PATH MOVED RATHER THAN DISAPPEARING, which matters because
+      // a presented figure with no independent check is weaker than one with.
+      // The old "independently" sub-row showed the SAME field this row now reads,
+      // so keeping it would have been a value against itself — the tautology
+      // signature. The real independent construction is the reserve rollforward:
+      // `ending = beginning + booked net ultimate - development - paid`, built
+      // from the balance sheet rather than from the income statement, and
+      // asserted in the Reserve section on this same page.
+      explain: 'Paid plus the change in unpaid on prior cohorts, including closed-cohort runoff. '
+        + 'Checked independently against the reserve rollforward below, which reaches the same '
+        + 'development figure from the balance sheet.',
       indent: 2,
       note: checks.priorYearClaims.note,
       status: checks.priorYearClaims.status,
@@ -2656,9 +2707,20 @@ export function buildRevExpRows(
         // development, so it inherited the first term's error exactly: both rows
         // were out by 86,806,261.5843 to the cent, which is what showed they were
         // one cause and not two.
-        terms: result.reinsuranceRecovery !== 0
-          ? [cur(bookedGrossIS), cur(-result.reinsuranceRecovery), cur(checks.priorYearClaimsValue)]
-          : [cur(bookedGrossIS), cur(checks.priorYearClaimsValue)],
+        // ⚠ THE BOOKING MARKDOWN AND THE GIVE-BACK ARE BOTH HERE NOW, AND THEIR
+        // ABSENCE IS WHY THIS ROW STAYED RED AFTER THE PRIOR-YEAR LINE WAS FIXED.
+        // bookedGross - recovery reaches netUltimateLoss exactly (measured 0.0000
+        // on every line-year), but what enters the provision is the BOOKED NET
+        // figure, which is that less the IBNER bias and less the give-back. The
+        // chain was short by both; the prior-year reconstruction had been
+        // absorbing them.
+        terms: [
+          cur(bookedGrossIS, 'booked gross register'),
+          ...(result.reinsuranceRecovery !== 0 ? [cur(-result.reinsuranceRecovery, 'ceded recoveries')] : []),
+          ...(lines.bookingBiasMarkdown !== 0 ? [cur(lines.bookingBiasMarkdown, 'IBNER booking markdown')] : []),
+          ...((result.bookingGiveBack ?? 0) !== 0 ? [cur(-(result.bookingGiveBack ?? 0), 'recovery deferred by booking low')] : []),
+          cur(checks.priorYearClaimsValue, 'prior year claims'),
+        ],
       },
       indent: 2,
       emphasis: 'subtotal',

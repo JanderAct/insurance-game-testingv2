@@ -2272,6 +2272,8 @@ export function processLineYear(
     aggregatePremium,
     aggregateAttachment,
     netUltimateLoss,
+    // The booked figure, recorded rather than left as a local — see its field.
+    bookedNetUltimate: bookedUltimate,
     netIncurredLoss,
 
     operatingExpense,
@@ -3338,6 +3340,10 @@ export function aggregateLineResults(
     // figure — the audit page then reconciled on every line and not at pool,
     // which is a worse state than failing everywhere.
     bookedGrossUltimate: results.reduce((sum, r) => sum + (r.bookedGrossUltimate ?? r.grossUltimateLoss), 0),
+    // ⚠ A PLAIN SUM, WHICH IS THE POINT OF STORING IT. Booked net ultimate is
+    // extensive money and adds across lines; derived, it would need each line's
+    // own CLF, which the pool row does not carry.
+    bookedNetUltimate: results.reduce((sum, r) => sum + (r.bookedNetUltimate ?? r.netUltimateLoss), 0),
     shockLossIncurred: results.some(r => r.shockLossIncurred),
     // ONE ROW PER EVENT, costs summed across the lines it hit — not one row per
     // line. A cross-line event like #28 is a single cause, and showing it twice

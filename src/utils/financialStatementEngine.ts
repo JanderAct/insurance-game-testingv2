@@ -1,7 +1,7 @@
 // Financial Statement engine for Risk Pool Simulation v1
 
 import { isPoolRow } from './lineHelpers';
-import type { LineResultSet , ResultSet} from '../types/simulation';
+import type { CoverageLine, LineResultSet, ResultSet } from '../types/simulation';
 
 export interface IncomeStatement {
   poolPremium: number;
@@ -93,6 +93,113 @@ export interface AnnualFinancialStatement {
   retainedAboveTower: number;
   reserveDetail: ReserveDetail;
   fundingDetail: FundingDetail | null;  // null for historical years — no player-selected funding confidence exists pre-game
+}
+
+/**
+ * THE PRESENTATION SUBTOTALS, DERIVED ONCE.
+ *
+ * ⚠ EVERY FIGURE BELOW WAS BUILT TWICE — once in FinancialsPage and once in
+ * CalculationAuditPage, from the same fields, with no shared helper. They agreed,
+ * and nothing made them agree: a change to one surface moved that surface only,
+ * which is the symptom this exists to end. Two of them were also WRONG in both
+ * places, identically, which is what a single definition would have prevented.
+ *
+ * ⚠ WHY A SEPARATE FUNCTION AND NOT MORE FIELDS ON AnnualFinancialStatement.
+ * deriveAnnualStatement is a pure field MAP — every line of it copies a stored
+ * engine value under a presentation name, and that is worth keeping readable as
+ * exactly that. These are DERIVATIONS: sums, splits and sign flips that exist
+ * only because a statement has subtotals. Keeping the two apart means a reader
+ * can tell at a glance which numbers the engine produced and which this file
+ * computed, which is the distinction the audit page exists to expose.
+ *
+ * ⚠ AND IT RETURNS THE OPERANDS, NOT ONLY THE SUBTOTALS. The audit page renders
+ * the build-up of each figure, so it needs the parts; if it took the subtotal and
+ * re-derived the parts to display them, the duplication would be back in the
+ * place that matters most. One call, every term.
+ */
+export interface StatementLines {
+  /** Pass-throughs shown GROSS: reinsurance and admin are both revenue and expense. */
+  totalOperatingRevenues: number;
+  totalOperatingExpenses: number;
+  /**
+   * ⚠ BOOKED, NOT DRAWN, AND THIS IS THE ONE PLAYER-VISIBLE CHANGE. The provision
+   * subtotal must tie to netIncurredLoss, which the engine builds from the BOOKED
+   * register; `grossUltimateLoss` is the register as DRAWN, before forward
+   * booking contracts it. Showing the drawn figure against a booked subtotal is a
+   * basis mismatch, and it is why the audit page's provision check failed every
+   * year at every scope.
+   */
+  currentYearClaims: number;
+  /**
+   * ⚠ READ FROM priorYearDevelopment, NOT RECONSTRUCTED. Both pages computed
+   * `netIncurredLoss - netUltimateLoss`, which is the same quantity ONLY when the
+   * booked and pre-bias ultimates agree — that is, only at or above break-even.
+   * Below it the reconstruction absorbed the booking bias and the give-back, so
+   * the prior-year line silently carried a current-year item. The engine already
+   * emits the figure; the sign is flipped because the engine signs development
+   * positive-is-favourable and the statement presents it as an expense.
+   */
+  priorYearClaims: number;
+  /**
+   * THE IBNER BOOKING MARKDOWN — negative, and the line the statement was missing.
+   *
+   * ⚠ THE PROVISION SUBTOTAL ONLY EVER TIED BECAUSE TWO ERRORS CANCELLED. The
+   * statement shows the give-back (`Recovery deferred by optimistic booking`) but
+   * never showed the bias markdown beside it, even though both are parts of the
+   * same optimistic booking. The chain was therefore short by this term — and the
+   * old prior-year line, reconstructed as `netIncurredLoss - netUltimateLoss`,
+   * was absorbing exactly it. Correcting the prior-year line on its own exposed
+   * the hole rather than creating it.
+   *
+   * Measured at confidence 0.30, residual 0.000000 on every line-year:
+   * `bookedNetUltimate - netUltimateLoss = -netUltimateLoss x bias - giveBack`.
+   *
+   * ⚠ DERIVED FROM STORED FIELDS, NOT FROM THE BIAS FUNCTION, so it is computable
+   * at POOL scope. `ibnerBookingBias(selectedFundingCLF)` needs a CLF the pool row
+   * does not have; this rearrangement needs only figures both scopes carry.
+   */
+  bookingBiasMarkdown: number;
+  cashAndEquivalents: number;
+  noncurrentInvestments: number;
+  currentUnpaidPortion: number;
+  noncurrentUnpaidPortion: number;
+}
+
+export function statementLines(result: ResultSet | LineResultSet): StatementLines {
+  const totalOperatingRevenues =
+    result.reinsuranceCost + result.poolPremium + result.adminExpense + result.assessments;
+  const totalOperatingExpenses =
+    result.reinsuranceCost + result.netIncurredLoss + result.operatingExpense
+    + result.riskControlInvestment + result.dividends;
+
+  // The cash-equivalents slice comes off the allocation the pool actually chose.
+  // assetAllocation is pool-wide and projected identically into every line, so it
+  // reads the same at either scope.
+  const cashSlice = result.endingInvestments * (result.assetAllocation.cashPct / 100);
+
+  // ⚠ THE CURRENT PORTION IS RESERVE-WEIGHTED PER LINE AND CANNOT BE A SINGLE
+  // MULTIPLICATION AT POOL SCOPE. Each line's nextYearPaydownRate is the engine's
+  // own weighting over the cohorts that line holds, and under a payout pattern
+  // the rate depends on each cohort's age. Both pages already walked byLine to do
+  // this, identically; that walk lives here now.
+  const currentUnpaidPortion = isPoolRow(result)
+    ? (Object.keys(result.byLine) as CoverageLine[])
+      .reduce((s, l) => s + result.byLine[l].endingNetReserve * result.byLine[l].nextYearPaydownRate, 0)
+    : result.endingNetReserve * result.nextYearPaydownRate;
+
+  return {
+    totalOperatingRevenues,
+    totalOperatingExpenses,
+    currentYearClaims: result.bookedGrossUltimate ?? result.grossUltimateLoss,
+    priorYearClaims: -result.priorYearDevelopment,
+    bookingBiasMarkdown:
+      (result.bookedNetUltimate ?? result.netUltimateLoss) - result.netUltimateLoss
+      + (result.bookingGiveBack ?? 0),
+    cashAndEquivalents: result.endingCash + cashSlice,
+    noncurrentInvestments: result.endingInvestments - cashSlice,
+    currentUnpaidPortion,
+    noncurrentUnpaidPortion: result.endingNetReserve - currentUnpaidPortion,
+  };
 }
 
 export function deriveAnnualStatement(result: ResultSet | LineResultSet): AnnualFinancialStatement {

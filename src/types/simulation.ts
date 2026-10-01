@@ -1370,6 +1370,32 @@ interface ResultRowFields {
   // whole shipped path with FORWARD_BOOKING off, so recording it adds a field
   // without moving one. Optional for saves written before it existed.
   bookedGrossUltimate?: number;
+  /**
+   * THE NET ULTIMATE AS BOOKED — `netUltimateLoss x (1 - bookingBias) - bookingGiveBack`.
+   *
+   * ⚠ IT IS THE FIGURE THAT ACTUALLY ENTERS THE RESERVE, AND NOT STORING IT IS
+   * WHY THREE AUDIT CHECKS WERE RED. simulationEngine computes it as a local
+   * (`const bookedUltimate`) and uses it for both `currentYearNetReserve` and
+   * `netPaidCurrentYear` — so the balance-sheet identity
+   * `ending = beginning + bookedNetUltimate - priorYearDevelopment - netPaidLosses`
+   * is the engine's own construction. The audit page was asserting that identity
+   * with `netUltimateLoss` in its place, which is the PRE-bias figure, and the
+   * three checks failed by exactly the difference on every line that funded below
+   * break-even.
+   *
+   * ⚠ STORED RATHER THAN DERIVED, DELIBERATELY, AND THE REASON IS NOT
+   * CONVENIENCE. The derivation needs `ibnerBookingBias(selectedFundingCLF)`, and
+   * the POOL row has no CLF — each line picks its own stop, which is why
+   * selectedFundingCLF is in PoolAbsentKey. A shared derivation would therefore
+   * still have to walk byLine and re-apply a per-line bias, which is the
+   * reimplementation this field exists to delete. Stored per line, the pool value
+   * is a plain sum.
+   *
+   * ⚠ IT RECORDS AN EXISTING ENGINE VALUE. It is not a second definition that can
+   * drift from a first: it IS the local the engine already computed and threw
+   * away. Optional for saves written before it existed, like its gross twin.
+   */
+  bookedNetUltimate?: number;
   // ⚠ NOT THE SHOCK EVENT SYSTEM. This flag predates it and already carries
   // THREE different line-specific meanings — a WC catastrophic-tier claim, a GL
   // occurrence over $1M, or Property's aggregate factor exceeding its
