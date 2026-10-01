@@ -46,10 +46,28 @@ export function formatPct(value: number, decimals = 1): string {
 // header previously inlined its own three-band scale (<0.90 / <1.10) against
 // this four-band one, so a 0.95 loss ratio rendered amber in the header and
 // sky on the dashboard, on the same screen, for the same number.
-function ratioBand(ratio: number): 0 | 1 | 2 | 3 {
-  if (ratio < 0.90) return 0;
-  if (ratio < 1.00) return 1;
-  if (ratio < 1.10) return 2;
+//
+// ⚠ AND IT DRIFTED A SECOND TIME, IN PROSE, WHICH IS WHY THE FUNCTION IS NOW
+// EXPORTED. narrativeEngine carried its own pair — 0.65 and 0.95 — fitted
+// "roughly symmetrically either side of what the year was PRICED to produce".
+// So the colour and the sentence disagreed about the same number: a 0.97 ratio
+// rendered sky (band 1, below 1.00) while the prose called it unfavourable, and
+// a 0.93 rendered sky while the prose said nothing. The comment above already
+// said these must share; copying the numbers is what let them drift, so there
+// are no numbers left to copy.
+//
+// ⚠ THE CUTOFFS ARE ABSOLUTE, NOT RELATIVE TO THE PRICE, AND THAT IS A RULING
+// RATHER THAN A CONVENIENCE. 1.00 is the line between making and losing money
+// on underwriting. A pool funding at 40% and running 0.95 is burning surplus;
+// grading it against its own price would call that favourable and reward the
+// underpricing. 0.65 and 0.95 marked nothing — they were fitted to the priced
+// expectation, which moves with the player's own aggression.
+export const LOSS_RATIO_CUTOFFS = { covered: 0.90, breakEven: 1.00, severe: 1.10 } as const;
+
+export function ratioBand(ratio: number): 0 | 1 | 2 | 3 {
+  if (ratio < LOSS_RATIO_CUTOFFS.covered) return 0;
+  if (ratio < LOSS_RATIO_CUTOFFS.breakEven) return 1;
+  if (ratio < LOSS_RATIO_CUTOFFS.severe) return 2;
   return 3;
 }
 
