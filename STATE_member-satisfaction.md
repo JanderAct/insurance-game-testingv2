@@ -52,11 +52,16 @@ Neither receives work. Quote a number from either as "the demo build", never as 
 **Standing red set:** `ibner-null-check` and `cession-uplift-basis`, both with their reasons in
 `EXPECTED_RED` in `scripts/gates.ts`. An unexpected *pass* on either is as loud as a failure.
 
-> ⚠ **THE SET IS NOW FOUR, NOT TWO.** True as written at `59e5c4b`; two more were entered at `98ae506`,
-> the `PER_CLAIM_REVISION` flip. The full set is `ibner-null-check` (1), `cession-uplift-basis` (2),
-> `actuarial-memo-check` (1) and `clf-label-backtest-check` (1), each with its exit code, its measured
-> figure and its paired control in `EXPECTED_RED`. Measured on a full 72-gate sweep at `8305f4d`:
-> 68 green, those four expected-red at exactly those codes, no unexpected red and no XPASS.
+> ⚠ **THE SET IS NOW THREE.** It read two when this file was written at `59e5c4b`, went to four at
+> `98ae506` (the `PER_CLAIM_REVISION` flip), and is back to three: `ibner-null-check` (exit 1),
+> `cession-uplift-basis` (exit 2) and `clf-label-backtest-check` (exit 1), each with its exit code,
+> its measured figure and its paired control in `EXPECTED_RED`.
+>
+> `actuarial-memo-check` was **retired by being fixed**, not by its condition lapsing — the memo was
+> blanking a development column on the claim that a year past its IBNER horizon cannot move, and the
+> check was asserting that the Prior row holds only carried-in cohorts. Both were wrong, in different
+> places, and both were corrected together. Its entry in `scripts/gates.ts` records the full history,
+> including that its stated evidence had gone stale three ways before anyone read it.
 
 The drivers need a built app and a preview server; there is no npm script for that reason.
 `scripts/tools/session-drivers/_shared.cjs` carries the invocation and says which of their assertions

@@ -128,7 +128,7 @@ function checkTable(
   ctx: { arm: string; config: string; scope: string; year: number },
   rows: ParsedRow[],
 ) {
-  let sawSettled = 0, sawSeeded = 0, sawAdverse = 0, sawFavourable = 0, sawEmptyTriplet = 0, sawPrior = 0;
+  let sawSeeded = 0, sawAdverse = 0, sawFavourable = 0, sawEmptyTriplet = 0, sawPrior = 0;
 
   for (const r of rows) {
     const [initial, prior, current, oneYear, total] = r.cells;
@@ -150,30 +150,22 @@ function checkTable(
       }
     }
 
-    // --- PRINTING: only three blank patterns are legal --------------------
-    // ⚠ THE LEGAL SET GREW BY ONE AND THE OLD RULE WOULD NOW FIRE ON EVERY
-    // MATURED ROW. It used to be "0 or 3 blanks", because the only blank case
-    // was a year with no prior valuation. A matured year now blanks its 1-year
-    // cell alone, so the patterns are:
-    //     none        an ordinary developing year
-    //     1yr only    matured — no further development possible
+    // --- PRINTING: only two blank patterns are legal ----------------------
+    // ⚠ BACK TO "0 or 3", WHICH IS WHERE IT STARTED. A third pattern was added
+    // when the memo began blanking the 1-year cell on a row past its horizon,
+    // and the assertion underneath it — that such a row must not have moved —
+    // fired 759 times because the premise was false. The memo no longer blanks
+    // for that reason, so there are two patterns again:
+    //     none        a row with an earlier valuation to subtract
     //     all three   the newest year — no prior valuation to compare against
     // Anything else is a cell that went blank for no stated reason.
     const blanks = [prior, oneYear, total].map(c => c === EMPTY);
     const emptyCount = blanks.filter(Boolean).length;
-    const maturedPattern = !blanks[0] && blanks[1] && !blanks[2];
-    if (emptyCount !== 0 && emptyCount !== 3 && !maturedPattern) {
+    if (emptyCount !== 0 && emptyCount !== 3) {
       fail(ctx, 'illegal blank pattern', `${where}: prior/1yr/total = ${prior}/${oneYear}/${total}`);
     }
     if (emptyCount === 3) sawEmptyTriplet++;
 
-    // --- PRINTING: a matured year must not have moved ----------------------
-    if (maturedPattern) {
-      sawSettled++;
-      if (Math.abs(num(prior) - num(current)) > 2 * PRINT_QUANTUM) {
-        fail(ctx, 'matured year moved', `${where}: 1-year blank but prior ${prior} != current ${current}`);
-      }
-    }
 
     // --- PRINTING: the word "settled" must never reappear -------------------
     // It collapsed MATURITY into CLOSURE. Guarded by name so a future edit
@@ -205,7 +197,7 @@ function checkTable(
   if (sawEmptyTriplet > 1) {
     fail(ctx, 'more than one year without a prior', `${sawEmptyTriplet} rows carry an empty prior/1yr/total; only the newest accident year can`);
   }
-  return { sawSettled, sawSeeded, sawAdverse, sawFavourable, sawPrior };
+  return { sawSeeded, sawAdverse, sawFavourable, sawPrior };
 }
 
 // ============================================================================
@@ -222,15 +214,22 @@ const PROSE_CLAIMS: ProseClaim[] = [
     extract: /(\d+) row\(s\) on this exhibit/,
     truth: rows => rows.length,
   },
+  // ⚠ BOTH REWORDED WITH THE SENTENCE THEY GUARD. The memo used to say "N no
+  // longer developing and K still developing", which asserted the same false
+  // thing the 1-year blank did — a row past its IBNER horizon can still move.
+  // The sentence now reports position relative to the horizon and nothing more,
+  // and these claims track it. The regexes are deliberately anchored on the new
+  // wording: if the old sentence came back, they would stop matching and the
+  // "did not render" report below would say so rather than passing quietly.
   {
-    what: 'rows no longer developing',
-    extract: /on this exhibit; (\d+) no longer developing/,
-    truth: rows => rows.filter(r => r.matured).length,
+    what: 'rows past their IBNER horizon',
+    extract: /on this exhibit; (\d+) past their IBNER horizon/,
+    truth: rows => rows.filter(r => r.pastHorizon).length,
   },
   {
-    what: 'rows still developing',
-    extract: /no longer developing and (\d+) still developing/,
-    truth: rows => rows.length - rows.filter(r => r.matured).length,
+    what: 'rows still within the horizon',
+    extract: /past their IBNER horizon and (\d+) still within it/,
+    truth: rows => rows.length - rows.filter(r => r.pastHorizon).length,
   },
   {
     what: 'accident years collapsed into Prior',
@@ -242,6 +241,13 @@ const PROSE_CLAIMS: ProseClaim[] = [
     truth: () => 0,   // replaced per call site; see proseAudit's `collapsed`
   },
 ];
+
+// ⚠ COUNTED FROM ExhibitRow, NOT FROM THE PRINTED TEXT, because the printed row
+// no longer says whether it is past its horizon — and that is the point of the
+// change: the exhibit now renders a post-horizon row exactly like any other.
+// The parsed-text loop therefore cannot see this, so it is counted here, where
+// the structured rows are.
+let postHorizonShown = 0, postHorizonMoved = 0;
 
 let proseChecked = 0;
 const proseNoMatch: Record<string, number> = {};
@@ -270,21 +276,48 @@ function proseAudit(
 // an assertion about something a reader can no longer see is not a claim worth
 // guarding, it is a claim that can never fail informatively.
 //
-// It is REPLACED by the claim that actually justifies the new boundary, and which
-// a reader CAN check: every row shown individually has a claim register behind it,
-// and every cohort folded into Prior does not. That is what makes the cut
-// principled rather than cosmetic, so it is the thing to hold the exhibit to.
+// ⚠ ITS REPLACEMENT WAS TRUE WHEN WRITTEN AND IS NOT TRUE NOW, AND THE REASON IS
+// WORTH THE PARAGRAPH BECAUSE NOTHING HERE WAS CARELESS.
+//
+// c282a64 replaced it with "every row shown individually has a claim register
+// behind it, and every cohort folded into Prior does not", and said why the
+// boundary could carry that weight: "It traces exactly the line between cohorts
+// that HAVE a claim register and cohorts that do not. Accident years -2, -1 and 0
+// went through processLineYear and have real registers... Everything older is a
+// seed cohort." With PRE_GAME_YEARS = 3 that was EXACT.
+//
+// 556cef5 then added MATURATION_YEARS = 7 — seven further simulated years before
+// the declared pre-game — so the register line moved from -2 to -9 while
+// PRIOR_BOUNDARY stayed at -2. Prior has contained played accident years with
+// real registers ever since, and this assertion has failed on every evaluation of
+// it: 420 of 420, in both arms, with PER_CLAIM_REVISION on and off alike.
+//
+// ⚠ IT WAS INVISIBLE BECAUSE THE GATE WAS ALREADY EXCUSED. actuarial-memo-check
+// was entered in EXPECTED_RED five days BEFORE 556cef5, for an unrelated reason
+// (the matured blank), and an excused gate is one nobody reads the output of. The
+// entry recorded 48 findings; by the time it was retired the gate reported 1,179.
+// That is the exact hazard EXPECTED_RED's own header warns about — a red nobody
+// is looking at — occurring inside the mechanism built to prevent it.
+//
+// WHAT IT ASSERTS NOW is the age model the memo actually implements and has always
+// documented: "Prior collects every accident year older than PRIOR_BOUNDARY". The
+// register line is no longer where the cut is, so the cut is not held to it.
 function checkPriorBoundary(
   ctx: { arm: string; config: string; scope: string; year: number },
   raw: ExhibitRow[],
   shown: ExhibitRow[],
 ) {
   for (const r of shown) {
-    if (r.isPrior) {
-      if (!r.seeded) fail(ctx, 'prior boundary', 'the Prior row contains an accident year that HAS a claim register');
-      continue;
+    // COVERAGE, counted on every shown row including Prior: a row that is past
+    // its IBNER horizon and still shows a 1-year figure is the thing the old
+    // assertion forbade and the exhibit now displays. Required non-zero below.
+    if (r.pastHorizon && r.oneYear !== null) {
+      postHorizonShown++;
+      if (Math.abs(r.oneYear) > 0.005) postHorizonMoved++;
     }
-    if (r.seeded) fail(ctx, 'prior boundary', `accident year ${r.yearNumber} is shown individually but has no claim register`);
+    if (r.isPrior) continue;
+    // The only boundary claim left about an individually-listed row, and it is
+    // the one the memo makes: it is not older than the cut.
     if (r.yearNumber < PRIOR_BOUNDARY) fail(ctx, 'prior boundary', `accident year ${r.yearNumber} is older than ${PRIOR_BOUNDARY} and was not collapsed`);
   }
 
@@ -318,12 +351,12 @@ function checkPriorBoundary(
 console.log('=== ACTUARIAL MEMORANDUM CHECK ===');
 
 let memosBuilt = 0;
-const coverage = { settled: 0, seeded: 0, adverse: 0, favourable: 0, deficiencyNonZero: 0, finalSections: 0, prior: 0 };
-const perArmCoverage: Record<string, { adverse: number; deficiency: number; settled: number; seeded: number }> = {};
+const coverage = { seeded: 0, adverse: 0, favourable: 0, deficiencyNonZero: 0, finalSections: 0, prior: 0 };
+const perArmCoverage: Record<string, { adverse: number; deficiency: number; seeded: number }> = {};
 let boundaryChecked = 0;
 
 for (const arm of ARMS) {
-  perArmCoverage[arm.name] = { adverse: 0, deficiency: 0, settled: 0, seeded: 0 };
+  perArmCoverage[arm.name] = { adverse: 0, deficiency: 0, seeded: 0 };
   for (const { lines, name } of CONFIGS) {
     for (let g = 0; g < GAMES; g++) {
       const id = `AMC${name}${g}`;
@@ -357,11 +390,10 @@ for (const arm of ARMS) {
           const table = tables.find(t => t.heading === lines[i]);
           if (!table) { fail(ctx, 'missing section', `no table under heading "${lines[i]}"`); continue; }
           const seen = checkTable(ctx, table.rows);
-          coverage.settled += seen.sawSettled; coverage.seeded += seen.sawSeeded;
+          coverage.seeded += seen.sawSeeded;
           coverage.adverse += seen.sawAdverse; coverage.favourable += seen.sawFavourable;
           coverage.prior += seen.sawPrior;
           perArmCoverage[arm.name].adverse += seen.sawAdverse;
-          perArmCoverage[arm.name].settled += seen.sawSettled;
           perArmCoverage[arm.name].seeded += seen.sawSeeded;
 
           const shown = collapsePrior(perLineRows[i]);
@@ -465,11 +497,12 @@ console.log(`${memosBuilt.toLocaleString()} memoranda built across ${ARMS.length
 for (const arm of ARMS) console.log(`  ${arm.name.padEnd(9)} ${arm.why}`);
 
 console.log('\n--- COVERAGE: DID THE CHECK REACH THE INTERESTING STATES? ---');
-console.log('  A green run over rows that never matured, never developed adversely and never');
-console.log('  carried a deficiency would be a check passing while unable to fail.\n');
-console.log(`  matured rows seen        ${coverage.settled.toLocaleString()}  (1-year column blank)`);
+console.log('  A green run over rows that never passed their horizon, never developed adversely');
+console.log('  and never carried a deficiency would be a check passing while unable to fail.\n');
+console.log(`  post-horizon rows shown  ${postHorizonShown.toLocaleString()}  (1-year figure printed, not blanked)`);
+console.log(`  of those, moved          ${postHorizonMoved.toLocaleString()}  (the exhibit shows development past the horizon)`);
 console.log(`  Prior rows seen          ${coverage.prior.toLocaleString()}`);
-console.log(`  carried-in rows seen     ${coverage.seeded.toLocaleString()}  (should equal Prior — the dagger belongs to it alone)`);
+console.log(`  daggered rows seen       ${coverage.seeded.toLocaleString()}  (should equal Prior — each Prior row CONTAINS carried-in years)`);
 console.log(`  adverse developments     ${coverage.adverse.toLocaleString()}`);
 console.log(`  favourable developments  ${coverage.favourable.toLocaleString()}`);
 console.log(`  final-position sections  ${coverage.finalSections.toLocaleString()}`);
@@ -479,7 +512,7 @@ console.log(`  Prior boundary claim     ${boundaryChecked.toLocaleString()} eval
 console.log('\n  per arm:');
 for (const arm of ARMS) {
   const c = perArmCoverage[arm.name];
-  console.log(`    ${arm.name.padEnd(9)} adverse ${String(c.adverse).padStart(5)}   settled ${String(c.settled).padStart(5)}   carried-in ${String(c.seeded).padStart(5)}   deficiency>0 ${c.deficiency}`);
+  console.log(`    ${arm.name.padEnd(9)} adverse ${String(c.adverse).padStart(5)}   daggered ${String(c.seeded).padStart(5)}   deficiency>0 ${c.deficiency}`);
 }
 
 // ⚠ THE ARMS MUST DIFFER, AND THIS IS ASSERTED RATHER THAN EYEBALLED. The whole
@@ -497,13 +530,25 @@ if (perArmCoverage['squeezed'].deficiency === 0) {
 for (const arm of ARMS) {
   const c = perArmCoverage[arm.name];
   if (c.adverse === 0) armErrors.push(`${arm.name} arm saw no adverse development at all`);
-  if (c.settled === 0) armErrors.push(`${arm.name} arm saw no settled accident year at all`);
-  if (c.seeded === 0) armErrors.push(`${arm.name} arm saw no carried-in accident year at all`);
+  if (c.seeded === 0) armErrors.push(`${arm.name} arm saw no daggered row at all — the carried-in caveat never rendered`);
 }
 if (coverage.finalSections === 0) armErrors.push('the final-position section never rendered');
 if (coverage.prior === 0) armErrors.push('no Prior row was ever rendered — the collapse is untested');
+// ⚠ WHAT THIS NOW MEANS. Every Prior row collapses years older than
+// PRIOR_BOUNDARY, and the carried-in cohorts are the oldest years in the ledger,
+// so every Prior row contains some — and must carry the dagger. The old message
+// said "every carried-in year should be inside Prior and nowhere else", which is
+// a claim about the BOUNDARY tracing the register line; that stopped being true
+// at 556cef5 and is no longer what the exhibit promises. The dagger is a
+// CONTAINS marker now, and this is the assertion that matches it.
 if (coverage.prior !== coverage.seeded) {
-  armErrors.push(`${coverage.prior} Prior rows but ${coverage.seeded} daggered rows — every carried-in year should be inside Prior and nowhere else`);
+  armErrors.push(`${coverage.prior} Prior rows but ${coverage.seeded} daggered — every Prior row collapses the oldest ledger years, which are carried in, so each should carry the dagger`);
+}
+// The replacement for the retired "matured year moved" assertion. If this ever
+// reads zero the exhibit has stopped showing post-horizon development, which is
+// what this commit corrected it to show.
+if (postHorizonMoved === 0) {
+  armErrors.push(`no row past its IBNER horizon was seen to move (${postHorizonShown} post-horizon rows rendered a 1-year figure) — either the blanking is back or the sample no longer reaches one`);
 }
 if (boundaryChecked === 0) armErrors.push('the Prior boundary claim was never evaluated');
 if (proseChecked === 0) armErrors.push('no prose claim was ever evaluated');
@@ -518,7 +563,9 @@ console.log('\n--- FINDINGS ---');
 if (findings.length === 0 && armErrors.length === 0) {
   console.log('\nEVERY ROW IDENTITY RECONCILES from its printed cells, in both arms; blank cells are');
   console.log('used only where the exhibit has nothing to report rather than a zero to report; the');
-  console.log('Prior row ties to the years it collapses and carries the dagger alone; the pool total');
+  console.log('Prior row ties to the years it collapses and is daggered because it contains');
+  console.log('carried-in years; development past the IBNER horizon is shown rather than blanked;');
+  console.log('the pool total');
   console.log('is the sum of its lines; every registered prose claim matches the data; and both arms');
   console.log('reached the states that make those checks capable of failing.');
   process.exit(0);

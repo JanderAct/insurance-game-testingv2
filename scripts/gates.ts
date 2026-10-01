@@ -839,16 +839,43 @@ const EXPECTED_RED: Record<string, { code: number; why: string }> = {
   //     Re-pointed at the three current-year items; prior-year development on
   //     cohorts written UNDER cover is reported, not asserted zero. PROVEN:
   //     ignoring the decline on layer 0 fails all three decline assertions.
-  'actuarial-memo-check': {
-    code: 1,
-    why: 'THE MEMO\'S DEFINITION OF "MATURED" IS THE COHORT HORIZON. It asserts that an accident year '
-      + 'past IBNER_HORIZON shows a blank 1-year development and does not move. Under the per-claim law a '
-      + 'cohort keeps developing while its claims are OPEN, which outlives that horizon, so 48 findings '
-      + 'report matured years moving by 0.1-1.5% (e.g. prior 6.42 vs current 6.44). Verified: GREEN with '
-      + 'the flag off at this same commit. The magnitudes are small but the exhibit is internally '
-      + 'inconsistent — it prints a blank next to a value that moved. FIX: S3, which has to settle what '
-      + 'maturity means once pricing reads a triangle whose claims develop to closure.',
-  },
+  // ⚠ actuarial-memo-check's ENTRY WAS HERE AND IS RETIRED — BOTH SIDES WERE
+  // CORRECTED, NOT THE CONDITION LAPSED. The distinction matters to anyone
+  // reading this history: the gate did not go green because the world changed
+  // around it. The memo and the check were each wrong, in different places, and
+  // both were fixed in the commit that removed this entry.
+  //
+  // The entry read: 'THE MEMO'S DEFINITION OF "MATURED" IS THE COHORT HORIZON...
+  // 48 findings report matured years moving by 0.1-1.5%... Verified: GREEN with
+  // the flag off at this same commit. FIX: S3, which has to settle what maturity
+  // means once pricing reads a triangle whose claims develop to closure.'
+  //
+  // Its retirement condition — S3 — HAS shipped (PRICING_TRIANGLE.enabled), and
+  // the work it actually named, settling what maturity means, is what the fix
+  // did: the memo no longer blanks a row because it is past its horizon, because
+  // a row past its horizon can still move. The horizon stops IBNER, not the
+  // estimate.
+  //
+  // ⚠ ITS RECORDED EVIDENCE WAS STALE THREE WAYS BY THE TIME IT WAS READ, and
+  // every one of them is a reason to distrust a long-lived excuse:
+  //   48 findings       the gate reported 1,179.
+  //   one cause         420 of those were a SECOND, unrelated failure the entry
+  //                     never mentioned — checkPriorBoundary asserting that the
+  //                     Prior row contains only carried-in cohorts. That was TRUE
+  //                     when written (PRE_GAME_YEARS = 3, boundary at -2) and was
+  //                     falsified by 556cef5 adding MATURATION_YEARS = 7, which
+  //                     moved the register line to -9 and left the boundary at -2.
+  //   'GREEN with the   it is not. With PER_CLAIM_REVISION off the gate still
+  //    flag off'        reports 765 findings and 3 coverage failures. The matured
+  //                     half was never purely the flag's doing: 345 off, 759 on.
+  //
+  // ⚠ AND THE SECOND FAILURE ARRIVED FIVE DAYS AFTER THIS ENTRY WAS WRITTEN AND
+  // WAS INVISIBLE BECAUSE OF IT. An excused gate is one nobody reads the output
+  // of, which is the exact hazard the header above warns about — and it happened
+  // inside the mechanism built to prevent it. The XPASS guard catches an
+  // expectation that outlives its defect; nothing caught an expectation that
+  // acquired a second one.
+
   // ⚠ ratemaking-loop-check IS GONE FROM THIS MAP AND THAT IS THE HEADLINE OF
   // ITS COMMIT. It was entered red on the day it was written, as the loop's own
   // definition, and it now passes 4/4 on the flagged arm. Its three lives here

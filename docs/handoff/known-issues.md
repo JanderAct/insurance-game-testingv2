@@ -171,12 +171,20 @@ measured justification, a paired control and a named fix. Two fired as `xfail`
 in the FAST run (`actuarial-memo-check`, `cession-uplift-basis`).
 
 ⚠ **THAT IS THE FAST TIER ONLY, AND READING IT AS THE WHOLE SET IS THE MISTAKE
-IT INVITES.** `EXPECTED_RED` holds **four**; the other two live in the deferred
-tier and so never appear in a FAST run. In full: `ibner-null-check` (exit 1),
-`cession-uplift-basis` (exit 2), `actuarial-memo-check` (exit 1) and
-`clf-label-backtest-check` (exit 1). Measured on a full 72-gate sweep at
-`8305f4d` — 68 green, those four at exactly those codes, no unexpected red and
-no XPASS. Anything quoting a two-gate red set predates `98ae506`.
+IT INVITES.** `EXPECTED_RED` now holds **three**: `ibner-null-check` (exit 1),
+`cession-uplift-basis` (exit 2) and `clf-label-backtest-check` (exit 1). Only
+the second appears in a FAST run; the other two are deferred-tier.
+
+⚠ **`actuarial-memo-check` IS NO LONGER AMONG THEM, AND IT LEFT BY BEING FIXED.**
+The memo blanked a development column on the claim that an accident year past its
+IBNER horizon cannot move — it can, and does — and the check separately asserted
+that the Prior row contains only carried-in cohorts, which stopped being true when
+`MATURATION_YEARS` was added. Both were corrected together and the gate is green.
+Its retirement note in `scripts/gates.ts` is worth reading for what it says about
+long-lived excuses: the entry's own recorded evidence had gone stale three ways —
+48 findings against 1,179, no mention of the second failure, and a flag-off
+control that no longer held — and the second failure arrived five days after the
+entry and was invisible precisely because the gate was already excused.
 
 A later entry, `clf-label-backtest-check`, is of a different kind from the rest
 and worth separating: it is not a threshold awaiting re-derivation. The tables

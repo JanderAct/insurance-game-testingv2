@@ -156,7 +156,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // committed baseline. The committed path is the default and is what a bare run
 // uses.
 const BASELINE = process.env.RENDER_BASELINE
-  ?? path.join(__dirname, '../../baselines/RENDER_IDENTITY_v5.json');
+  ?? path.join(__dirname, '../../baselines/RENDER_IDENTITY_v6.json');
 const WRITE = process.argv.includes('--write');
 const BASE_URL = process.env.RENDER_URL ?? 'http://127.0.0.1:4173';
 // The image ships chromium 1194; a newer `playwright` expects its own build and

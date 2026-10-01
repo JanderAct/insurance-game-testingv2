@@ -53,14 +53,27 @@ export interface ExhibitRow {
   current: number;
   oneYear: number | null;
   total: number | null;
-  // ⚠ MATURED, NOT "SETTLED", AND THE RENAME IS THE POINT. Reaching the horizon
-  // means IBNER has stopped developing the cohort. It does NOT mean the accident
-  // year is finished: it is still open and still paying. processIbner's own
-  // header says so — "runoff and development are separate clocks: the horizon
-  // governs how long the ESTIMATE is uncertain, the payout pattern governs how fast it
-  // is settled" — and the old label collapsed the two, telling a player a year
-  // was done while it was still writing cheques.
-  matured: boolean;
+  // ⚠ PAST THE HORIZON. NOT "matured", AND NOT "settled" BEFORE THAT — THE NAME
+  // HAS NOW BEEN WRONG TWICE AND BOTH TIMES THE SAME WAY.
+  //
+  // Reaching the horizon means IBNER has stopped developing the cohort. It does
+  // NOT mean the accident year is finished, and it does NOT mean the estimate
+  // cannot move: claims revise while they are open, and under PER_CLAIM_REVISION
+  // they go on doing so long past the cohort's horizon. processIbner's own header
+  // draws the first distinction — "runoff and development are separate clocks:
+  // the horizon governs how long the ESTIMATE is uncertain, the payout pattern
+  // governs how fast it is settled".
+  //
+  // "settled" collapsed maturity into CLOSURE and was renamed for it. "matured"
+  // then collapsed the horizon into FINALITY — this file blanked the 1-year
+  // column on the strength of it, asserting the year could not move — and that
+  // was false under the cohort law too, just less often: 345 exhibits moved after
+  // their horizon with PER_CLAIM_REVISION off, and 759 with it on. The rename
+  // fixed the word and left the claim.
+  //
+  // `pastHorizon` states the fact and nothing more. Nothing printed may infer
+  // finality from it.
+  pastHorizon: boolean;
   /** True only for the collapsed Prior row. */
   isPrior: boolean;
 
@@ -167,7 +180,7 @@ export function exhibitRows(ledger: ReserveDevelopmentRow[], asAt: number): Exhi
         prior,
         oneYear: prior === null ? null : current - prior,
         total: isFirst ? null : current - initial,
-        matured: ageAt(r, asAt) > r.horizon,
+        pastHorizon: ageAt(r, asAt) > r.horizon,
         isPrior: false,
         paid,
         // NET over NET — `current` is this row's net ultimate at the same
@@ -214,7 +227,7 @@ export function poolExhibitRows(perLine: ExhibitRow[][]): ExhibitRow[] {
         total: anyNull(r => r.total) ? null : sum(r => r.total ?? 0),
         // Matured only when EVERY contributing line has stopped developing. One
         // line still moving makes the pool row still moving.
-        matured: rows.every(r => r.matured),
+        pastHorizon: rows.every(r => r.pastHorizon),
         isPrior: false,
         // ⚠ THE RATIO IS RE-DERIVED FROM THE SUMMED DOLLARS, NEVER AVERAGED.
         // Adding three lines' paid-to-incurred ratios is meaningless and
@@ -253,7 +266,20 @@ export function collapsePrior(rows: ExhibitRow[]): ExhibitRow[] {
     // boundary. Asserted rather than assumed, because a non-seeded year falling
     // in here would mean the cut had drifted off the register line it is
     // supposed to trace.
-    seeded: old.every(r => r.seeded),
+    // ⚠ `some`, NOT `every`, AND THIS IS THE HALF THE GATE WAS ASSERTING WRONG.
+    // When this collapse was written the pre-game was PRE_GAME_YEARS = 3 — years
+    // -2, -1 and 0 — so everything older than PRIOR_BOUNDARY really was a seed
+    // cohort and `every` and `some` agreed. MATURATION_YEARS = 7 (556cef5) then
+    // put seven PLAYED accident years, -9 to -3, inside Prior, each with a real
+    // claim register. `every` has read false ever since, so the dagger stopped
+    // rendering at all and the caveat it carries stopped being shown.
+    //
+    // The honest claim is that the row CONTAINS carried-in years, which is what
+    // the caveat is about: Prior's INITIAL column is now a mixture of real
+    // original estimates and game-start valuations, and a reader needs to know
+    // the mixture is there. `every` would only be true again if the boundary were
+    // moved back onto the register line.
+    seeded: old.some(r => r.seeded),
     initial: sum(r => r.initial),
     prior: anyNull(r => r.prior) ? null : sum(r => r.prior ?? 0),
     current: sum(r => r.current),
@@ -261,7 +287,7 @@ export function collapsePrior(rows: ExhibitRow[]): ExhibitRow[] {
     total: anyNull(r => r.total) ? null : sum(r => r.total ?? 0),
     // Still developing if ANY constituent is. One live cohort inside Prior makes
     // the whole row live.
-    matured: old.every(r => r.matured),
+    pastHorizon: old.every(r => r.pastHorizon),
     isPrior: true,
     // Summed and then divided once, exactly as at pool scope and for the same
     // reason: a ratio of sums, never a sum or an average of ratios.
@@ -314,15 +340,24 @@ function renderTable(rows: ExhibitRow[]): string {
     const label = r.isPrior
       ? `**Prior** (to ${r.calendarYear})${r.seeded ? ' †' : ''}`
       : `${r.yearNumber} (${r.calendarYear})${r.seeded ? ' †' : ''}`;
-    // ⚠ BLANK, NOT "settled", AND NOT 0.00. A matured accident year cannot
-    // develop further, so the 1-year cell has nothing to report — and printing
-    // 0.00 would say "measured, and it did not move", which is a different and
-    // weaker claim than "there was nothing to measure". Same distinction the
-    // negative-zero rule draws in m() below.
+    // ⚠ THE 1-YEAR CELL IS BLANK FOR EXACTLY ONE REASON: THERE IS NO EARLIER
+    // VALUATION TO SUBTRACT. It used to blank whenever the row was past its
+    // horizon as well, on the claim that such a year "cannot develop further" —
+    // and that claim was false, so the exhibit printed a blank beside a figure
+    // that had visibly moved. 759 of them on the current law.
     //
-    // "settled" was worse than either: it collapsed MATURITY into CLOSURE and
-    // told a player the year was finished while it was still paying out.
-    const oneYear = r.matured ? EMPTY : cell(r.oneYear);
+    // THE TWO MEANINGS LOOK IDENTICAL ON A PAGE AND ARE OPPOSITE: "nothing to
+    // measure" (no prior valuation — the year is new) against "measured and it
+    // cannot change" (a claim about the future). Only the first is ever true
+    // here, and `cell` renders it from `oneYear === null`, which is set by
+    // exhibitRows iff this is the row's first valuation. There is no longer a
+    // second path to a blank, so the reader does not have to work out which
+    // kind they are looking at.
+    //
+    // Still not 0.00: that would say "measured, and it did not move", a
+    // different and weaker claim than "there was nothing to measure". Same
+    // distinction the negative-zero rule draws in m() below.
+    const oneYear = cell(r.oneYear);
     // ⚠ EVERY COLUMN ON THIS ROW IS NET, INCLUDING THE LAST TWO, which is what
     // makes the row internally subtractable — paid + remaining reserve = current
     // ultimate, exactly, on the printed figures. A gross paid column here would
@@ -340,10 +375,14 @@ function renderTable(rows: ExhibitRow[]): string {
 // sentence beside a correct table is exactly the defect the Calculation Audit
 // page needed a third kind of check to find.
 function sectionProse(rows: ExhibitRow[], collapsed: number): string {
-  const matured = rows.filter(r => r.matured).length;
-  const developing = rows.length - matured;
-  return `${rows.length} row(s) on this exhibit; ${matured} no longer developing and ` +
-    `${developing} still developing; ${collapsed} accident year(s) collapsed into Prior.`;
+  // ⚠ "past their IBNER horizon", NOT "no longer developing". The old sentence
+  // asserted the thing the blank asserted and was wrong the same way: a year past
+  // its horizon can still move, and on this exhibit it frequently does. What the
+  // horizon tells a reader is that IBNER has stopped driving the estimate — not
+  // that the estimate has stopped.
+  const past = rows.filter(r => r.pastHorizon).length;
+  return `${rows.length} row(s) on this exhibit; ${past} past their IBNER horizon and ` +
+    `${rows.length - past} still within it; ${collapsed} accident year(s) collapsed into Prior.`;
 }
 
 // THE UN-EMERGED DEFICIENCY, DISCLOSED AT GAME END ONLY.
@@ -505,24 +544,25 @@ export function buildActuarialMemo({ gameState, asAtYear }: ActuarialMemoInput):
     'else in the game shows that — Net Paid Losses is one calendar-year total per line.\n' +
     '- **A year can be well paid and still open.** Closure is slower than payment, deliberately ' +
     'and from the pool\'s own experience, so a high paid ratio does not mean the files are shut.\n' +
-    '- **Empty cells are not zeros.** The newest accident year has no prior valuation and no ' +
-    'development, because it has had no opportunity to develop. That is different from a year ' +
-    'that had the opportunity and did not move.\n' +
-    '- **A blank development column means the year has run past its development horizon.** ' +
-    'Its estimate will not move again, so there is nothing to report in that column — which is ' +
-    'a different statement from measuring the movement and finding it was zero. **It does NOT ' +
-    'mean the accident year is finished.** It is still open and still paying claims out; the ' +
-    'horizon governs how long the ESTIMATE stays uncertain, not how long the year takes to pay.\n' +
+    '- **An empty development cell means there was nothing to subtract, not that nothing ' +
+    'moved.** A blank appears on one row only: the newest accident year, which has no earlier ' +
+    'valuation to compare against. Every other row shows its movement, including zero movement ' +
+    'as 0.00. A blank never means "this year can no longer change".\n' +
+    '- **Past the IBNER horizon is not finished.** The horizon governs how long IBNER drives the ' +
+    'ESTIMATE, not how long the year takes to pay and not whether it can move. Claims revise ' +
+    'while they are open, which outlasts the horizon, so a year past it can and does still ' +
+    'develop — and this exhibit shows that movement rather than hiding it behind a blank.\n' +
     '- **Prior** collects every accident year older than ' + PRIOR_BOUNDARY + ', as a development ' +
     'exhibit normally does. Its columns are the sum of the years it replaces.\n' +
-    '- **† carried in at game start.** The Prior row predates the pool\'s own record. Those ' +
-    'accident years were apportioned from an opening reserve total rather than built up from ' +
-    'claims, so the INITIAL column is the estimate as at game start, not at inception — there is ' +
-    'no inception figure for them and none has been invented, and their development is measured ' +
-    'from game start for the same reason. **That is exactly why the Prior boundary sits where it ' +
-    'does:** every year shown individually has a real claim register behind it and a real ' +
-    'original estimate; everything inside Prior has neither. They are also much smaller than a ' +
-    'full accident year, being shares of one opening balance, so do not read the step up at ' +
+    '- **† this row CONTAINS years carried in at game start.** Not that every year in it was: ' +
+    'Prior collapses by age, and the oldest few of the years it folds together predate the ' +
+    'pool\'s own record while the rest were played before year 1 and have real claim registers. ' +
+    'The carried-in ones were apportioned from an opening reserve total rather than built up ' +
+    'from claims, so for those the INITIAL column is the estimate as at game start, not at ' +
+    'inception — there is no inception figure for them and none has been invented, and their ' +
+    'development is measured from game start for the same reason. **So Prior\'s INITIAL column ' +
+    'is a mixture of the two**, and the dagger is there to say the mixture exists. The ' +
+    'carried-in years are also much smaller than a ' +
     'year -2 as a jump in loss experience.\n' +
     '- **Short-tail lines stop developing and long-tail lines do not.** Property\'s accident ' +
     'years go blank after a few valuations while Workers\' Compensation keeps moving for a ' +
