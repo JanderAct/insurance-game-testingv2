@@ -529,7 +529,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Nothing else differs: 356 lines became 360, and the four new lines are the
 // added row on the Pool sheet and on each of the three line sheets.
 
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v49.json');
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v50.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

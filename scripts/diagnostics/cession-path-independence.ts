@@ -258,7 +258,7 @@ function runArm(g: number, squeezed: boolean): Record<string, Tally> {
         t.registerSum += born.registerSum;
         t.biasDollars += born.registerSum * born.bookingBias;
         t.claimsAtInception += (born.developingClaims ?? []).reduce((s, c) => s + c.original, 0);
-        t.claimsDrawn += (born.developingClaims ?? []).reduce((s, c) => s + c.drawn, 0);
+        t.claimsDrawn += (born.developingClaims ?? []).reduce((s, c) => s + c.reported, 0);
       }
 
       // A favourable movement bigger than the subset can absorb: the clamp.

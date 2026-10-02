@@ -119,9 +119,12 @@ export function grossUltimateByAccidentYear(
  */
 export interface OccDevelopment {
   /** The occurrence as first REPORTED — with forward booking on, the contracted
-   *  initial estimate, BELOW what the generator drew. Never moves. Exported
-   *  under the historical header "Drawn Occurrence". */
-  drawn: number;
+   *  initial estimate, BELOW what the generator drew. Never moves.
+   *  ⚠ EXPORTED UNDER THE HISTORICAL HEADER "Drawn Occurrence", which is the
+   *  published column name and is kept; the FIELD is named for what it holds,
+   *  because naming it for the header is what produced the closure-band defect
+   *  this rename closes. */
+  reported: number;
   /** As first BOOKED — `drawn` less the cohort's optimistic markdown. */
   booked: number;
   current: number;
@@ -159,7 +162,7 @@ export function occurrenceDevelopment(
         if (mv !== 0) byYear.set(c.yearNumber + k + 1, mv);
       });
       m.set(d.occurrenceId, {
-        drawn: d.drawn, booked: d.original, current: d.current, dev,
+        reported: d.reported, booked: d.original, current: d.current, dev,
         pct: d.original > 0 ? Number(((dev / d.original) * 100).toFixed(1)) : '',
         accidentYear: c.yearNumber,
         byYear,

@@ -220,8 +220,36 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // carries it. The change is invisible here by construction, not by luck.
 // ⚠ THE CONTROL RAN FIRST AND ON A SEPARATE PORT: 0655f2e built into its own
 // worktree and served on 4174 reproduced all 298 fingerprints.
+// ⚠ v11 -> v12: THE CLOSURE BAND PUT ON THE DRAW. 224 of 298 fingerprints
+// moved, and that breadth is the point rather than a surprise: changing which
+// claims are closed changes the developing set, which changes development
+// allocation, which changes reserves, premium and every figure downstream.
+// Classified mechanically rather than sampled — of the 224:
+//   177  every changed token is a number
+//    41  the same, with a suffix my first pass missed ('1.44x' -> '1.43x',
+//        '$0.71M.' -> '$0.72M.')
+//     6  a token COUNT change, each attributed individually:
+//          3x Calculation Audit|GL|y0  the status badge going from '28 of 29
+//             checks OK — 1 difference found' to 'All 29 checks OK'
+//          3x Departments|doc:Claims|y2  one row of the top-ten open listing
+//             REPLACED, e.g. '2024 Summit Recreation District 119' giving way
+//             to '2026 Ashford County 047' — a claim's status flipped, which is
+//             this change reaching the player-visible document.
+// ⚠ PROPERTY-SOLO MOVED NOT AT ALL: GL 44, WC 44, WC+GL 60, WC+GL+PR 76, PR 0.
+// Property has no CLOSURE_BY_SIZE split, so it has no band to resolve and the
+// contraction cannot reach it. That is the confinement claim, and the export
+// guard says the same thing independently — all six PR-solo workbooks are
+// byte-identical across every metric, year and full-precision rendering.
+// ⚠ AND TWO AUDIT CHECKS FLIP BOTH WAYS. 'Review' -> 'OK' on one row and 'OK'
+// -> 'Review' on another, because their differences moved across a tolerance
+// that is too tight to be stable — the bound is half a rounding unit for a
+// check that sums two rounded rates. That is a SEPARATE defect, fixed in the
+// commit after this one; it is recorded here because it is why some of these
+// rows carry a word change rather than only numbers.
+// ⚠ THE CONTROL RAN FIRST AND ON A SEPARATE PORT: ccebb95 built into its own
+// worktree and served on 4174 reproduced all 298 against the committed v11.
 const BASELINE = process.env.RENDER_BASELINE
-  ?? path.join(__dirname, '../../baselines/RENDER_IDENTITY_v11.json');
+  ?? path.join(__dirname, '../../baselines/RENDER_IDENTITY_v12.json');
 const WRITE = process.argv.includes('--write');
 const BASE_URL = process.env.RENDER_URL ?? 'http://127.0.0.1:4173';
 // The image ships chromium 1194; a newer `playwright` expects its own build and

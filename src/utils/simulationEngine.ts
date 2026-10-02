@@ -24,7 +24,7 @@ function mergeShockRecords(lineResults: LineResultSet[]): ShockRecord[] | undefi
   return merged.size > 0 ? [...merged.values()] : undefined;
 }
 import { SeededRandom, deriveSubRng } from './random';
-import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, CAPITAL_ADEQUACY_THRESHOLDS, FUNDING_CLF_TABLE, IBNER_BOOKING_BIAS_COEFF, IBNER_CALENDAR_RHO, IBNER_COHORT_SD_SCALE, IBNER_HORIZON, IBNER_STEP_MIXTURE, IBNER_TOTAL_SD, IBNER_UNWIND_DECAY, LINE_PAYOUT_PATTERN, FORWARD_BOOKING, PER_CLAIM_REVISION, PRICING_TRIANGLE, MEMBER_LOSS_VOLATILITY, OPERATING_CASH_PCT_OF_PREMIUM, PROPERTY_HELD_PURE_PREMIUM_PER_100, RISK_CONTROL_PARAMS, resolveClosureCurve, openShareAtStep } from '../data/defaultAssumptions';
+import { ADMIN_EXPENSE_RATIO_OF_PURE_PREMIUM, AGGREGATE_LOSS_DISTRIBUTION, CAPITAL_ADEQUACY_THRESHOLDS, FUNDING_CLF_TABLE, IBNER_BOOKING_BIAS_COEFF, IBNER_CALENDAR_RHO, IBNER_COHORT_SD_SCALE, IBNER_HORIZON, IBNER_STEP_MIXTURE, IBNER_TOTAL_SD, IBNER_UNWIND_DECAY, LINE_PAYOUT_PATTERN, FORWARD_BOOKING, PER_CLAIM_REVISION, PRICING_TRIANGLE, MEMBER_LOSS_VOLATILITY, OPERATING_CASH_PCT_OF_PREMIUM, PROPERTY_HELD_PURE_PREMIUM_PER_100, RISK_CONTROL_PARAMS, openShareAtStep } from '../data/defaultAssumptions';
 import type { TowerLine } from '../data/reinsuranceTower';
 import {
   DEVELOPMENT_ALLOCATION, DEVELOPMENT_CESSION_ENABLED, STOCHASTIC_ALLOCATION_MODE,
@@ -40,7 +40,7 @@ import { memberExperienceMods } from './memberExperienceMod';
 import { claimRevisionUnit, normalQuantile, reviseDevelopingSet, settleClosingSet } from './claimRevision';
 import { experienceRatePer100, type ExperienceBasis } from './experienceRating';
 import { projectPricingTriangle, windowRows } from './pricingTriangle';
-import { developmentDrift, initialEstimate } from './claimTriangle';
+import { closureCurveForReported, developmentDrift, initialEstimate } from './claimTriangle';
 import { poolYearFactor, wcGenerationInputs, glGenerationInputs, propertyGenerationInputs } from './claimGeneration';
 import { programFreqMultiplier, programAnnualCost, programRtwConversion } from './riskControlPrograms';
 import {
@@ -3727,7 +3727,13 @@ function processIbner(
           c.developingClaims,
           c.developmentBench ?? [],
           c.untrackedTotal ?? 0,
-          (claimId, drawn) => isClaimClosed(resolveClosureCurve(line, drawn), gameId, claimId, curveAge),
+          // ⚠ closureCurveForReported, NOT resolveClosureCurve. The value this
+          // callback receives is the occurrence's REPORTED figure, which under
+          // forward booking is contracted below the draw — and the size band is
+          // defined on the draw. Passing it straight to resolveClosureCurve is
+          // what put the engine's `closed` flag at odds with the claims
+          // memorandum and the workbook on 1.08% of claims.
+          (claimId, reported) => isClaimClosed(closureCurveForReported(line, reported), gameId, claimId, curveAge),
           developing ? DEVELOPMENT_ALLOCATION.claimCount : 0,
           // ⚠ THE SET MUST HOLD THE MOVEMENT, NOT MERELY NUMBER TEN. A matured
           // cohort takes no step, so it needs to hold nothing.

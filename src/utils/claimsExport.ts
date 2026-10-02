@@ -284,7 +284,7 @@ function devHeader(years: number[]): string[] {
 function devCells(dev: OccDevelopment | undefined, years: number[]): Row {
   if (!dev) return new Array<string>(years.length + 4).fill('');
   return [
-    numOrBlank(dev.drawn), numOrBlank(dev.booked),
+    numOrBlank(dev.reported), numOrBlank(dev.booked),
     ...years.map(y => (dev.byYear.has(y) ? numOrBlank(dev.byYear.get(y)) : '')),
     numOrBlank(dev.current), numOrBlank(dev.dev),
   ];

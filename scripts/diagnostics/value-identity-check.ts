@@ -794,7 +794,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // capture is sufficient alone here: the hash guard cannot tell "different
 // members enrolled" from "the arithmetic broke", and this one says the
 // changed set is exactly the set a roster change explains.
-const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v48.json');
+const BASELINE = path.join(__dirname, '../../baselines/VALUE_IDENTITY_v49.json');
 
 function seedOf(id: string) {
   let h = 5381;

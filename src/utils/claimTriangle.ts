@@ -109,6 +109,9 @@ import { reviseOnce, settlementFactor, type RevisionState } from './claimRevisio
 import { getMemberExposure } from './lineHelpers';
 import {
   CLAIM_REVISION_MAGNITUDE_NUMERATOR,
+  CLOSURE_BY_SIZE,
+  CLOSURE_SIZE_THRESHOLD,
+  FORWARD_BOOKING,
   LINE_PAYOUT_PATTERN,
   TRIANGLE_DEVELOPMENT_DRIFT,
   TRIANGLE_HISTORY_YEARS,
@@ -185,6 +188,55 @@ export interface ClaimTriangle {
 export function initialEstimate(line: CoverageLine, drawn: number): number {
   const { k, A } = TRIANGLE_INITIAL_CONTRACTION[line];
   return A * Math.pow(Math.max(0, drawn), k);
+}
+
+/**
+ * The closure curve for an occurrence known only by its REPORTED (contracted)
+ * value — the engine's register — resolved onto the same band the DRAW picks.
+ *
+ * ⚠ THE BAND IS DEFINED ON THE DRAW AND THE ENGINE WAS RESOLVING IT ON THE
+ * CONTRACTED FIGURE. resolveClosureCurve splits at CLOSURE_SIZE_THRESHOLD of
+ * the drawn value; forward booking contracts an occurrence before the register
+ * ever stores it, so passing the stored figure straight in asked a question
+ * about a DIFFERENT size. The two engine-side resolutions had drifted apart
+ * from each other: claimTriangle's closureAgeOf resolves on the draw and argues
+ * why, while reselectDevelopingSet resolved on the contracted estimate, so the
+ * claims memorandum and the workbook — which read the register's own
+ * Claim.grossUltimate — disagreed with the engine's `closed` flag on 1.08% of
+ * claims and on 4 of 120 displayed memorandum rows.
+ *
+ * ⚠ CLOSURE IS A PROPERTY OF THE CLAIM, NOT OF WHAT ANYONE CURRENTLY THINKS IT
+ * IS WORTH, which is what decides the direction of the fix. Letting the booking
+ * policy pick the size band would make closure depend on the booking — a
+ * different book, rather than the same book seen earlier in its life. That is
+ * claimClosure's own prohibition, and closureAgeOf already states it.
+ *
+ * ⚠ IT COMPARES AGAINST THE CONTRACTED THRESHOLD RATHER THAN INVERTING, and the
+ * difference matters. initialEstimate is A·x^k with A, k > 0, so it is strictly
+ * increasing, and therefore
+ *
+ *     draw >= T   <=>   initialEstimate(draw) >= initialEstimate(T)
+ *
+ * exactly. Recovering the draw by inverting the power law also works —
+ * measured, it round-trips to 1.56e-15 relative with zero band flips over
+ * 29,271 claims — but it puts a round trip between two numbers that must agree
+ * exactly with a third party's. This evaluates one forward power on a CONSTANT
+ * and compares it against the figure the engine already stored. Verified
+ * against the register's own draw over 27,236 claims: zero disagreements.
+ *
+ * ⚠ AND IT IS FLAG-AWARE. With FORWARD_BOOKING off the register holds the draw
+ * itself, so the threshold is the raw one; contracting it then would introduce
+ * the very mismatch this function exists to remove.
+ */
+export function closureCurveForReported(line: CoverageLine, reported: number) {
+  const split = CLOSURE_BY_SIZE[line];
+  // A line with no size split has one curve, so there is no band to resolve and
+  // nothing the contraction can change. Property is in this branch.
+  if (!split) return resolveClosureCurve(line, reported);
+  const threshold = FORWARD_BOOKING.enabled
+    ? initialEstimate(line, CLOSURE_SIZE_THRESHOLD)
+    : CLOSURE_SIZE_THRESHOLD;
+  return reported >= threshold ? split.large : split.small;
 }
 
 /**

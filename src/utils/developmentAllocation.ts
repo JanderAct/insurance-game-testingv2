@@ -385,7 +385,7 @@ export function buildTrackedSet(
       tracked.push({
         claimId: claimIds[i] ?? occurrenceIds[i],
         occurrenceId: occurrenceIds[i],
-        drawn: totals[i],
+        reported: totals[i],
         original: totals[i],
         current: totals[i],
         developing: isDeveloping.has(i),
@@ -400,7 +400,7 @@ export function buildTrackedSet(
   }
   // Developing claims first, largest first — the register reads better and the
   // proportional maths does not care about order.
-  tracked.sort((a, b) => (Number(b.developing) - Number(a.developing)) || (b.drawn - a.drawn));
+  tracked.sort((a, b) => (Number(b.developing) - Number(a.developing)) || (b.reported - a.reported));
 
   // The bench — the same successive size-weighted sampling, on the remainder,
   // from its own stream. `largest` selection gets a `largest` bench for the
@@ -429,7 +429,7 @@ export function buildTrackedSet(
       bench.push({
         claimId: claimIds[i] ?? occurrenceIds[i],
         occurrenceId: occurrenceIds[i],
-        drawn: totals[i],
+        reported: totals[i],
         original: totals[i],
         current: totals[i],
       });
@@ -579,7 +579,9 @@ export function reselectDevelopingSet(
   tracked: DevelopingClaim[],
   bench: BenchClaim[],
   untrackedTotal: number,
-  isClosed: (claimId: string, drawn: number) => boolean,
+  /** Resolves closure for one occurrence from its REPORTED value — the
+   *  caller owns converting that to a size band; see closureCurveForReported. */
+  isClosed: (claimId: string, reported: number) => boolean,
   floor: number,
   minHold: number,
   rng: SeededRandom,
@@ -589,7 +591,7 @@ export function reselectDevelopingSet(
   //    without re-deriving; the predicate is pure and agrees anyway.
   let retired = 0;
   const next: DevelopingClaim[] = tracked.map(c => {
-    const closed = c.closed === true || isClosed(c.claimId, c.drawn);
+    const closed = c.closed === true || isClosed(c.claimId, c.reported);
     if (closed && c.developing) retired++;
     const wasFlagged = c.closed === true;
     // A closed occurrence stands down. It keeps its place in the register.
@@ -599,7 +601,7 @@ export function reselectDevelopingSet(
 
   // 2. The bench sheds its closed members. No dollars move — a benched
   //    occurrence's value lives inside `untrackedTotal` and stays there.
-  const openBench = bench.filter(b => !isClosed(b.claimId, b.drawn));
+  const openBench = bench.filter(b => !isClosed(b.claimId, b.reported));
 
   // ============================================================================
   // 3. DRAW THE WHOLE SET FRESH, size-weighted over every OPEN occurrence the
@@ -639,9 +641,9 @@ export function reselectDevelopingSet(
   // Everything open, whether or not it was developing last time.
   const cands: { kind: 'tracked' | 'bench'; idx: number; w: number }[] = [];
   next.forEach((c, i) => {
-    if (c.closed !== true) { next[i] = { ...c, developing: false }; cands.push({ kind: 'tracked', idx: i, w: Math.max(0, c.drawn) }); }
+    if (c.closed !== true) { next[i] = { ...c, developing: false }; cands.push({ kind: 'tracked', idx: i, w: Math.max(0, c.reported) }); }
   });
-  openBench.forEach((b, i) => cands.push({ kind: 'bench', idx: i, w: Math.max(0, b.drawn) }));
+  openBench.forEach((b, i) => cands.push({ kind: 'bench', idx: i, w: Math.max(0, b.reported) }));
 
   const takenBench = new Set<number>();
   const promotedIds = new Set<string>();
@@ -678,7 +680,7 @@ export function reselectDevelopingSet(
       next.push({
         claimId: b.claimId,
         occurrenceId: b.occurrenceId,
-        drawn: b.drawn,
+        reported: b.reported,
         original: b.original,
         current: b.current,
         developing: true,
@@ -1015,7 +1017,7 @@ export function markDownForBooking(
     // shows a pool that booked optimistically holding optimistic CLAIM values,
     // which is the coherence the old shape lacked.
     tracked: moved.map(c => ({ ...c, original: c.current })),
-    bench: set.bench.map(b => ({ ...b, original: b.drawn * benchFactor, current: b.drawn * benchFactor })),
+    bench: set.bench.map(b => ({ ...b, original: b.reported * benchFactor, current: b.reported * benchFactor })),
     untrackedTotal: Math.max(0, set.untrackedTotal + untrackedDelta),
     giveBack: ceded,          // negative
     markedDown: -applied,

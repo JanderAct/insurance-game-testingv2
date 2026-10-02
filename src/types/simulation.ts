@@ -691,11 +691,22 @@ export interface DecisionSet {
 export interface DevelopingClaim {
   claimId: string;
   occurrenceId: string;
-  /** As first REPORTED, GROSS of reinsurance: with FORWARD_BOOKING on, the
-   *  contracted initialEstimate of the drawn occurrence (simulationEngine's
-   *  buildTrackedSet call), BELOW what the generator drew. The drawn value is the
-   *  register's Claim.grossUltimate, which this develops toward. Never moves. */
-  drawn: number;
+  /**
+   * As first REPORTED, GROSS of reinsurance: with FORWARD_BOOKING on, the
+   * contracted initialEstimate of the drawn occurrence (simulationEngine's
+   * buildTrackedSet call), BELOW what the generator drew. The drawn value is the
+   * register's Claim.grossUltimate, which this develops toward. Never moves.
+   *
+   * ⚠ IT WAS CALLED `drawn` AND IT IS NOT THE DRAW. The old name cost a real
+   * defect: the closure curve is size-banded, and the engine resolved the band
+   * by passing this field to resolveClosureCurve — which expects the DRAW — so
+   * 1.08% of claims carried a different status in the engine's register from
+   * the one the claims memorandum and the workbook computed for them. Every
+   * line of the doc comment above already said the field was contracted, and
+   * the name outvoted the comment. Renamed so the next reader cannot make the
+   * same substitution.
+   */
+  reported: number;
   /** As first BOOKED — `drawn` less this cohort's optimistic markdown. Equal to
    *  `drawn` when the line was funded at or above break-even. Never moves. */
   original: number;
@@ -775,10 +786,10 @@ export interface BenchClaim {
   claimId: string;
   occurrenceId: string;
   /** As first REPORTED, GROSS — the contracted initialEstimate when
-   *  FORWARD_BOOKING is on, exactly as DevelopingClaim.drawn. Never moves. Also
-   *  the size the closure curve is resolved on, exactly as for a tracked
-   *  occurrence. */
-  drawn: number;
+   *  FORWARD_BOOKING is on, exactly as DevelopingClaim.reported. Never moves.
+   *  ⚠ THE CLOSURE CURVE IS NOT RESOLVED ON THIS DIRECTLY — this is a contracted
+   *  value and the band is defined on the draw; see closureCurveForReported. */
+  reported: number;
   /** As first BOOKED — `drawn` less this cohort's optimistic markdown. */
   original: number;
   /** Its share of the untracked mass now. Becomes the occurrence's `current` on
