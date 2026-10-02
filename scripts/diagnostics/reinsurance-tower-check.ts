@@ -322,14 +322,12 @@ console.log('\n=== 6. LIVE GAME: ceded reconciles, and GL above-tower exceeds th
   // same request goes through untouched. A gate that swallowed the aggregate
   // unconditionally would also pass the check above.
   console.log(`  with the layer PLACED the same level passes through: ` +
-    `${note(normalizeAggregateStopLevel('Property', [true, true], 1) === 1, 'the gate suppressed a legitimate aggregate')}`);
-  // ⚠ AND THE CAT LAYER ALONE DOES NOT ENABLE IT. It answers catastrophe
-  // occurrences only and caps no attritional claim, so per-risk declined + cat
-  // placed is the aggregate-only trap reached through a layer that never
-  // touches the claims the gate exists for. See normalizeAggregateStopLevel.
-  console.log(`  with ONLY the cat layer placed the aggregate stays gated: ` +
-    `${note(normalizeAggregateStopLevel('Property', [false, true], 1) === -1, 'the cat layer alone enabled the Property aggregate over uncapped attritional claims')}` +
-    `; per-risk alone passes: ${note(normalizeAggregateStopLevel('Property', [true, false], 1) === 1, 'the per-risk layer alone did not enable the aggregate')}`);
+    `${note(normalizeAggregateStopLevel('Property', [true], 1) === 1, 'the gate suppressed a legitimate aggregate')}`);
+  // Property is ONE layer answering every occurrence, catastrophes included, so
+  // the only gated case is that layer declined — asserted directly here as well
+  // as through the engine above.
+  console.log(`  with the one layer declined the gate returns -1: ` +
+    `${note(normalizeAggregateStopLevel('Property', [false], 1) === -1, 'the Property aggregate was enabled over a declined occurrence layer')}`);
   // WC IS NOW GATED THE SAME WAY, one commit after Property so that commit's
   // line control stayed clean. Measured: all three layers declined, WC's
   // aggregate attaches at $19.17M with a $17.42M limit, so it tops out at

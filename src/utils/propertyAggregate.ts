@@ -86,7 +86,7 @@
 //                   then RE-BINNED onto the lattice by the same mean-preserving
 //                   split every other lattice placement here uses
 //   R_cat           EXACT: the event distribution of propertyCatastrophe.ts,
-//                   mapped through the cat layer, compounded by Panjer's
+//                   mapped through Property's one layer, compounded by Panjer's
 //                   Poisson recursion (exact for a Poisson count)
 //
 // The attritional re-bin is the ONLY approximation the cat band adds, and it
@@ -266,19 +266,20 @@ export function quotePropertyAggregate(
   // this cannot drift from the engine's own funding numbers.
   const layers = REINSURANCE_TOWER.Property;
   const on = (i: number) => i >= 0 && placed[i] === true && layers[i].purchasable;
-  const perRiskIdx = layers.findIndex(l => l.responds !== 'catastrophe');
-  const catIdx = layers.findIndex(l => l.responds === 'catastrophe');
-  const purchased = on(perRiskIdx);
+  // ONE LAYER, answering attritional claims and catastrophe occurrences alike.
+  const purchased = on(0);
+  const layer = layers[0];
   const cededByPlaced = layers.reduce((s, _l, i) => s + (on(i) ? (layerExpectedCeded[i] ?? 0) : 0), 0);
   const expectedRetained = Math.max(1, expectedGrossLoss - cededByPlaced);
 
-  // THE CAT SIDE'S RETAINED DISTRIBUTION, EXACT, under this placement. Its mean
+  // THE CAT SIDE'S RETAINED DISTRIBUTION, EXACT, under this placement — the
+  // same layer, read on each event's occurrence total. Its mean
   // is this book's own — so the ATTRITIONAL side is what absorbs any gap between
   // the caller's E[R] and the model's: the held rate carries the MARKET's cat
   // load, this book's events are this book's. The gap is the book's realised
   // cat share against the 12% budget, and it is small; see property-cat-check.
-  const catLayer = on(catIdx)
-    ? { attachment: layers[catIdx].attachment, ceiling: layers[catIdx].attachment + layers[catIdx].limit }
+  const catLayer = purchased
+    ? { attachment: layer.attachment, ceiling: layer.attachment + layer.limit }
     : null;
   const catEvent = catEventRetained(members, catLayer, BIN);
   const catMean = PROPERTY_CAT_MODEL.eventsPerYear * catEvent.m1Retained;
@@ -308,7 +309,9 @@ export function quotePropertyAggregate(
     sumLambdaSq += lambda * lambda;
   }
 
-  const threshold = purchased ? PM.perRiskRetention : PM.severityCap;
+  // The attritional side's retained severity: capped at the layer's attachment
+  // when it is placed, at the claim's own $75M cap when it is not.
+  const threshold = purchased ? Math.min(layer.attachment, PM.severityCap) : PM.severityCap;
   const severityPmf = discretizedRetainedSeverity(threshold);
 
   // NegBin fit by moments: Var[N] = E[N] + sum(lambda_i^2)/k (k = frailty

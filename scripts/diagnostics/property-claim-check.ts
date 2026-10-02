@@ -34,7 +34,7 @@ import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
 import {
   PROPERTY_CAT_MODEL, PROPERTY_LOSS_MODEL, PROPERTY_HELD_PURE_PREMIUM_PER_100, PROPERTY_PURE_PREMIUM_SPLIT,
 } from '../../src/data/defaultAssumptions';
-import { PROPERTY_CAT_CEILING, TOWER_TOP } from '../../src/data/reinsuranceTower';
+import { PROPERTY_TOWER_TOP, REINSURANCE_TOWER, TOWER_TOP } from '../../src/data/reinsuranceTower';
 import {
   computeKPr, deriveNeutralPropertyPurePremiumPer100, deriveNeutralPropertyPurePremiumSplit,
   expectedPropertyAttritionalLoss, expectedPropertyGrossLoss,
@@ -100,18 +100,23 @@ check(Math.abs(PROPERTY_MEAN_SEVERITY - 418_289) < 500,
 // severity trend, this check is the tripwire that should fire first and send
 // them to propertySeverityCap's header.
 //
-// ⚠ IT NO LONGER SETS TOWER_TOP.Property. That is PROPERTY_CAT_CEILING now,
-// decoupled when the cat band needed the tower to reach $500M; asserted below
-// so the two cannot quietly re-weld.
+// ⚠ IT NO LONGER SETS TOWER_TOP.Property. That is PROPERTY_TOWER_TOP, the $1B
+// per-occurrence limit, decoupled when a regional event became one occurrence;
+// asserted below so the two cannot quietly re-weld. The one layer runs from the
+// $5M retention to that top.
 {
   const caps = [1, 2, 5, 10, 20].map(y => propertySeverityCap(y));
   const allSame = caps.every(c => c === caps[0]);
   check(allSame, 'Property ceiling is year-invariant (its severity trend is exactly 1)',
     `${caps.map(c => `$${(c / 1e6).toFixed(1)}M`).join(' ')}`);
-  check(caps[0] === M.severityCap, 'and equals PROPERTY_LOSS_MODEL.severityCap, which the per-risk layer\'s limit depends on',
+  check(caps[0] === M.severityCap, 'and equals PROPERTY_LOSS_MODEL.severityCap',
     `$${(caps[0] / 1e6).toFixed(1)}M`);
-  check(TOWER_TOP.Property === PROPERTY_CAT_CEILING && PROPERTY_CAT_CEILING !== M.severityCap,
-    'TOWER_TOP.Property is the cat ceiling, decoupled from severityCap',
+  const L = REINSURANCE_TOWER.Property;
+  check(L.length === 1 && L[0].attachment === M.perRiskRetention && L[0].attachment + L[0].limit === PROPERTY_TOWER_TOP,
+    'Property is ONE layer, from the $5M retention to the $1B top',
+    L.map(l => `${l.name}`).join(', '));
+  check(TOWER_TOP.Property === PROPERTY_TOWER_TOP && PROPERTY_TOWER_TOP !== M.severityCap,
+    'TOWER_TOP.Property is the $1B occurrence limit, decoupled from severityCap',
     `$${(TOWER_TOP.Property / 1e6).toFixed(0)}M vs cap $${(M.severityCap / 1e6).toFixed(0)}M`);
   const momentSame = propertySeverityMoment(1, 1, 1) === propertySeverityMoment(1, 1, 20);
   check(momentSame, 'and the capped mixture moment is therefore year-invariant too');

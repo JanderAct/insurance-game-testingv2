@@ -33,9 +33,10 @@ export const SHOCK_CATALOG: Record<string, ShockDefinition> = {
   // ⚠ #2 WAS DATA ONLY AND IS NOW EXECUTABLE. Its two blockers were "no cat
   // generator" and "no occurrence tower for a cat event to pierce". Both went
   // with the cat band (propertyCatastrophe.ts, PROPERTY_CAT_MODEL): a regional
-  // event summed into ONE occurrence, answered by the $462.5M xs $37.5M cat
-  // layer. A forced event reuses all of it — the occurrence, the catastrophe
-  // flag the tower reads, the cat layer, development and the claims export — and
+  // event summed into ONE occurrence, answered by Property's one $995M xs $5M
+  // layer like any other occurrence. A forced event reuses all of it — the
+  // occurrence, the catastrophe flag booking reads, development and the claims
+  // export — and
   // adds only a named region and a stated size. So wildfire, earthquake,
   // flooding and windstorm are rows of ONE effect kind, not four mechanisms.
   //
@@ -50,9 +51,8 @@ export const SHOCK_CATALOG: Record<string, ShockDefinition> = {
   //     freqMultiplier on WC outright.
   //
   // THE SIZE, $25M-$100M, is the matrix's range, drawn uniformly per firing
-  // from a stream keyed on the shock id. Against the $37.5M cat retention that
-  // is a real reinsurance question: the bottom of the range is retained in
-  // full, the top cedes $62.5M.
+  // from a stream keyed on the shock id. Against Property's $5M occurrence
+  // retention the whole range is ceded above $5M: $20M-$95M per event.
   //
   // THE WC HALVES ARE JUDGMENT CALLS, stated. The matrix row says Property and
   // WC "both take a large loss" for the earthquake and names WC only as

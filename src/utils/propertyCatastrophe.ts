@@ -27,8 +27,8 @@
 // bounding lattice points in the proportion that keeps its mean — the same
 // construction propertyAggregate's Gerber discretisation uses for the
 // attritional severity. E[event gross] on the lattice equals the closed form to
-// float precision. Retention ($37.5M) and ceiling ($500M) are lattice points,
-// so the per-event retained/ceded mapping adds no further approximation.
+// float precision. The layer's attachment ($5M) and top ($1B) are lattice
+// points, so the per-event retained/ceded mapping adds no further approximation.
 //
 // ⚠ MEMBERS ARE CONVOLVED IN A FIXED ORDER — BY id — NOT IN ROSTER ORDER.
 // Convolution is commutative in exact arithmetic and not in floating point: a
@@ -158,8 +158,8 @@ export function catEventGrossDistribution(members: Member[], bin = PROPERTY_LATT
   return out;
 }
 
-// The cat layer's cession of ONE event's gross, and what the pool keeps of it.
-// Everything above the ceiling is retained — there is no layer to cede it to.
+// A layer's cession of ONE event's gross, and what the pool keeps of it.
+// Everything above the layer's top is retained — there is no layer to cede it to.
 export function catCeded(gross: number, attachment: number, ceiling: number): number {
   return Math.max(0, Math.min(gross - attachment, ceiling - attachment));
 }
@@ -175,7 +175,8 @@ export interface CatEventRetained {
   m2Ceded: number;
 }
 
-// Map the event gross distribution through the cat layer. With the layer
+// Map the event gross distribution through a layer — Property's one layer, read
+// on each event's occurrence total. With the layer
 // declined the pool keeps the whole event. The mapping is EXACT here because
 // the attachment and the ceiling are lattice points, so retained(k x bin) is
 // again a lattice point — asserted, since a retention off the lattice would
@@ -192,7 +193,7 @@ export function catEventRetained(
   const dist = catEventGrossDistribution(members, bin);
   const { pmf: gross } = dist;
   if (layer && (layer.attachment % bin !== 0 || layer.ceiling % bin !== 0)) {
-    throw new Error(`catEventRetained: cat layer bounds must be lattice points ($${bin} bins)`);
+    throw new Error(`catEventRetained: layer bounds must be lattice points ($${bin} bins)`);
   }
   const layerKey = layer ? `${layer.attachment}|${layer.ceiling}` : 'declined';
   let byLayer = retainedCache.get(dist);
@@ -218,7 +219,7 @@ export function catEventRetained(
   return out;
 }
 
-// The cat layer's ANNUAL moments: a compound Poisson sum of per-event
+// A layer's ANNUAL cession on catastrophe events: a compound Poisson sum of per-event
 // cessions, so E = lambda E[c] and Var = lambda E[c^2] exactly. No frailty term
 // — the event count has none.
 export function catLayerAnnualMoments(

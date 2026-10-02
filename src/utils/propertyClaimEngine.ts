@@ -162,12 +162,12 @@ export function propertySeverityTrend(yearNumber: number): number {
 // statement — it is STRUCTURALLY WELDED TO THE REINSURANCE TOWER in two places
 // that WC's and GL's are not:
 //
-//   reinsuranceTower.ts   the per-risk layer's limit is severityCap - perRiskRetention
+//   towerMoments.ts       the layer's attritional cession is integrated to severityCap
 //   propertyAggregate.ts  the aggregate threshold falls back to severityCap
 //
-// (There were three. TOWER_TOP.Property WAS severityCap until the cat band
-// landed and needed the tower to reach $500M; it is PROPERTY_CAT_CEILING now,
-// its own constant, and no longer moves with this one.)
+// (There were three. TOWER_TOP.Property WAS severityCap until a regional event
+// became one occurrence; it is PROPERTY_TOWER_TOP, the $1B occurrence limit,
+// now, and the layer's limit runs to it rather than to this cap.)
 //
 // So a trending Property ceiling would silently grow the purchased tower and
 // move an aggregate threshold, which is a reinsurance change wearing a severity
@@ -642,7 +642,7 @@ export function generatePropertyClaims(inputs: PropertyGenerationInputs): Proper
   }
 
   // ONE OCCURRENCE PER EVENT, with every hit member's claim in it — the unit the
-  // cat layer attaches to. An event that hit nobody enrolled produced no claim
+  // tower attaches to. An event that hit nobody enrolled produced no claim
   // and emits no occurrence. memberId is set only when exactly one member was
   // hit: the Occurrence type makes it optional precisely so a multi-member
   // event cannot be silently attributed to one of them.
@@ -663,8 +663,8 @@ export function generatePropertyClaims(inputs: PropertyGenerationInputs): Proper
   });
 
   // One occurrence per forced event, exactly as for the band's own events —
-  // flagged as a catastrophe so the cat layer, not the per-risk layer, answers
-  // it. `peril` names the scheduled peril rather than the band's generic 'cat'.
+  // flagged as a catastrophe so it is booked at full and held there. `peril`
+  // names the scheduled peril rather than the band's generic 'cat'.
   forcedEvents.forEach((fe, ev) => {
     if (forcedClaimIds[ev].length === 0) return;
     occurrences.push({

@@ -21,7 +21,7 @@
 //      shuffled roster — the fixed member order is what makes it so — and the
 //      annual recursion's cached prefix, extended or sliced, is bit-identical
 //      to a fresh run.
-//   3. Event tail probabilities and the cat layer's per-event moments agree
+//   3. Event tail probabilities and the tower's per-event moments agree
 //      with 4,000,000 independently simulated events, within 4 SE, on two
 //      books.
 //   4. The ANNUAL cat retained distribution (Panjer, Poisson count) agrees with
@@ -30,13 +30,13 @@
 //      AAL, one occurrence per event with every claim in its region, and a
 //      member's cat claims unchanged by who else is enrolled.
 //
-// WHAT IS REPORTED (not gated): the ceiling's exceedance rate, the realised
+// WHAT IS REPORTED (not gated): the $1B top's exceedance rate, the realised
 // cat share of expected loss on each book, and P(an event) in a 5-year game.
 // ============================================================================
 
 import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
 import { PROPERTY_CAT_MODEL } from '../../src/data/defaultAssumptions';
-import { REINSURANCE_TOWER, PROPERTY_CAT_CEILING } from '../../src/data/reinsuranceTower';
+import { REINSURANCE_TOWER, PROPERTY_TOWER_TOP } from '../../src/data/reinsuranceTower';
 import {
   CAT_REGIONS, PROPERTY_LATTICE_BIN, catAnnualRetainedPmf, catEventGrossDistribution, catEventRetained,
   catLayerAnnualMoments, catLossIfHit, expectedPropertyCatLoss, propertyCatInternals,
@@ -81,8 +81,11 @@ function xoshiro(seed: number) {
 const roster = getPredefinedMarketMembers();
 // A representative ENROLLED-size book: every third member of the market.
 const BOOKS: [string, Member[]][] = [['full market', roster], ['one-third book', roster.filter((_, i) => i % 3 === 0)]];
-const catLayer = REINSURANCE_TOWER.Property.find(l => l.responds === 'catastrophe')!;
-const LAYER = { attachment: catLayer.attachment, ceiling: catLayer.attachment + catLayer.limit };
+// Property's ONE layer — it answers catastrophe occurrences like any other, so
+// the event distribution is checked through the layer the engine actually cedes
+// to: $5M retained, covered to the $1B top.
+const towerLayer = REINSURANCE_TOWER.Property[0];
+const LAYER = { attachment: towerLayer.attachment, ceiling: towerLayer.attachment + towerLayer.limit };
 const fmt = (x: number) => `$${(x / 1e6).toFixed(2)}M`;
 
 function tailOf(pmf: Float64Array, x: number): number {
@@ -180,10 +183,10 @@ for (const [name, book] of BOOKS) {
   const ev = catEventRetained(book, LAYER);
   const cMean = sumC / N, cVar = sumC2 / N - cMean * cMean;
   const zc = (cMean - ev.m1Ceded) / Math.sqrt(cVar / N);
-  check(Math.abs(zc) < Z, 'E[ceded per event] (cat layer)', `exact ${fmt(ev.m1Ceded)} vs simulated ${fmt(cMean)}, z ${zc.toFixed(2)}`);
+  check(Math.abs(zc) < Z, 'E[ceded per event] (the tower, on the event)', `exact ${fmt(ev.m1Ceded)} vs simulated ${fmt(cMean)}, z ${zc.toFixed(2)}`);
   const gMean = sumG / N;
   console.log(`        E[event gross]: exact ${fmt(dist.expectedGross)}, simulated ${fmt(gMean)}`);
-  console.log(`        events above the $${PROPERTY_CAT_CEILING / 1e6}M ceiling: ${(tailOf(dist.pmf, PROPERTY_CAT_CEILING) * 100).toFixed(4)}% (exact)`);
+  console.log(`        events above the $${PROPERTY_TOWER_TOP / 1e6}M tower top: ${(tailOf(dist.pmf, PROPERTY_TOWER_TOP) * 100).toFixed(4)}% (exact)`);
 
   // 4. The annual cat retained distribution, both placements.
   const YEARS = 1_000_000;
@@ -218,7 +221,7 @@ for (const [name, book] of BOOKS) {
   const attr = expectedPropertyAttritionalLoss(book, { riskQualityOverride: 5, kPr: 1 });
   const m = catLayerAnnualMoments(book, LAYER);
   console.log(`        cat AAL ${fmt(cat)} on attritional ${fmt(attr)} (neutral): cat share ${(cat / (cat + attr) * 100).toFixed(2)}% against the ${C.budgetShareOfExpectedLoss * 100}% budget`);
-  console.log(`        cat layer annual: E ${fmt(m.expected)}, SD ${fmt(m.sd)}`);
+  console.log(`        tower's cession on events, annual: E ${fmt(m.expected)}, SD ${fmt(m.sd)}`);
   console.log('');
 }
 

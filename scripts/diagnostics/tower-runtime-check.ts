@@ -32,7 +32,7 @@ import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
 import { REINSURANCE_TOWER, TOWER_TOP } from '../../src/data/reinsuranceTower';
 import { GL_SEVERITY_CAP, WC_LOSS_MODEL } from '../../src/data/defaultAssumptions';
 import {
-  layerRiskMoments, retainedRiskMoments, resetTowerMomentCache, glBandMoments, wcBandMoments,
+  layerRiskMoments, attritionalLayerRiskMoments, retainedRiskMoments, resetTowerMomentCache, glBandMoments, wcBandMoments,
 } from '../../src/utils/towerMoments';
 import { occurrenceProgramCost } from '../../src/utils/reinsuranceTower';
 import { computeKLine, generateWcClaims } from '../../src/utils/wcClaimEngine';
@@ -316,7 +316,10 @@ console.log('\n--- 4. THE SHARED-FACTOR FLOOR: GL at 0.2000, WC at 0.3534, Prope
   // limit twice.
   {
     const huge = Array.from({ length: 200 }, () => ROSTER).flat();
-    const pr = layerRiskMoments('Property', 0, huge, 1).sdOverExpected;
+    // ATTRITIONAL cession only: Property's one layer also answers catastrophes,
+    // whose exact convolution on a x200 book is unaffordable and whose SD/E is
+    // not what this witness is about.
+    const pr = attritionalLayerRiskMoments('Property', 0, huge, 1).sdOverExpected;
     console.log(`  Property at x200 (no shared factor): ${pr.toFixed(4)}`);
     check(pr < FLOOR / 2, 'Property SD/E decays well below GL\'s floor — no shared factor, no floor',
       `${pr.toFixed(4)} vs ${(FLOOR / 2).toFixed(4)}`);

@@ -723,9 +723,8 @@ export interface DevelopingClaim {
    *  serialised poolState, 3.3-3.5% of it and ~0.27% of a 5MB quota. */
   movementByStep?: number[];
   /** Present, and true, only on a Property CATASTROPHE occurrence. The tower
-   *  needs it to cede development through the right treaty — the cat layer
-   *  answers these and the per-risk layer does not (TowerLayer.responds).
-   *  And it decides how the occurrence is RESERVED: booked at its drawn total
+   *  does not read it — Property's one layer answers every occurrence — but it
+   *  decides how the occurrence is RESERVED: booked at its drawn total
    *  rather than contracted, always tracked, never in the developing set, and
    *  exempt from revision and from the settlement factor — known at inception,
    *  paid out on the Property pattern, closed at the value it was booked at.

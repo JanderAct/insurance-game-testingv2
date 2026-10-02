@@ -1442,10 +1442,10 @@ export function processLineYear(
     //
     // ⚠ EACH CAT EVENT IS ONE OCCURRENCE, NOT ONE OCCURRENCE PER MEMBER HIT —
     // the generator emits it that way and occurrenceTotals sums its claims
-    // before the tower sees it. The tower ALSO needs the kind: the cat layer
-    // answers cat events only and the per-risk layer attritional claims only
-    // (TowerLayer.responds), which is why occurrenceKinds is passed to the
-    // cession below and to the tracked set.
+    // before the tower sees it, and Property's one layer answers it like any
+    // other occurrence. The KIND still matters to booking and development: a
+    // catastrophe is booked at its drawn total and held there, which is why
+    // occurrenceKinds reaches bookedOccurrenceTotals and the tracked set.
     shockOccurred = false;
   } else {
     shockOccurred = commonLossFactor > catastropheThreshold;
@@ -1562,10 +1562,7 @@ export function processLineYear(
     const drawnSum = drawnTotals.reduce((a, b) => a + b, 0);
     const bookedSum = totals.reduce((a, b) => a + b, 0);
     if (FORWARD_BOOKING.enabled && drawnSum > 0) bookedGrossContraction = bookedSum / drawnSum;
-    // Which occurrences are Property cat events — the cat layer answers those
-    // and the per-risk layer does not (TowerLayer.responds). All false on WC and
-    // GL, where the kind changes nothing.
-    const cession = cedeOccurrences(towerLine, totals, placed, occurrenceKinds(generatedOccurrences ?? []));
+    const cession = cedeOccurrences(towerLine, totals, placed);
     cededByLayer = cession.cededByLayer;
     retainedAboveTower = cession.retainedAboveTower;
 
@@ -1682,8 +1679,7 @@ export function processLineYear(
         ibnerRng,
         reselectRng(instance.seed, line, yearNumber, yearNumber, 'bench'),
         undefined,
-        // Cat events are tracked against the cat retention and carry the kind,
-        // so their development cedes through the cat layer.
+        // Cat events carry the kind: always tracked, held at their booked value.
         occurrenceKinds(generatedOccurrences ?? []),
       )
     : { tracked: [], untrackedTotal: 0, bench: [] };

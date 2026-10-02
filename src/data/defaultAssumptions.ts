@@ -5253,7 +5253,8 @@ export const PROPERTY_PURE_PREMIUM_SPLIT = { nonCatDerived: 0.2100, catDerived: 
 //
 // ⚠ ONE OCCURRENCE PER REGION. An event is one region by construction; a
 // wildfire that crosses two regions is two events, two occurrences, and two
-// retentions. That is the ruling, not an approximation of a spanning event.
+// retentions — $10M at Property's $5M. That is the ruling, not an
+// approximation of a spanning event.
 //
 // WHY THE LOSS IS FIXED PER MEMBER, AND NOT DRAWN. With a fixed loss the only
 // randomness inside an event is which region is struck and which members are
@@ -5267,14 +5268,14 @@ export const PROPERTY_PURE_PREMIUM_SPLIT = { nonCatDerived: 0.2100, catDerived: 
 //   footprint    0.075   share of a struck region's members that are hit
 //   budget       12%     cat share of TOTAL expected loss on the calibration
 //                        book — the target eventsPerYear is solved against
-//   retention    $37.5M  per event, FLAT. A percentage-of-affected-TIV
-//                        retention depends on the hit set's TIV as well as its
-//                        loss, and loss is not proportional to TIV here
-//                        (primaryAssetShare varies), so the retained
-//                        distribution would need a two-dimensional lattice and
-//                        stop being exact. Flat is required, not preferred.
-//   ceiling      $500M   top of the cat layer, its own constant — see
-//                        PROPERTY_CAT_CEILING in reinsuranceTower.ts
+//
+// ⚠ NO RETENTION AND NO CEILING OF ITS OWN ANY MORE. A cat occurrence meets
+// Property's one tower like any other occurrence — $5M retained, covered to a
+// $1B top (REINSURANCE_TOWER.Property, PROPERTY_TOWER_TOP). The $37.5M cat
+// retention and $500M cat ceiling that stood here were invented levers and
+// came out with the separate cat layer. The retention stays FLAT per
+// occurrence, which keeps the retained distribution exact: a
+// percentage-of-affected-TIV form would need a two-dimensional lattice.
 //
 // ⚠ eventsPerYear AND regionWeights ARE PROPERTIES OF THE MARKET, NOT OF THE
 // ENROLLED BOOK. Both were derived once on the 200-member canonical roster and
@@ -5304,9 +5305,6 @@ export const PROPERTY_CAT_MODEL = {
   regionWeights: { North: 0.3523, Central: 0.3384, South: 0.3093 },
   footprint: 0.075,
   damageRatio: 0.35,
-  // Per event, flat. REINSURANCE_TOWER.Property's cat layer attaches here —
-  // this is the single source.
-  retention: 37_500_000,
   // The budget eventsPerYear was solved against. The engine never reads it; it
   // is held so property-claim-check can re-derive eventsPerYear from it.
   budgetShareOfExpectedLoss: 0.12,
