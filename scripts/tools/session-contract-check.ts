@@ -33,7 +33,7 @@ import type { Server } from 'node:http';
 import { LocalSessionTransport } from '../../src/session/localTransport';
 import { HttpSessionTransport } from '../../src/session/httpTransport';
 import type { SessionTransport } from '../../src/session/contract';
-import { isSessionError, type SessionErrorCode, type JsonValue } from '../../src/session/contract';
+import { isSessionError, newSessionToken, type SessionErrorCode, type JsonValue } from '../../src/session/contract';
 import type { CoverageLine } from '../../src/types/simulation';
 import { decisionsForYear, governingYear } from '../../src/session/client/decisions';
 import type { RoomView, TeamYearFigures, TeamYearSummary } from '../../src/session/contract';
@@ -124,8 +124,24 @@ function transport() {
   return makeTransport();
 }
 
+/**
+ * Advance one year the way a real client does: from the year it can SEE.
+ *
+ * ⚠ IT READS FIRST, WHICH IS THE POINT RATHER THAN A CONVENIENCE.
+ * HostRoomScreen compare-and-swaps on its polled `room.currentYear`, so a
+ * harness that passed a year it had counted itself would be testing a client
+ * nobody wrote. The idempotency assertions below pass the year EXPLICITLY,
+ * because there the whole question is what happens when the expectation and
+ * the room disagree.
+ */
+async function step(t: SessionTransport, code: string, token: string) {
+  const { room } = await t.read({ code, token });
+  return t.advance({ code, token, expectedYear: room.currentYear });
+}
+
 async function freshRoom(t: SessionTransport) {
   return t.createRoom({
+    hostToken: newSessionToken(),
     seed: 'MAMC6EA4',
     yearCount: 3,
     startingYear: 2026,
@@ -174,11 +190,11 @@ async function main(): Promise<void> {
     ok(!JSON.stringify(created.room).includes(created.hostToken), 'the room view never discloses the host token');
 
     await rejects(
-      t.createRoom({ seed: 's', yearCount: 0, startingYear: 2026, eventName: 'p', expectedTeams: 3, shocks: [] }),
+      t.createRoom({ hostToken: newSessionToken(), seed: 's', yearCount: 0, startingYear: 2026, eventName: 'p', expectedTeams: 3, shocks: [] }),
       'INVALID_REQUEST', 'a zero-year game is refused',
     );
     await rejects(
-      t.createRoom({ seed: 's', yearCount: 3, startingYear: 2026, eventName: 'p', expectedTeams: 0, shocks: [] }),
+      t.createRoom({ hostToken: newSessionToken(), seed: 's', yearCount: 3, startingYear: 2026, eventName: 'p', expectedTeams: 0, shocks: [] }),
       'INVALID_REQUEST', 'a room expecting no teams is refused',
     );
     await rejects(t.read({ code: 'ZZZZZZ' }), 'ROOM_NOT_FOUND', 'an unknown code is not found');
@@ -256,12 +272,12 @@ async function main(): Promise<void> {
     // ⚠ AUTHORITY IS ENFORCED, NOT HIDDEN. The player's screen has no advance
     // button, but that is a UI fact; this is the one that matters.
     await rejects(
-      t.advance({ code, token: players[0].teamToken }),
+      t.advance({ code, token: players[0].teamToken, expectedYear: 1 }),
       'NOT_HOST', 'a team token cannot advance the year',
     );
-    await rejects(t.advance({ code, token: 'nope' }), 'BAD_TOKEN', 'a forged token cannot advance the year');
+    await rejects(t.advance({ code, token: 'nope', expectedYear: 1 }), 'BAD_TOKEN', 'a forged token cannot advance the year');
 
-    const adv = await t.advance({ code, token: hostToken });
+    const adv = await step(t, code, hostToken);
     eq(adv.currentYear, 2, 'the host advances the room to year 2');
     const afterAdv = await t.read({ code, token: hostToken });
     ok(afterAdv.room.teams.every(x => !x.locked), 'advancing clears every teamlock for the new year');
@@ -275,7 +291,7 @@ async function main(): Promise<void> {
     const p = await t.join({ code, teamName: TEAMS[0], role: 'player', lines: WC });
 
     await t.submit({ code, token: p.teamToken, yearNumber: 1, decisions: decisionsFor(1, 'deliberate') });
-    await t.advance({ code, token: hostToken });
+    await step(t, code, hostToken);
 
     // ⚠ THE WHOLE POINT OF CARRY-FORWARD. The team did NOT lock for year 2. What
     // it gets back must still be the deliberate choice it made in year 1 —
@@ -295,6 +311,7 @@ async function main(): Promise<void> {
     const t = transport();
     // Its own room: this block needs six years, and the shared fixture is three.
     const { code, hostToken } = await t.createRoom({
+      hostToken: newSessionToken(),
       seed: 'MAMC6EA4', yearCount: 6, startingYear: 2026,
       eventName: 'History', expectedTeams: 1, shocks: [],
     });
@@ -302,10 +319,10 @@ async function main(): Promise<void> {
 
     // Lock years 1 and 2 with DIFFERENT sets, skip 3, lock 4.
     await t.submit({ code, token: p.teamToken, yearNumber: 1, decisions: decisionsFor(1, 'y1') });
-    await t.advance({ code, token: hostToken });
+    await step(t, code, hostToken);
     await t.submit({ code, token: p.teamToken, yearNumber: 2, decisions: decisionsFor(2, 'y2') });
-    await t.advance({ code, token: hostToken });
-    await t.advance({ code, token: hostToken });   // year 3 never locked
+    await step(t, code, hostToken);
+    await step(t, code, hostToken);   // year 3 never locked
     await t.submit({ code, token: p.teamToken, yearNumber: 4, decisions: decisionsFor(4, 'y4') });
 
     const mine = await t.read({ code, token: p.teamToken });
@@ -323,7 +340,7 @@ async function main(): Promise<void> {
     eq(governingYear(3, h), 2, 'and the governing year for a skipped year is named, not inferred');
 
     // Re-submitting a year replaces THAT year and leaves the others alone.
-    await t.advance({ code, token: hostToken });
+    await step(t, code, hostToken);
     await t.submit({ code, token: p.teamToken, yearNumber: 5, decisions: decisionsFor(5, 'y5') });
     const after = await t.read({ code, token: p.teamToken });
     eq(marker(1), 'y1', 'a later submit does not disturb an earlier year');
@@ -337,7 +354,7 @@ async function main(): Promise<void> {
     const p = await t.join({ code, teamName: TEAMS[0], role: 'player', lines: WC });
 
     await t.submit({ code, token: p.teamToken, yearNumber: 1, decisions: decisionsFor(1, 'y1') });
-    await t.advance({ code, token: hostToken });
+    await step(t, code, hostToken);
 
     // A result is for a year already processed, so it arrives for a year BEHIND
     // the room's current one. That is the normal case, not an error.
@@ -391,7 +408,7 @@ async function main(): Promise<void> {
 
     // Once a year is actually played, the opening stays put beside it.
     await t.submit({ code, token: p.teamToken, yearNumber: 1, decisions: decisionsFor(1, 'y1') });
-    await t.advance({ code, token: hostToken });
+    await step(t, code, hostToken);
     const played = await t.submit({ code, token: p.teamToken, yearNumber: 1, result: summaryFor(1, 1500) });
     eq(played.room.teams[0].resultYear, 1, 'the first PLAYED year is the first reported one');
     eq(Object.keys(played.room.teams[0].resultsByYear ?? {}).sort().join(','), '0,1',
@@ -422,7 +439,7 @@ async function main(): Promise<void> {
 
     await t.submit({ code, token: p.teamToken, yearNumber: 0, result: summaryFor(0, 500, WC, 1) });
     await t.submit({ code, token: p.teamToken, yearNumber: 1, decisions: decisionsFor(1, 'y1') });
-    await t.advance({ code, token: hostToken });
+    await step(t, code, hostToken);
     // Year 1's valuation restates accident year 0 at 1.5x what year 0 said.
     await t.submit({ code, token: p.teamToken, yearNumber: 1, result: summaryFor(1, 1500, WC, 1.5) });
 
@@ -454,6 +471,7 @@ async function main(): Promise<void> {
     const t = transport();
     // Its own room again: four played years, and the shared fixture is three.
     const { code, hostToken } = await t.createRoom({
+      hostToken: newSessionToken(),
       seed: 'MAMC6EA4', yearCount: 6, startingYear: 2026,
       eventName: 'Results', expectedTeams: 1, shocks: [],
     });
@@ -462,7 +480,7 @@ async function main(): Promise<void> {
     // Play through four years, posting a DIFFERENT surplus for 1, 2 and 4.
     for (const y of [1, 2, 3, 4]) {
       await t.submit({ code, token: p.teamToken, yearNumber: y, decisions: decisionsFor(y, `y${y}`) });
-      await t.advance({ code, token: hostToken });
+      await step(t, code, hostToken);
       if (y !== 3) {
         await t.submit({ code, token: p.teamToken, yearNumber: y, result: summaryFor(y, y * 1000) });
       }
@@ -552,6 +570,7 @@ async function main(): Promise<void> {
     // all three lines; the host does not constrain the choice. What is still
     // refused is a set that is empty or not made of coverage lines.
     const narrow = await t.createRoom({
+      hostToken: newSessionToken(),
       seed: 's', yearCount: 3, startingYear: 2026, eventName: 'p',
       expectedTeams: 2, shocks: [],
     });
@@ -604,11 +623,83 @@ async function main(): Promise<void> {
   {
     const t = transport();
     const { code, hostToken } = await freshRoom(t); // yearCount 3
-    await t.advance({ code, token: hostToken }); // -> 2
-    await t.advance({ code, token: hostToken }); // -> 3
-    const last = await t.advance({ code, token: hostToken }); // -> 4, past the end
+    await step(t, code, hostToken); // -> 2
+    await step(t, code, hostToken); // -> 3
+    const last = await step(t, code, hostToken); // -> 4, past the end
     eq(last.room.status, 'complete', 'a room past its last year reads as complete');
-    await rejects(t.advance({ code, token: hostToken }), 'GAME_COMPLETE', 'a complete game cannot advance again');
+    await rejects(t.advance({ code, token: hostToken, expectedYear: 4 }), 'GAME_COMPLETE', 'a complete game cannot advance again');
+  }
+
+  // ---- IDEMPOTENCY: the three mutating endpoints survive a lost response --
+  //
+  // ⚠ A LOST RESPONSE IS NOT AN EXOTIC CASE. It is what every client produces
+  // the moment a network blinks: the request arrived, the work was done, the
+  // reply went down a socket nobody was listening on, and the client retries a
+  // byte-identical request. Each of these three used to do real damage on that
+  // path — advance SKIPPED A YEAR, createRoom made a SECOND ROOM, and join
+  // answered TEAM_TAKEN to the player who had just made the team.
+  {
+    const t = transport();
+    const { code, hostToken, reused } = await freshRoom(t);
+    ok(reused === false, 'a first createRoom reports reused: false');
+
+    // ADVANCE, TWICE, WITH THE SAME EXPECTED YEAR — the proof.
+    const first = await t.advance({ code, token: hostToken, expectedYear: 1 });
+    const retry = await t.advance({ code, token: hostToken, expectedYear: 1 });
+    eq(first.currentYear, 2, 'the first advance moves the room to year 2');
+    ok(first.advanced === true, 'the first advance reports advanced: true');
+    // ⚠ THE RETRY SUCCEEDS. It does not reject, and it does not move the room.
+    eq(retry.currentYear, 2, 'the RETRY leaves the room on year 2 — one advance, not two');
+    ok(retry.advanced === false, 'the retry reports advanced: false — it did not move the year');
+    eq(retry.room.currentYear, 2, 'the room the retry returns is the same room, on year 2');
+    const after = await t.read({ code, token: hostToken });
+    eq(after.room.currentYear, 2, 'and a fresh read agrees: the year moved exactly once');
+
+    // The other three branches of the compare-and-swap.
+    await rejects(t.advance({ code, token: hostToken, expectedYear: 1 - 1 }), 'WRONG_YEAR',
+      'an expectation two years stale is WRONG_YEAR, not a silent no-op');
+    await rejects(t.advance({ code, token: hostToken, expectedYear: 9 }), 'WRONG_YEAR',
+      'an invented future expectation is WRONG_YEAR');
+    await rejects(t.advance({ code, token: 'nope', expectedYear: 2 }), 'BAD_TOKEN',
+      'a forged token is refused before the year is even considered');
+  }
+  {
+    // CREATE, TWICE, WITH THE SAME HOST TOKEN.
+    const t = transport();
+    const token = newSessionToken();
+    const mk = () => t.createRoom({
+      hostToken: token, seed: 'MAMC6EA4', yearCount: 3, startingYear: 2026,
+      eventName: 'Ripple Game', expectedTeams: 3, shocks: [],
+    });
+    const a = await mk();
+    const b = await mk();
+    eq(b.code, a.code, 'a retried createRoom returns the SAME room code, not a second room');
+    ok(a.reused === false && b.reused === true,
+      `the retry is reported as reused (first ${a.reused}, retry ${b.reused})`);
+    eq(b.hostToken, token, 'the response echoes the token the caller minted');
+  }
+  {
+    // JOIN, TWICE, WITH THE SAME CLIENT TOKEN.
+    const t = transport();
+    const { code } = await freshRoom(t);
+    const token = newSessionToken();
+    const req = { code, teamName: 'Harbour Mutual', role: 'player' as const, lines: WC, token };
+    const a = await t.join(req);
+    const b = await t.join({ ...req, lines: undefined });
+    ok(a.rejoined === false, 'the first join creates the team rather than rejoining');
+    // ⚠ THE RETRY IS A REJOIN, NOT TEAM_TAKEN. This is the assertion the whole
+    // client-minted-token change exists for.
+    ok(b.rejoined === true, 'the RETRY is a rejoin, not TEAM_TAKEN');
+    eq(b.teamToken, token, 'and it gets back the token it supplied');
+    const room = (await t.read({ code })).room;
+    eq(room.teams.length, 1, 'the room holds ONE team after the retry, not two');
+
+    // ⚠ AND A CLIENT CANNOT TAKE A SEAT BY PRESENTING SOMEBODY ELSE'S TOKEN.
+    // Moving the mint to the client would be a hole without this.
+    await rejects(
+      t.join({ code, teamName: 'Cedar Valley', role: 'player', lines: WC, token }),
+      'BAD_TOKEN', 'a token already owned by another team is refused on a new join',
+    );
   }
 
   // ---- fallibility -----------------------------------------------------
@@ -627,7 +718,7 @@ async function main(): Promise<void> {
 
     t.faults.failAll('TRANSPORT_FAILURE');
     await rejects(t.read({ code, token: hostToken }), 'TRANSPORT_FAILURE', 'failAll holds the error state');
-    await rejects(t.advance({ code, token: hostToken }), 'TRANSPORT_FAILURE', 'failAll applies to every endpoint');
+    await rejects(t.advance({ code, token: hostToken, expectedYear: 1 }), 'TRANSPORT_FAILURE', 'failAll applies to every endpoint');
     t.faults.clear();
     const recovered = await t.read({ code, token: hostToken });
     eq(recovered.room.code, code, 'clearing the fault restores the transport');

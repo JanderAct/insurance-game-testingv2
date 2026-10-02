@@ -47,11 +47,18 @@ export default function HostRoomScreen({ code }: Props) {
   }, [error, hostToken]);
 
   async function handleAdvance() {
-    if (!hostToken) return;
+    // `room` is required, not merely truthy-checked for safety: its currentYear
+    // IS the compare-and-swap value, so there is no advance to send without it.
+    if (!hostToken || !room) return;
     setAdvancing(true);
     setActionError(null);
     try {
-      await sessionTransport().advance({ code, token: hostToken });
+      // ⚠ THE YEAR THIS SCREEN BELIEVES THE ROOM IS ON. If the response is lost
+      // and the request retried, the server sees the same expectation and
+      // recognises the retry instead of advancing a second time. `room` is the
+      // polled view, so this is the host's own screen state rather than a
+      // re-read — which is exactly the value that must be compare-and-swapped.
+      await sessionTransport().advance({ code, token: hostToken, expectedYear: room.currentYear });
       refresh();
     } catch (e) {
       setActionError(isSessionError(e) ? e : null);

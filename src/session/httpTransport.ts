@@ -55,20 +55,44 @@
 //    deployment needs a TTL, rotation and revocation, and ideally an authorizer
 //    in front so a dead token never reaches the handler.
 //
-// 4. `advance` IS NOT IDEMPOTENT, AND THIS ONE IS A CONTRACT-LEVEL GAP RATHER
-//    THAN AN OPERATIONAL ONE. It increments the year; a retried POST — which is
-//    exactly what a client does when a response is lost — SKIPS A YEAR, and
-//    every team then reports against a year nobody played. The fix is a request
-//    field carrying the expected current year and a compare-and-swap on it, so
-//    a retry is a no-op instead of a second advance. That changes
-//    AdvanceRequest, which is why it is recorded here rather than done.
+// 4. ✅ DONE — `advance` IS IDEMPOTENT. AdvanceRequest carries `expectedYear`
+//    and the transport compare-and-swaps on it. ⚠ WHAT THE LAMBDA MUST
+//    REPRODUCE, because the local implementation gets atomicity from a lock and
+//    a hosted one will not: ONE conditional update on the HEADER item and only
+//    there — condition `currentYear = expectedYear`, still inside the year
+//    count, host token matches. On a FAILED condition, read the header back and
+//    distinguish exactly four cases, in this order:
 //
-// 5. `createRoom` IS NOT IDEMPOTENT EITHER, more cheaply: a retry makes a
-//    SECOND room and the caller keeps the code of whichever response arrived.
-//    It needs an idempotency key. Its room-code collision check is also a
-//    read-then-write (`store.getItem` then retry), which on DynamoDB is the
-//    racy pattern by definition — it wants a conditional put with
-//    `attribute_not_exists(code)`.
+//      1. token mismatch            NOT_HOST  (BAD_TOKEN if it is nobody's)
+//      2. already at expected + 1   A RETRY — return SUCCESS and the room
+//      3. past the year count       GAME_COMPLETE
+//      4. anything else             WRONG_YEAR
+//
+//    ⚠ CASE 2 BEFORE CASE 3, OR THE LAST ADVANCE OF EVERY GAME BREAKS. With
+//    yearCount 3 and the room on 4, a retry carrying expectedYear 3 is a retry
+//    of the advance that completed the game and must succeed, while a fresh
+//    call carrying expectedYear 4 must be GAME_COMPLETE. Both see
+//    `currentYear > yearCount`; only the expectation separates them.
+//
+//    ⚠ AND THE RETRY RETURNS SUCCESS, NOT A POLITE ERROR. An error would report
+//    a failure for an operation that worked, to a host who can do nothing about
+//    it. `AdvanceResponse.advanced` says which path ran.
+//
+// 5. ✅ DONE — `createRoom` AND `join` ARE IDEMPOTENT, by a client-generated
+//    token. The client mints the bearer token and sends it, so a retry presents
+//    the same one: createRoom keys an index on it and returns the room it
+//    already made (`reused: true`), and join matches it on the rejoin path
+//    instead of answering TEAM_TAKEN to the player who just created the team.
+//    ⚠ THE HOSTED INDEX MUST BE KEYED ON A HASH of the token, not the token, so
+//    no plaintext bearer token is written to the table — the local transport
+//    keys on the token itself because the room record beside it already holds
+//    it in the clear in the same localStorage, which a server does not.
+//    ⚠ AND THE COLLISION GUARD IS NOT OPTIONAL: a supplied token already owned
+//    by another team, a viewer or the host must be REFUSED, or moving the mint
+//    to the client becomes a way to claim a seat by presenting its token.
+//    The room-code collision check is still a read-then-write (`store.getItem`
+//    then retry), which on DynamoDB is the racy pattern by definition — it
+//    wants a conditional put with `attribute_not_exists(code)`.
 //    `submit` is already idempotent per (team, year) and needs nothing.
 //
 // 6. THE ROOM IS ONE ITEM AND DYNAMODB CAPS AN ITEM AT 400 KB. Measured: 31 KB

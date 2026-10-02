@@ -39,7 +39,7 @@
 // ============================================================================
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { LocalSessionTransport } from '../../src/session/localTransport';
+import { LocalSessionTransport, ROOM_KEY_PREFIX } from '../../src/session/localTransport';
 import { isSessionError, type SessionErrorCode } from '../../src/session/contract';
 
 // ---------------------------------------------------------------- storage
@@ -55,6 +55,8 @@ class MemoryStorage {
   setItem(k: string, v: string): void { this.map.set(k, String(v)); }
   removeItem(k: string): void { this.map.delete(k); }
   key(i: number): string | null { return [...this.map.keys()][i] ?? null; }
+  /** How many ROOMS are held — see the note at the /health handler. */
+  roomCount(): number { return [...this.map.keys()].filter(k => k.startsWith(ROOM_KEY_PREFIX)).length; }
 }
 
 const store = new MemoryStorage();
@@ -124,7 +126,10 @@ export function createStubServer() {
 
       const path = (req.url ?? '').split('?')[0].replace(/^\/+/, '');
       if (path === 'health') {
-        send(res, 200, { ok: true, rooms: store.length });
+        // ⚠ ROOMS, NOT KEYS. `store.length` was a room count only while a room
+        // was the one thing written; createRoom's idempotency index is a second
+        // key per room, so an unfiltered count reports double.
+        send(res, 200, { ok: true, rooms: store.roomCount() });
         return;
       }
 

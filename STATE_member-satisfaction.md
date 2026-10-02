@@ -110,9 +110,12 @@ it cannot see was broken".
 3. **The solo oracle's 32 moved fingerprints.** Recapture needs an attribution — which change moved which
    screen — that nobody has done, and there is no file to recapture into. Either give it a baseline and
    attribute, or retire it in favour of the render baseline.
-4. **`advance` is not idempotent.** A retried POST skips a year; the fix carries the expected current year
-   and compare-and-swaps, which changes `AdvanceRequest`. Contract-level, recorded at
-   `src/session/httpTransport.ts` item 4, deliberately not done.
+4. ~~**`advance` is not idempotent.**~~ **CLOSED.** `AdvanceRequest` carries `expectedYear` and the
+   transport compare-and-swaps on it; a retry returns SUCCESS and does not move the year.
+   `createRoom` and `join` were closed in the same commit by a client-generated token. The four-case
+   readback a Lambda must reproduce — and why the retry case must precede the game-complete case — is
+   at `src/session/httpTransport.ts` items 4 and 5. ⚠ This ruling is the one that said "deliberately
+   not done"; it is listed as closed rather than deleted because the AWS owner's guide points here.
 5. **Whether the measurement probes ship.** The storage and gap-decomposition probes are still outside the
    repo, which is the same failure the drivers just had.
 

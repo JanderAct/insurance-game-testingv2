@@ -19,7 +19,8 @@
 // many to expect — and it BINDS NOTHING (see the transport).
 // ============================================================================
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { newSessionToken } from '../contract';
 import { Trash2, Zap } from 'lucide-react';
 import { SHOCK_CATALOG } from '../../data/shockCatalog';
 import { IMPLEMENTED_EFFECTS } from '../../types/shocks';
@@ -54,6 +55,7 @@ export default function HostCreateScreen() {
   const [shockId, setShockId] = useState(SCHEDULABLE.find(s => s.buildable)?.id ?? '');
   const [shockYear, setShockYear] = useState(2);
 
+  const hostTokenRef = useRef<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<SessionError | null>(null);
 
@@ -63,7 +65,13 @@ export default function HostCreateScreen() {
     setBusy(true);
     setError(null);
     try {
+      // ⚠ MINTED HERE AND HELD ACROSS THE RETRY. The token is the idempotency
+      // key, so it must be the SAME on a second attempt — generating it inside
+      // the call would make every retry a new room. Kept in a ref so a user who
+      // clicks Create again after a timeout reuses it.
+      if (!hostTokenRef.current) hostTokenRef.current = newSessionToken();
       const res = await sessionTransport().createRoom({
+        hostToken: hostTokenRef.current,
         seed: seed.trim() || randomSeed(),
         yearCount,
         startingYear,
@@ -74,6 +82,7 @@ export default function HostCreateScreen() {
       // ⚠ PERSIST THE HOST TOKEN BEFORE NAVIGATING. The room exists the moment
       // createRoom resolves; a navigation that happened first and then failed to
       // store would leave a live room nobody can drive.
+      // res.hostToken is the token we sent, echoed back — see CreateRoomResponse.
       saveActive(res.code, { hostToken: res.hostToken });
       rememberHostToken(res.code, res.hostToken);
       navigate(`/host/${res.code}`);

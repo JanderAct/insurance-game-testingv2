@@ -54,11 +54,25 @@ import type {
   SubmitRequest, SubmitResponse,
   TeamView,
 } from './contract';
-import { SessionError } from './contract';
+import { SessionError, SESSION_TOKEN_PATTERN, newSessionToken } from './contract';
 import { Faults } from './faults';
 import type { CoverageLine } from '../types/simulation';
 
-const KEY_PREFIX = 'ripple.session.v1.room.';
+// ⚠ EXPORTED BECAUSE THE STORE NOW HOLDS MORE THAN ROOMS. The stub server's
+// /health used to report `store.length` as the room count, which was true while
+// a room was the only thing written. The createRoom idempotency index below put
+// a second key in the same store per room, and the two-contexts driver caught
+// it immediately — "the SERVER holds the room (2)" after one create. Anything
+// counting rooms filters on this.
+export const ROOM_KEY_PREFIX = 'ripple.session.v1.room.';
+const KEY_PREFIX = ROOM_KEY_PREFIX;
+// ⚠ THE IDEMPOTENCY INDEX FOR createRoom: host token -> room code. Keyed on the
+// token itself here, which is no worse than the room record beside it — that
+// already holds the token in the clear in the same localStorage. A HOSTED
+// implementation must key on a HASH so no plaintext bearer token is written to
+// the table; that is the server's side of the wire and the contract does not
+// constrain it.
+const IDEMPOTENCY_PREFIX = 'ripple.session.v1.create.';
 
 // No O/0/I/1 — a room code gets read aloud across a room and written on a
 // whiteboard, and those are the four characters that come back wrong.
@@ -114,8 +128,30 @@ function randomFrom(alphabet: string, length: number): string {
   return out;
 }
 
-function newToken(): string {
-  return randomFrom('abcdefghijklmnopqrstuvwxyz0123456789', 32);
+// ⚠ ONE MINT, SHARED WITH THE CLIENTS. It lives in the contract now because a
+// client mints its own token for join and createRoom — see newSessionToken.
+const newToken = newSessionToken;
+
+/**
+ * A token a CALLER supplied, checked before it is allowed to own anything.
+ *
+ * ⚠ TWO SEPARATE REFUSALS, AND THE SECOND IS THE ONE THAT MATTERS. Shape keeps
+ * a malformed or trivially short string out of the credential space. COLLISION
+ * is what stops a client claiming somebody else's seat: a supplied token that
+ * already belongs to a different team, a viewer or the host is refused outright
+ * rather than quietly accepted, so moving the mint to the client cannot be used
+ * to take a team by presenting its token. A caller re-presenting its OWN token
+ * is the rejoin path and never reaches here.
+ */
+function assertTokenFree(room: RoomRecord, token: string): void {
+  if (!SESSION_TOKEN_PATTERN.test(token)) {
+    throw new SessionError('INVALID_REQUEST', 'That token is not a valid session token.');
+  }
+  if (token === room.hostToken
+    || room.teams.some(t => t.token === token)
+    || room.viewers.some(v => v.token === token)) {
+    throw new SessionError('BAD_TOKEN', 'That token is already in use in this room.');
+  }
 }
 
 // ---------------------------------------------------------------- storage
@@ -328,7 +364,23 @@ export class LocalSessionTransport implements SessionTransport {
         throw new SessionError('INVALID_REQUEST', 'Expected teams must be a positive whole number.');
       }
 
+      if (!SESSION_TOKEN_PATTERN.test(req.hostToken)) {
+        throw new SessionError('INVALID_REQUEST', 'A room needs a valid host token.');
+      }
+
       const store = storage();
+
+      // ⚠ THE RETRY PATH, AND IT RETURNS SUCCESS RATHER THAN AN ERROR. A
+      // createRoom whose response was lost used to make a SECOND room on retry,
+      // leaving an orphan with its own code that teams could still join. The
+      // same host token means the same request; hand back the room it already
+      // made.
+      const seen = store.getItem(IDEMPOTENCY_PREFIX + req.hostToken);
+      if (seen !== null) {
+        const existing = loadRoom(seen);
+        return { code: existing.code, hostToken: req.hostToken, room: roomView(existing), reused: true };
+      }
+
       let code = randomFrom(CODE_ALPHABET, 6);
       // Collision is ~1 in 10^9 per pair, but a collision would silently hand two
       // sessions the same room, so it is cheap to just not allow it.
@@ -339,7 +391,7 @@ export class LocalSessionTransport implements SessionTransport {
       const now = Date.now();
       const room: RoomRecord = {
         code,
-        hostToken: newToken(),
+        hostToken: req.hostToken,
         seed: req.seed,
         eventName: req.eventName,
         yearCount: req.yearCount,
@@ -358,7 +410,10 @@ export class LocalSessionTransport implements SessionTransport {
       };
 
       store.setItem(KEY_PREFIX + code, JSON.stringify(room));
-      return { code, hostToken: room.hostToken, room: roomView(room) };
+      // The index AFTER the room, so a failure between the two leaves no index
+      // pointing at a room that was never written.
+      store.setItem(IDEMPOTENCY_PREFIX + req.hostToken, code);
+      return { code, hostToken: room.hostToken, room: roomView(room), reused: false };
     }, true);
   }
 
@@ -388,7 +443,11 @@ export class LocalSessionTransport implements SessionTransport {
         if (existing) {
           return { teamToken: existing.token, teamName: team.name, lines: [...team.lines], role: 'viewer' as const, rejoined: true, room: roomView(room) };
         }
-        const token = newToken();
+        // ⚠ THE CALLER'S OWN TOKEN WHEN IT SUPPLIED ONE, so a retried viewer
+        // join lands on the `existing` branch above instead of stacking a
+        // second viewer record per lost response.
+        const token = req.token ?? newToken();
+        if (req.token) assertTokenFree(room, req.token);
         room.viewers.push({ token, teamName: team.name });
         saveRoom(room);
         return { teamToken: token, teamName: team.name, lines: [...team.lines], role: 'viewer' as const, rejoined: false, room: roomView(room) };
@@ -432,7 +491,16 @@ export class LocalSessionTransport implements SessionTransport {
         throw new SessionError('INVALID_REQUEST', `${notALine.join(', ')} is not a coverage line.`);
       }
 
-      const token = newToken();
+      // ⚠ THE CLIENT'S TOKEN, WHICH IS WHAT MAKES THE FIRST JOIN REPLAYABLE.
+      // The team is created owning a secret the caller ALREADY HOLDS, so if the
+      // response is lost the retry presents the same token, matches on the
+      // rejoin path above and gets its seat back. While the server minted it,
+      // the only copy went down a socket nobody was listening on and the retry
+      // read as a second person taking a claimed name — TEAM_TAKEN, in front of
+      // a room. assertTokenFree is what stops this being a way to CLAIM a seat:
+      // a token already owned by anyone else in the room is refused.
+      const token = req.token ?? newToken();
+      if (req.token) assertTokenFree(room, req.token);
       const created: TeamRecord = {
         name,
         // Canonical WC/GL/Property order regardless of click sequence, so two
@@ -509,20 +577,77 @@ export class LocalSessionTransport implements SessionTransport {
     }, true);
   }
 
+  /**
+   * ⚠ A COMPARE-AND-SWAP ON THE ROOM'S CURRENT YEAR, AND THE ORDER OF THE FOUR
+   * CASES BELOW IS LOAD-BEARING.
+   *
+   * `advance` increments, so a retried request — which is what a client sends
+   * when a response is lost — used to SKIP A YEAR, and every team then reported
+   * against a year nobody played. The two requests are byte-identical from the
+   * server's side; `expectedYear` is what makes them distinguishable.
+   *
+   * ⚠ WRITTEN SO THE LAMBDA INHERITS IT. On DynamoDB this is one conditional
+   * update on the HEADER item and only there: condition `currentYear = the
+   * expected year`, still inside the year count, host token matches. On a
+   * failed condition the handler reads the header back and distinguishes
+   * exactly the four cases below. Here the lock makes the read-modify-write
+   * atomic so the "readback" is just the record in hand — but the CASES are the
+   * contract, and they are written out rather than collapsed so the hosted
+   * implementation has something to match.
+   *
+   *   1. token mismatch            NOT_HOST   (BAD_TOKEN if it is nobody's)
+   *   2. already at expected + 1   A RETRY — success, no write
+   *   3. past the year count       GAME_COMPLETE
+   *   4. anything else             WRONG_YEAR
+   *
+   * ⚠ CASE 2 PRECEDES CASE 3, AND SWAPPING THEM BREAKS THE LAST ADVANCE OF
+   * EVERY GAME. Take yearCount 3 with the room on 4: a retry carrying
+   * expectedYear 3 is a retry of the advance that COMPLETED the game and must
+   * return success, while a fresh call carrying expectedYear 4 is a genuine
+   * attempt to advance past the end and must be GAME_COMPLETE. Both see
+   * `currentYear > yearCount`; only the expectation tells them apart.
+   *
+   * ⚠ AND A RETRY SUCCEEDS RATHER THAN FAILING POLITELY. Returning an error
+   * saying "it already happened" would report a failure for an operation that
+   * worked, to a host who can do nothing about it. `advanced` says which path
+   * ran, so a caller that cares can tell.
+   *
+   * ⚠ THE WINDOW IS ONE YEAR WIDE, WHICH IS A REAL LIMIT AND NOT A BUG. A host
+   * on a stale screen whose room has moved on by exactly one gets a success and
+   * no second advance — indistinguishable from a retry, by construction, and
+   * the safe failure of the two. Two or more years stale is WRONG_YEAR.
+   */
   advance(req: AdvanceRequest): Promise<AdvanceResponse> {
     return this.call(() => {
       const room = loadRoom(req.code);
+      if (!Number.isInteger(req.expectedYear)) {
+        throw new SessionError('INVALID_REQUEST', 'advance needs the year the caller expects the room to be on.');
+      }
+      // 1. Authority first: a non-host must not learn the room's year from the
+      //    shape of the refusal.
       const { role } = callerOf(room, req.token);
       if (role !== 'host') {
         throw new SessionError('NOT_HOST', 'Only the host may advance the year.');
       }
+      // 2. The retry. No write, and success.
+      if (room.currentYear === req.expectedYear + 1) {
+        return { room: roomView(room), currentYear: room.currentYear, advanced: false };
+      }
+      // 3. Past the end.
       if (room.currentYear > room.yearCount) {
         throw new SessionError('GAME_COMPLETE', 'The game is already complete.');
+      }
+      // 4. A stale or invented expectation.
+      if (room.currentYear !== req.expectedYear) {
+        throw new SessionError(
+          'WRONG_YEAR',
+          `The room is on year ${room.currentYear}; that request expected year ${req.expectedYear}.`,
+        );
       }
 
       room.currentYear += 1;
       saveRoom(room);
-      return { room: roomView(room), currentYear: room.currentYear };
+      return { room: roomView(room), currentYear: room.currentYear, advanced: true };
     }, true);
   }
 

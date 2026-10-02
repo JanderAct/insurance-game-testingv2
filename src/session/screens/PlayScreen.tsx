@@ -47,6 +47,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Clock, Eye, Loader2 } from 'lucide-react';
 import { sessionTransport, isSessionError, type SessionError } from '../index';
+import { newSessionToken } from '../contract';
 import { clearActive, forgetTeamCredential, loadActive, loadHeld, rememberTeamCredential, saveActive } from '../client/identity';
 import { useRoom } from '../client/useRoom';
 import { decisionsForYear, decisionsToJson } from '../client/decisions';
@@ -99,6 +100,9 @@ export default function PlayScreen({ code, role }: Props) {
   // carry-forward; for a viewer it is simply what the team it watches last
   // locked, which is the most recent thing there is to show.
   const seededYear = useRef<number | null>(null);
+  // Per team NAME: the token this tab minted for its first join attempt, held
+  // so a retry presents the same one. See JoinRequest.token.
+  const joinTokenRef = useRef<Record<string, string>>({});
   useEffect(() => {
     if (!room || you?.role !== role) return;
     if (seededYear.current === room.currentYear) return;
@@ -114,12 +118,18 @@ export default function PlayScreen({ code, role }: Props) {
     setActionError(null);
     try {
       const held = heldCreds.find(c => c.teamName === teamName);
+      // ⚠ A TOKEN ON THE FIRST JOIN TOO, NOT ONLY ON A REJOIN. Minted here and
+      // held for this team name, so a retry after a lost response presents the
+      // SAME token and lands on the rejoin path instead of TEAM_TAKEN — which
+      // used to lock a player out of the team they had just created, in front
+      // of a room.
+      if (!joinTokenRef.current[teamName]) joinTokenRef.current[teamName] = newSessionToken();
       // ⚠ NO `lines` ON A REJOIN. The team already holds its set and the
       // transport refuses a rejoin that asks for a different one (LINES_LOCKED);
       // sending the form's current state would turn a refresh into that refusal.
       const res = await sessionTransport().join({
         code, teamName, role,
-        token: held?.teamToken,
+        token: held?.teamToken ?? joinTokenRef.current[teamName],
         lines: held ? undefined : lines,
       });
       saveActive(code, { teamToken: res.teamToken, teamName: res.teamName, role });

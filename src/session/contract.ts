@@ -112,6 +112,38 @@ export class SessionError extends Error {
   }
 }
 
+// ---------------------------------------------------------------- tokens
+
+/**
+ * Mint a bearer token. CLIENTS call this now, not only the server.
+ *
+ * ⚠ THE CLIENT GENERATES ITS OWN TOKEN SO THAT A RETRY CAN PRESENT THE SAME
+ * ONE, which is the whole of the idempotency fix for `join` and `createRoom`.
+ * While the server minted it, a lost RESPONSE was unrecoverable: the team
+ * existed, the token that owned it had gone back down a socket nobody was
+ * listening on, and the retry read as a second person claiming a taken name —
+ * TEAM_TAKEN, in front of a room, locking a player out of a team they had just
+ * created. Nothing on the client could fix that, because the only copy of the
+ * secret was in the response that never arrived.
+ *
+ * ⚠ IT IS NOT A WEAKER SECRET. Same alphabet, same length, same
+ * crypto.getRandomValues as the server's. What changes is WHO holds it first.
+ * The server still refuses a token that is already in use by somebody else —
+ * see the collision guard in the local transport — so a client cannot claim a
+ * seat by guessing, any more than it could before.
+ */
+export function newSessionToken(): string {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  const bytes = new Uint8Array(32);
+  globalThis.crypto.getRandomValues(bytes);
+  let out = '';
+  for (let i = 0; i < 32; i++) out += alphabet[bytes[i] % alphabet.length];
+  return out;
+}
+
+/** What a token must look like for the transport to accept it from a caller. */
+export const SESSION_TOKEN_PATTERN = /^[a-z0-9]{32}$/;
+
 export function isSessionError(e: unknown): e is SessionError {
   return e instanceof SessionError;
 }
@@ -377,14 +409,34 @@ export interface CreateRoomRequest {
   /** Non-binding — see RoomView.expectedTeams. */
   expectedTeams: number;
   shocks: ScheduledShockSpec[];
+  /**
+   * ⚠ THE HOST'S TOKEN, MINTED BY THE CLIENT, AND IT DOUBLES AS THE
+   * IDEMPOTENCY KEY. A retried createRoom used to make a SECOND room and the
+   * caller kept whichever response arrived — two rooms, two codes, one of them
+   * orphaned with teams potentially joining it. Presenting the same token means
+   * the server can recognise the retry and hand back the room it already made.
+   *
+   * ⚠ THE SERVER STORES AN INDEX ON IT. In the local transport that index is
+   * keyed on the token itself, which is no worse than the room record beside it
+   * — that already holds the token in the clear, in the same localStorage. ⚠ A
+   * HOSTED IMPLEMENTATION MUST KEY ON A HASH INSTEAD, so no plaintext bearer
+   * token is written to the table; the contract does not constrain that because
+   * it is entirely the server's side of the wire.
+   */
+  hostToken: string;
 }
 
 export interface CreateRoomResponse {
   code: string;
-  // ⚠ RETURNED ONCE AND NEVER READABLE AGAIN. This is what makes the host the
-  // host; `read` never discloses it. It is shown at creation as the resume code
-  // precisely because a closed laptop otherwise ends the session.
+  // ⚠ ECHOED, NOT MINTED — it is the token the CALLER supplied, returned so the
+  // response stays self-contained and a caller that lost its own copy between
+  // request and response still has one. `read` never discloses it. It is shown
+  // at creation as the resume code precisely because a closed laptop otherwise
+  // ends the session.
   hostToken: string;
+  /** False when this call CREATED the room, true when it recognised a retry and
+   *  returned the room it had already made. See AdvanceResponse.advanced. */
+  reused: boolean;
   room: RoomView;
 }
 
@@ -411,10 +463,20 @@ export interface JoinRequest {
    * whole claim history are a function of the lines it opened with.
    */
   lines?: CoverageLine[];
-  // ⚠ REJOIN, NOT A SECOND CLAIM. The same browser returning to the same code
-  // presents the token it already holds and gets its own seat back. Without
-  // this, a refresh reads as a different person trying to take a team that is
-  // already taken, and the real driver is locked out of their own game.
+  /**
+   * ⚠ REJOIN, NOT A SECOND CLAIM. The same browser returning to the same code
+   * presents the token it already holds and gets its own seat back. Without
+   * this, a refresh reads as a different person trying to take a team that is
+   * already taken, and the real driver is locked out of their own game.
+   *
+   * ⚠ AND IT IS SUPPLIED ON THE FIRST JOIN TOO, WHICH IS WHAT MAKES JOIN
+   * IDEMPOTENT. The client mints it (newSessionToken) and sends it when
+   * CREATING the team as well as when returning to it, so a retry after a lost
+   * response presents the same token and lands on the rejoin path above rather
+   * than on TEAM_TAKEN. Omitting it is still legal and still works — it is then
+   * a one-shot join that cannot survive a lost response, which is what every
+   * join used to be.
+   */
   token?: string;
 }
 
@@ -454,11 +516,37 @@ export interface AdvanceRequest {
   code: string;
   // Host token only. Enforced by the implementation, not by hiding the button.
   token: string;
+  /**
+   * ⚠ THE YEAR THE CALLER BELIEVES THE ROOM IS ON, AND THE SERVER
+   * COMPARE-AND-SWAPS ON IT. REQUIRED, not optional: an advance that may omit
+   * its expectation is an advance somebody will omit it from, and the whole
+   * guarantee is gone for that call. The compiler asks every caller.
+   *
+   * ⚠ WHAT IT PREVENTS. `advance` increments. A retried POST — which is exactly
+   * what a client does when a response is lost — used to SKIP A YEAR: the room
+   * went to 4 when the host had asked it to go to 3, and every team then
+   * reported against a year nobody played. There is no way to tell the two
+   * requests apart from the server's side without this field, because they are
+   * byte-identical.
+   */
+  expectedYear: number;
 }
 
 export interface AdvanceResponse {
   room: RoomView;
   currentYear: number;
+  /**
+   * ⚠ FALSE WHEN THIS CALL WAS A RETRY THAT CHANGED NOTHING, and the call still
+   * SUCCEEDS. That is the point of the whole mechanism rather than a detail: a
+   * host whose request was retried must see the year advance ONCE and get a
+   * success, not an error telling them it already happened. An error would be a
+   * failure the host can do nothing about, reported for an operation that
+   * worked.
+   *
+   * It is reported rather than hidden so a UI can stay quiet on a retry instead
+   * of animating a second transition, and so a harness can tell the two apart.
+   */
+  advanced: boolean;
 }
 
 export interface ReadRequest {
