@@ -131,6 +131,7 @@ export function propertyGenerationInputs(b: LineYearGenerationBase): PropertyGen
     members: b.members, yearNumber: b.yearNumber, calendarYear: b.calendarYear,
     instanceSeed: b.instanceSeed, kPr: b.k, riskControlEffectiveness: b.riskControlEffectiveness,
     forcedEvents: b.shock?.forcedEvents,
+    weatherEvents: b.shock?.weatherEvents,
   };
 }
 

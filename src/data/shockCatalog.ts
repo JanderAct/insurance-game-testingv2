@@ -25,6 +25,7 @@ import type { CoverageLine } from '../types/simulation';
 import { WC_SEVERITY_COMPONENTS } from './defaultAssumptions';
 import { WHOLE_LINE } from '../utils/shockEffects';
 import { CAT_REGIONS } from '../utils/propertyCatastrophe';
+import { REINSURANCE_TOWER } from './reinsuranceTower';
 
 export const SHOCK_CATALOG: Record<string, ShockDefinition> = {
   // -------------------------------------------------------------------------
@@ -106,6 +107,38 @@ export const SHOCK_CATALOG: Record<string, ShockDefinition> = {
     effects: [
       { kind: 'forceEvent', line: 'Property', peril: 'wildfire', region: 'North', loss: { min: 25_000_000, max: 100_000_000 } },
       { kind: 'injectClaim', line: 'WC', count: 2, amount: 900_000 },
+    ],
+  },
+
+  // -------------------------------------------------------------------------
+  // WINTER STORM — PROVISIONAL ID, for the same reason as WILDFIRE. The first
+  // NON-CATASTROPHE weather event, and the original design's middle band
+  // (attritional / non-cat weather / catastrophe) in shock form.
+  //
+  // ⚠ WHY IT IS NOT A CATASTROPHE. About a hundred claims of $100k-$500k, so
+  // ~$30M — the size of a mid catastrophe — but every claim is its OWN
+  // occurrence. As one occurrence the pool would keep $5M and the tower pay the
+  // rest; as a hundred, none reaches the $5M retention and the pool keeps all of
+  // it. The same dollars cost about six times as much arriving apart, and this
+  // is the event that shows it. It is also the only event the AGGREGATE STOP
+  // answers: no occurrence layer responds to a year of many medium claims.
+  //
+  // JUDGMENT CALLS, stated: NORTH, as the winter peril's region; COUNT 80-120
+  // and SIZE $100k-$500k, both uniform, from the brief's "roughly 100 claims of
+  // $100,000 to $500,000"; BAND 'high', since ~$30M retained is about a year of
+  // Property pool premium — the matrix gives no grade for it.
+  // -------------------------------------------------------------------------
+  'WINTER-STORM': {
+    id: 'WINTER-STORM',
+    name: 'Severe Winter Storm',
+    horizon: 'current',
+    band: 'high',
+    description:
+      'A severe winter storm crosses the North region: ice, snow load and burst pipes damage dozens of members\' '
+      + 'buildings. Each loss is its own claim, none large enough to reach the reinsurance retention — so the '
+      + 'pool pays all of it.',
+    effects: [
+      { kind: 'weatherEvent', line: 'Property', peril: 'winter storm', region: 'North', count: { min: 80, max: 120 }, claim: { min: 100_000, max: 500_000 } },
     ],
   },
 
@@ -423,6 +456,7 @@ export const SHOCK_CATALOG: Record<string, ShockDefinition> = {
 // mapped; a line reading a new channel is added in both places.
 const READS: Record<string, readonly CoverageLine[]> = {
   forceEvent: ['Property'],
+  weatherEvent: ['Property'],
   injectClaim: ['WC', 'GL'],
   freqMultiplier: ['GL'],
   componentFreqMultiplier: ['WC'],
@@ -462,6 +496,30 @@ export function validateShockDefinition(def: ShockDefinition): void {
         throw new Error(`shockCatalog ${def.id}: forceEvent loss range [${effect.loss.min}, ${effect.loss.max}] is not a positive range.`);
       }
       if (!effect.peril) throw new Error(`shockCatalog ${def.id}: forceEvent needs a peril.`);
+    }
+
+    // A weather event names a region with members in it, a claim COUNT that is
+    // a positive whole-number range, and a claim SIZE range — and that size must
+    // stay BELOW the occurrence retention. A "weather" claim large enough to
+    // reach it would be a catastrophe wearing the wrong label, and the whole
+    // point of this effect is the dollars the tower never sees.
+    if (effect.kind === 'weatherEvent') {
+      if (!CAT_REGIONS.includes(effect.region)) {
+        throw new Error(`shockCatalog ${def.id}: weatherEvent region '${effect.region}' is not one of ${CAT_REGIONS.join('/')}.`);
+      }
+      if (!Number.isInteger(effect.count.min) || !Number.isInteger(effect.count.max)
+        || !(effect.count.min > 0) || !(effect.count.max >= effect.count.min)) {
+        throw new Error(`shockCatalog ${def.id}: weatherEvent count [${effect.count.min}, ${effect.count.max}] is not a positive whole-number range.`);
+      }
+      if (!(effect.claim.min > 0) || !(effect.claim.max >= effect.claim.min)) {
+        throw new Error(`shockCatalog ${def.id}: weatherEvent claim range [${effect.claim.min}, ${effect.claim.max}] is not a positive range.`);
+      }
+      const retention = REINSURANCE_TOWER.Property[0].attachment;
+      if (!(effect.claim.max < retention)) {
+        throw new Error(`shockCatalog ${def.id}: weatherEvent claims reach $${effect.claim.max.toLocaleString()}, at or above the `
+          + `$${retention.toLocaleString()} occurrence retention — a claim that size is not ordinary weather.`);
+      }
+      if (!effect.peril) throw new Error(`shockCatalog ${def.id}: weatherEvent needs a peril.`);
     }
 
     // An injected claim MUST carry a positive explicit amount. The generator

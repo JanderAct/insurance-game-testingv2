@@ -40,6 +40,9 @@ function describe(effect: ShockEffect): string {
   switch (effect.kind) {
     case 'forceEvent':
       return `force a ${effect.peril} catastrophe in ${effect.region}, ${money(effect.loss.min)}-${money(effect.loss.max)} gross`;
+    case 'weatherEvent':
+      return `${effect.count.min}-${effect.count.max} ${effect.peril} claims in ${effect.region}, `
+        + `${money(effect.claim.min)}-${money(effect.claim.max)} each, every one its own occurrence`;
     case 'injectClaim': {
       const n = typeof effect.count === 'number' ? `${effect.count}` : `${effect.count.min}-${effect.count.max}`;
       const plural = typeof effect.count === 'number' && effect.count === 1 ? '' : 's';
@@ -166,6 +169,15 @@ export function resolveShocks(instance: GameInstance, yearNumber: number): Shock
           const bucket = lineBucket(byLine, effect.line);
           bucket.forcedEvents = bucket.forcedEvents ?? [];
           bucket.forcedEvents.push({ shockId: def.id, peril: effect.peril, region: effect.region, loss: effect.loss });
+          break;
+        }
+        case 'weatherEvent': {
+          // DATA ONLY, like forceEvent: the count, the sizes and which members
+          // take the claims are drawn by Property's generator from streams keyed
+          // on this shock id.
+          const bucket = lineBucket(byLine, effect.line);
+          bucket.weatherEvents = bucket.weatherEvents ?? [];
+          bucket.weatherEvents.push({ shockId: def.id, peril: effect.peril, region: effect.region, count: effect.count, claim: effect.claim });
           break;
         }
         case 'injectClaim': {

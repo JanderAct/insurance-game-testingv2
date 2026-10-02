@@ -79,6 +79,16 @@ export type ShockEffect =
   // PROPERTY ONLY — the only line with a cat band. shockCatalog rejects it on
   // any other line at load.
   | { kind: 'forceEvent'; line: 'Property'; peril: string; region: Region; loss: ShockRange }
+  // IMPLEMENTED for Property. A NON-CATASTROPHE WEATHER EVENT: a region's
+  // members take MANY separate claims, each its OWN OCCURRENCE — `count` claims
+  // drawn from the range, each of a size drawn from `claim`. The opposite of
+  // forceEvent in exactly one respect, and it is the point: forceEvent sums its
+  // claims into ONE occurrence the tower attaches to; this leaves every claim
+  // standing alone, so none reaches the $5M retention and the pool keeps all of
+  // it. NOT a catastrophe: its occurrences carry isCatastrophe false and its
+  // claims the tier 'weather', so they book contracted, develop and settle like
+  // any other Property claim. PROPERTY ONLY — shockCatalog rejects it elsewhere.
+  | { kind: 'weatherEvent'; line: 'Property'; peril: string; region: Region; count: ShockRange; claim: ShockRange }
   // IMPLEMENTED for WC. Injects `count` claims through that line's own
   // generator, so the claims are real: they carry ids, join the occurrence
   // list, and flow into reserving and reinsurance like any other.
@@ -203,6 +213,7 @@ export type ShockEffectKind = ShockEffect['kind'];
 // against this rather than against a comment, so the two cannot drift.
 export const IMPLEMENTED_EFFECTS: ReadonlySet<ShockEffectKind> = new Set<ShockEffectKind>([
   'forceEvent',
+  'weatherEvent',
   'injectClaim',
   'freqMultiplier',
   'componentFreqMultiplier',
@@ -289,6 +300,9 @@ export interface LineShockEffects {
   // Property only: forced catastrophe events, in resolution order. Carries the
   // shock id because the size and hit order are drawn from streams keyed on it.
   forcedEvents?: { shockId: string; peril: string; region: Region; loss: ShockRange }[];
+  // Property only: non-catastrophe weather events, in resolution order. Carries
+  // the shock id for the same reason — every draw is keyed on it.
+  weatherEvents?: { shockId: string; peril: string; region: Region; count: ShockRange; claim: ShockRange }[];
 }
 
 export interface ShockResolution {

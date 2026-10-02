@@ -669,13 +669,14 @@ console.log('\n--- 9. #19 Social Inflation Hard Market — the first sevMultipli
 // the data rule exists for — the draws are the shock's own, so everything that
 // is NOT the event is bit-identical to the unshocked game.
 // ============================================================================
-console.log('\n--- 10. #2 / WILDFIRE / WATER-CONTAMINATION ---');
+console.log('\n--- 10. #2 / WILDFIRE / WATER-CONTAMINATION / WINTER-STORM ---');
 {
   const FIRE = 3;
   const EVENTS: { id: string; lines: CoverageLine[] }[] = [
     { id: 'WILDFIRE', lines: ['Property', 'WC'] },
     { id: '#2', lines: ['Property', 'WC'] },
     { id: 'WATER-CONTAMINATION', lines: ['GL'] },
+    { id: 'WINTER-STORM', lines: ['Property'] },
   ];
   const cleanBySeed = new Map(SEEDS.map(id => [id, play(id, 5, [])]));
   for (const ev of EVENTS) {
@@ -706,6 +707,19 @@ console.log('\n--- 10. #2 / WILDFIRE / WATER-CONTAMINATION ---');
         const inj = (r3.byLine.GL!.claims ?? []).filter(c => c.tier === 'injected');
         if (!(inj.length >= 2 && inj.length <= 5 && inj.every(c => c.grossUltimate > 5e6 && c.grossUltimate <= 10e6))) sizeOk = false;
         sizes.push(`${inj.length} x ${inj.map(c => fmt$(c.grossUltimate)).join('/')}`);
+      } else if (ev.id === 'WINTER-STORM') {
+        // MANY CLAIMS, EACH ITS OWN NON-CATASTROPHE OCCURRENCE, NONE AT THE
+        // RETENTION — and so the tower recovers NOTHING more than it does in the
+        // unshocked year: the whole point of the event.
+        const pr3 = r3.byLine.Property!, pc3 = c3.byLine.Property!;
+        const w = (pr3.claims ?? []).filter(c => c.tier === 'weather');
+        const occ = new Map((pr3.occurrences ?? []).map(o => [o.id, o]));
+        const own = w.every(c => { const o = occ.get(c.occurrenceId); return !!o && o.claimIds.length === 1 && o.isCatastrophe === false; });
+        const distinct = new Set(w.map(c => c.occurrenceId)).size === w.length;
+        const sized = w.length >= 80 && w.length <= 120 && w.every(c => c.grossUltimate >= 100_000 && c.grossUltimate <= 500_000);
+        const towerSilent = pr3.reinsuranceRecovery === pc3.reinsuranceRecovery;
+        if (!(own && distinct && sized && towerSilent)) sizeOk = false;
+        sizes.push(`${w.length} claims, ${fmt$(w.reduce((t, c) => t + c.grossUltimate, 0))}, each its own non-cat occurrence${towerSilent ? ', tower recovery unchanged' : ', TOWER RECOVERED SOME'}`);
       } else {
         const evClaims = (r3.byLine.Property!.claims ?? []).filter(c => c.occurrenceId.includes('-SHOCK-'));
         const occ = new Set(evClaims.map(c => c.occurrenceId));
@@ -750,6 +764,9 @@ console.log('\n--- 10. #2 / WILDFIRE / WATER-CONTAMINATION ---');
     ['a range on a WC injection', { id: 'x', name: 'x', horizon: 'current', band: 'high', description: 'x', effects: [{ kind: 'injectClaim', line: 'WC', count: { min: 1, max: 2 }, amount: 1 }] }],
     ['freqMultiplier on WC (the old #2 defect)', { id: 'x', name: 'x', horizon: 'current', band: 'high', description: 'x', effects: [{ kind: 'freqMultiplier', line: 'WC', factor: 1.4 }] }],
     ['sevMultiplier on Property', { id: 'x', name: 'x', horizon: 'current', band: 'high', description: 'x', effects: [{ kind: 'sevMultiplier', line: 'Property', factor: 1.1 }] }],
+    ['weatherEvent on WC', { id: 'x', name: 'x', horizon: 'current', band: 'high', description: 'x', effects: [{ kind: 'weatherEvent', line: 'WC' as 'Property', peril: 'storm', region: 'North', count: { min: 1, max: 2 }, claim: { min: 1, max: 2 } }] }],
+    ['weather claims reaching the retention', { id: 'x', name: 'x', horizon: 'current', band: 'high', description: 'x', effects: [{ kind: 'weatherEvent', line: 'Property', peril: 'storm', region: 'North', count: { min: 1, max: 2 }, claim: { min: 1_000_000, max: 5_000_000 } }] }],
+    ['a fractional weather claim count', { id: 'x', name: 'x', horizon: 'current', band: 'high', description: 'x', effects: [{ kind: 'weatherEvent', line: 'Property', peril: 'storm', region: 'North', count: { min: 1.5, max: 2 }, claim: { min: 1, max: 2 } }] }],
   ];
   for (const [label, def] of bad) {
     console.log(`  validator rejects ${label}: ${note(throws(() => validateShockDefinition(def)), `the validator accepts ${label}`)}`);

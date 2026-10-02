@@ -94,7 +94,9 @@ const PROPERTY_NOTE =
   'pool\'s own nine years of claims, one claim per occurrence (weather is inside the mixture). "cat" ' +
   'claims come from regional catastrophe events: each event strikes one region, and every member it ' +
   'hits loses a fixed share of its primary asset — all of one event\'s claims share one occurrence, ' +
-  'and the catastrophe layer attaches to their sum. Reported Year always equals Accident Year: ' +
+  'and the tower attaches to their sum. A "weather" claim comes from a scheduled non-catastrophe ' +
+  'weather event: many claims, each its OWN occurrence, none large enough to reach the retention, so ' +
+  'the pool keeps all of it. Reported Year always equals Accident Year: ' +
   'Property carries no report lag.';
 
 function safeStr(v: unknown): string {

@@ -52,6 +52,10 @@ const BAND = 'property';
 // claims export and the tower both need to tell a cat claim from an
 // attritional one, and Occurrence.isCatastrophe is the flag the tower reads.
 export const CAT_BAND = 'cat';
+// A NON-CATASTROPHE WEATHER claim's tier. Deliberately NOT CAT_BAND: memberValue
+// pools every 'cat' claim of an occurrence before splitting it across the tower,
+// and these are ordinary claims that happen to arrive together.
+export const WEATHER_BAND = 'weather';
 
 // Risk quality scales the Poisson mean. Neutral RQ 5 is the reference, so a
 // neutral book reproduces the fitted frequency exactly.
@@ -317,6 +321,9 @@ export interface PropertyGenerationInputs {
   // like every shock: the price does not see them. Absent on every unshocked
   // year, and then nothing below reads a stream it did not read before.
   forcedEvents?: { shockId: string; peril: string; region: Region; loss: { min: number; max: number } }[];
+  // Scheduled NON-CATASTROPHE weather events — many claims, each its own
+  // occurrence. Absent on every unscheduled year.
+  weatherEvents?: { shockId: string; peril: string; region: Region; count: { min: number; max: number }; claim: { min: number; max: number } }[];
 }
 
 export interface PropertyGenerationResult {
@@ -338,6 +345,8 @@ export interface PropertyGenerationResult {
   // unless the region's enrolled members could not absorb it all (then every
   // one of them was hit in full and `shortfall` is the rest).
   forcedEventResults: { shockId: string; target: number; gross: number; claims: number; shortfall: number }[];
+  // Per scheduled weather event: claims landed and their gross. Every claim its own occurrence.
+  weatherEventResults: { shockId: string; claims: number; gross: number }[];
 }
 
 export function generatePropertyClaims(inputs: PropertyGenerationInputs): PropertyGenerationResult {
@@ -459,6 +468,55 @@ export function generatePropertyClaims(inputs: PropertyGenerationInputs): Proper
   });
   const forcedOccurrenceId = (ev: number) =>
     `PR-${yearNumber}-SHOCK-${forcedEvents[ev].shockId.replace(/[^A-Za-z0-9]/g, '')}-${ev}`;
+
+  // ==========================================================================
+  // SCHEDULED NON-CATASTROPHE WEATHER — many claims, EACH ITS OWN OCCURRENCE.
+  //
+  // ⚠ THE SAME DOLLARS COST MORE WHEN THEY ARRIVE APART. A forced catastrophe
+  // sums its claims into one occurrence, the pool keeps $5M and the tower pays
+  // the rest. A hundred $300k claims are a hundred occurrences, none reaches the
+  // retention, and the pool keeps every dollar. Nothing here aggregates.
+  //
+  // ⚠ NOT A CATASTROPHE, AND NOT FLAGGED AS ONE. isCatastrophe stays false and
+  // the tier is WEATHER_BAND, so these book contracted like any claim, develop,
+  // and settle — they are ordinary claims that happen to have company.
+  //
+  // EVERY DRAW IS KEYED, NONE SEQUENTIAL: the count on `pr_weather:<id>`, and
+  // claim n's member and size on `pr_weather:<id>:<n>` — so claim n is the same
+  // whatever the count, and no cat-band, attritional or forced-event stream is
+  // touched. The member is drawn in proportion to insured value from the
+  // region's enrolled book IN id ORDER, so a roster reordering moves nothing;
+  // who is enrolled still decides who CAN be hit, as for a forced event.
+  // ==========================================================================
+  const weatherEvents = inputs.weatherEvents ?? [];
+  const weatherPlan = new Map<string, { event: number; n: number; loss: number }[]>();
+  const weatherEventResults: { shockId: string; claims: number; gross: number }[] = [];
+  weatherEvents.forEach((we, ev) => {
+    const countRng = deriveSubRng(instanceSeed, yearNumber, `pr_weather:${we.shockId}`);
+    const count = we.count.min + Math.floor(countRng.next() * (we.count.max - we.count.min + 1));
+    const book = members
+      .filter(m => m.region === we.region && (m.exposureByLine.Property ?? 0) > 0)
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    const totalTiv = book.reduce((t, m) => t + (m.exposureByLine.Property ?? 0), 0);
+    let gross = 0, landed = 0;
+    if (totalTiv > 0) {
+      for (let n = 0; n < count; n++) {
+        const rng = deriveSubRng(instanceSeed, yearNumber, `pr_weather:${we.shockId}:${n}`);
+        let u = rng.next() * totalTiv;
+        let pick = book[book.length - 1];
+        for (const m of book) { u -= m.exposureByLine.Property ?? 0; if (u < 0) { pick = m; break; } }
+        const loss = we.claim.min + rng.next() * (we.claim.max - we.claim.min);
+        const list = weatherPlan.get(pick.id) ?? [];
+        list.push({ event: ev, n, loss });
+        weatherPlan.set(pick.id, list);
+        gross += loss;
+        landed++;
+      }
+    }
+    weatherEventResults.push({ shockId: we.shockId, claims: landed, gross });
+  });
+  const weatherOccurrenceId = (ev: number, n: number) =>
+    `PR-${yearNumber}-SHOCK-${weatherEvents[ev].shockId.replace(/[^A-Za-z0-9]/g, '')}-${ev}-${n}`;
 
   for (const member of members) {
     // PER-MEMBER STREAMS, KEYED ON member.id — unchanged from the retired
@@ -614,6 +672,43 @@ export function generatePropertyClaims(inputs: PropertyGenerationInputs): Proper
       claimCount++;
     }
 
+    // THIS MEMBER'S CLAIMS FROM ANY SCHEDULED WEATHER EVENT — planned above.
+    // Each is its own occurrence, emitted with it; not a catastrophe.
+    for (const { event, n, loss } of weatherPlan.get(member.id) ?? []) {
+      const occurrenceId = weatherOccurrenceId(event, n);
+      const claimId = `${occurrenceId}-${member.id}`;
+      claims.push({
+        id: claimId,
+        occurrenceId,
+        memberId: member.id,
+        line: LINE,
+        accidentYear: yearNumber,
+        calendarYear,
+        tier: WEATHER_BAND,
+        status: 'open',
+        reportedYear: yearNumber,
+        grossUltimate: loss,
+        paidToDate: 0,
+        caseReserve: loss,
+        paymentPattern: [...M.payoutPattern],
+      });
+      occurrences.push({
+        id: occurrenceId,
+        line: LINE,
+        memberId: member.id,
+        memberIds: [member.id],
+        accidentYear: yearNumber,
+        calendarYear,
+        region: weatherEvents[event].region,
+        isCatastrophe: false,
+        claimIds: [claimId],
+        peril: weatherEvents[event].peril,
+      });
+      memberLoss += loss;
+      grossUltimateLoss += loss;
+      claimCount++;
+    }
+
     // PER CLAIM, over the claims this member just generated. Property is not
     // RATED on experience (its measured primary-layer credibility is 0.000 —
     // see memberExperienceMod.ts), but the figure is recorded anyway so the
@@ -693,6 +788,7 @@ export function generatePropertyClaims(inputs: PropertyGenerationInputs): Proper
     catEvents: eventCount,
     catGrossLoss,
     forcedEventResults,
+    weatherEventResults,
   };
 }
 
