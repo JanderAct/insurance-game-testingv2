@@ -1,3 +1,7 @@
+import { RESULT_METRICS } from '../../src/utils/resultMetrics';
+import { toHistoricalYear } from '../../src/utils/priorHistoryEngine';
+import { isClaimClosed } from '../../src/utils/claimClosure';
+import { closureCurveForReported } from '../../src/utils/claimTriangle';
 // ============================================================================
 // THE BASIS CROSS-CHECK — EVERY QUANTITY THIS TREE COMPUTES TWICE, ON ONE
 // SAMPLE, SIDE BY SIDE, WITH THE BASIS NAMED.
@@ -332,6 +336,120 @@ console.log(RULE);
     console.log('      2.1613 / 2.2897 / 2.1384. What survives at this sample is booked < drawn <');
     console.log('      settled, which is the basis difference. The LEVELS belong to the two gates.');
     console.log(`    k = ${TRIANGLE_INITIAL_CONTRACTION.GL.k}, A = ${TRIANGLE_INITIAL_CONTRACTION.GL.A}`);
+  }
+}
+
+// ============================================================================
+// THE DISPLAY SURFACES — WHAT A PLAYER IS SHOWN, COMPUTED EVERY WAY A SCREEN
+// COMPUTES IT.
+//
+// ⚠ NARROW ON PURPOSE, AND THE WIDE VERSION WAS THE PROPOSAL. The original idea
+// was to run every surface's pure functions on one sample and compare
+// everything shared across them. By the time it came to be built, five steps of
+// de-duplication had landed — cohortViews for the cohort readers, statementLines
+// for the income statement, formatters for the loss-ratio bands, RESULT_METRICS
+// for the spreadsheet labels and the pool-row filter — and the TYPE SPLIT
+// between ResultSet and LineResultSet had turned a whole class of these into
+// compile errors. A general probe over that would mostly re-derive what the
+// compiler and eight gates already hold, and a probe that cannot fail is worse
+// than none. So this covers the three things a survey of the tree actually
+// found still computed more than once, and each one carries a CONTROL that
+// fires.
+//
+// ⚠ IT STILL ASSERTS NOTHING, which is this file's charter and is not a
+// formality here. Two of the three families below are groups of copies that are
+// all CORRECT — four places computing one rate at line scope is duplication,
+// not a defect — and a tolerance would turn this file into a gate with an
+// opinion about which copy is canonical, which is the failure it exists to
+// catch.
+//
+// ⚠ WHAT IT CANNOT REACH, SAID PLAINLY RATHER THAN PAPERED OVER. Three of the
+// copies below live as inline expressions inside JSX and are not exported, so
+// node cannot call them: ResultsPage's two per-$100 rates and its net
+// prior-year development. They are NAMED with their line numbers and their
+// value is recomputed here from the same fields — which means that for those
+// three this file compares a TRANSCRIPTION rather than the running code, and a
+// drift in the page would not show up. That is an argument for hoisting them,
+// and it is recorded as a limitation instead of being hidden behind a green
+// line.
+// ============================================================================
+console.log(`\n${RULE}`);
+console.log('DISPLAY SURFACES — the three quantities still computed more than once');
+console.log(RULE);
+
+{
+  const line: CoverageLine = 'GL';
+  const lr = R.byLine?.[line];
+
+  // ---- 1. THE CLOSURE BAND ------------------------------------------------
+  // The one family here that WAS a defect. Three sites resolved the size band
+  // and two of them disagreed; the control is the behaviour that was removed.
+  {
+    const regen = regenerateLineYearClaims(gs.instance, result as never, line);
+    const age = 1;
+    const closedOn = (curveOf: (c: { grossUltimate: number }) => ReturnType<typeof resolveClosureCurve>) =>
+      regen.claims.filter(c => isClaimClosed(curveOf(c), id, c.id, age)).length;
+    const asDrawn = closedOn(c => resolveClosureCurve(line, c.grossUltimate));
+    const asReported = closedOn(c => closureCurveForReported(line, initialEstimate(line, c.grossUltimate)));
+    const asWasBefore = closedOn(c => resolveClosureCurve(line, initialEstimate(line, c.grossUltimate)));
+    family('CLOSURE BAND — how many files are closed at age 1', 'count', [
+      { basis: 'register draw (memo, workbook)', value: asDrawn, note: 'resolveClosureCurve(line, Claim.grossUltimate)' },
+      { basis: 'engine, reported value', value: asReported, note: 'closureCurveForReported — the shipped path' },
+      { basis: 'CONTROL: reported, raw cut', value: asWasBefore, note: '⚠ the pre-fix engine path. MUST differ, or this probe is blind' },
+    ], 'the size band is defined on the DRAW. The first two are the same question asked from the two '
+     + 'places that ask it and must agree exactly. The third is what the engine did before the band '
+     + 'was put on the draw — it resolves a contracted value against the uncontracted cut, and it is '
+     + 'here so a reader can see this family is capable of showing a difference at all.');
+    console.log(`    claims in this register: ${regen.claims.length}`);
+  }
+
+  // ---- 2. THE LOSS RATIO REPRODUCES FROM ITS OWN PRINTED ROWS -------------
+  if (lr) {
+    const byKey = (k: string) => {
+      const m = RESULT_METRICS.find(x => x.key === k);
+      return m?.csvValue ? Number(m.csvValue(lr)) : null;
+    };
+    const num = byKey('netIncurredLoss');
+    const den = (byKey('poolPremium') ?? 0) + (byKey('adminExpense') ?? 0);
+    family('ACTUAL LOSS RATIO — against the rows the spreadsheet prints', '%', [
+      { basis: 'stored field', value: lr.actualLossRatioPricingBasis, note: 'what the page shows' },
+      { basis: 'from printed rows', value: num !== null && den > 0 ? num / den : null, note: 'netIncurredLoss / (poolPremium + adminExpense), all three RESULT_METRICS rows' },
+      { basis: 'CONTROL: netUltimateLoss', value: den > 0 ? (byKey('netUltimateLoss') ?? 0) / den : null, note: '⚠ the only loss row the table carried before. MUST differ' },
+    ], 'a reader checking the arithmetic divides the loss row by the premium rows. That reproduced '
+     + 'nothing until netIncurredLoss was added: the control is the division the table used to '
+     + 'support, and it misses by tens of points because netUltimateLoss is this accident year alone '
+     + 'while the ratio is on the whole ledger movement.');
+  }
+
+  // ---- 3. PRIOR-YEAR DEVELOPMENT (GROSS), TWO PLACES ----------------------
+  if (lr) {
+    const m = RESULT_METRICS.find(x => x.key === 'priorYearDevelopmentGross');
+    family('PRIOR-YEAR DEVELOPMENT (GROSS) — derived, not stored', '$M', [
+      { basis: 'RESULT_METRICS', value: m?.csvValue ? Number(m.csvValue(lr)) : null, note: "key 'priorYearDevelopmentGross', resultMetrics.ts:549" },
+      { basis: 'ResultsPage:393 (transcribed)', value: lr.priorYearDevelopment - lr.priorYearDevelopmentCeded, note: '⚠ inline JSX — NOT callable, so this is a copy of the expression, not the page' },
+      { basis: 'CONTROL: the stored NET', value: lr.priorYearDevelopment, note: '⚠ priorYearDevelopment itself. MUST differ whenever anything was ceded' },
+    ], 'gross development is NOT a stored field — both surfaces derive it as net MINUS the ceded '
+     + 'recovery, because priorYearDevelopment is favourable-positive and ceding makes an adverse '
+     + 'year less adverse. Two derivations of one figure under one label. ⚠ ONLY ONE IS REACHABLE '
+     + 'FROM NODE: the page copy is transcribed here, so a drift inside the page would not show. The '
+     + 'control is the stored net, which is what a reader would reach for by mistake.');
+  }
+
+  // ---- 4. THE PER-$100 RATE, FOUR SITES -----------------------------------
+  if (lr) {
+    const m = RESULT_METRICS.find(x => x.key === 'poolPremiumRateAtSelectedClf');
+    const direct = lr.poolPremium / Math.max(lr.activeExposure * 10_000, 1);
+    const poolRow = R.poolPremium / Math.max(R.activeExposure * 10_000, 1);
+    family('POOL PREMIUM RATE PER $100 — four sites, all line scope', 'plain', [
+      { basis: 'RESULT_METRICS', value: m?.csvValue ? Number(m.csvValue(lr)) : null, note: 'resultMetrics.ts:270' },
+      { basis: 'priorHistoryEngine', value: toHistoricalYear(lr).poolPremiumRatePer100 ?? null, note: 'priorHistoryEngine.ts:617, the HistoricalYear adapter' },
+      { basis: 'ResultsPage:337 (transcribed)', value: direct, note: '⚠ inline JSX — NOT callable' },
+      { basis: 'ResultsPage:513 (transcribed)', value: direct, note: '⚠ inline JSX — NOT callable, same expression' },
+      { basis: 'CONTROL: at POOL scope', value: poolRow, note: '⚠ payroll + TIV in one denominator. MUST differ, and means nothing' },
+    ], 'four copies of one formula and all four are CORRECT — this is duplication, not a defect, and '
+     + 'the file says so rather than ruling on which should be canonical. The control is the pooled '
+     + 'version that step 1 removed: adding payroll to TIV gives a denominator with no unit, which is '
+     + 'why there is no pool rate rather than a rounding worry.');
   }
 }
 
