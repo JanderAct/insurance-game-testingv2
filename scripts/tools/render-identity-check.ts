@@ -248,8 +248,26 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // rows carry a word change rather than only numbers.
 // ⚠ THE CONTROL RAN FIRST AND ON A SEPARATE PORT: ccebb95 built into its own
 // worktree and served on 4174 reproduced all 298 against the committed v11.
+// ⚠ v12 -> v13: THE AUDIT PAGE'S OWN CHECKS. 26 rows, every one Calculation
+// Audit and nothing else, attributed by diffing the text behind the hashes:
+//   line scope   the rate tolerance rises ($166 -> $609 on GL, $169 -> $410 on
+//                WC, $10,170 -> $10,178 on Property) because it now carries the
+//                exposure rounding as well as the rate rounding, and the note
+//                names both. The badge goes '28 of 29 — 1 difference found' to
+//                'All 29 checks OK'.
+//   pool scope   '$NaN' -> 'n/a' and 'Review' -> the n/a reason, on the two
+//                rows whose recalculation needs a per-line CLF the pool has
+//                not got; the badge goes '2 differences found, 3 not
+//                applicable' to '5 not applicable'.
+//   everywhere   'differences under $0' -> 'differences under one cent'.
+// After it: 16 captures read 'All 29 checks OK' and the ten pooled ones read
+// 53-54 of 58 with the remainder n/a and ZERO differences found.
+// ⚠ NO VALUE MOVED. Both value baselines are untouched by this commit; the only
+// figures that changed are the printed tolerances themselves.
+// ⚠ THE CONTROL RAN FIRST AND ON A SEPARATE PORT: 1330777 built into its own
+// worktree and served on 4174 reproduced all 298 against the committed v12.
 const BASELINE = process.env.RENDER_BASELINE
-  ?? path.join(__dirname, '../../baselines/RENDER_IDENTITY_v12.json');
+  ?? path.join(__dirname, '../../baselines/RENDER_IDENTITY_v13.json');
 const WRITE = process.argv.includes('--write');
 const BASE_URL = process.env.RENDER_URL ?? 'http://127.0.0.1:4173';
 // The image ships chromium 1194; a newer `playwright` expects its own build and

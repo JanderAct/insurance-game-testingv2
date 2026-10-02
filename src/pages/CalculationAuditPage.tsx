@@ -479,7 +479,11 @@ export default function CalculationAuditPage({ lockedResults, priorHistory, inst
 
       <div className={`border rounded-xl px-4 py-3 text-sm font-semibold ${status.tone}`}>
         {status.text}
-        <span className="font-normal opacity-75"> — differences under {formatCurrency(CHECK_TOLERANCE)} pass as floating-point epsilon; detail is in the Check / Notes column of each card.</span>
+        {/* ⚠ NOT formatCurrency(CHECK_TOLERANCE). It rounds to whole dollars, so a
+            one-cent tolerance rendered as "$0" and every audit screen read
+            "differences under $0 pass as floating-point epsilon" — a sentence
+            that is false for every difference there is. */}
+        <span className="font-normal opacity-75"> — differences under one cent pass as floating-point epsilon; detail is in the Check / Notes column of each card.</span>
       </div>
 
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
@@ -863,6 +867,39 @@ export function computeAuditChecks(
   const totalOperatingRevenuesValue = lines.totalOperatingRevenues;
   const totalOperatingExpensesValue = lines.totalOperatingExpenses;
 
+  // ============================================================================
+  // ⚠ THESE TWO CHECKS COMPARE A VALUE AGAINST ITSELF AND CANNOT FAIL. LEFT IN
+  // PLACE AND RECORDED RATHER THAN QUIETLY REMOVED, BECAUSE THE RULE THIS
+  // PROJECT APPLIES TO ITS GATES — A CHECK THAT CANNOT FAIL IS WORSE THAN NONE —
+  // APPLIES HERE, AND DELETING THEM IS A JUDGEMENT SOMEBODY SHOULD MAKE ON
+  // PURPOSE RATHER THAN A TIDY-UP.
+  //
+  // ⚠ IT PREDATES THE SHARED DERIVATION ABOVE, which is the first thing anyone
+  // will assume. At a84b9f7^ the two values were built here from result fields
+  // (`r.reinsuranceCost + r.poolPremium + r.adminExpense + r.assessments` and
+  // its expense twin) and were ALREADY passed to mkCheck twice, so the check was
+  // already tautological; that commit changed only where the value came from.
+  //
+  // WHAT EACH WAS MEANT TO ASSERT, which is the question worth answering:
+  //
+  //   Nothing that it can. mkCheck's contract is `statement - derived` — a
+  //   STATEMENT figure against an INDEPENDENT reconstruction. There is no
+  //   independent second construction of either total anywhere in the tree: the
+  //   income statement's revenue line IS the sum of those four fields, and now
+  //   has exactly one definition in statementLines. So the pair is not a check
+  //   that lost its second input; it is a check that never had one, and it has
+  //   been counting toward the page's "N of M checks OK" badge as two passes
+  //   that cannot do otherwise.
+  //
+  //   The honest forms are: present them as plain rows with a build-up and no
+  //   Check column (what every other derived total on this page does), or give
+  //   them a genuinely separate reconstruction — summing the member-charge
+  //   components per line and comparing against the pooled statement would be
+  //   one, and is real work rather than a rename.
+  //
+  // Not changed here because this commit is about checks that fail WRONGLY, and
+  // these fail never. Flagged for a ruling.
+  // ============================================================================
   const totalOperatingRevenues = mkCheck(totalOperatingRevenuesValue, totalOperatingRevenuesValue);
   const totalOperatingExpenses = mkCheck(totalOperatingExpensesValue, totalOperatingExpensesValue);
   const operatingIncome = mkCheck(
@@ -1483,17 +1520,48 @@ export function buildSupportingRows(
   // line's rate kept as a placeholder — while activeExposure is the sum across
   // lines, so the product multiplies summed exposure by a single line's rate.
   //
-  // At line scope the rates are stored rounded to four decimals, so the error
-  // is bounded by half a rounding unit times the payroll units, which is the
-  // tolerance used here rather than a flat dollar.
-  const rateRoundingTolerance = Math.max(1, result.activeExposure * 10_000 * 0.00005);
-  const rateCheck = (diff: number) =>
+  // ⚠ BOTH OPERANDS OF THE PRODUCT ARE ROUNDED, AND THE OLD BOUND COUNTED ONE.
+  // It read `activeExposure * 10_000 * 0.00005` — half a rounding unit on the
+  // RATE alone — and these checks multiply a stored rate by a stored EXPOSURE,
+  // which simulationEngine rounds to two decimals of $M on the result row
+  // (`parseFloat(activeExposure.toFixed(2))`) exactly as it rounds the rate to
+  // four decimals per $100. A bound that ignores one of its two error sources
+  // is not a loose bound, it is the wrong bound, and this one was failing on
+  // every WC and GL configuration at defaults.
+  //
+  // With P = E·r·10_000, E stored to 2dp of $M and r to 4dp per $100, the
+  // first-order error is
+  //
+  //     |ΔP| <= 10_000 · (E·δr + r·δE),    δr = 5e-5,  δE = 5e-3
+  //
+  // so the second term is 50·r dollars — which is the piece that was missing,
+  // and it is NOT small: at a rate of 3.63 it is $182 against a first term of
+  // $175. The δr·δE cross term is ~1e-7 dollars and is dropped.
+  //
+  // ⚠ IT IS A FUNCTION OF THE RATE NOW, because the two callers multiply by
+  // DIFFERENT rates — ratePer100 for the premium check, purePremiumPer100 for
+  // the expected-loss one — and a single constant silently used the wrong one
+  // for whichever it was not derived from.
+  //
+  // ⚠ DERIVED, NOT FITTED. The observed failures were -$328 at r = 3.63 and
+  // -$238 at r = 6.19; the bound this gives is $357 and $485. It was written
+  // from the two roundings the product actually carries and then checked
+  // against those cases, not sized to clear them.
+  const rateRoundingTolerance = (ratePer100: number) =>
+    Math.max(1, result.activeExposure * 10_000 * 0.00005 + 10_000 * ratePer100 * 0.005);
+  const rateCheck = (diff: number, ratePer100: number) =>
     isPoolView
       ? naNote(
           'pool-level rates are one line\'s rate kept as a placeholder, while exposure is summed across ' +
           'lines — the product is not a meaningful quantity. Select a line tab to check it.'
         )
-      : legacyCheck(diff, rateRoundingTolerance);
+      : legacyCheck(diff, rateRoundingTolerance(ratePer100));
+
+  /** The wording shared by both rate checks, naming BOTH roundings. */
+  const rateToleranceNote = (ratePer100: number) =>
+    `Tolerance ${formatCurrency(rateRoundingTolerance(ratePer100))}: the rate is stored to four decimals `
+    + 'and the exposure to two, so this is half a rounding unit on each — exposure × ½ rate-unit, plus '
+    + 'rate × ½ exposure-unit. Both terms matter; the second is the larger one at these rates.';
 
   // Per-line check. NaN at pool scope rather than 0 — it is consumed only by
   // rows that are themselves absent there, and a 0 would read as a real figure.
@@ -1912,8 +1980,8 @@ export function buildSupportingRows(
       formula: isPoolView
         ? { kind: 'text', text: 'Not computed at pool scope — see the note.' }
         : { kind: 'sum', terms: [curTerm(result.grossPremium, 'stored'), curTerm(-grossPremiumCheck, 'exposure × stored rate × 10,000')] },
-      explain: `Tolerance ${formatCurrency(rateRoundingTolerance)}: the rate is stored rounded to four decimals, so this is half a rounding unit × payroll units.`,
-      ...rateCheck(grossPremiumDifference),
+      explain: isPoolView ? undefined : rateToleranceNote(lineRow.ratePer100),
+      ...rateCheck(grossPremiumDifference, lineRow === null ? 0 : lineRow.ratePer100),
     },
   ];
 
@@ -1936,8 +2004,8 @@ export function buildSupportingRows(
       formula: isPoolView
         ? { kind: 'text', text: 'Not computed at pool scope — see the note.' }
         : { kind: 'sum', terms: [curTerm(result.expectedLoss, 'stored'), curTerm(-expectedLossCheck, 'exposure × stored rate × 10,000')] },
-      explain: `Tolerance ${formatCurrency(rateRoundingTolerance)}: the rate is stored rounded to four decimals, so this is half a rounding unit × payroll units.`,
-      ...rateCheck(expectedLossDifference),
+      explain: isPoolView ? undefined : rateToleranceNote(lineRow.purePremiumPer100),
+      ...rateCheck(expectedLossDifference, lineRow === null ? 0 : lineRow.purePremiumPer100),
     },
     {
       // NOT the pool premium — see the matching note in resultMetrics.ts. This
@@ -1962,10 +2030,20 @@ export function buildSupportingRows(
     },
     {
       metric: 'CLF-Adjusted Gross Expected Loss Check Difference',
-      value: formatCurrency(clfAdjustedExpectedLossDifference),
+      value: isPoolView ? 'n/a' : formatCurrency(clfAdjustedExpectedLossDifference),
       numericValue: clfAdjustedExpectedLossDifference,
       formula: { kind: 'sum', terms: [curTerm(result.clfAdjustedExpectedLoss, 'stored'), curTerm(-clfAdjustedExpectedLossCheck, 'recalculated')] },
-      ...legacyCheck(clfAdjustedExpectedLossDifference),
+      // ⚠ n/a AT POOL SCOPE, NOT A FAILURE. The recalculation multiplies by a
+      // line's selectedFundingCLF and the pool has none, so it is deliberately
+      // NaN — and legacyCheck(NaN) is false against any threshold, so the row
+      // printed "$NaN" and flagged Review on every pooled view while the prose
+      // beside it already explained that there is no pool factor. The page
+      // already had naNote for exactly this; this row was never routed through
+      // it.
+      ...(isPoolView
+        ? naNote('each line applies its own CLF, so there is no single pool factor to multiply by. '
+          + 'Select a line tab to check it.')
+        : legacyCheck(clfAdjustedExpectedLossDifference)),
     },
     {
       metric: 'Gross Ultimate Loss + LAE',
@@ -2371,10 +2449,16 @@ export function buildSupportingRows(
     },
     {
       metric: 'Indicated Net Reserve Check Difference',
-      value: formatCurrency(indicatedNetReserveDifference),
+      value: isPoolView ? 'n/a' : formatCurrency(indicatedNetReserveDifference),
       numericValue: indicatedNetReserveDifference,
       formula: { kind: 'sum', terms: [curTerm(result.indicatedNetReserveAtConfidenceLevel, 'stored'), curTerm(-indicatedNetReserveCheck, 'recalculated')] },
-      ...legacyCheck(indicatedNetReserveDifference),
+      // n/a at pool scope for the same reason as the CLF-adjusted row above:
+      // the recalculation needs a single pool confidence level and there is not
+      // one. See that row's note.
+      ...(isPoolView
+        ? naNote('the pool has no single confidence level to multiply by — each line carries its own. '
+          + 'Select a line tab to check it.')
+        : legacyCheck(indicatedNetReserveDifference)),
     },
     {
       metric: 'Reserve Risk Margin Needed',
