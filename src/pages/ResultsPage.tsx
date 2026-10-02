@@ -15,7 +15,7 @@ import {
   formatCurrency,
   formatMillions,
   formatPct,
-  colorForRatio,
+  colorForCombinedRatio,
   colorForNetIncome,
   colorForSurplus,
 } from '../utils/formatters';
@@ -413,7 +413,7 @@ export default function ResultsPage({ lockedResults, lineView }: ResultsPageProp
               <Row label="Actual Loss Ratio (retained premium)" value={formatPct(result.actualLossRatioRetainedPremium)} />
               <Row label="Actual Loss Ratio (Net, member charge)" value={formatPct(result.actualLossRatio)} />
               <Row label="Actual Expense Ratio (member charge)" value={formatPct(result.actualExpenseRatio)} />
-              <Row label="Actual Combined Ratio (member charge)" value={formatPct(result.actualCombinedRatio)} valueColor={colorForRatio(result.actualCombinedRatio)} />
+              <Row label="Actual Combined Ratio (member charge)" value={formatPct(result.actualCombinedRatio)} valueColor={colorForCombinedRatio(result.actualCombinedRatio)} />
               <div className="border-t border-gray-100 my-1" />
               <Row label="Net Income" value={formatCurrency(result.netIncome)} valueColor={colorForNetIncome(result.netIncome)} />
             </ResultCard>

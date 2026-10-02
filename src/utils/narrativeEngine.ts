@@ -67,20 +67,52 @@ export function generateNarrative(result: ResultSet, _priorResult?: ResultSet): 
   // one step along. The sentence states what the ratio DID now; the priced figure
   // stays as context, never as the standard.
   //
-  // MEASURED at 70-85% funding, 24 games x 10 years, 720 line-years:
-  //   <0.90 83.6%   0.90-1.00 6.7%   1.00-1.10 3.8%   >=1.10 6.0%
-  // so it speaks critically on 9.7% of line-years (the old pair: 12.2%) and
-  // 2.5% of pool-years. The criticism barely moved; what the ruling changed is
-  // the favourable side, 44.4% -> 83.6%, which is why its wording is flat.
+  // ⚠ ALL FIVE BANDS SPEAK NOW. Under the four-band scale the 0.90-1.00 band
+  // printed NOTHING — a year at 0.97 got no loss sentence at all, which read as
+  // an omission rather than a judgement. Every band says what the ratio did.
+  //
+  // ⚠ AND THE ABSOLUTE DISCIPLINE RUNS THROUGH ALL FIVE, which is the harder
+  // half of the five-band change. Every clause below is checkable against the
+  // printed number alone: "most of the premium unspent" is what below 0.50
+  // MEANS; "lost money this year" is what above 1.00 MEANS. None of them says
+  // better, worse, or as expected. ⚠ IN PARTICULAR BAND 1 IS NOT "BETTER THAN
+  // PRICED" IN WORDS even though 0.70 is where the price sits — naming the
+  // comparison in the sentence is how the relative standard would creep back
+  // in, one step along again. The edge is set by the price; the sentence is
+  // not. `priced` stays appended to all five as context.
+  //
+  // MEASURED at 70-85% funding, 24 games x 10 years, 720 line-years (and 240
+  // pool-years, which is the scope this actually renders at):
+  //   band      <0.50   0.50-0.70   0.70-1.00   1.00-1.10   >=1.10
+  //   line      11.9%     43.5%       36.1%        3.6%       4.9%
+  //   pool       2.1%     54.2%       40.8%        1.7%       1.3%
+  // The top band is rare at both scopes without being dead at either, and the
+  // largest band is 43.5% of line-years / 54.2% of pool-years.
+  //
+  // ⚠ THIS CHANGE SPLIT THE FAVOURABLE MASS AND RE-GRADED NO YEAR AS WORSE.
+  // 1.00 and 1.10 did not move, so the two critical bands hold exactly the
+  // years they held before — 8.5% of line-years, 3.0% of pool-years, the same
+  // ones. Every edge this change introduced is BELOW break-even. That is worth
+  // stating because a five-band scale sounds like a harsher one and is not.
+  //
+  // ⚠ THE EARLIER SWEEP REPORTED THESE A FEW TENTHS APART (12.2 / 43.8 / 34.3 /
+  // 3.8 / 6.0 at line scope) because it assigned funding across the band on a
+  // different schedule. Same seeds, same engine, different sample. The figures
+  // here and in formatters.ts come from ONE run of one harness, which is the
+  // only way the two files cannot drift apart.
   const lossRatio = actualLossRatioPricingBasis;
   const priced = `against roughly ${pct(expectedLossRatio)} priced`;
   const band = ratioBand(lossRatio);
-  if (band === 3) {
+  if (band === 4) {
     parts.push(`Net losses ran to ${pct(lossRatio)} of premium and admin expense — well past the point where underwriting pays for itself, ${priced}.`);
-  } else if (band === 2) {
+  } else if (band === 3) {
     parts.push(`Net losses exceeded premium and admin expense at ${pct(lossRatio)}, so underwriting lost money this year, ${priced}.`);
-  } else if (band === 0) {
-    parts.push(`Net losses ran to ${pct(lossRatio)} of premium and admin expense, covering the year's underwriting with margin, ${priced}.`);
+  } else if (band === 2) {
+    parts.push(`Net losses ran to ${pct(lossRatio)} of premium and admin expense, covering the year's underwriting, ${priced}.`);
+  } else if (band === 1) {
+    parts.push(`Net losses ran to ${pct(lossRatio)} of premium and admin expense, covering the year's underwriting with margin to spare, ${priced}.`);
+  } else {
+    parts.push(`Net losses ran to ${pct(lossRatio)} of premium and admin expense, covering the year's underwriting with most of the premium unspent, ${priced}.`);
   }
 
   // --- Combined Ratio ---

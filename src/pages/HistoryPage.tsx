@@ -1,6 +1,6 @@
 import { Activity, DollarSign, Shield, Users } from 'lucide-react';
 import type { HistoricalYear, LineView } from '../types/simulation';
-import { colorForRatio, formatCurrency, formatMillions, formatPct } from '../utils/formatters';
+import { colorForCombinedRatio, formatCurrency, formatMillions, formatPct } from '../utils/formatters';
 import { lineDisplayName } from '../utils/lineDisplay';
 
 interface HistoryPageProps {
@@ -64,7 +64,7 @@ export default function HistoryPage({ historicalYears, lineView }: HistoryPagePr
     {
       label: 'Actual Combined Ratio',
       value: year => formatPct(year.actualCombinedRatio),
-      className: year => colorForRatio(year.actualCombinedRatio),
+      className: year => colorForCombinedRatio(year.actualCombinedRatio),
     },
     {
       label: 'Underwriting Income',
@@ -104,7 +104,7 @@ export default function HistoryPage({ historicalYears, lineView }: HistoryPagePr
           label="Latest Actual Combined Ratio"
           value={formatPct(last.actualCombinedRatio)}
           detail={`${combinedChange >= 0 ? 'Up' : 'Down'} ${formatPct(Math.abs(combinedChange))} over the history`}
-          valueClass={colorForRatio(last.actualCombinedRatio)}
+          valueClass={colorForCombinedRatio(last.actualCombinedRatio)}
         />
         <SummaryCard
           icon={<DollarSign size={17} />}

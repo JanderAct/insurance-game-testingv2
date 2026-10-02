@@ -98,6 +98,13 @@ export default function Header({ gameState, startingFinancials, onNewGame, onAdv
                 value={formatCurrency(surplus, true)}
                 valueClass={surplus >= 0 ? 'text-emerald-400' : 'text-red-400'}
               />
+              {/* ⚠ FOUR COLOURS OVER THE NARRATIVE'S FIVE BANDS, AND THE MERGE IS
+                  DELIBERATE. The chip is a number and a colour with no room for
+                  words, so bands 0 and 1 — "most of the premium unspent" and
+                  "margin to spare" — share emerald. Every colour boundary is
+                  also a sentence boundary, so the chip says LESS than the
+                  narrative and never something different. The band-to-sentence
+                  map is at colorForRatio in formatters.ts; change neither alone. */}
               {poolLossRatio !== undefined && (
                 <Chip
                   label="Loss Ratio (prem + admin)"

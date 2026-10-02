@@ -155,8 +155,31 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // against another (an A/B across two commits) rather than only against the
 // committed baseline. The committed path is the default and is what a bare run
 // uses.
+//
+// ⚠ v8 -> v9: THE FIVE-BAND LOSS-RATIO SCALE. Five rows moved, all of them
+// Results|Pool|y2, one per configuration, and every one a prose-only change to
+// the loss sentence — attributed by diffing the text behind the hashes
+// (RENDER_TEXT_DIR, which exists for exactly this) rather than asserted:
+//   GL, WC+GL, WC+GL+PR   "...the year's underwriting WITH MARGIN," -> "...the
+//                         year's underwriting," — these fell in the new 0.70-1.00
+//                         band, which drops the clause.
+//   PR                    "with margin," -> "with margin TO SPARE," — 0.50-0.70.
+//   WC                    a whole sentence APPEARED where there had been none:
+//                         90.8% against 82.1% priced. The old scale's 0.90-1.00
+//                         band printed nothing at all, so that year's loss result
+//                         was silent. That silence is the defect the fifth band
+//                         fixes, and this row is the evidence it existed.
+// ⚠ THE CONTROL RAN FIRST AND ON A SEPARATE PORT: 6b90859 built into its own
+// worktree and served on 4174 reproduced all 298 fingerprints. That is what
+// rules out "the baseline had already drifted" — and it is the check that a
+// previous recapture on this project got wrong by pointing the harness at the
+// wrong server and reading a false all-clear.
+// ⚠ COLOUR IS NOT IN THE FINGERPRINT. innerText carries no CSS classes, so the
+// emerald/sky boundary moving from 0.90 to 0.70, and HistoryPage's and
+// ResultsPage's combined ratios moving to their own scale, are INVISIBLE here.
+// Those changes are real and this instrument did not and cannot see them.
 const BASELINE = process.env.RENDER_BASELINE
-  ?? path.join(__dirname, '../../baselines/RENDER_IDENTITY_v8.json');
+  ?? path.join(__dirname, '../../baselines/RENDER_IDENTITY_v9.json');
 const WRITE = process.argv.includes('--write');
 const BASE_URL = process.env.RENDER_URL ?? 'http://127.0.0.1:4173';
 // The image ships chromium 1194; a newer `playwright` expects its own build and
