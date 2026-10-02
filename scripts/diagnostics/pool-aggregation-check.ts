@@ -61,8 +61,12 @@ const DOLLARS = new Set([
   'grossUltimateLoss', 'reinsuranceCost', 'retainedAboveTower', 'aggregateRecovery',
   // Additive for the same reason its gross and net neighbours are: it is the
   // same register at a different point in the booking, so the pool figure is
-  // the sum of the lines and nothing else.
-  'bookedGrossUltimate',
+  // the sum of the lines and nothing else. ⚠ BOTH OF THEM: the net twin was
+  // added to ResultSet in the same commit as the gross one and classified in
+  // neither set, which turned this red for two commits — precisely the "a field
+  // added without a class turns this red" case the section exists to catch,
+  // found late only because two briefs in a row skipped the sweep.
+  'bookedGrossUltimate', 'bookedNetUltimate',
   'aggregatePremium', 'reinsuranceRecovery', 'netUltimateLoss', 'netIncurredLoss',
   'operatingExpense', 'riskControlInvestment', 'priorYearDevelopment',
   'beginningNetReserve', 'currentYearNetReserve', 'netPaidLosses', 'endingNetReserve',

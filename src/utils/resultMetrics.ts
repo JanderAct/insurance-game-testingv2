@@ -103,8 +103,8 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
       // projected copy; the POOL form reads the pool's own field. Same number,
       // named where it lives — so the Pool tab keeps the row.
       lineOnly: true,
-      poolValue: r => formatPct(r.pool.riskControlPct, 1),
-      poolCsvValue: r => r.pool.riskControlPct,
+      poolCell: r => formatPct(r.pool.riskControlPct, 1),
+      poolCsvCell: r => r.pool.riskControlPct,
       category: 'Decisions',
       label: 'Risk Control %',
       value: r => formatPct(r.decisions.riskControlPct, 1),
