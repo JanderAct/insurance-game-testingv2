@@ -32,12 +32,6 @@ export default function DepartmentsPage({ gameState, currentDecisions }: Departm
     [gameState, selectedYear],
   );
 
-  // ⚠ KEYED TO selectedYear NOW, WHERE THE EXHIBIT IT REPLACED WAS NOT. The
-  // listing is struck AT a valuation: the Evaluation date column says which, and
-  // both Claim status and Paid resolve against it — a claim open at year 6 may
-  // be closed at year 9. It rebuilds the whole book to split paid per accident
-  // year, which is 41 ms on a reloaded game, so it is memoised rather than
-  // recomputed on an unrelated re-render.
   // Memoised on the same rule as the other two: it walks the whole marketplace
   // and every member's stored history for each active line.
   const underwritingMemo = useMemo(
@@ -45,9 +39,19 @@ export default function DepartmentsPage({ gameState, currentDecisions }: Departm
     [gameState, currentDecisions],
   );
 
+  // ⚠ NOT KEYED TO selectedYear, AND IT USED TO BE. The listing is struck at a
+  // valuation and it resolves that valuation itself — see ClaimsMemoInput for
+  // why the selected year could not be honoured: claim status would move with
+  // the selection while Paid and Incurred, which come from live cohort state,
+  // would not. Passing the year in was what made the two disagree, so the year
+  // is no longer passed in. The selector still drives the actuarial memorandum,
+  // which keeps a real valuation history, and that document says so.
+  //
+  // It rebuilds the whole book to split paid per accident year, which is 41 ms
+  // on a reloaded game, so it is still memoised.
   const claimsMemo = useMemo(
-    () => buildClaimsMemo({ gameState, asAtYear: selectedYear }),
-    [gameState, selectedYear],
+    () => buildClaimsMemo({ gameState }),
+    [gameState],
   );
 
   const documents: DocumentEntry[] = [

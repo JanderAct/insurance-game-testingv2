@@ -128,8 +128,8 @@ for (let g = 0; g < GAMES; g++) {
   console.log(`game ${g}:`);
 
   // 1. THE RELOAD — the register is stripped and redrawn, claim for claim.
-  const liveList = claimListing({ gameState: live, asAtYear: asAt });
-  const postList = claimListing({ gameState: reloaded, asAtYear: asAt });
+  const liveList = claimListing({ gameState: live });
+  const postList = claimListing({ gameState: reloaded });
   ok(liveList.rows.length === postList.rows.length,
     `the listing survives a save/restore (${liveList.rows.length.toLocaleString()} claims)`,
     `${liveList.rows.length} live against ${postList.rows.length} after reload`);
@@ -180,6 +180,26 @@ for (let g = 0; g < GAMES; g++) {
   const statusDiff = shown.filter(r => wb.closedBy.get(r.claim.id) !== r.closed);
   ok(statusDiff.length === 0, 'every displayed Status equals the workbook\'s closure draw',
     `${statusDiff.length} row(s) differ — two closure draws for one claim`);
+
+  // 4b. ⚠ ONE VALUATION YEAR, NOT TWO — THE ASSERTION THIS GATE DID NOT HAVE.
+  //
+  // The listing used to take the reader's selected year and resolve claim
+  // STATUS against it, while Paid and Incurred came from live cohort state and
+  // were therefore always at the latest valuation. This gate could not see that
+  // because it only ever called the listing at `YEARS`, the one year where the
+  // two halves agree by accident. Everything above would have stayed green with
+  // the defect in place.
+  //
+  // ⚠ THE FIXTURE'S currentYearNumber IS YEARS + 1, which is precisely the
+  // Departments page's default selection — the year nobody has played. So this
+  // asserts the listing ignores it and strikes where the workbook does.
+  ok(liveList.asAtYear === asAt,
+    `the listing strikes at the latest valuation (year ${asAt}), not the selected year`,
+    `it struck at ${liveList.asAtYear} against a workbook valuation of ${asAt}`);
+  ok(live.currentYearNumber !== asAt,
+    `the fixture does sit on an unplayed year (currentYearNumber ${live.currentYearNumber}), `
+    + 'so the assertion above is not vacuous',
+    'the fixture no longer reproduces the condition — the guard is testing nothing');
 
   // 5. THE SPLIT SUMS TO THE COHORT'S PAID, per line and accident year.
   //
@@ -260,7 +280,7 @@ for (let g = 0; g < GAMES; g++) {
     `${shown.filter(r => r.closed).length} settled file(s) reached the inventory`);
 
   // 6. THE RENDERED DOCUMENT.
-  const memo = buildClaimsMemo({ gameState: reloaded, asAtYear: asAt });
+  const memo = buildClaimsMemo({ gameState: reloaded });
   const bodyRows = memo.split('\n').filter(l => /^\| 12\/31\//.test(l));
   ok(bodyRows.length === shown.length, `the rendered memo has ${shown.length} body rows`,
     `it rendered ${bodyRows.length}`);
@@ -306,7 +326,7 @@ console.log('\n  POSITIVE CONTROLS (each MUST be caught):');
 {
   const { live } = build(0);
   const asAt = YEARS;
-  const base = claimListing({ gameState: live, asAtYear: asAt });
+  const base = claimListing({ gameState: live });
   const pick = (l: ReturnType<typeof claimListing>) => LINES.flatMap(line =>
     l.rows.filter(r => r.line === line && !r.closed)
       .sort((a, b) => b.incurred - a.incurred).slice(0, CLAIMS_ROWS_PER_LINE));
@@ -317,10 +337,29 @@ console.log('\n  POSITIVE CONTROLS (each MUST be caught):');
   for (const r of [...broken.priorHistory, ...broken.lockedResults])
     for (const line of LINES)
       for (const c of r.byLine[line]?.claims ?? []) c.memberId = 'member-does-not-exist';
-  const brokenShown = pick(claimListing({ gameState: broken, asAtYear: asAt }));
+  const brokenShown = pick(claimListing({ gameState: broken }));
   ok(brokenShown.some(r => r.member === undefined),
     'control A — an unresolvable member id is caught by the member assertion',
     'the assertion passed on ids no member holds');
+
+  // ⚠ CONTROL A2 — THE TWO-VALUATION DEFECT ITSELF. Status resolved one year on
+  // from the money beside it is what the listing used to do at the page's
+  // default selection. Rebuilt here from the same closure draw the workbook
+  // makes, so a green run means 4b would have caught the old behaviour rather
+  // than merely agreeing with the new one.
+  {
+    const asAtAhead = asAt + 1;                    // the page's default selection
+    const wbHere = workbookAnswer(live, asAt);
+    const wbAhead = workbookAnswer(live, asAtAhead);
+    let flipped = 0;
+    for (const [id, closedHere] of wbHere.closedBy) {
+      if (wbAhead.closedBy.get(id) !== closedHere) flipped++;
+    }
+    ok(flipped > 0,
+      `control A2 — ${flipped} claim(s) change status between year ${asAt} and year ${asAtAhead}, `
+      + 'so a listing on two valuations is detectable',
+      'no claim changes status across a year, so 4b could not distinguish the two valuations');
+  }
 
   // B: a Paid that disagrees with the workbook.
   const wb = workbookAnswer(live, asAt);
@@ -363,7 +402,7 @@ console.log('\n  POSITIVE CONTROLS (each MUST be caught):');
   //    the identity above would pass on the stale column and prove nothing.
   {
     const drawnByAy = new Map<string, number>();
-    const rows = claimListing({ gameState: live, asAtYear: asAt }).rows;
+    const rows = claimListing({ gameState: live }).rows;
     for (const r of rows) {
       if (!r.developed) continue;
       const k = `${r.line}|${r.claim.accidentYear}`;
@@ -389,7 +428,7 @@ console.log('\n  POSITIVE CONTROLS (each MUST be caught):');
   // G: AND Paid <= Incurred MUST BE ABLE TO FAIL. Against the OLD column — the
   //    drawn value — the crossing is exactly what was observed before the fix.
   {
-    const rows = claimListing({ gameState: live, asAtYear: asAt }).rows;
+    const rows = claimListing({ gameState: live }).rows;
     const crossedOld = rows.filter(r =>
       r.paid !== undefined && r.paid > r.claim.grossUltimate * (1 + 1e-9));
     ok(crossedOld.length > 0,
@@ -406,13 +445,13 @@ console.log('\n  POSITIVE CONTROLS (each MUST be caught):');
   // stayed absent and the control read as a failure of the field rather than of
   // its own aim.
   const withDesc: GameState = JSON.parse(JSON.stringify(live));
-  const target = pick(claimListing({ gameState: withDesc, asAtYear: asAt }))[0];
+  const target = pick(claimListing({ gameState: withDesc }))[0];
   for (const r of [...withDesc.priorHistory, ...withDesc.lockedResults])
     for (const line of LINES)
       for (const c of r.byLine[line]?.claims ?? []) {
         if (c.id === target.claim.id) c.description = 'Fall from height, disputed liability';
       }
-  const memoD = buildClaimsMemo({ gameState: withDesc, asAtYear: asAt });
+  const memoD = buildClaimsMemo({ gameState: withDesc });
   ok(memoD.includes('Claim description') && memoD.includes('Fall from height, disputed liability'),
     'control E — the Claim description column APPEARS once a claim carries one',
     'populating a description did not produce the column, so the field is unreachable');

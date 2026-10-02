@@ -27,6 +27,7 @@ import type {
   CoverageLine, GameState, LinePoolState, ReserveDevelopmentRow,
 } from '../types/simulation';
 import { ibnerUnwindWeight } from './simulationEngine';
+import { countDevelopedOccurrences } from './cohortViews';
 import { cumulativePaid } from './payoutPattern';
 import { LINE_PAYOUT_PATTERN, TRIANGLE_HISTORY_YEARS } from '../data/defaultAssumptions';
 import { pricingExperienceBasis, windowRows } from './pricingTriangle';
@@ -517,10 +518,20 @@ export function buildActuarialMemo({ gameState, asAtYear }: ActuarialMemoInput):
   // EXPLAINED by these claims, and a reserve movement left standing on its own
   // is the thing this sentence exists to prevent. Moving the exhibit without
   // leaving the pointer would have made this page harder to read, not tidier.
-  const developed = lines.reduce((n, line) =>
-    n + (gameState.poolState.lines[line]?.reserveCohorts ?? []).reduce((k, c) =>
-      k + (c.developingClaims ?? []).filter(d => Math.abs(d.current - d.original) >= 1000).length,
-    0), 0);
+  // ⚠ AS AT THE SELECTED VALUATION, AND IT USED TO BE AS AT THE LATEST ONE
+  // WHATEVER THE READER HAD SELECTED. Every other figure in this memo moves
+  // with asAtYear; this one field did not, because it counted current cohort
+  // state rather than walking the movement series. Measured on a seven-year
+  // game it printed 778 at every selection against true counts of 440 / 493 /
+  // 557 / 608 / 664 / 721 / 778 — out by 77% at year 1 and converging only at
+  // the latest valuation, which is the single year actuarial-memo-check tested.
+  // The count is now summed over the steps that had landed by asAtYear; see
+  // countDevelopedOccurrences, which also carries the $1,000 floor and the
+  // measurement behind it.
+  // `asAt`, not `asAtYear` — the memo already clamps an unvalued selection back
+  // to the latest valuation and says so at the head, and this sentence must be
+  // the same year as the exhibit above it.
+  const developed = countDevelopedOccurrences(gameState.poolState, lines, asAt);
 
   if (developed > 0) {
     out.push(

@@ -178,8 +178,30 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // emerald/sky boundary moving from 0.90 to 0.70, and HistoryPage's and
 // ResultsPage's combined ratios moving to their own scale, are INVISIBLE here.
 // Those changes are real and this instrument did not and cannot see them.
+// ⚠ v9 -> v10: THE CLAIMS MEMO PUT ON ONE VALUATION YEAR. Ten rows moved, every
+// one `Departments|doc:Claims` at y0 and y2 across all five configurations, and
+// every one the SAME cause — attributed by diffing the text behind the hashes
+// (RENDER_TEXT_DIR) rather than asserted:
+//   the evaluation date moves BACK one year   12/31/2026 -> 12/31/2025 at y0,
+//   12/31/2028 -> 12/31/2027 at y2. The listing used to be dated at the year the
+//   page had SELECTED — which defaults to the unplayed `currentYearNumber` —
+//   while its Paid and Incurred came from live cohort state a year earlier. It
+//   is now dated where the money is, which is also where the claims workbook
+//   strikes. At y0 that is the last PRE-GAME year, which is why y0 moves at all.
+//   the row sets and amounts follow, because claim status now resolves at the
+//   same valuation as the figures beside it.
+//   plus one added sentence saying which valuation the listing is struck at and
+//   that the year selector does not move it.
+// ⚠ doc:Actuarial DID NOT MOVE, and that is expected rather than lucky. Its
+// developed-occurrence count was also wrong — always the latest year, whatever
+// year was selected — but both year-points this harness captures select the
+// current year, where the memo clamps to the latest valuation anyway. The fix
+// is only visible on a HISTORICAL selection, which this instrument never makes.
+// actuarial-memo-check covers it across all ten years; see the control there.
+// ⚠ THE CONTROL RAN FIRST AND ON A SEPARATE PORT: f27c066 built into its own
+// worktree and served on 4174 reproduced all 298 fingerprints.
 const BASELINE = process.env.RENDER_BASELINE
-  ?? path.join(__dirname, '../../baselines/RENDER_IDENTITY_v9.json');
+  ?? path.join(__dirname, '../../baselines/RENDER_IDENTITY_v10.json');
 const WRITE = process.argv.includes('--write');
 const BASE_URL = process.env.RENDER_URL ?? 'http://127.0.0.1:4173';
 // The image ships chromium 1194; a newer `playwright` expects its own build and

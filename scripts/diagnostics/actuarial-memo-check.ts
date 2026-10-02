@@ -458,6 +458,39 @@ for (const arm of ARMS) {
           }
         }
 
+        // ⚠ THE DEVELOPED-OCCURRENCE COUNT MUST MOVE WITH THE SELECTED YEAR,
+        // AND IT DID NOT. Every other figure in the memo is struck at asAt;
+        // this one sentence counted live cohort state and so printed the LATEST
+        // year's figure at every selection — measured on a seven-year game, 778
+        // at all seven against true counts of 440 / 493 / 557 / 608 / 664 / 721
+        // / 778. This loop already ran every year; what it lacked was an
+        // assertion on this field, so the defect sat inside a green gate.
+        //
+        // Recomputed here from movementByStep rather than by calling
+        // countDevelopedOccurrences, so the gate is not testing that function
+        // against itself.
+        {
+          const printed = /([\d,]+) occurrences across these lines/.exec(md);
+          let expected = 0;
+          for (const line of lines) {
+            for (const c of gs.poolState.lines[line]?.reserveCohorts ?? []) {
+              for (const d of c.developingClaims ?? []) {
+                let cum = 0;
+                (d.movementByStep ?? []).forEach((mv, k) => {
+                  if (c.yearNumber + k + 1 <= asAt) cum += mv;
+                });
+                if (Math.abs(cum) >= 1000) expected++;
+              }
+            }
+          }
+          const shown = printed ? Number(printed[1].replace(/,/g, '')) : 0;
+          if (shown !== expected) {
+            fail({ arm: arm.name, config: name, scope: 'developed', year: asAt },
+              'developed-occurrence count is not as at the selected year',
+              `the memo prints ${shown} at year ${asAt}; the movement series gives ${expected}`);
+          }
+        }
+
         // The final-position block, at game end only.
         const ctxF = { arm: arm.name, config: name, scope: 'final', year: asAt };
         const hasFinal = md.includes('### Final position');

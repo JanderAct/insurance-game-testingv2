@@ -50,6 +50,10 @@ import * as XLSX from 'xlsx';
 import type { Claim, CoverageLine, Member, PoolState, ResultSet } from '../types/simulation';
 import { FIXED_LINE_ORDER, LINE_ABBREV } from './resultsExport';
 import { claimPaidSplit, isClaimClosed } from './claimClosure';
+import {
+  grossPaidByAccidentYear, latestValuationYear, occurrenceDevelopment,
+  type OccDevelopment,
+} from './cohortViews';
 import { resolveClosureCurve } from '../data/defaultAssumptions';
 // ⚠ IMPORTED, NOT RESTATED. The exhibit and this workbook must agree on which
 // accident years can carry claims; a second copy of -2 would be two facts.
@@ -170,47 +174,10 @@ const TEXT = undefined;
 // header already requires a future catastrophe to be emitted as ONE occurrence
 // with many claims, and on that day a claim-id join starts misattributing
 // silently. This is written for that day rather than for today.
-interface OccDevelopment {
-  /** The occurrence as first REPORTED — with forward booking on, the contracted
-   *  initial estimate, BELOW what the generator drew. Never moves. Exported
-   *  under the historical header "Drawn Occurrence"; see DEV_NOTE. */
-  drawn: number;
-  /** As first BOOKED — `drawn` less the cohort's optimistic markdown. */
-  booked: number;
-  current: number;
-  /** current - booked. */
-  dev: number;
-  pct: number | '';
-  accidentYear: number;
-  /** Valuation year -> that year's change. Only years the occurrence actually
-   *  moved in appear; a year it was valued at and did not move in is absent. */
-  byYear: Map<number, number>;
-}
-
-function developmentByOccurrence(poolState: PoolState | undefined, line: CoverageLine): Map<string, OccDevelopment> {
-  const m = new Map<string, OccDevelopment>();
-  for (const c of poolState?.lines[line]?.reserveCohorts ?? []) {
-    for (const d of c.developingClaims ?? []) {
-      const dev = d.current - d.original;
-      // ⚠ THE VALUATION YEAR IS DERIVED, NOT STORED. Index k of movementByStep
-      // is the step from age k to age k+1, and a cohort takes its first step the
-      // year AFTER the accident year it was written for — so k belongs to
-      // valuation year `yearNumber + k + 1`. Storing the year on every entry
-      // would carry the cohort's own accident year once per claim per step.
-      const byYear = new Map<number, number>();
-      (d.movementByStep ?? []).forEach((mv, k) => {
-        if (mv !== 0) byYear.set(c.yearNumber + k + 1, mv);
-      });
-      m.set(d.occurrenceId, {
-        drawn: d.drawn, booked: d.original, current: d.current, dev,
-        pct: d.original > 0 ? Number(((dev / d.original) * 100).toFixed(1)) : '',
-        accidentYear: c.yearNumber,
-        byYear,
-      });
-    }
-  }
-  return m;
-}
+// (The type and the walk now live in cohortViews.ts — the workbook, the claims
+// memo and the actuarial memo all read the cohorts through it. The reasoning
+// that used to sit here, about joining on the occurrence rather than the claim,
+// moved with the code.)
 
 // The contiguous span of valuation years anything developed in, across every
 // line — one span for the whole workbook so the sheets stay comparable and a
@@ -531,7 +498,7 @@ function claimCoverage(
   // failure this file's own header warns about two sheets away.
   const known = new Set([...present, ...missing.map(m => m.yearNumber)]);
   const unretained = [...new Set(
-    [...developmentByOccurrence(poolState, line).values()]
+    [...occurrenceDevelopment(poolState, line).values()]
       .map(d => d.accidentYear)
       .filter(y => !known.has(y)),
   )].sort((a, b) => a - b);
@@ -652,8 +619,6 @@ function buildPaidLedgerView(
   line: CoverageLine,
   gameId: string,
 ): PaidLedgerView {
-  const grossPaidByAy = new Map<number, number>();
-  const ls = poolState?.lines?.[line];
   // ⚠ THE LIVE COHORT ONLY, AND reserveDevelopment IS DELIBERATELY NOT READ.
   // That ledger's paidByValuation is NET — it feeds the actuarial exhibit, which
   // is a net document — and pulling it in here as a fallback would put net
@@ -667,9 +632,7 @@ function buildPaidLedgerView(
   // would be worse than a missing one. Cohorts close only well after maturity
   // (WC at age 37 under the share-based rule), so no normal-length game reaches
   // it.
-  for (const c of ls?.reserveCohorts ?? []) {
-    if (c.grossPaid !== undefined) grossPaidByAy.set(c.yearNumber, c.grossPaid);
-  }
+  const grossPaidByAy = grossPaidByAccidentYear(poolState, line);
 
   // ⚠ THE VALUATION IS THE LATEST LOCKED YEAR, AND A PRE-GAME-ONLY WORKBOOK
   // STRIKES AT ITS LAST PRE-GAME YEAR RATHER THAN AT 0. Before year 1 is played
@@ -677,9 +640,7 @@ function buildPaidLedgerView(
   // pre-game claim's closure at a curve age of `0 - accidentYear + 1` — ages 3,
   // 2 and 1 for years -2, -1 and 0, which is right by luck for the last one and
   // wrong for the others. priorHistory's own last year is the actual valuation.
-  const valuationYear = lockedResults.length > 0
-    ? lockedResults[lockedResults.length - 1].yearNumber
-    : (priorHistory.length > 0 ? priorHistory[priorHistory.length - 1].yearNumber : 0);
+  const valuationYear = latestValuationYear({ lockedResults, priorHistory });
 
   // Group the register by accident year and split each one whole. The closure
   // draw resolved here is the SAME call paidAndStatus used to make per row, at
@@ -958,7 +919,7 @@ function buildDevelopmentRows(poolState: PoolState, activeLines: CoverageLine[],
     // what they carry, and building it from a second traversal of the cohorts is
     // exactly how two views of one fact drift apart. One source, two
     // presentations — and now literally the same header, from devHeader().
-    const rows = [...developmentByOccurrence(poolState, line).entries()]
+    const rows = [...occurrenceDevelopment(poolState, line).entries()]
       .sort((a, b) => (a[1].accidentYear - b[1].accidentYear) || a[0].localeCompare(b[0]));
     for (const [occurrenceId, d] of rows) {
       body.push([line, d.accidentYear, occurrenceId, ...devCells(d, years), d.pct]);
@@ -1067,7 +1028,7 @@ export function buildClaimsWorkbook(
   // same column on WC as on Property and the sheets read side by side. Property
   // runs off in 2-4 years against WC's 5-12, so a per-sheet span would give the
   // three sheets three different grids over the same calendar.
-  const devByLine = new Map(CLAIM_LINES.map(l => [l, developmentByOccurrence(poolState, l)]));
+  const devByLine = new Map(CLAIM_LINES.map(l => [l, occurrenceDevelopment(poolState, l)]));
   const years = valuationYearSpan([...devByLine.values()]);
 
   for (const line of orderedLines) {

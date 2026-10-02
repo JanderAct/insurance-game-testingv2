@@ -136,6 +136,9 @@
 // ============================================================================
 
 import { isClaimClosed, claimPaidSplit, claimIncurredSplit } from './claimClosure';
+import {
+  grossPaidByAccidentYear, grossUltimateByAccidentYear, latestValuationYear,
+} from './cohortViews';
 import { resolveClosureCurve } from '../data/defaultAssumptions';
 import { regenerateLineYearClaims, ClaimRegenerationError } from './claimRegeneration';
 import type {
@@ -235,10 +238,41 @@ function registerFor(gameState: GameState, r: ResultSet, line: CoverageLine): Cl
   }
 }
 
+/**
+ * ⚠ NO asAtYear, AND REMOVING IT IS THE FIX RATHER THAN A SIMPLIFICATION. This
+ * listing used to take the year the reader had selected on the Departments
+ * page and resolve claim STATUS against it, while Paid and Incurred came from
+ * `reserveCohorts` — which is live state and therefore always the LATEST
+ * valuation. Two valuation years in one row, and the document's own note
+ * promised it agreed with the claims workbook, which strikes at the latest.
+ *
+ * ⚠ THE DEFAULT SELECTION IS THE WORST CASE, WHICH IS WHY IT WENT UNSEEN. The
+ * page defaults the selector to `currentYearNumber` — the year nobody has
+ * played — so out of the box status was resolved one year AHEAD of the money
+ * beside it. Measured on a seven-year game: 1,494 files are open at the
+ * workbook's valuation and 986 at the memo's default, so a third of the open
+ * inventory vanished from a listing whose stated subject is the open
+ * inventory, and every surviving row still carried the earlier year's Paid.
+ *
+ * ⚠ AND THE SELECTED YEAR COULD NOT HAVE WON. The obvious repair is to honour
+ * the selection on both halves, and the data will not support it: a cohort
+ * carries `grossPaid`/`grossUnpaid` as they stand NOW and keeps no earlier
+ * pair. The only per-valuation history is `reserveDevelopment.paidByValuation`,
+ * which is NET — and this document is gross throughout, so reading it would put
+ * net dollars in a column headed Paid on exactly the old accident years nobody
+ * re-checks. Rewinding the money is not available at any price this change
+ * could pay.
+ *
+ * So the listing strikes at the latest valuation, the same one the workbook
+ * uses, and says so in its first line. That also happens to be what a reader
+ * opening a department memo expects — a current inventory rather than a
+ * historical one — but the deciding argument is that it is the only year at
+ * which both columns exist on one basis. The actuarial memorandum is the
+ * document that answers historical valuations, and it still honours the
+ * selector, because its ledger genuinely carries a per-valuation series.
+ */
 export interface ClaimsMemoInput {
   gameState: GameState;
-  /** The valuation the listing is struck at. Status and paid both resolve here. */
-  asAtYear: number;
 }
 
 /**
@@ -251,8 +285,9 @@ export interface ClaimsMemoInput {
  * layer in.
  */
 export function claimListing(
-  { gameState, asAtYear }: ClaimsMemoInput,
-): { rows: ClaimListingRow[]; unpricedYears: number; missingRegisters: number } {
+  { gameState }: ClaimsMemoInput,
+): { rows: ClaimListingRow[]; unpricedYears: number; missingRegisters: number; asAtYear: number } {
+  const asAtYear = latestValuationYear(gameState);
   const members = memberIndex(gameState);
   const results = [...gameState.priorHistory, ...gameState.lockedResults]
     .filter(r => r.yearNumber <= asAtYear);
@@ -268,14 +303,8 @@ export function claimListing(
     // ⚠ ULTIMATE IS grossPaid + grossUnpaid, WHICH IS THE COHORT AS CARRIED
     // TODAY. Both halves are needed, so a cohort missing either contributes
     // neither figure and its claims fall back to their drawn values.
-    const grossPaidByAy = new Map<number, number>();
-    const grossUltByAy = new Map<number, number>();
-    for (const c of gameState.poolState.lines[line]?.reserveCohorts ?? []) {
-      if (c.grossPaid !== undefined) grossPaidByAy.set(c.yearNumber, c.grossPaid);
-      if (c.grossPaid !== undefined && c.grossUnpaid !== undefined) {
-        grossUltByAy.set(c.yearNumber, c.grossPaid + c.grossUnpaid);
-      }
-    }
+    const grossPaidByAy = grossPaidByAccidentYear(gameState.poolState, line);
+    const grossUltByAy = grossUltimateByAccidentYear(gameState.poolState, line);
 
     for (const r of results) {
       const claims = registerFor(gameState, r, line);
@@ -326,7 +355,7 @@ export function claimListing(
   }
 
   rows.sort((a, b) => b.incurred - a.incurred);
-  return { rows, unpricedYears, missingRegisters };
+  return { rows, unpricedYears, missingRegisters, asAtYear };
 }
 
 /** Why Paid is an allocation and must not be read as a payment record. */
@@ -343,12 +372,20 @@ function paidNote(): string {
 }
 
 export function buildClaimsMemo(input: ClaimsMemoInput): string {
-  const { gameState, asAtYear } = input;
-  const { rows, unpricedYears, missingRegisters } = claimListing(input);
+  const { gameState } = input;
+  const { rows, unpricedYears, missingRegisters, asAtYear } = claimListing(input);
   const out: string[] = [];
 
   out.push('# Claims Department');
+  // ⚠ IT SAYS WHICH VALUATION AND THAT THE YEAR SELECTOR DOES NOT MOVE IT. The
+  // selector still drives the actuarial memorandum, so a reader who changes it
+  // and sees this document unchanged needs to be told that is the intent rather
+  // than a stuck screen.
   out.push(`**Open claim inventory, evaluated ${evaluationDate(gameState, asAtYear)}.** `
+    + 'This listing is always struck at the most recent completed valuation — the same one the '
+    + 'claims workbook uses — because a claim\'s paid and incurred figures are carried only as '
+    + 'they stand today. Selecting an earlier year changes the actuarial memorandum, which keeps a '
+    + 'valuation history, and not this document. '
     + `The ${CLAIMS_ROWS_PER_LINE} largest OPEN files on each program by current incurred. `
     + 'Settled files are excluded: they cannot move again, so they belong to a history rather '
     + 'than to an inventory. Amounts are GROSS of reinsurance, and both money columns are shares '
