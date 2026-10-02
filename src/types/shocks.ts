@@ -118,17 +118,23 @@ export type ShockEffect =
   // glGenerationInputs dropped them, so a GL injection would have been
   // silently inert. Property still reads none, and shockCatalog rejects one.
   //
-  // RANGES, GL ONLY. `count` and `amount` may each be a ShockRange where the
-  // matrix states a range ("two to five claims above $5M"). GL draws them from
-  // a sub-stream keyed on the shock id. WC's injection path takes explicit
-  // values only and shockCatalog rejects a range there — a WC range would need
-  // the same shock-keyed draw added to wcClaimEngine first.
+  // RANGES, GL AND WC. `count` and `amount` may each be a ShockRange where the
+  // event states a range ("two to five claims above $5M", "thirty to sixty
+  // injuries"). Both lines draw them from sub-streams keyed on the shock id, so
+  // nothing else in the year moves. WC draws a ranged AMOUNT LOG-UNIFORMLY — its
+  // severity is heavily right-skewed (median ~$1k), so "mostly small, some
+  // serious" means the geometric middle of the range, not the arithmetic one.
+  //
+  // `region` (WC only) confines the injured to members in the region the event
+  // struck — an earthquake's injuries come from where the earthquake was. Absent,
+  // the claim lands anywhere on the book, as every explicit injection always has.
   | {
       kind: 'injectClaim';
       line: CoverageLine;
       count: number | ShockRange;
       amount: number | ShockRange;
       firstYearOnly?: boolean;
+      region?: Region;
     }
   // IMPLEMENTED for GL sub-coverages. Multiplies a realized frequency for one
   // year. `sub` omitted means the whole line.
@@ -296,7 +302,7 @@ export interface LineShockEffects {
   // shockId is carried so an injected claim's cost maps back to the event that
   // caused it. Frequency multipliers carry no such tag because their cost is
   // not exactly attributable in the first place — see ShockRecord.
-  injections?: { count: number | ShockRange; amount: number | ShockRange; shockId: string }[];
+  injections?: { count: number | ShockRange; amount: number | ShockRange; shockId: string; region?: Region }[];
   // Property only: forced catastrophe events, in resolution order. Carries the
   // shock id because the size and hit order are drawn from streams keyed on it.
   forcedEvents?: { shockId: string; peril: string; region: Region; loss: ShockRange }[];

@@ -55,14 +55,24 @@ export const SHOCK_CATALOG: Record<string, ShockDefinition> = {
   // from a stream keyed on the shock id. Against Property's $5M occurrence
   // retention the whole range is ceded above $5M: $20M-$95M per event.
   //
-  // THE WC HALVES ARE JUDGMENT CALLS, stated. The matrix row says Property and
-  // WC "both take a large loss" for the earthquake and names WC only as
-  // secondary for the wildfire, with no WC figure for either. Both reuse
-  // magnitudes this catalog already documents rather than inventing new ones:
-  //   earthquake  one claim at $9.0M — #15's catastrophic-injury amount, the
-  //               heavy component's 99.95th percentile
-  //   wildfire    two claims at $900,000 — #10's serious-occupational amount,
-  //               the heavy component's ~98.3rd percentile
+  // THE WC HALVES ARE SHAPES, NOT ONE CLAIM. They were one $9.0M claim for the
+  // earthquake and two $900k for the wildfire, borrowed from #15 and #10. A
+  // disaster does not injure one worker catastrophically; it injures many
+  // ordinarily, or a few badly — and the shape decides who pays. Each claim is
+  // its own occurrence (every WC claim is), so below the $1M retention the pool
+  // keeps all of it: forty $100k injuries cost the pool everything, where one
+  // $9.0M claim was mostly ceded. Both are region-bound to where the event
+  // struck, and drawn log-uniformly (see injectClaim in types/shocks.ts).
+  // Measured against the natural book (60 default game-years, 33,676 claims):
+  // median $1k, 90th percentile $28k, 99th $525k, 99.9th $3.08M; ~58 claims a
+  // year fall in $20k-$300k.
+  //   earthquake  30-60 claims, $20k-$300k — above ordinary (the 89th-99.4th
+  //               percentile band: falling debris, evacuation, clean-up) and
+  //               well below the retention; roughly doubles a year's
+  //               moderate-injury count. Expected ~$4.6M, all retained.
+  //   wildfire    3-6 claims, $300k-$2.5M — the 99th-99.9th percentile band:
+  //               firefighters, burns, smoke inhalation. Few and severe, and
+  //               ~43% of them cross $1M, so the tower answers the worst.
   // DISPLACED BY: a WC figure in the matrix row.
   //
   // BANDS. The matrix grades wildfire at severity 4 and contamination at 3 on
@@ -76,11 +86,12 @@ export const SHOCK_CATALOG: Record<string, ShockDefinition> = {
     band: 'severe',
     description:
       'A major earthquake strikes the Central region. Damage runs across the members there as one '
-      + 'catastrophe — one occurrence, answered by the catastrophe layer — and building collapse '
-      + 'brings a catastrophic workers\' compensation injury with it.',
+      + 'catastrophe — one occurrence, retained to $5M and covered by the reinsurance tower above it — '
+      + 'and falling debris, evacuation and clean-up injure dozens of workers in the region, each claim '
+      + 'small enough that the pool pays all of it.',
     effects: [
       { kind: 'forceEvent', line: 'Property', peril: 'earthquake', region: 'Central', loss: { min: 25_000_000, max: 100_000_000 } },
-      { kind: 'injectClaim', line: 'WC', count: 1, amount: 9_000_000 },
+      { kind: 'injectClaim', line: 'WC', count: { min: 30, max: 60 }, amount: { min: 20_000, max: 300_000 }, region: 'Central' },
     ],
   },
 
@@ -102,11 +113,12 @@ export const SHOCK_CATALOG: Record<string, ShockDefinition> = {
     band: 'high',
     description:
       'A major wildfire burns through the North region\'s wildland-urban interface. The damage across the '
-      + 'members it reaches is one catastrophe — one occurrence, answered by the catastrophe layer — and '
-      + 'staff responding to it are seriously injured.',
+      + 'members it reaches is one catastrophe — one occurrence, retained to $5M and covered above it — and '
+      + 'a handful of firefighters and staff responding to it are badly hurt: burns and smoke inhalation, '
+      + 'the worst of them large enough to reach the reinsurance.',
     effects: [
       { kind: 'forceEvent', line: 'Property', peril: 'wildfire', region: 'North', loss: { min: 25_000_000, max: 100_000_000 } },
-      { kind: 'injectClaim', line: 'WC', count: 2, amount: 900_000 },
+      { kind: 'injectClaim', line: 'WC', count: { min: 3, max: 6 }, amount: { min: 300_000, max: 2_500_000 }, region: 'North' },
     ],
   },
 
@@ -527,11 +539,20 @@ export function validateShockDefinition(def: ShockDefinition): void {
     // catches a bad row at startup. See the #15 comment for why a missing
     // amount is the dangerous case rather than an obviously broken one.
     if (effect.kind === 'injectClaim') {
-      // A RANGE IS GL-ONLY. GL's injection path draws ranges from a shock-keyed
-      // stream; WC's takes explicit values, and a range reaching it would throw
-      // at fire time instead of here.
-      if ((isRange(effect.count) || isRange(effect.amount)) && effect.line !== 'GL') {
-        throw new Error(`shockCatalog ${def.id}: injectClaim on ${effect.line} uses a range, and only GL draws ranges. Give an explicit count and amount.`);
+      // A RANGE IS GL AND WC. Both draw ranges from shock-keyed streams; no
+      // other line reads an injection at all (READS rejects it above).
+      if ((isRange(effect.count) || isRange(effect.amount)) && effect.line !== 'GL' && effect.line !== 'WC') {
+        throw new Error(`shockCatalog ${def.id}: injectClaim on ${effect.line} uses a range, and only GL and WC draw ranges.`);
+      }
+      // A REGION IS WC-ONLY, and must be one the book has. GL's injection path
+      // does not read it, so a region there would be silently ignored.
+      if (effect.region !== undefined) {
+        if (effect.line !== 'WC') {
+          throw new Error(`shockCatalog ${def.id}: injectClaim on ${effect.line} names a region, and only WC's injections read one.`);
+        }
+        if (!CAT_REGIONS.includes(effect.region)) {
+          throw new Error(`shockCatalog ${def.id}: injectClaim region '${effect.region}' is not one of ${CAT_REGIONS.join('/')}.`);
+        }
       }
       const amountMin = isRange(effect.amount) ? effect.amount.min : effect.amount;
       const amountMax = isRange(effect.amount) ? effect.amount.max : effect.amount;

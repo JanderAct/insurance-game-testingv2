@@ -1430,6 +1430,14 @@ export function processLineYear(
       shockAttributableLoss[r.shockId] = (shockAttributableLoss[r.shockId] ?? 0) + r.gross;
       shockAttributableClaims[r.shockId] = (shockAttributableClaims[r.shockId] ?? 0) + r.claims;
     }
+    // And of a scheduled weather event, the same way. ⚠ THIS WAS MISSING when
+    // WINTER-STORM landed (e1639c7): its claims were drawn and booked but the
+    // shock record read $0 and 0 claims, so the Results card named the storm
+    // and attributed nothing to it.
+    for (const r of generated.weatherEventResults) {
+      shockAttributableLoss[r.shockId] = (shockAttributableLoss[r.shockId] ?? 0) + r.gross;
+      shockAttributableClaims[r.shockId] = (shockAttributableClaims[r.shockId] ?? 0) + r.claims;
+    }
     // ⚠ NO SHOCK CHANNEL — BUT A CAT BAND, AND ITS LOAD, TOGETHER. Property's
     // shock used to arrive as an aggregate add-on keyed off commonLossFactor,
     // which went with the Gamma path; the cat shock events are still gated

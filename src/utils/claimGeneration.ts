@@ -83,9 +83,10 @@ export interface LineYearGenerationOutput {
  * regenerateLineYearClaims passes it for the redraw.
  *
  * ⚠ THE SHOCK CHANNELS DIFFER BY LINE AND THAT IS NOT AN OVERSIGHT. WC takes
- * component arrival-rate multipliers and explicit injections; GL takes
+ * component arrival-rate multipliers and injections (explicit, or ranged and
+ * region-bound, keyed on the shock id); GL takes
  * whole-line frequency and severity multipliers, injections (explicit or
- * ranged) and gPool; Property takes forced catastrophes and no gPool (its
+ * ranged) and gPool; Property takes forced catastrophes, weather events and no gPool (its
  * fitted mixture already contains what gPool would add — see the note at its
  * engine call site). A shock effect the line does not read is dropped here —
  * and shockCatalog now REJECTS such an effect at load, so a catalog event can
@@ -103,16 +104,13 @@ export function wcGenerationInputs(b: LineYearGenerationBase): WcGenerationInput
     members: b.members, yearNumber: b.yearNumber, calendarYear: b.calendarYear,
     instanceSeed: b.instanceSeed, kLine: b.k, riskControlEffectiveness: b.riskControlEffectiveness,
     componentFreqMultipliers: b.shock?.componentFreqMultipliers,
-    // WC takes EXPLICIT injections only. shockCatalog rejects a range on a WC
-    // injectClaim at load, so this narrowing cannot fire on a catalog event; it
-    // is here so a range can never reach WC's generator as a malformed number.
-    injections: b.shock?.injections?.map(i => ({ count: explicit(i.count, 'WC count'), amount: explicit(i.amount, 'WC amount') })),
+    // Ranges and a region reach WC now, keyed on the shock id; an explicit,
+    // region-less injection is passed exactly as before and takes WC's original
+    // path, so every shipped fixed-amount event is bit-identical.
+    injections: b.shock?.injections?.map(i => (typeof i.count === 'number' && typeof i.amount === 'number' && !i.region
+      ? { count: i.count, amount: i.amount }
+      : { count: i.count, amount: i.amount, shockId: i.shockId, ...(i.region ? { region: i.region } : {}) })),
   };
-}
-
-function explicit(v: number | { min: number; max: number }, what: string): number {
-  if (typeof v === 'number') return v;
-  throw new Error(`${what}: a shock range reached a generator that takes explicit values only`);
 }
 
 export function glGenerationInputs(b: LineYearGenerationBase): GlGenerationInputs {

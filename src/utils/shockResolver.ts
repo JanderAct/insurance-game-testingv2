@@ -192,6 +192,7 @@ export function resolveShocks(instance: GameInstance, yearNumber: number): Shock
             count: effect.count,
             amount: effect.amount,
             shockId: def.id,
+            ...(effect.region ? { region: effect.region } : {}),
           });
           break;
         }

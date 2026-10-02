@@ -727,7 +727,27 @@ console.log('\n--- 10. #2 / WILDFIRE / WATER-CONTAMINATION / WINTER-STORM ---');
         if (!(g >= 25e6 - 1e-6 && g <= 100e6 + 1e-6) || occ.size !== 1) sizeOk = false;
         const o = (r3.byLine.Property!.occurrences ?? []).find(x => occ.has(x.id));
         if (!o?.isCatastrophe) sizeOk = false;
-        sizes.push(`${fmt$(g)} on ${evClaims.length} member(s), one occurrence`);
+        // AND THE WC HALF IS A SHAPE, NOT ONE CLAIM: many moderate injuries for
+        // the earthquake, a few severe ones for the wildfire — every one its own
+        // NON-catastrophe occurrence, tier 'injected', in the event's region,
+        // with an id that names the shock.
+        const WC_SHAPE: Record<string, { n: [number, number]; amt: [number, number]; region: string }> = {
+          '#2': { n: [30, 60], amt: [20_000, 300_000], region: 'Central' },
+          'WILDFIRE': { n: [3, 6], amt: [300_000, 2_500_000], region: 'North' },
+        };
+        const shape = WC_SHAPE[ev.id];
+        const wc3 = r3.byLine.WC!;
+        const wcInj = (wc3.claims ?? []).filter(c => c.tier === 'injected');
+        const region = new Map((wc3.memberList ?? []).map(m => [m.id, m.region]));
+        const wcOcc = new Map((wc3.occurrences ?? []).map(x => [x.id, x]));
+        const tag = ev.id.replace(/[^A-Za-z0-9]/g, '');
+        const wcOk = !!shape && wcInj.length >= shape.n[0] && wcInj.length <= shape.n[1]
+          && wcInj.every(c => c.grossUltimate >= shape.amt[0] - 1e-6 && c.grossUltimate <= shape.amt[1] + 1e-6)
+          && wcInj.every(c => region.get(c.memberId) === shape.region)
+          && wcInj.every(c => { const x = wcOcc.get(c.occurrenceId); return !!x && x.claimIds.length === 1 && x.isCatastrophe === false; })
+          && wcInj.every(c => c.id.includes(`-${tag}-`));
+        if (!wcOk) sizeOk = false;
+        sizes.push(`${fmt$(g)} on ${evClaims.length} member(s), one occurrence; WC ${wcInj.length} x ${fmt$(Math.min(...wcInj.map(c => c.grossUltimate)))}-${fmt$(Math.max(...wcInj.map(c => c.grossUltimate)))} in ${shape?.region}${wcOk ? '' : ' — WC SHAPE WRONG'}`);
       }
       // REPRODUCIBLE — the same schedule on the same seed is the same game.
       // One seed per event: it is a determinism check, not a sample.
@@ -761,7 +781,8 @@ console.log('\n--- 10. #2 / WILDFIRE / WATER-CONTAMINATION / WINTER-STORM ---');
     ['forceEvent on GL', { id: 'x', name: 'x', horizon: 'current', band: 'high', description: 'x', effects: [{ kind: 'forceEvent', line: 'GL' as 'Property', peril: 'wildfire', region: 'North', loss: { min: 1, max: 2 } }] }],
     ['forceEvent in no region', { id: 'x', name: 'x', horizon: 'current', band: 'high', description: 'x', effects: [{ kind: 'forceEvent', line: 'Property', peril: 'wildfire', region: 'East' as 'North', loss: { min: 1, max: 2 } }] }],
     ['injectClaim on Property', { id: 'x', name: 'x', horizon: 'current', band: 'high', description: 'x', effects: [{ kind: 'injectClaim', line: 'Property', count: 1, amount: 1 }] }],
-    ['a range on a WC injection', { id: 'x', name: 'x', horizon: 'current', band: 'high', description: 'x', effects: [{ kind: 'injectClaim', line: 'WC', count: { min: 1, max: 2 }, amount: 1 }] }],
+    ['a region on a GL injection', { id: 'x', name: 'x', horizon: 'current', band: 'high', description: 'x', effects: [{ kind: 'injectClaim', line: 'GL', count: 1, amount: 1, region: 'North' }] }],
+    ['a WC injection in no region', { id: 'x', name: 'x', horizon: 'current', band: 'high', description: 'x', effects: [{ kind: 'injectClaim', line: 'WC', count: 1, amount: 1, region: 'East' as 'North' }] }],
     ['freqMultiplier on WC (the old #2 defect)', { id: 'x', name: 'x', horizon: 'current', band: 'high', description: 'x', effects: [{ kind: 'freqMultiplier', line: 'WC', factor: 1.4 }] }],
     ['sevMultiplier on Property', { id: 'x', name: 'x', horizon: 'current', band: 'high', description: 'x', effects: [{ kind: 'sevMultiplier', line: 'Property', factor: 1.1 }] }],
     ['weatherEvent on WC', { id: 'x', name: 'x', horizon: 'current', band: 'high', description: 'x', effects: [{ kind: 'weatherEvent', line: 'WC' as 'Property', peril: 'storm', region: 'North', count: { min: 1, max: 2 }, claim: { min: 1, max: 2 } }] }],
