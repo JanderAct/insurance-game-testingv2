@@ -436,6 +436,40 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
       value: r => formatCurrency(r.netUltimateLoss),
       csvValue: r => roundDollars(r.netUltimateLoss),
     },
+    {
+      /**
+       * ⚠ THE LOSS-RATIO NUMERATOR, AND ITS ABSENCE MEANT THE PAGE NEVER ADDED
+       * UP. Every actual loss ratio in the model divides netIncurredLoss —
+       * `actualLossRatio`, `actualLossRatioPricingBasis` and
+       * `actualLossRatioRetainedPremium` alike — and this list's only loss row
+       * was netUltimateLoss. So the loss a reader could see, over the
+       * denominator a reader could see, never reproduced the ratio printed
+       * beside it. Not approximately: measured over 6 games x 10 years, the two
+       * disagree on 60 of 60 pool-years and 180 of 180 line-years, by a mean of
+       * 35.3 percentage points at pool scope and a maximum of 115.3 at line
+       * scope. The worst pool-year shows a $34.38M loss where a reader computes
+       * 58.7% and the page prints 116.1% — the difference between a year that
+       * looks profitable and one that lost heavily.
+       *
+       * ⚠ IT IS NOT netUltimateLoss PLUS SOMETHING VISIBLE, WHICH IS WHY THE
+       * ROW IS NEEDED RATHER THAN A NOTE. netIncurredLoss is
+       * `netPaidLosses + endingNetReserve - beginningNetReserve`: this year's
+       * movement in the whole net ledger, prior accident years included.
+       * netUltimateLoss is THIS accident year's loss alone. A reader cannot get
+       * from one to the other with the rows in front of them, and the gap is
+       * prior-year development, which is a different row again.
+       *
+       * ⚠ AND IT SITS NEXT TO netUltimateLoss DELIBERATELY. Two loss rows
+       * adjacent, on two bases, is exactly the shape that lets a reader see
+       * WHICH one the ratio uses — the alternative, filing it under the ratios,
+       * would have hidden the comparison that makes it legible.
+       */
+      key: 'netIncurredLoss',
+      category: 'Losses',
+      label: 'Net Incurred Loss (the loss-ratio numerator)',
+      value: r => formatCurrency(r.netIncurredLoss),
+      csvValue: r => roundDollars(r.netIncurredLoss),
+    },
 
     // Expenses and income
     {
@@ -748,7 +782,7 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
       // others may be crossed with them.
       key: 'actualLossRatioPricingBasis',
       category: 'Ratios and Capital',
-      label: 'Actual Loss Ratio (pricing basis)',
+      label: 'Actual Loss Ratio (pricing basis — premium + admin expense)',
       value: r => formatPct(r.actualLossRatioPricingBasis),
       csvValue: r => r.actualLossRatioPricingBasis,
     },
@@ -808,3 +842,28 @@ export const RESULT_METRICS: SpreadsheetMetric[] = [
       value: r => r.capitalAdequacyStatus,
     },
 ];
+
+/**
+ * The shared label for one metric key.
+ *
+ * ⚠ THIS EXISTS BECAUSE FIVE LABELS HAD ALREADY DRIFTED. ResultsPage's
+ * comparison table named the same ResultSet fields itself, and by the time
+ * anyone compared the two lists they disagreed on five of the thirteen rows
+ * they share — "Ultimate Losses (Gross)" against "Gross Ultimate Loss + LAE",
+ * "Pool Premium" against "Pool Premium at Selected CLF", and so on. Dropping
+ * "+ LAE" or "at Selected CLF" is not a shortening; both phrases state a BASIS,
+ * and a reader comparing the screen against the downloaded workbook had to work
+ * out whether two differently-named rows were the same quantity.
+ *
+ * ⚠ IT SHARES THE LABEL AND NOTHING ELSE, WHICH IS THE WHOLE DESIGN. A
+ * comparison table needs a polarity (is up good?) and a per-row decision about
+ * showing a percentage change; a spreadsheet row needs a CSV form. Neither list
+ * has any business holding the other's concerns, and an attempt to merge them
+ * would end with one list carrying fields the other ignores. One name per
+ * quantity is the part that was actually broken.
+ */
+export function metricLabel(key: string): string {
+  const m = RESULT_METRICS.find(x => x.key === key);
+  if (!m) throw new Error(`metricLabel: no RESULT_METRICS entry keyed ${key}`);
+  return m.label;
+}

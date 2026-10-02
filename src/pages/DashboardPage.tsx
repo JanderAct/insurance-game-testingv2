@@ -18,16 +18,44 @@ interface DashboardPageProps {
   gameComplete: boolean;
 }
 
-/** The pricing-basis loss ratio for a seeded history year.
+/**
+ * The pricing-basis loss ratio for a seeded history year, or undefined.
  *
- *  ⚠ RECOMPUTED WHEN THE FIELD IS ABSENT, NOT DEFAULTED TO ZERO. A save written
- *  before `actualLossRatioPricingBasis` existed carries the dollar fields but
- *  not the ratio, and a `?? 0` there would print a confident 0.0% for every
- *  pre-game year. Both inputs are present in every save, so the fallback is the
- *  same division the engine does rather than a placeholder. */
-function historicalPricingBasisLR(y: HistoricalYear): number {
-  return y.actualLossRatioPricingBasis
-    ?? y.netUltimateLoss / Math.max(y.poolPremiumAndAdminExpense, 1);
+ * ⚠ BLANK WHEN THE FIELD IS ABSENT, AND THE RECOMPUTATION THAT USED TO STAND
+ * HERE WAS A DIFFERENT DIVISION UNDER A COMMENT SAYING IT WAS THE SAME ONE.
+ * It read `netUltimateLoss / poolPremiumAndAdminExpense` and called itself
+ * "the same division the engine does". The engine divides netIncurredLoss:
+ *
+ *     actualLossRatioPricingBasis = netIncurredLoss / poolPremiumAndAdminExpense
+ *
+ * Different numerator. netUltimateLoss is this accident year's loss alone;
+ * netIncurredLoss is the movement in the whole net ledger, prior years
+ * included. Measured over 6 games x 10 years the two divisions disagree on 60
+ * of 60 pool-years by a mean of 35.3 percentage points, so the fallback was not
+ * an approximation — it was a confident wrong number, which is the one thing
+ * the old comment correctly said must not happen.
+ *
+ * ⚠ AND IT CANNOT BE REPAIRED BY READING THE RIGHT FIELD, which is why this
+ * goes blank rather than switching numerators. HistoricalYear carries
+ * netPaidLosses and endingNetReserve but no beginningNetReserve and no
+ * netIncurredLoss, so the engine's numerator is not reconstructable from a row
+ * — and a save old enough to lack the ratio lacks the numerator too, so adding
+ * the field would not reach the saves this fallback exists for.
+ *
+ * Blank is this codebase's own convention where no honest figure exists — the
+ * claims workbook's blank-not-zero rule, applied to a ratio.
+ */
+function historicalPricingBasisLR(y: HistoricalYear): number | undefined {
+  return y.actualLossRatioPricingBasis;
+}
+
+/** The ratio cell for a history row: the figure, or an em dash that says why. */
+function pricingBasisCell(y: HistoricalYear) {
+  const lr = historicalPricingBasisLR(y);
+  if (lr === undefined) {
+    return <span className="text-gray-400" title="This saved year predates the pricing-basis loss ratio and its numerator cannot be rebuilt from the fields the save carries.">—</span>;
+  }
+  return <span className={colorForRatio(lr)}>{formatPct(lr)}</span>;
 }
 
 export default function DashboardPage({ lockedResults, historicalYears, startingFinancials, currentYearNumber, lineView, endingPositionRows, gameComplete }: DashboardPageProps) {
@@ -180,7 +208,7 @@ export default function DashboardPage({ lockedResults, historicalYears, starting
                     <td className="px-4 py-3">{formatCurrency(year.poolPremiumAndAdminExpense, true)}</td>
                     <td className="px-4 py-3">{formatCurrency(year.grossUltimateLoss, true)}</td>
                     <td className="px-4 py-3">{formatCurrency(year.netUltimateLoss, true)}</td>
-                    <td className={`px-4 py-3 font-semibold ${colorForRatio(historicalPricingBasisLR(year))}`}>{formatPct(historicalPricingBasisLR(year))}</td>
+                    <td className="px-4 py-3 font-semibold">{pricingBasisCell(year)}</td>
                     <td className={year.underwritingIncome >= 0 ? 'px-4 py-3 text-emerald-600/70' : 'px-4 py-3 text-red-600/70'}>{formatCurrency(year.underwritingIncome, true)}</td>
                     <td className="px-4 py-3">{formatCurrency(year.investmentIncome, true)}</td>
                     <td className={year.netIncome >= 0 ? 'px-4 py-3 font-semibold text-emerald-600/70' : 'px-4 py-3 font-semibold text-red-600/70'}>{formatCurrency(year.netIncome, true)}</td>
@@ -197,7 +225,7 @@ export default function DashboardPage({ lockedResults, historicalYears, starting
                     <td className="px-4 py-3 text-gray-700">{formatCurrency(openingYear.poolPremiumAndAdminExpense, true)}</td>
                     <td className="px-4 py-3 text-gray-700">{formatCurrency(openingYear.grossUltimateLoss, true)}</td>
                     <td className="px-4 py-3 text-gray-700">{formatCurrency(openingYear.netUltimateLoss, true)}</td>
-                    <td className={`px-4 py-3 font-semibold ${colorForRatio(historicalPricingBasisLR(openingYear))}`}>{formatPct(historicalPricingBasisLR(openingYear))}</td>
+                    <td className="px-4 py-3 font-semibold">{pricingBasisCell(openingYear)}</td>
                     <td className={openingYear.underwritingIncome >= 0 ? 'px-4 py-3 text-emerald-600/70' : 'px-4 py-3 text-red-600/70'}>{formatCurrency(openingYear.underwritingIncome, true)}</td>
                     <td className="px-4 py-3 text-gray-700">{formatCurrency(openingYear.investmentIncome, true)}</td>
                     <td className={openingYear.netIncome >= 0 ? 'px-4 py-3 font-semibold text-emerald-600/70' : 'px-4 py-3 font-semibold text-red-600/70'}>{formatCurrency(openingYear.netIncome, true)}</td>

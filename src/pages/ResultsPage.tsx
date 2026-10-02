@@ -19,6 +19,7 @@ import {
   colorForNetIncome,
   colorForSurplus,
 } from '../utils/formatters';
+import { metricLabel } from '../utils/resultMetrics';
 import { placementSummary, hasTractableCeded, towerTopLabel, RETAINED_ABOVE_TOWER_CAVEAT } from '../utils/reinsuranceDisplay';
 import { lineDisplayName } from '../utils/lineDisplay';
 
@@ -57,25 +58,38 @@ interface ComparisonMetric {
   showPctChange: boolean;
 }
 
+// ⚠ THE LABELS COME FROM RESULT_METRICS; EVERYTHING ELSE ON THE ROW IS THIS
+// TABLE'S OWN. `polarity` and `showPctChange` are comparison concerns that the
+// spreadsheet list has no notion of, and its `csvValue` is one this table has no
+// use for — so the two lists stay separate and share the one thing that was
+// actually broken, which is the NAME of each quantity. Five of these thirteen
+// rows had drifted from the workbook's name for the same field.
 const COMPARISON_METRICS: ComparisonMetric[] = [
-  { key: 'premium', label: 'Pool Premium', kind: 'currency', polarity: 'neutral', getValue: r => r.poolPremium, showPctChange: true },
-  { key: 'ultimateLosses', label: 'Ultimate Losses (Gross)', kind: 'currency', polarity: 'goodDown', getValue: r => r.grossUltimateLoss, showPctChange: true },
-  { key: 'netLosses', label: 'Net Ultimate Loss', kind: 'currency', polarity: 'goodDown', getValue: r => r.netUltimateLoss, showPctChange: true },
+  { key: 'premium', label: metricLabel('poolPremium'), kind: 'currency', polarity: 'neutral', getValue: r => r.poolPremium, showPctChange: true },
+  { key: 'ultimateLosses', label: metricLabel('grossUltimateLoss'), kind: 'currency', polarity: 'goodDown', getValue: r => r.grossUltimateLoss, showPctChange: true },
+  { key: 'netLosses', label: metricLabel('netUltimateLoss'), kind: 'currency', polarity: 'goodDown', getValue: r => r.netUltimateLoss, showPctChange: true },
+  // ⚠ THE RATIO'S NUMERATOR, SHOWN NEXT TO THE ACCIDENT-YEAR LOSS ABOVE IT.
+  // Without this row the two ratios below cannot be checked against anything on
+  // the page: they divide netIncurredLoss, and the only loss row here was
+  // netUltimateLoss, which is a different quantity by the whole of prior-year
+  // development. Measured, the two never agreed — 0 of 60 pool-years, mean gap
+  // 35.3 percentage points. See the RESULT_METRICS entry.
+  { key: 'netIncurred', label: metricLabel('netIncurredLoss'), kind: 'currency', polarity: 'goodDown', getValue: r => r.netIncurredLoss, showPctChange: true },
   // ⚠ PRICING BASIS, AND THE LABEL SAYS SO — see the display note at Header.tsx.
   // The combined ratio below it stays on the MEMBER-CHARGE basis, because it is
   // a sum of a loss and an expense ratio and those may only be added on a shared
   // denominator. So these two adjacent rows are deliberately on different bases
   // and both say which; do not "make them consistent" by moving either.
-  { key: 'lossRatio', label: 'Actual Loss Ratio (prem + admin)', kind: 'ratio', polarity: 'goodDown', getValue: r => r.actualLossRatioPricingBasis, showPctChange: true },
-  { key: 'lossRatioRetained', label: 'Actual Loss Ratio (retained premium)', kind: 'ratio', polarity: 'goodDown', getValue: r => r.actualLossRatioRetainedPremium, showPctChange: true },
-  { key: 'combinedRatio', label: 'Actual Combined Ratio (member charge)', kind: 'ratio', polarity: 'goodDown', getValue: r => r.actualCombinedRatio, showPctChange: true },
-  { key: 'reserves', label: 'Ending Net Reserve', kind: 'currency', polarity: 'neutral', getValue: r => r.endingNetReserve, showPctChange: true },
-  { key: 'reinsRecovery', label: 'Reinsurance Recovery (current year)', kind: 'currency', polarity: 'neutral', getValue: r => r.reinsuranceRecovery, showPctChange: false },
-  { key: 'reinsRecoveryDev', label: 'Reinsurance Recovery (prior-year development)', kind: 'currency', polarity: 'neutral', getValue: r => r.priorYearDevelopmentCeded, showPctChange: false },
-  { key: 'bookingGiveBack', label: 'Recovery deferred by optimistic booking', kind: 'currency', polarity: 'neutral', getValue: r => r.bookingGiveBack, showPctChange: false },
-  { key: 'investmentIncome', label: 'Investment Income', kind: 'currency', polarity: 'goodUp', getValue: r => r.investmentIncome, showPctChange: false },
-  { key: 'netIncome', label: 'Net Income', kind: 'currency', polarity: 'goodUp', getValue: r => r.netIncome, showPctChange: false },
-  { key: 'endingSurplus', label: 'Ending Surplus', kind: 'currency', polarity: 'goodUp', getValue: r => r.endingSurplus, showPctChange: true },
+  { key: 'lossRatio', label: metricLabel('actualLossRatioPricingBasis'), kind: 'ratio', polarity: 'goodDown', getValue: r => r.actualLossRatioPricingBasis, showPctChange: true },
+  { key: 'lossRatioRetained', label: metricLabel('actualLossRatioRetainedPremium'), kind: 'ratio', polarity: 'goodDown', getValue: r => r.actualLossRatioRetainedPremium, showPctChange: true },
+  { key: 'combinedRatio', label: metricLabel('actualCombinedRatio'), kind: 'ratio', polarity: 'goodDown', getValue: r => r.actualCombinedRatio, showPctChange: true },
+  { key: 'reserves', label: metricLabel('endingNetReserve'), kind: 'currency', polarity: 'neutral', getValue: r => r.endingNetReserve, showPctChange: true },
+  { key: 'reinsRecovery', label: metricLabel('reinsuranceRecovery'), kind: 'currency', polarity: 'neutral', getValue: r => r.reinsuranceRecovery, showPctChange: false },
+  { key: 'reinsRecoveryDev', label: metricLabel('priorYearDevelopmentCeded'), kind: 'currency', polarity: 'neutral', getValue: r => r.priorYearDevelopmentCeded, showPctChange: false },
+  { key: 'bookingGiveBack', label: metricLabel('bookingGiveBack'), kind: 'currency', polarity: 'neutral', getValue: r => r.bookingGiveBack, showPctChange: false },
+  { key: 'investmentIncome', label: metricLabel('investmentIncome'), kind: 'currency', polarity: 'goodUp', getValue: r => r.investmentIncome, showPctChange: false },
+  { key: 'netIncome', label: metricLabel('netIncome'), kind: 'currency', polarity: 'goodUp', getValue: r => r.netIncome, showPctChange: false },
+  { key: 'endingSurplus', label: metricLabel('endingSurplus'), kind: 'currency', polarity: 'goodUp', getValue: r => r.endingSurplus, showPctChange: true },
 ];
 
 // Never Infinity/NaN: division only happens when prior !== 0.
@@ -344,6 +358,13 @@ export default function ResultsPage({ lockedResults, lineView }: ResultsPageProp
               <Row label="Reinsurance Recovery (prior-year development)" value={formatCurrency(result.priorYearDevelopmentCeded)} valueColor="text-emerald-600" />
               <Row label="Recovery deferred by optimistic booking" value={formatCurrency(result.bookingGiveBack)} />
               <Row label="Net Ultimate Loss" value={formatCurrency(result.netUltimateLoss)} valueColor="text-red-600" />
+              {/* ⚠ THE NUMERATOR OF ALL THREE ACTUAL LOSS RATIOS BELOW. This card
+                  used to end at Net Ultimate Loss, and the Ratios card beneath it
+                  prints three actual loss ratios that every one divide
+                  netIncurredLoss — so none of the three could be checked against
+                  any figure on the page. The two losses differ by prior-year
+                  development, which is a row in the next card down. */}
+              <Row label={metricLabel('netIncurredLoss')} value={formatCurrency(result.netIncurredLoss)} valueColor="text-red-600" />
             </ResultCard>
 
             <ResultCard title="Accounting Reserves & Development" icon={<Shield size={16} />}>

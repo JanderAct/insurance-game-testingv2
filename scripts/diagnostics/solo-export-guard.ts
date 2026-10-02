@@ -508,7 +508,28 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 //
 // So this capture carries its own negative control: a table change that reaches
 // two lines and provably does not reach the third.
-const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v48.json');
+// v48 was retired (to v49) by a SHAPE CHANGE AND A RENAME, AND BY NO VALUE AT
+// ALL — which is the whole of what the diff shows and is why it was safe to
+// recapture. All 24 exports moved; dumped at full stored precision on both
+// sides and compared line for line, the difference on every sheet is exactly:
+//
+//   1. ONE ADDED ROW, `Net Incurred Loss (the loss-ratio numerator)`, under
+//      Losses. RESULT_METRICS carried netUltimateLoss and no netIncurredLoss,
+//      while all three actual loss ratios divide the latter — so the workbook
+//      could not reproduce its own ratios. Measured before the fix: the loss
+//      shown over the denominator shown missed the ratio shown by 32.7 to 40.1
+//      percentage points across five years, and by a mean of 35.3pp over 60
+//      pool-years. After it, the division reproduces to six decimal places.
+//   2. ONE RENAMED LABEL, `Actual Loss Ratio (pricing basis)` ->
+//      `... (pricing basis — premium + admin expense)`, so the row names its
+//      own denominator. ⚠ ITS VALUES ARE BYTE-IDENTICAL ON BOTH SIDES —
+//      1.1154327323013637 before and after — which is the evidence that this
+//      recapture carries no engine movement hiding behind a shape change.
+//
+// Nothing else differs: 356 lines became 360, and the four new lines are the
+// added row on the Pool sheet and on each of the three line sheets.
+
+const BASELINE = path.join(__dirname, '../../baselines/SOLO_EXPORT_GUARD_v49.json');
 
 function seedOf(id: string) { let h = 5381; for (let i = 0; i < id.length; i++) { h = ((h << 5) + h) ^ id.charCodeAt(i); h = h >>> 0; } return h; }
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

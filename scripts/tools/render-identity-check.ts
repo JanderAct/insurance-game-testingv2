@@ -200,8 +200,28 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // actuarial-memo-check covers it across all ten years; see the control there.
 // ⚠ THE CONTROL RAN FIRST AND ON A SEPARATE PORT: f27c066 built into its own
 // worktree and served on 4174 reproduced all 298 fingerprints.
+// ⚠ v10 -> v11: netIncurredLoss ADDED TO RESULT_METRICS, AND THE LABELS SHARED.
+// Eighteen rows moved — 13 on Results (every configuration x every line scope,
+// at y2) and 5 on Result Spreadsheet — attributed by diffing the text behind
+// the hashes. Two causes and no third:
+//   1. the added row, `Net Incurred Loss (the loss-ratio numerator)`, with its
+//      figure and, on Results, its year-over-year change.
+//   2. labels taken from RESULT_METRICS instead of retyped: `Pool Premium` ->
+//      `Pool Premium at Selected CLF`, `Ultimate Losses (Gross)` -> `Gross
+//      Ultimate Loss + LAE`, `Net Ultimate Loss` -> `... + LAE`, and the loss
+//      ratio's `(prem + admin)` / `(pricing basis)` -> `(pricing basis —
+//      premium + admin expense)` on both surfaces.
+// ⚠ NO FIGURE CHANGED. The spreadsheet rows carry the same dollars either side;
+// only a row appeared and four names were corrected.
+// ⚠ Dashboard DID NOT MOVE, which is the expected result and worth recording.
+// Its pricing-basis fallback was also wrong — a different numerator under a
+// comment claiming it was the engine's — but the fallback fires only when
+// `actualLossRatioPricingBasis` is ABSENT, and every save this harness plays
+// carries it. The change is invisible here by construction, not by luck.
+// ⚠ THE CONTROL RAN FIRST AND ON A SEPARATE PORT: 0655f2e built into its own
+// worktree and served on 4174 reproduced all 298 fingerprints.
 const BASELINE = process.env.RENDER_BASELINE
-  ?? path.join(__dirname, '../../baselines/RENDER_IDENTITY_v10.json');
+  ?? path.join(__dirname, '../../baselines/RENDER_IDENTITY_v11.json');
 const WRITE = process.argv.includes('--write');
 const BASE_URL = process.env.RENDER_URL ?? 'http://127.0.0.1:4173';
 // The image ships chromium 1194; a newer `playwright` expects its own build and
