@@ -45,6 +45,7 @@ import { poolYearFactor, wcGenerationInputs, glGenerationInputs, propertyGenerat
 import {
   aggregateRecovery,
   cedeOccurrences,
+  occurrenceDeductibles,
   occurrenceKinds,
   normalizeAggregateStopLevel,
   normalizeLayersPlaced,
@@ -1570,7 +1571,11 @@ export function processLineYear(
     const drawnSum = drawnTotals.reduce((a, b) => a + b, 0);
     const bookedSum = totals.reduce((a, b) => a + b, 0);
     if (FORWARD_BOOKING.enabled && drawnSum > 0) bookedGrossContraction = bookedSum / drawnSum;
-    const cession = cedeOccurrences(towerLine, totals, placed);
+    // Each occurrence's peril deductible — an earthquake retains $10M, every
+    // other occurrence meets the layer's attachment (PROPERTY_PERIL_DEDUCTIBLE).
+    const cession = cedeOccurrences(
+      towerLine, totals, placed, occurrenceDeductibles(towerLine, generatedOccurrences ?? []),
+    );
     cededByLayer = cession.cededByLayer;
     retainedAboveTower = cession.retainedAboveTower;
 
@@ -1689,6 +1694,8 @@ export function processLineYear(
         undefined,
         // Cat events carry the kind: always tracked, held at their booked value.
         occurrenceKinds(generatedOccurrences ?? []),
+        // And the deductible, so development cedes on the inception terms.
+        occurrenceDeductibles(line as TowerLine, generatedOccurrences ?? []),
       )
     : { tracked: [], untrackedTotal: 0, bench: [] };
 
@@ -2108,6 +2115,13 @@ export function processLineYear(
   // on the result is the same quantity divided by exposure, and re-deriving it
   // from that would round-trip through a per-$100 figure for no reason.
   // ============================================================================
+  // The peril deductibles by occurrence id, only where one applies — so the
+  // value split retains what the cession retained.
+  const valueDeductibles = new Map<string, number>();
+  if (hasTractableCeded) {
+    const occs = generatedOccurrences ?? [];
+    occurrenceDeductibles(line as TowerLine, occs).forEach((d, i) => { if (d > 0) valueDeductibles.set(occs[i].id, d); });
+  }
   const valuePots = poolValueRow({
     line,
     claims: generatedClaims ?? [],
@@ -2118,9 +2132,10 @@ export function processLineYear(
     // ⚠ THE PLACEMENT, so a declined layer's loss lands in the pot that actually
     // funds it. Invisible at defaults, where everything is placed.
     layersPlaced: lineDecisions.layersPlaced,
+    deductibles: valueDeductibles,
   });
   const valueRows = memberValueRows(
-    memberPremiumShares, generatedClaims ?? [], line, lineDecisions.layersPlaced,
+    memberPremiumShares, generatedClaims ?? [], line, lineDecisions.layersPlaced, valueDeductibles,
   );
 
   const result: LineResultSet = {

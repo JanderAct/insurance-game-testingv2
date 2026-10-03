@@ -151,7 +151,7 @@
 // ============================================================================
 
 import type { SeededRandom } from './random';
-import { cedeToLayer } from './reinsuranceTower';
+import { cedeAbove } from './reinsuranceTower';
 import { REINSURANCE_TOWER, type TowerLine } from '../data/reinsuranceTower';
 import type { BenchClaim, DevelopingClaim } from '../types/simulation';
 
@@ -350,6 +350,12 @@ export function retentionFor(line: TowerLine): number {
 // tracked, never developing, and carries the flag so development holds it at
 // its booked value. Absent means no occurrence is, which is every WC and GL
 // call.
+//
+// `deductibles[i]` is occurrence i's peril deductible (occurrenceDeductibles).
+// It is stamped on the tracked record only where it is positive, so development
+// cedes on the same terms the inception cession used and nothing without one
+// changes shape. It does not decide what is tracked: an occurrence carrying a
+// deductible is a catastrophe today, and those are always tracked.
 export function buildTrackedSet(
   line: TowerLine,
   occurrenceIds: string[],
@@ -360,12 +366,16 @@ export function buildTrackedSet(
   benchRng?: SeededRandom,
   benchDepth: number = DEVELOPMENT_BENCH_DEPTH,
   catastrophe?: readonly boolean[],
+  deductibles?: readonly number[],
 ): TrackedSet {
   const n = totals.length;
   if (n === 0) return { tracked: [], untrackedTotal: 0, bench: [] };
   const retention = retentionFor(line);
   const isCat = (i: number) => catastrophe?.[i] === true;
-  const kind = (i: number) => (isCat(i) ? { catastrophe: true as const } : {});
+  const kind = (i: number) => ({
+    ...(isCat(i) ? { catastrophe: true as const } : {}),
+    ...((deductibles?.[i] ?? 0) > 0 ? { deductible: deductibles![i] } : {}),
+  });
 
   // The developing set.
   //
@@ -465,7 +475,9 @@ export function buildTrackedSet(
         drawn: totals[i],
         original: totals[i],
         current: totals[i],
-        ...kind(i),
+        // The kind only: a benched occurrence is below the retention and not a
+        // catastrophe, so it never carries a deductible.
+        ...(isCat(i) ? { catastrophe: true as const } : {}),
       });
     }
   }
@@ -974,7 +986,9 @@ export function cedeDevelopment(
     const next = Math.max(0, c.current + deltas[i]);
     layers.forEach((l, li) => {
       if (!placed[li] || !l.purchasable) return;
-      ceded += cedeToLayer(next, l.attachment, l.limit) - cedeToLayer(c.current, l.attachment, l.limit);
+      // The occurrence's own deductible, the one its inception cession used.
+      const d = c.deductible ?? 0;
+      ceded += cedeAbove(next, l, d) - cedeAbove(c.current, l, d);
     });
     return { ...c, current: next };
   });

@@ -8,7 +8,7 @@ import { SLIDER_RANGES, ASSET_ALLOCATION_DEFAULT } from '../data/defaultAssumpti
 import { formatCurrency } from '../utils/formatters';
 import { defaultLineDecisionSet } from '../utils/decisionDefaults';
 import { hasTractableCeded } from '../utils/reinsuranceDisplay';
-import { AGG_ATTACHMENT_LEVELS, AGG_LIMIT_MULTIPLE, REINSURANCE_TOWER, RISK_LOAD_LAMBDA, TOWER_TOP } from '../data/reinsuranceTower';
+import { AGG_ATTACHMENT_LEVELS, AGG_LIMIT_MULTIPLE, PROPERTY_PERIL_DEDUCTIBLE, REINSURANCE_TOWER, RISK_LOAD_LAMBDA, TOWER_TOP } from '../data/reinsuranceTower';
 import { normalizeAggregateStopLevel, normalizeLayersPlaced, quoteAggregate } from '../utils/reinsuranceTower';
 import { allLayerRiskMoments } from '../utils/towerMoments';
 import { lineDisplayName } from '../utils/lineDisplay';
@@ -1045,10 +1045,15 @@ function TowerControls({
         {/* One retention per occurrence on every line. On Property a regional
             catastrophe is one occurrence and meets the same retention as any
             other claim, so the label says "per occurrence" rather than "per
-            risk": a two-region event retains it twice. */}
+            risk": a two-region event retains it twice. A peril with its own
+            deductible is listed from PROPERTY_PERIL_DEDUCTIBLE, so the label
+            names every exception the cession applies. */}
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
           {line === 'Property'
-            ? <>Occurrence Layers — Retention ${layers[0].attachment / 1e6}M per occurrence, catastrophes included</>
+            ? <>Occurrence Layers — Retention ${layers[0].attachment / 1e6}M per occurrence, catastrophes included{
+                Object.entries(PROPERTY_PERIL_DEDUCTIBLE).map(([peril, d]) =>
+                  `; ${peril.charAt(0).toUpperCase()}${peril.slice(1)} $${d / 1e6}M`).join('')
+              }</>
             : <>Occurrence Layers — Retention ${layers[0].attachment / 1e6}M</>}
         </p>
         <div className="space-y-1.5">

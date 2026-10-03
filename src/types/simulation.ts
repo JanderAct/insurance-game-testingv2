@@ -732,6 +732,14 @@ export interface DevelopingClaim {
    *  Absent everywhere else, so every WC and GL record serialises exactly as it
    *  did before the cat band existed. */
   catastrophe?: true;
+  /** The peril deductible this occurrence retains before the tower responds,
+   *  where it is above the layers' own attachments — a Property earthquake's
+   *  $10M (PROPERTY_PERIL_DEDUCTIBLE). cedeDevelopment reads it so every later
+   *  movement cedes on the terms the occurrence was ceded on at inception.
+   *  Absent means the layers' attachments, which is every WC and GL record and
+   *  every Property occurrence of an unlisted peril, so they serialise exactly
+   *  as before. */
+  deductible?: number;
 }
 
 // ============================================================================

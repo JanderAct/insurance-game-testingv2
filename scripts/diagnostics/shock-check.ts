@@ -41,6 +41,8 @@ import { computeKGl, expectedGlGrossLossForPricing, generateGlClaims } from '../
 import { computeKLine, componentMean, expectedWcGrossLossForPricing, generateWcClaims } from '../../src/utils/wcClaimEngine';
 import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
 import type { Member } from '../../src/types/simulation';
+import { PROPERTY_PERIL_DEDUCTIBLE, REINSURANCE_TOWER } from '../../src/data/reinsuranceTower';
+import { cedeAbove } from '../../src/utils/reinsuranceTower';
 import { SHOCK_CATALOG, validateShockDefinition } from '../../src/data/shockCatalog';
 import { buildResultsWorkbook } from '../../src/utils/resultsExport';
 import { RESULT_METRICS } from '../../src/utils/resultMetrics';
@@ -727,6 +729,19 @@ console.log('\n--- 10. #2 / WILDFIRE / WATER-CONTAMINATION / WINTER-STORM ---');
         if (!(g >= 25e6 - 1e-6 && g <= 100e6 + 1e-6) || occ.size !== 1) sizeOk = false;
         const o = (r3.byLine.Property!.occurrences ?? []).find(x => occ.has(x.id));
         if (!o?.isCatastrophe) sizeOk = false;
+        // AND THE TOWER RECOVERS ON THE PERIL'S OWN DEDUCTIBLE. The event is the
+        // only thing that differs from the unshocked year and a catastrophe is
+        // booked at full, so the extra recovery is exactly what the one layer
+        // cedes on it: above $10M for the earthquake, above the $5M attachment
+        // for the wildfire, which inherits it.
+        const layer = REINSURANCE_TOWER.Property[0];
+        const ded = PROPERTY_PERIL_DEDUCTIBLE[o?.peril ?? ''] ?? 0;
+        const wantDed = ev.id === '#2' ? 10_000_000 : 0;
+        const extra = r3.byLine.Property!.reinsuranceRecovery - c3.byLine.Property!.reinsuranceRecovery;
+        const expected = cedeAbove(g, layer, ded);
+        const dedOk = ded === wantDed && Math.abs(extra - expected) <= 1e-6 * Math.max(1, g);
+        if (!dedOk) sizeOk = false;
+        const dedNote = `; ${o?.peril} retains ${fmt$(Math.max(ded, layer.attachment))}, recovery +${fmt$(extra)} vs ${fmt$(expected)} expected${dedOk ? '' : ' — DEDUCTIBLE WRONG'}`;
         // AND THE WC HALF IS A SHAPE, NOT ONE CLAIM: many moderate injuries for
         // the earthquake, a few severe ones for the wildfire — every one its own
         // NON-catastrophe occurrence, tier 'injected', in the event's region,
@@ -747,7 +762,7 @@ console.log('\n--- 10. #2 / WILDFIRE / WATER-CONTAMINATION / WINTER-STORM ---');
           && wcInj.every(c => { const x = wcOcc.get(c.occurrenceId); return !!x && x.claimIds.length === 1 && x.isCatastrophe === false; })
           && wcInj.every(c => c.id.includes(`-${tag}-`));
         if (!wcOk) sizeOk = false;
-        sizes.push(`${fmt$(g)} on ${evClaims.length} member(s), one occurrence; WC ${wcInj.length} x ${fmt$(Math.min(...wcInj.map(c => c.grossUltimate)))}-${fmt$(Math.max(...wcInj.map(c => c.grossUltimate)))} in ${shape?.region}${wcOk ? '' : ' — WC SHAPE WRONG'}`);
+        sizes.push(`${fmt$(g)} on ${evClaims.length} member(s), one occurrence; WC ${wcInj.length} x ${fmt$(Math.min(...wcInj.map(c => c.grossUltimate)))}-${fmt$(Math.max(...wcInj.map(c => c.grossUltimate)))} in ${shape?.region}${wcOk ? '' : ' — WC SHAPE WRONG'}${dedNote}`);
       }
       // REPRODUCIBLE — the same schedule on the same seed is the same game.
       // One seed per event: it is a determinism check, not a sample.

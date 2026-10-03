@@ -136,6 +136,26 @@ export interface TowerLayer {
 // visibly.
 export const PROPERTY_TOWER_TOP = 1_000_000_000;
 
+// PER-PERIL DEDUCTIBLES — a Property occurrence of a named peril retains this
+// much before the tower responds, instead of the layer's own $5M attachment.
+// A peril not listed inherits the attachment, so the next peril with its own
+// deductible is a row here rather than a branch in the cession.
+//
+// EARTHQUAKE $10M, PER OCCURRENCE — and a cat occurrence is one region, so per
+// region. The real programme's structure: earthquake carries a higher
+// deductible than every other peril because it is the correlated tail the
+// reinsurer prices hardest. NOT the retired $37.5M catastrophe retention,
+// which applied to every catastrophe and was a volatility lever; this applies
+// to one peril and comes from the programme. Flat, not a percentage: a
+// percentage of affected value would need which members were hit, which the
+// exact event distribution does not keep.
+//
+// The top does not move: a $10M deductible makes the earthquake's layer
+// $990M xs $10M under the same $1B occurrence limit.
+export const PROPERTY_PERIL_DEDUCTIBLE: Readonly<Record<string, number>> = {
+  earthquake: 10_000_000,
+};
+
 // ============================================================================
 // ⚠ THERE ARE NO PRICING CONSTANTS IN THIS FILE ANY MORE. A LAYER IS ITS BOUNDS.
 //
