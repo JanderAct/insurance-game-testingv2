@@ -37,7 +37,7 @@
 
 import type { Claim, CoverageLine, Member, MemberLossResult, Occurrence, Region } from '../types/simulation';
 import { deriveSubRng } from './random';
-import { PROPERTY_CAT_MODEL, PROPERTY_LOSS_MODEL } from '../data/defaultAssumptions';
+import { PROPERTY_CAT_EARTHQUAKE, PROPERTY_CAT_MODEL, PROPERTY_LOSS_MODEL } from '../data/defaultAssumptions';
 import { EXPERIENCE_SPLIT_POINT } from './memberLossHistory';
 import { CAT_REGIONS, catLossIfHit, expectedPropertyCatLoss, memberExpectedCatLoss } from './propertyCatastrophe';
 
@@ -416,6 +416,14 @@ export function generatePropertyClaims(inputs: PropertyGenerationInputs): Proper
     }
     eventRegions.push(region);
   }
+  // EACH EVENT IS AN EARTHQUAKE OR IT IS NOT — PROPERTY_CAT_EARTHQUAKE.share,
+  // a placeholder. Its own stream, one uniform per event whether or not the
+  // event hits anyone, so no region, hit or attritional draw moves; only the
+  // occurrence's peril, and so the deductible it meets, changes. Independent
+  // of region and size, which is what the exact pricing relies on.
+  const perilRng = deriveSubRng(instanceSeed, yearNumber, 'pr_cat_peril');
+  const eventPerils: string[] = eventRegions.map(() =>
+    (perilRng.next() < PROPERTY_CAT_EARTHQUAKE.share ? PROPERTY_CAT_EARTHQUAKE.peril : CAT_BAND));
   // Per event, the claims it produced and whom it hit — assembled into ONE
   // occurrence per event after every member has drawn.
   const eventClaimIds: string[][] = eventRegions.map(() => []);
@@ -753,13 +761,14 @@ export function generatePropertyClaims(inputs: PropertyGenerationInputs): Proper
       region,
       isCatastrophe: true,
       claimIds: eventClaimIds[e],
-      peril: CAT_BAND,
+      peril: eventPerils[e],
     });
   });
 
   // One occurrence per forced event, exactly as for the band's own events —
   // flagged as a catastrophe so it is booked at full and held there. `peril`
-  // names the scheduled peril rather than the band's generic 'cat'.
+  // names the scheduled peril — #2's earthquake meets the same $10M deductible
+  // a drawn earthquake does.
   forcedEvents.forEach((fe, ev) => {
     if (forcedClaimIds[ev].length === 0) return;
     occurrences.push({

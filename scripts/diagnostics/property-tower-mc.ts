@@ -23,7 +23,7 @@ import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
 import { generatePropertyClaims, computeKPr, expectedPropertyGrossLoss } from '../../src/utils/propertyClaimEngine';
-import { quoteAggregate, occurrenceTotals, cedeOccurrences } from '../../src/utils/reinsuranceTower';
+import { quoteAggregate, occurrenceDeductibles, occurrenceTotals, cedeOccurrences } from '../../src/utils/reinsuranceTower';
 import { propertyAggregateInternals } from '../../src/utils/propertyAggregate';
 import { retainedRiskMoments } from '../../src/utils/towerMoments';
 import { lognormalPartialMoment } from '../../src/utils/claimMath';
@@ -85,7 +85,11 @@ function mcRetained(members: Member[], kPr: number, trials: number): number[] {
       members, yearNumber: 1, calendarYear: 2026,
       instanceSeed: 1_000_003 + t * 97, kPr, riskControlEffectiveness: 0,
     });
-    out[t] = cedeOccurrences('Property', occurrenceTotals(gen.claims, gen.occurrences), [true]).retained;
+    // With each occurrence's peril deductible, as the engine cedes it — a drawn
+    // earthquake retains $10M, which the aggregate's price now assumes.
+    out[t] = cedeOccurrences(
+      'Property', occurrenceTotals(gen.claims, gen.occurrences), [true], occurrenceDeductibles('Property', gen.occurrences),
+    ).retained;
   }
   return out;
 }

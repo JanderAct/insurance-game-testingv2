@@ -27,8 +27,9 @@
 // bounding lattice points in the proportion that keeps its mean — the same
 // construction propertyAggregate's Gerber discretisation uses for the
 // attritional severity. E[event gross] on the lattice equals the closed form to
-// float precision. The layer's attachment ($5M) and top ($1B) are lattice
-// points, so the per-event retained/ceded mapping adds no further approximation.
+// float precision. The layer's attachment ($5M), the earthquake's deductible
+// ($10M) and the top ($1B) are lattice points, so the per-event retained/ceded
+// mapping adds no further approximation.
 //
 // ⚠ MEMBERS ARE CONVOLVED IN A FIXED ORDER — BY id — NOT IN ROSTER ORDER.
 // Convolution is commutative in exact arithmetic and not in floating point: a
@@ -43,7 +44,8 @@
 // a stale distribution.
 // ============================================================================
 
-import { PROPERTY_CAT_MODEL } from '../data/defaultAssumptions';
+import { PROPERTY_CAT_EARTHQUAKE, PROPERTY_CAT_MODEL } from '../data/defaultAssumptions';
+import { PROPERTY_PERIL_DEDUCTIBLE } from '../data/reinsuranceTower';
 import type { Member, Region } from '../types/simulation';
 
 const C = PROPERTY_CAT_MODEL;
@@ -175,9 +177,32 @@ export interface CatEventRetained {
   m2Ceded: number;
 }
 
+// The attachment each category of drawn event meets, with its share of events.
+// An earthquake (PROPERTY_CAT_EARTHQUAKE.share, a placeholder) attaches at its
+// peril deductible where that is above the layer's attachment; every other
+// event at the attachment. One class when the two coincide, so a zero share or
+// a deductible at or below the attachment prices exactly as before.
+export function drawnPerilAttachments(attachment: number): { share: number; attachment: number }[] {
+  const s = PROPERTY_CAT_EARTHQUAKE.share;
+  const aEq = Math.max(attachment, PROPERTY_PERIL_DEDUCTIBLE[PROPERTY_CAT_EARTHQUAKE.peril] ?? 0);
+  if (!(s > 0) || aEq === attachment) return [{ share: 1, attachment }];
+  return [{ share: 1 - s, attachment }, { share: s, attachment: aEq }];
+}
+
 // Map the event gross distribution through a layer — Property's one layer, read
 // on each event's occurrence total. With the layer
-// declined the pool keeps the whole event. The mapping is EXACT here because
+// declined the pool keeps the whole event.
+//
+// ⚠ TWO ATTACHMENTS, ONE DISTRIBUTION. Whether a drawn event is an earthquake
+// is independent of which region it strikes and whom it hits, so the earthquakes
+// are a THINNING of the same Poisson event process with the same per-event gross
+// distribution. One event's retained loss is then the mixture
+//   (1 - s) x [gross read at the $5M attachment] + s x [gross read at $10M]
+// — the ONE convolution, mapped twice and weighted. A compound Poisson count
+// with a mixture severity is exactly the sum of the two thinned processes, so
+// the annual moments (lambda E[c], lambda E[c^2]) and Panjer's recursion below
+// stay exact, deterministic and as cheap as before: one extra pass over the
+// event lattice. $10M is a lattice point, so the mapping adds no approximation. The mapping is EXACT here because
 // the attachment and the ceiling are lattice points, so retained(k x bin) is
 // again a lattice point — asserted, since a retention off the lattice would
 // silently need the mean-preserving split this skips.
@@ -195,24 +220,39 @@ export function catEventRetained(
   if (layer && (layer.attachment % bin !== 0 || layer.ceiling % bin !== 0)) {
     throw new Error(`catEventRetained: layer bounds must be lattice points ($${bin} bins)`);
   }
-  const layerKey = layer ? `${layer.attachment}|${layer.ceiling}` : 'declined';
+  const classes = layer ? drawnPerilAttachments(layer.attachment) : [{ share: 1, attachment: 0 }];
+  if (layer && classes.some(c => c.attachment % bin !== 0)) {
+    throw new Error(`catEventRetained: peril attachments must be lattice points ($${bin} bins)`);
+  }
+  // The classes are in the key: a share or a deductible changed in-process (a
+  // probe) must not be served the mapping of the old one.
+  const layerKey = layer
+    ? `${layer.ceiling}|` + classes.map(c => `${c.attachment}:${c.share}`).join(',')
+    : 'declined';
   let byLayer = retainedCache.get(dist);
   if (!byLayer) { byLayer = new Map(); retainedCache.set(dist, byLayer); }
   const hit = byLayer.get(layerKey);
   if (hit) return hit;
-  const aIdx = layer ? layer.attachment / bin : 0;
   const cIdx = layer ? layer.ceiling / bin : 0;
-  const retainedIdx = (k: number) => layer ? Math.min(k, aIdx) + Math.max(0, k - cIdx) : k;
-  const pmf = new Float64Array(retainedIdx(gross.length - 1) + 1);
+  // The highest attachment retains the most, so it sets the array's length.
+  const topIdx = (k: number) => layer
+    ? Math.min(k, Math.max(...classes.map(c => c.attachment)) / bin) + Math.max(0, k - cIdx) : k;
+  const pmf = new Float64Array(topIdx(gross.length - 1) + 1);
   let m1r = 0, m2r = 0, m1c = 0, m2c = 0;
-  for (let k = 0; k < gross.length; k++) {
-    const p = gross[k];
-    if (p === 0) continue;
-    const ri = retainedIdx(k);
-    pmf[ri] += p;
-    const r = ri * bin, c = (k - ri) * bin;
-    m1r += p * r; m2r += p * r * r;
-    m1c += p * c; m2c += p * c * c;
+  // Class by class in a fixed order, so the arrays are bit-reproducible. With
+  // one class its share is 1 and every product is the old one exactly.
+  for (const cls of classes) {
+    const aIdx = cls.attachment / bin;
+    const retainedIdx = (k: number) => layer ? Math.min(k, aIdx) + Math.max(0, k - cIdx) : k;
+    for (let k = 0; k < gross.length; k++) {
+      const p = cls.share === 1 ? gross[k] : gross[k] * cls.share;
+      if (p === 0) continue;
+      const ri = retainedIdx(k);
+      pmf[ri] += p;
+      const r = ri * bin, c = (k - ri) * bin;
+      m1r += p * r; m2r += p * r * r;
+      m1c += p * c; m2c += p * c * c;
+    }
   }
   const out: CatEventRetained = { bin, pmf, m1Retained: m1r, m2Retained: m2r, m1Ceded: m1c, m2Ceded: m2c };
   byLayer.set(layerKey, out);

@@ -35,8 +35,8 @@
 // ============================================================================
 
 import { getPredefinedMarketMembers } from '../../src/data/memberCatalog';
-import { PROPERTY_CAT_MODEL } from '../../src/data/defaultAssumptions';
-import { REINSURANCE_TOWER, PROPERTY_TOWER_TOP } from '../../src/data/reinsuranceTower';
+import { PROPERTY_CAT_EARTHQUAKE, PROPERTY_CAT_MODEL } from '../../src/data/defaultAssumptions';
+import { PROPERTY_PERIL_DEDUCTIBLE, REINSURANCE_TOWER, PROPERTY_TOWER_TOP } from '../../src/data/reinsuranceTower';
 import {
   CAT_REGIONS, PROPERTY_LATTICE_BIN, catAnnualRetainedPmf, catEventGrossDistribution, catEventRetained,
   catLayerAnnualMoments, catLossIfHit, expectedPropertyCatLoss, propertyCatInternals,
@@ -86,6 +86,11 @@ const BOOKS: [string, Member[]][] = [['full market', roster], ['one-third book',
 // to: $5M retained, covered to the $1B top.
 const towerLayer = REINSURANCE_TOWER.Property[0];
 const LAYER = { attachment: towerLayer.attachment, ceiling: towerLayer.attachment + towerLayer.limit };
+// A drawn event is an earthquake with probability EQ_SHARE and then retains the
+// earthquake deductible instead of the attachment. The simulator draws that
+// independently of the event, as the generator does.
+const EQ_SHARE = PROPERTY_CAT_EARTHQUAKE.share;
+const EQ_ATTACH = Math.max(LAYER.attachment, PROPERTY_PERIL_DEDUCTIBLE[PROPERTY_CAT_EARTHQUAKE.peril] ?? 0);
 const fmt = (x: number) => `$${(x / 1e6).toFixed(2)}M`;
 
 function tailOf(pmf: Float64Array, x: number): number {
@@ -116,7 +121,8 @@ function simulator(book: Member[], seed: number) {
     do { k++; p *= rng(); } while (p > L);
     return k - 1;
   };
-  return { event, poisson };
+  const attachment = () => (rng() < EQ_SHARE ? EQ_ATTACH : LAYER.attachment);
+  return { event, poisson, attachment };
 }
 
 console.log('=== PROPERTY CATASTROPHE BAND ===\n');
@@ -157,6 +163,37 @@ for (const [name, book] of BOOKS) {
     check(same, 'annual cat distribution: extended and sliced cache == fresh recursion, bit for bit');
   }
 
+  // 2b. TWO ATTACHMENTS, ONE DISTRIBUTION — the earthquake mixture is exact.
+  // With the share at zero the mapping is the single-attachment one, bit for
+  // bit; at the shipped share it is (1 - s) x the $5M mapping + s x the $10M
+  // mapping, pmf and moments, to float precision; and it is deterministic cold.
+  {
+    const eq = PROPERTY_CAT_EARTHQUAKE as unknown as { share: number };
+    const s = eq.share;
+    eq.share = 0;
+    const at5 = catEventRetained(book, LAYER);
+    const at10 = catEventRetained(book, { attachment: EQ_ATTACH, ceiling: LAYER.ceiling });
+    eq.share = s;
+    const mix = catEventRetained(book, LAYER);
+    let worst = 0;
+    for (let k = 0; k < mix.pmf.length; k++) {
+      const want = (1 - s) * (at5.pmf[k] ?? 0) + s * (at10.pmf[k] ?? 0);
+      if (want > 0) worst = Math.max(worst, Math.abs(mix.pmf[k] / want - 1));
+      else if (mix.pmf[k] !== 0) worst = Infinity;
+    }
+    const rel = (x: number, y: number) => Math.abs(x / y - 1);
+    const mOk = rel(mix.m1Ceded, (1 - s) * at5.m1Ceded + s * at10.m1Ceded) < 1e-12
+      && rel(mix.m2Ceded, (1 - s) * at5.m2Ceded + s * at10.m2Ceded) < 1e-12
+      && rel(mix.m1Retained, (1 - s) * at5.m1Retained + s * at10.m1Retained) < 1e-12;
+    check(s > 0 && worst < 1e-12 && mOk, `earthquake ${s * 100}%: per-event mapping == (1-s) x $5M + s x $${EQ_ATTACH / 1e6}M, pmf and moments`,
+      `worst relative pmf error ${worst.toExponential(2)}; E[ceded/event] ${fmt(at5.m1Ceded)} -> ${fmt(mix.m1Ceded)}`);
+    propertyCatInternals.resetCache();
+    const cold = catEventRetained(book, LAYER);
+    let same = cold.pmf.length === mix.pmf.length && cold.m2Ceded === mix.m2Ceded;
+    for (let k = 0; same && k < cold.pmf.length; k++) if (cold.pmf[k] !== mix.pmf[k]) same = false;
+    check(same, 'the mixture rebuilt cold: bit-identical');
+  }
+
   // 3. Independent events.
   const N = 4_000_000;
   const sim = simulator(book, name === 'full market' ? 0x5eed_0001 : 0x5eed_0002);
@@ -167,7 +204,8 @@ for (const [name, book] of BOOKS) {
   for (let i = 0; i < N; i++) {
     const g = sim.event();
     sumG += g;
-    const c = Math.max(0, Math.min(g - LAYER.attachment, LAYER.ceiling - LAYER.attachment));
+    const a = sim.attachment();
+    const c = Math.max(0, Math.min(g - a, LAYER.ceiling - a));
     sumC += c; sumC2 += c * c;
     for (let t = 0; t < thresholds.length; t++) if (g > thresholds[t]) over[t]++;
   }
@@ -202,7 +240,8 @@ for (const [name, book] of BOOKS) {
       let r = 0;
       for (let e = 0; e < n; e++) {
         const g = ysim.event();
-        r += placed ? Math.min(g, LAYER.attachment) + Math.max(0, g - LAYER.ceiling) : g;
+        const a = ysim.attachment();
+        r += placed ? Math.min(g, a) + Math.max(0, g - LAYER.ceiling) : g;
       }
       for (let t = 0; t < yThresh.length; t++) if (r > yThresh[t]) yOver[t]++;
     }
@@ -230,7 +269,7 @@ console.log('--- 5. THE GENERATOR ---');
 {
   const book = BOOKS[1][1];
   const Y = Number(process.env.GEN_YEARS ?? 20_000);
-  let events = 0, catLoss = 0, catLoss2 = 0, occOk = true, regionOk = true;
+  let events = 0, catLoss = 0, catLoss2 = 0, occOk = true, regionOk = true, catOccs = 0, quakes = 0, perilOk = true;
   const t0 = performance.now();
   for (let y = 1; y <= Y; y++) {
     const r = generatePropertyClaims({
@@ -240,6 +279,9 @@ console.log('--- 5. THE GENERATOR ---');
     catLoss += r.catGrossLoss; catLoss2 += r.catGrossLoss * r.catGrossLoss;
     const byId = new Map(r.claims.map(c => [c.id, c]));
     for (const o of r.occurrences.filter(o => o.isCatastrophe)) {
+      catOccs++;
+      if (o.peril === PROPERTY_CAT_EARTHQUAKE.peril) quakes++;
+      else if (o.peril !== 'cat') perilOk = false;
       const cs = o.claimIds.map(id => byId.get(id)!);
       if (cs.some(c => !c || c.occurrenceId !== o.id || c.tier !== 'cat')) occOk = false;
       if (o.memberIds.length !== cs.length) occOk = false;
@@ -259,6 +301,10 @@ console.log('--- 5. THE GENERATOR ---');
   check(Math.abs(za) < Z, 'generator cat loss == analytic cat AAL', `${fmt(mean)} vs ${fmt(aal)}, z ${za.toFixed(2)}`);
   check(occOk, 'one occurrence per event, holding every cat claim and only cat claims');
   check(regionOk, 'every claim in an event is in the region the event struck');
+  const qs = quakes / Math.max(1, catOccs);
+  const zq = (qs - EQ_SHARE) / Math.sqrt(EQ_SHARE * (1 - EQ_SHARE) / Math.max(1, catOccs));
+  check(perilOk && Math.abs(zq) < Z, `drawn events are '${PROPERTY_CAT_EARTHQUAKE.peril}' or 'cat', earthquake share == ${EQ_SHARE}`,
+    `${quakes} of ${catOccs} occurrences, ${(qs * 100).toFixed(2)}%, z ${zq.toFixed(2)}`);
 
   // Enrolment independence for cat claims: a member's cat claims do not move
   // when the rest of the book changes. Years chosen where the member was hit.

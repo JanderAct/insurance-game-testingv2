@@ -5311,6 +5311,56 @@ export const PROPERTY_CAT_MODEL = {
 } as const;
 
 // ===========================================================================
+// ⚠ A PLACEHOLDER. NOBODY SOURCED THIS FIGURE: 10% OF DRAWN CATASTROPHES ARE
+// EARTHQUAKES.
+//
+// A drawn catastrophe is an earthquake or it is not — two categories, not the
+// retired design doc's three perils. Earthquake is the only peril anything
+// downstream treats differently: it retains PROPERTY_PERIL_DEDUCTIBLE's $10M
+// rather than the layer's $5M. Flood and wildfire would be labels nothing reads.
+//
+// THE SHARE WAS CHOSEN, NOT DERIVED. The real book says only that earthquakes
+// are "really rare" and has no figure to hand. 10% was picked to be rare without
+// being nil. It is not an event-frequency study, a hazard-model output or a
+// loss-history share, and it should not be quoted as one.
+//
+// HOW IT ENTERS. Each drawn event is an earthquake with this probability,
+// independent of its region and of its size (stream `pr_cat_peril`, one uniform
+// per event, so no other draw moves). Being independent of size is what keeps
+// the pricing exact: the earthquakes are a thinning of the same Poisson event
+// process, so the per-event cession is a MIXTURE of the one event distribution
+// read at two attachments — see catEventRetained. It is a deductible, not a
+// rate: earthquake sits inside the catastrophe charge, as in the real
+// programme, and gets no rate element of its own.
+//
+// ⚠ IT SAYS SO HERE BECAUSE FOUR UNSOURCED CONSTANTS WENT WRONG IN ONE WEEK.
+// This one is labelled before it ships rather than after.
+//
+// WHAT WOULD REPLACE IT: the programme's earthquake share of catastrophe
+// frequency or AAL, from the real book's cat model output or its loss history,
+// by region if the book has it. A regional figure would also need the
+// earthquake's own region weights, which the pricing can take as a third
+// mixture weight without losing exactness.
+//
+// MEASURED BESIDE IT — share 0 against 10%, year 1, layer placed:
+//
+//                                  tower price              per $100k TIV
+//   full 200-member market         $91.035M -> $90.927M      153.69 -> 153.51
+//   game books (8 seeds, enrolled) -$0.074M a year mean      -0.42
+//   Property total member charge   -0.11% (game books, year 1)
+//
+// SMALL, AND IT HAS TO BE. The most an earthquake can take off the layer is
+// $5M (the band between the attachment and the deductible), arriving at
+// 0.08412 x 10% = 0.0084 a year: at most $42k of expected cession, plus its
+// share of the risk load. The price falls every year, earthquake or not, but
+// by about a tenth of a percent of the member charge.
+//
+// AND THE EVENT ITSELF IS RARE: one drawn earthquake in ~119 years.
+// P(at least one) is 4.1% in a 5-year game and 8.1% in a 10-year one. A
+// scheduled #2 is the way a game reliably meets one.
+export const PROPERTY_CAT_EARTHQUAKE = { peril: 'earthquake', share: 0.10 } as const;
+
+// ===========================================================================
 // THE OPEN-SHARE CURVE — the share of a cohort's VALUE still able to develop,
 // by step age. Derived by scripts/diagnostics/open-share-derive.ts.
 //

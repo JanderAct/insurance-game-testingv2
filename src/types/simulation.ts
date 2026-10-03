@@ -350,7 +350,9 @@ export interface Occurrence {
   isCatastrophe: boolean; // part of a regional/pool-wide catastrophe event
   claimIds: string[];     // every claim this event produced (WC and GL: exactly one)
   // The hazard band this event belongs to, for lines that have more than one:
-  // Property emits 'attritional' | 'weather' | 'cat'. Absent on WC and GL,
+  // Property emits 'property' (attritional) | 'weather' | 'cat' | 'earthquake'
+  // — a drawn catastrophe is 'earthquake' or 'cat', and a scheduled one names
+  // its own peril. PROPERTY_PERIL_DEDUCTIBLE is keyed on it. Absent on WC and GL,
   // which have a single hazard band each — their sub-coverage vocabulary lives
   // on Claim.tier and is a rating class, not a peril. Deliberately a string,
   // for the same reason Claim.tier is.

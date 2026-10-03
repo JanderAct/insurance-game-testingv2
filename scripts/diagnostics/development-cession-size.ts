@@ -51,7 +51,7 @@ import { generateGameInstance } from '../../src/utils/instanceGenerator';
 import { processYear } from '../../src/utils/simulationEngine';
 import { runPriorHistory } from '../../src/utils/priorHistoryEngine';
 import { defaultDecisionSet } from '../../src/utils/decisionDefaults';
-import { cedeOccurrences, occurrenceTotals } from '../../src/utils/reinsuranceTower';
+import { cedeOccurrences, occurrenceDeductibles, occurrenceTotals } from '../../src/utils/reinsuranceTower';
 import { REINSURANCE_TOWER, TOWER_TOP, type TowerLine } from '../../src/data/reinsuranceTower';
 import { WC_SEVERITY_CAP } from '../../src/data/defaultAssumptions';
 import { wcSeverityTrend } from '../../src/utils/wcClaimEngine';
@@ -124,7 +124,9 @@ for (let g = 0; g < GAMES; g++) {
   };
 
   // Register per (line, accident year), captured as the year is written.
-  const register = new Map<string, { totals: number[]; placed: boolean[] }>();
+  // `deductibles` is each occurrence's peril deductible, so a Property
+  // earthquake cedes above $10M here as it does in the engine.
+  const register = new Map<string, { totals: number[]; placed: boolean[]; deductibles: number[] }>();
   const live = new Map<string, Record<string, number[]>>();
   const key = (l: string, y: number) => `${l}|${y}`;
 
@@ -141,8 +143,9 @@ for (let g = 0; g < GAMES; g++) {
       if (!lr?.claims || !lr.occurrences) continue;
       const totals = occurrenceTotals(lr.claims, lr.occurrences);
       const placed = [...(lr.decisions?.layersPlaced ?? REINSURANCE_TOWER[line].map(l => l.purchasable))];
-      register.set(key(line, pg.yearNumber), { totals, placed });
-      cededBefore += cedeOccurrences(line, totals, placed).totalCeded;
+      const deductibles = occurrenceDeductibles(line, lr.occurrences);
+      register.set(key(line, pg.yearNumber), { totals, placed, deductibles });
+      cededBefore += cedeOccurrences(line, totals, placed, deductibles).totalCeded;
       grossBefore += totals.reduce((s2, t) => s2 + t, 0);
     }
   }
@@ -159,8 +162,9 @@ for (let g = 0; g < GAMES; g++) {
       if (r.claims && r.occurrences) {
         const totals = occurrenceTotals(r.claims, r.occurrences);
         const placed = [...(r.decisions?.layersPlaced ?? REINSURANCE_TOWER[line].map(l => l.purchasable))];
-        register.set(key(line, y), { totals, placed });
-        cededBefore += cedeOccurrences(line, totals, placed).totalCeded;
+        const deductibles = occurrenceDeductibles(line, r.occurrences);
+        register.set(key(line, y), { totals, placed, deductibles });
+        cededBefore += cedeOccurrences(line, totals, placed, deductibles).totalCeded;
         grossBefore += totals.reduce((s2, t) => s2 + t, 0);
       }
 
@@ -197,10 +201,10 @@ for (let g = 0; g < GAMES; g++) {
         let maxAfter = 0;
         for (const rule of RULES) {
           const cur = liveSet[rule.name];
-          const beforeCede = cedeOccurrences(line, cur, reg.placed);
+          const beforeCede = cedeOccurrences(line, cur, reg.placed, reg.deductibles);
           const delta = rule.alloc(cur, D);
           const next = cur.map((t, i) => Math.max(0, t + delta[i]));
-          const afterCede = cedeOccurrences(line, next, reg.placed);
+          const afterCede = cedeOccurrences(line, next, reg.placed, reg.deductibles);
           const marginal = afterCede.totalCeded - beforeCede.totalCeded;
           shareByRule[rule.name] = marginal / D;
           cededAfterByRule[rule.name] += marginal;
